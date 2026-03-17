@@ -30,13 +30,13 @@ if [[ ! -s "$TRANSCRIPT_PATH" ]]; then
 fi
  
 # Resolve archive destination relative to the project working directory
-ARCHIVE_DIR="${CWD}/docs/transcripts"
+ARCHIVE_DIR="${CWD}/docs/transcripts/pending"
 mkdir -p "$ARCHIVE_DIR"
- 
+
 # Use a compaction-specific filename so we don't clobber the Stop archive.
 # Pre-compaction snapshots are postfixed to distinguish them.
 TIMESTAMP=$(date +%s)
 DEST="${ARCHIVE_DIR}/${SESSION_ID}.precompact.${TIMESTAMP}.jsonl"
- 
+
 cp "$TRANSCRIPT_PATH" "$DEST"
 echo "on_pre_compact: snapshot saved to $DEST (trigger: $TRIGGER)"
