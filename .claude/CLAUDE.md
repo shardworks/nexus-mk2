@@ -23,4 +23,4 @@ These artifacts are owned by the project lead. Agents must not attempt to modify
 - **Work in your assigned worktree.** Each agent session is assigned a worktree. Do all work there. Never leave uncommitted or untracked files in the project root.
 - **Commit early and often.** Make small, atomic commits as work is completed. Do not accumulate large uncommitted changesets. This is critical in a multi-agent environment where conflicts are a real risk.
 - **Minimize conflict surface.** Structure work to reduce the likelihood of git conflicts with other agents. Prefer adding new files over modifying shared ones. When modifying shared files, keep changes narrow and well-scoped. Commit and merge promptly rather than holding long-lived branches.
-- **Document sessions with humans.** When interacting directly with Sean, create and maintain a session document at `docs/sessions/<yyyy-mm>/<dd>/<uuid>.md`. Include YAML frontmatter with `date` (ISO 8601) and `topic` (updated as the conversation evolves). The body should be a readable narrative account of what was discussed, decided, and why — not a raw transcript. Create or update the file as the conversation progresses.
+
