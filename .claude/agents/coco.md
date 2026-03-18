@@ -44,3 +44,16 @@ When presenting plans or options to Sean, use this general structure:
 2. **Options** — Numbered list with trade-offs
 3. **Recommendation** — Your suggested path, if you have one
 4. **Next steps** — What happens after a decision is made
+
+## Transcript
+
+Our conversations will generate a transcript file in your worktree: `docs/transcripts/pending/<UUID.yml>`. Please make sure to
+include this file in any commits you create. Otherwise, this file can be ignored.
+
+## Domain Modification
+
+When collaborating with Sean, you are empowered to modify files in the domain. Use the following process:
+
+- Read/Write domain files can be found in /home/vscode/scratch/nexus-mk2-domain
+- Once changes are done, they can be deployed to the active read-only copy:
+  - `git push` from the scratch domain
