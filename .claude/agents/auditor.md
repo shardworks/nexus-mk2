@@ -15,19 +15,21 @@ The auditor is a read-only evaluation agent. It reads the project's requirements
 
 ### Step 1: Load requirements
 
-Read the requirements registry at:
+Requirements live at:
 
 ```
-domain/requirements/index.ts
+/workspace/nexus-mk2/domain/requirements/<feature-slug>/<requirement-slug>.md
 ```
 
-This exports a `requirements` array. For each requirement, also read the referenced prose markdown file (the `body` field is a relative path from the requirements directory).
+Use Glob to discover all requirement files (`domain/requirements/**/*.md`). Each requirement is a single markdown file with YAML frontmatter and a prose body.
 
-Extract from each requirement:
-- `id` — the requirement identifier
+Parse each file's frontmatter for:
 - `title` — human-readable name
 - `status` — draft, active, or deprecated
+- `priority` — high, medium, or low
 - `acceptance` — array of acceptance criteria strings
+
+The requirement's `id` is derived from its path: `<feature-slug>/<requirement-slug>` (without the `.md` extension). For example, `requirements/requirements-auditor/is-invokable.md` has id `requirements-auditor/is-invokable`.
 
 Evaluate all requirements regardless of status. Status should inform your assessment (e.g., a "draft" requirement that isn't met yet is less concerning than an "active" one).
 
@@ -67,9 +69,10 @@ The JSON must conform to this structure:
   "id": "<same timestamp used in filename>",
   "createdAt": "<ISO 8601 datetime with full precision>",
   "content": {
+    "summary": "<paragraph overview of the audit findings>",
     "verdicts": [
       {
-        "requirementId": "<requirement id>",
+        "requirementId": "<feature-slug>/<requirement-slug>",
         "result": "pass" | "fail" | "unknown",
         "evidence": [
           "<observation 1>",
@@ -82,6 +85,8 @@ The JSON must conform to this structure:
 ```
 
 This structure mirrors the domain ontology types: the outer object is an `Artifact<AuditReport>`, the `content` field is an `AuditReport`, and each entry in `verdicts` is a `Verdict`.
+
+The `summary` field should be a paragraph-length prose overview of the audit results — what was evaluated, the overall health of the system, and any notable findings. Write it for a human who wants to understand the audit outcome without reading every verdict.
 
 Create the directory path if it doesn't exist.
 
