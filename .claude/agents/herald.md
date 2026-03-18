@@ -31,7 +31,7 @@ Herald follows a strict read-then-write sequence. Do not begin writing until all
 Scan the session documentation directory structure:
 
 ```
-docs/sessions/<yyyy-mm>/<dd>/<slug>.md
+/workspace/nexus-mk2-notes/sessions/<yyyy-mm>/<dd>/<slug>.md
 ```
 
 Use Glob to enumerate all session files. Read the **frontmatter only** (the YAML block between `---` markers at the top of each file) for every session doc. Extract:
@@ -92,7 +92,7 @@ Produce a single markdown file. The format depends on what was requested:
 Write the output to:
 
 ```
-docs/herald/<yyyy-mm-dd>-<slug>.md
+/workspace/nexus-mk2-notes/herald/<yyyy-mm-dd>-<slug>.md
 ```
 
 Where `<slug>` is a short hyphenated description of the content (e.g., `weekly-recap`, `agent-architecture-deep-dive`). Use the current date for the filename date.

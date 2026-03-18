@@ -8,11 +8,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PENDING_DIR="docs/transcripts/pending"
+PENDING_DIR="/workspace/nexus-mk2-notes/transcripts/pending"
+ARCHIVED_DIR="/workspace/nexus-mk2-notes/transcripts/archived"
 
 if [[ ! -d "$PENDING_DIR" ]]; then
   echo "No pending directory found at $PENDING_DIR — nothing to process."
-  exit 0
+  exit 0 
 fi
 
 # Collect only primary transcripts (skip .precompact. snapshots)
@@ -35,8 +36,18 @@ for f in "${PENDING_FILES[@]}"; do
   SESSION_ID="$(basename "$f" .jsonl)"
   echo ""
   echo "=== Processing: ${SESSION_ID} ==="
-  if "${SCRIPT_DIR}/scribe.sh" "$SESSION_ID"; then
+
+  # Collect any associated precompact snapshots
+  TRANSCRIPT_FILES=("$f")
+  for pc in "$PENDING_DIR"/"$SESSION_ID".precompact.*.jsonl; do
+    [[ -f "$pc" ]] && TRANSCRIPT_FILES+=("$pc")
+  done
+
+  if "${SCRIPT_DIR}/scribe.sh" "${TRANSCRIPT_FILES[@]}"; then
     echo "=== Done: ${SESSION_ID} ==="
+    mkdir -p "$ARCHIVED_DIR"
+    mv "$f" "${ARCHIVED_DIR}/${SESSION_ID}.jsonl"
+    echo "scribe: moved transcript to ${ARCHIVED_DIR}/${SESSION_ID}.jsonl"
   else
     echo "=== FAILED: ${SESSION_ID} ===" >&2
     FAILED=$((FAILED + 1))
@@ -45,4 +56,19 @@ done
 
 echo ""
 echo "Processed ${#PENDING_FILES[@]} transcript(s), ${FAILED} failure(s)."
+
+# Commit and push any archived transcript moves
+if git -C "$ARCHIVED_DIR" diff --quiet HEAD -- . 2>/dev/null || \
+   [[ -n "$(git -C "$ARCHIVED_DIR" status --porcelain .)" ]]; then
+  NOTES_REPO="$(git -C "$ARCHIVED_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ -n "$NOTES_REPO" ]]; then
+    git -C "$NOTES_REPO" add "$ARCHIVED_DIR"
+    if ! git -C "$NOTES_REPO" diff --cached --quiet; then
+      git -C "$NOTES_REPO" commit -m "transcripts: archive processed session(s)"
+      git -C "$NOTES_REPO" push
+      echo "scribe: committed and pushed archived transcripts."
+    fi
+  fi
+fi
+
 [[ $FAILED -eq 0 ]]

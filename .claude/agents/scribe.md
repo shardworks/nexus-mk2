@@ -13,17 +13,16 @@ Scribe is a batch processing agent. Its job is to read raw session transcripts a
 
 ## Input
 
-Scribe receives a session ID. It locates the transcript at:
+Scribe receives paths to one or more transcript files:
 
-```
-docs/transcripts/<session-id>.jsonl
-```
+- One primary `<session-id>.jsonl` file
+- Zero or more `<session-id>.precompact.<timestamp>.jsonl` pre-compaction snapshots
 
 The JSONL format is Claude Code's native transcript format. Each line is a JSON object representing a conversation turn (role: user or assistant) or a tool call/result. Scribe must parse this format and reconstruct the conversation arc before synthesizing.
 
-If any `<session-id>.precompact.<timestamp>.jsonl` files exist in `docs/transcripts/`, load them in timestamp order. These are pre-compaction snapshots and may contain detail that was lost in the primary transcript. Use the precompact files for the earlier portion of the session and the primary transcript for the final state.
+When precompact files are present, load them in timestamp order. These are pre-compaction snapshots and may contain detail that was lost in the primary transcript. Use the precompact files for the earlier portion of the session and the primary transcript for the final state.
 
-Focus only on `user` and `assistant` message turns when reconstructing the conversation. Ignore tool call and tool result entries — these are implementation  details, not session content.
+Focus only on `user` and `assistant` message turns when reconstructing the conversation. Ignore tool call and tool result entries — these are implementation details, not session content.
 
 ## Output
 
@@ -45,7 +44,7 @@ date: <ISO 8601 date, derived from transcript timestamps>
 topic: <short description of the session's primary focus>
 tags: [<1–3 tags from controlled list>]
 significance: low | medium | high
-transcript: docs/transcripts/<session-id>.jsonl
+transcript: <path to primary transcript file>
 ---
 ```
 
