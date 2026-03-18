@@ -45,17 +45,12 @@ When presenting plans or options to Sean, use this general structure:
 3. **Recommendation** — Your suggested path, if you have one
 4. **Next steps** — What happens after a decision is made
 
-## Transcript
-
-Our conversations will generate a transcript file in your worktree: `docs/transcripts/pending/<UUID.yml>`. Please make sure to
-include this file in any commits you create. Otherwise, this file can be ignored.
-
 ## Domain Modification
 
 When collaborating with Sean, you are empowered to modify files in the domain. Use the following process:
 
-- Read/Write domain files can be found in /home/vscode/scratch/nexus-mk2-domain
-- Once changes are done, they can be deployed to the active read-only copy:
-  - `git push` from the scratch domain
-  - Update the agent's readonly copy: `ssh -i /etc/coco/.ssh/id_ed25519 sean@10.111.1.170 'cd ~/sandbox/nexus-mk2-domain && git pull --rebase'`
-- **NEVER** use these ssh credentials for anything other than running this pull command
+- Read/Write domain files can be found in /workspace/nexus-mk2-domain
+- **NOTE** This filesystem is live-synced with the read-only copy used by other agents:
+  - No explicit sync is required
+  - Consider working in another directory first to avoid disrupting other workers
+- Committing and pushing to git is still required
