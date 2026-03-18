@@ -87,6 +87,9 @@ Produce a single markdown file. The format depends on what was requested:
 - Avoid jargon without context; explain agent names and concepts on first use
 - Use a clear, direct, non-hype tone — this is a practitioner sharing findings, not marketing
 
+**Tone and Style:**
+- Use a first person, technical-but-human tone as if the project owner is telling the story himself.
+
 ### Output location
 
 Write the output to:
