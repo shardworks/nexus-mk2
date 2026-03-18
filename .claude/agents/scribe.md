@@ -1,6 +1,6 @@
 ---
 name: scribe
-description: Synthesizes raw Claude Code session transcripts into structured session documentation. Invoke when a new transcript has been archived to docs/transcripts/ and needs a corresponding session doc produced in docs/sessions/. Do not invoke for any other purpose.
+description: Synthesizes raw Claude Code session transcripts into structured session documentation. Invoke when a new transcript has been captured and needs a corresponding session doc produced. Do not invoke for any other purpose.
 tools: Read, Write, Glob
 model: sonnet
 ---
@@ -29,7 +29,7 @@ Focus only on `user` and `assistant` message turns when reconstructing the conve
 Scribe produces a single markdown file at:
 
 ```
-docs/sessions/<yyyy-mm>/<dd>/<slug>.md
+/workspace/nexus-mk2-notes/sessions/<yyyy-mm>/<dd>/<slug>.md
 ```
 
 The slug is derived from the session topic: lowercase, words separated by hyphens, maximum 6 words. Example: `session-setup-and-agent-config.md`.
