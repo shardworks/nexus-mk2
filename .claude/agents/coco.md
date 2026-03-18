@@ -57,3 +57,5 @@ When collaborating with Sean, you are empowered to modify files in the domain. U
 - Read/Write domain files can be found in /home/vscode/scratch/nexus-mk2-domain
 - Once changes are done, they can be deployed to the active read-only copy:
   - `git push` from the scratch domain
+  - Update the agent's readonly copy: `ssh -i /etc/coco/.ssh/id_ed25519 sean@10.111.1.170 'cd ~/sandbox/nexus-mk2-domain && git pull --rebase'`
+- **NEVER** use these ssh credentials for anything other than running this pull command
