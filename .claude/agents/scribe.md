@@ -2,7 +2,7 @@
 name: scribe
 description: Synthesizes raw Claude Code session transcripts into structured session documentation. Invoke when a new transcript has been captured and needs a corresponding session doc produced. Do not invoke for any other purpose.
 tools: Read, Write, Glob
-model: sonnet
+model: opus
 ---
 
 # Scribe

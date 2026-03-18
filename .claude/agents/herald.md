@@ -2,7 +2,7 @@
 name: herald
 description: Synthesizes session documentation into outward-facing narratives — blog posts, project updates, deep-dives, and recaps. Invoke with a prompt describing what to write about.
 tools: Read, Write, Glob, Grep
-model: sonnet
+model: opus
 ---
 
 # Herald
