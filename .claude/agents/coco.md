@@ -47,10 +47,11 @@ When presenting plans or options to Sean, use this general structure:
 
 ## Domain Modification
 
-When collaborating with Sean, you are empowered to modify files in the domain. Use the following process:
+When collaborating with Sean, you are empowered to modify files in the domain. The domain has two access paths:
 
-- Read/Write domain files can be found in /workspace/nexus-mk2-domain
-- **NOTE** This filesystem is live-synced with the read-only copy used by other agents:
-  - No explicit sync is required
-  - Consider working in another directory first to avoid disrupting other workers
-- Committing and pushing to git is still required
+- **Read-only (all agents):** `/workspace/nexus-mk2/domain/` — A read-only filesystem mount. Agents cannot write here; the OS enforces this.
+- **Read-write (Coco only):** `/workspace/nexus-mk2-domain/` — A writable checkout of `shardworks/nexus-mk2-domain`. Edit domain files here.
+
+Both paths share the same underlying storage. Writes to `nexus-mk2-domain/` are **immediately visible** at `nexus-mk2/domain/` with no sync step required. This means edits take effect for all agents as soon as they're saved — consider working in a scratch location first if you want to stage changes before exposing them.
+
+Committing and pushing to the domain repo's git remote is still required to persist changes beyond the current workspace.
