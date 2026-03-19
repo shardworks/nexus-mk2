@@ -37,29 +37,24 @@ if [[ ! -s "$TRANSCRIPT_PATH" ]]; then
   exit 0
 fi
 
-# Store the pre-compaction snapshot as Artifact<StagedTranscript>.
-# Mirrors the layout used by bin/artifact.sh: non-persistent types go to
-# ${PROJECT_ROOT}/.artifacts/<type>/<id>.json with a companion <id>.jsonl.
-ARTIFACT_ROOT="${PROJECT_ROOT}/.artifacts"
-STAGED_DIR="${ARTIFACT_ROOT}/staged-transcript"
-mkdir -p "$STAGED_DIR"
-
 # Precompact artifact ID appends a timestamp to avoid collisions across compactions.
 ARTIFACT_ID="${SESSION_ID}.precompact.$(date -u +%s)"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-# Write companion JSONL first (artifact must not be listed without its data).
-cp "$TRANSCRIPT_PATH" "${STAGED_DIR}/${ARTIFACT_ID}.jsonl"
-
-# Build and write Artifact<StagedTranscript> JSON (jq handles escaping).
+# Build and store Artifact<StagedTranscript> via the artifact CLI.
+# The CLI handles path resolution and directory creation.
 jq -n \
   --arg type "staged-transcript" \
   --arg id "${ARTIFACT_ID}" \
   --arg createdAt "${NOW}" \
   --arg sessionId "${SESSION_ID}" \
   --arg captureType "precompact" \
-  --rawfile body "${STAGED_DIR}/${ARTIFACT_ID}.jsonl" \
-  '{type: $type, id: $id, createdAt: $createdAt, content: {sessionId: $sessionId, captureType: $captureType, body: $body}}' \
-  > "${STAGED_DIR}/${ARTIFACT_ID}.json"
+  '{type: $type, id: $id, createdAt: $createdAt, content: {sessionId: $sessionId, captureType: $captureType}}' \
+  | "${ARTIFACT_CLI}" store
+
+# Write companion JSONL via the path helper (callers are responsible for the JSONL
+# companion per bin/artifact.sh convention — the CLI stores JSON metadata only).
+JSONL_PATH="$("${PROJECT_ROOT}/bin/artifact-jsonl-path.sh" "${ARTIFACT_ID}")"
+cp "$TRANSCRIPT_PATH" "$JSONL_PATH"
 
 echo "on_pre_compact: captured transcript as Artifact<StagedTranscript> (session=${SESSION_ID}, captureType=precompact, trigger=${TRIGGER})"
