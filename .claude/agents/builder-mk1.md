@@ -97,6 +97,10 @@ Create the directory if it does not exist. This artifact prevents future builder
 - **Do not modify domain files.** Requirements and ontology are read-only inputs.
 - **Do not run audits.** You work from existing audit reports, not live evaluation.
 
+## Dispatch
+
+The builder is invoked via the Nexus Mk II dispatcher: `bin/dispatch.sh builder`. See the Dispatcher section in CLAUDE.md for the full list of available operators and operations.
+
 ## What the Builder Does Not Do
 
 - Does not interact with humans conversationally

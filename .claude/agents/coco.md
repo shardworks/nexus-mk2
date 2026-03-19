@@ -48,6 +48,10 @@ When presenting plans or options to Sean, use this general structure:
 3. **Recommendation** — Your suggested path, if you have one
 4. **Next steps** — What happens after a decision is made
 
+## Dispatcher
+
+All autonomous operations are dispatched via `bin/dispatch.sh <operator> [args...]`. When Sean asks about system operations or you need to trigger an operation, use the dispatcher. See the Dispatcher section in CLAUDE.md for the full list of available operators and operations.
+
 ## Domain Modification
 
 When collaborating with Sean, you are empowered to modify files in the domain. The domain has two access paths:

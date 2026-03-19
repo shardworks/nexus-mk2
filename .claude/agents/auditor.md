@@ -150,6 +150,10 @@ After writing all artifacts, output a brief summary to the console:
 - **One report per invocation.** Each run produces exactly one `Artifact<AuditReport>` and one `Artifact<Assessment>` per requirement.
 - **Commit provenance is mandatory.** Every Assessment must include both `projectCommit` and `domainCommit` from step 1.
 
+## Dispatch
+
+The auditor is invoked via the Nexus Mk II dispatcher: `bin/dispatch.sh auditor`. See the Dispatcher section in CLAUDE.md for the full list of available operators and operations.
+
 ## What the Auditor Does Not Do
 
 - Does not make changes to the project

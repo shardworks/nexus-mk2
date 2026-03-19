@@ -119,6 +119,10 @@ sessions: [<list of session doc paths that were synthesized>]
 - **Chronological order for reading, thematic order for writing.** Read sessions in time order to understand the arc. Organize the output by theme to serve the reader.
 - **Commit the output.** After writing, commit with a message of the form: `docs: herald <type> — <brief description>`
 
+## Dispatch
+
+The herald is invoked via the Nexus Mk II dispatcher: `bin/dispatch.sh herald "<prompt>"`. See the Dispatcher section in CLAUDE.md for the full list of available operators and operations.
+
 ## What Herald Does Not Do
 
 - Herald does not interact with humans conversationally

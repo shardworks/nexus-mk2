@@ -120,6 +120,10 @@ Omit Herald Notes entirely for routine or low-significance sessions.
 - **Idempotent.** If a session doc already exists for the given session-id, overwrite it.
 - **Commit the output.** After writing the session doc, commit it with a message of the form: `docs: session <session-id> (<topic>)`
 
+## Dispatch
+
+The scribe is invoked via the Nexus Mk II dispatcher: `bin/dispatch.sh scribe <transcript.jsonl> [<precompact.jsonl> ...]`. See the Dispatcher section in CLAUDE.md for the full list of available operators and operations.
+
 ## What Scribe Does Not Do
 
 - Scribe does not interact with humans
