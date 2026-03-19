@@ -30,16 +30,11 @@ echo "[audit-loop] Audit reconciliation loop starting. Ctrl+C to stop."
 # parse_requirements: extract non-deprecated requirement IDs from YAML.
 # Outputs one fully qualified requirement ID per line (feature-id/requirement-id).
 parse_requirements() {
-  python3 -c "
-import yaml, sys
-with open('$PROJECT_ROOT/domain/requirements/index.yaml') as f:
-    features = yaml.safe_load(f)
-for feature in features:
-    fid = feature['id']
-    for req in feature.get('requirements', []):
-        if req.get('status') != 'deprecated':
-            print(f\"{fid}/{req['id']}\")
-"
+  yq eval '
+    .[] | .id as $fid |
+    .requirements[] | select(.status != "deprecated") |
+    $fid + "/" + .id
+  ' "$PROJECT_ROOT/domain/requirements/index.yaml"
 }
 
 while true; do

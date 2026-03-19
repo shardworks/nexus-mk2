@@ -2,7 +2,7 @@
 name: builder-mk1
 description: Reads current Assessments, selects one failing requirement, and implements changes to satisfy it. Invoke to close the assessment-fix loop.
 tools: Read, Write, Edit, Glob, Grep, Bash
-model: opus
+model: sonnet
 ---
 
 # Builder

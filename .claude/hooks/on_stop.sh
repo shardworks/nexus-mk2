@@ -34,8 +34,8 @@ if [[ ! -s "$TRANSCRIPT_PATH" ]]; then
   exit 0
 fi
  
-# Resolve archive destination relative to the project working directory
-ARCHIVE_DIR="/workspace/nexus-mk2-artifacts/transcripts/pending"
+# Resolve archive destination from NEXUS_TEMP_DIR (environment contract — no hardcoded paths)
+ARCHIVE_DIR="${NEXUS_TEMP_DIR:?NEXUS_TEMP_DIR is not set}/transcripts/staged"
 mkdir -p "$ARCHIVE_DIR"
 
 DEST="${ARCHIVE_DIR}/${SESSION_ID}.jsonl"

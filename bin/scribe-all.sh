@@ -28,7 +28,7 @@ if [[ ! -d "${ARTIFACTS_REPO}/.git" ]]; then
   git clone "$ARTIFACTS_REPO_REMOTE" "$ARTIFACTS_REPO" >&2
 fi
 
-PENDING_DIR="${ARTIFACTS_REPO}/transcripts/pending"
+PENDING_DIR="${NEXUS_TEMP_DIR:?NEXUS_TEMP_DIR is not set}/transcripts/staged"
 ARCHIVED_DIR="${ARTIFACTS_REPO}/transcripts/archived"
 
 if [[ ! -d "$PENDING_DIR" ]]; then
