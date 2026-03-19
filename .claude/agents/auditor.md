@@ -22,7 +22,7 @@ The auditor receives a fully qualified requirement ID as input (format: `<featur
 Before beginning evaluation, record the current HEAD commit hashes. These are needed for Assessment provenance.
 
 - **Implementation repo:** run `git -C /workspace/nexus-mk2 rev-parse HEAD`
-- **Domain repo:** run `git -C /workspace/nexus-mk2/domain rev-parse HEAD`
+- **Domain repo:** run `git -C "$NEXUS_DOMAIN_PATH" rev-parse HEAD`
 
 Store both values — you will include them in the Assessment you produce.
 
@@ -31,7 +31,7 @@ Store both values — you will include them in the Assessment you produce.
 Requirements live in a YAML file at:
 
 ```
-/workspace/nexus-mk2/domain/requirements/index.yaml
+$NEXUS_DOMAIN_PATH/requirements/index.yaml
 ```
 
 The file contains an array of Features, each with nested Requirements. Parse the YAML to find the requirement matching the input requirement ID. The fully qualified requirement id is `<feature-id>/<requirement-id>`.
@@ -47,7 +47,7 @@ If the requirement cannot be found, produce an Assessment with result "unknown" 
 
 Examine the project to determine whether the requirement's invariants hold. Use Glob to discover relevant files, Read to examine their contents, and Grep to search for specific patterns.
 
-The project root is `/workspace/nexus-mk2/`. The domain is at `/workspace/nexus-mk2/domain/`.
+The project root is `/workspace/nexus-mk2/`. The domain is at the path in `$NEXUS_DOMAIN_PATH`.
 
 Be thorough but efficient. Focus your inspection on what each invariant actually claims.
 

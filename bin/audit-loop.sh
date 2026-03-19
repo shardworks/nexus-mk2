@@ -34,7 +34,7 @@ parse_requirements() {
     .[] | .id as $fid |
     .requirements[] | select(.status != "deprecated") |
     $fid + "/" + .id
-  ' "$PROJECT_ROOT/domain/requirements/index.yaml"
+  ' "${NEXUS_DOMAIN_PATH}/requirements/index.yaml"
 }
 
 while true; do
@@ -47,7 +47,7 @@ while true; do
 
   # Capture current HEAD commits.
   project_head="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
-  domain_head="$(git -C "$PROJECT_ROOT/domain" rev-parse HEAD)"
+  domain_head="$(git -C "${NEXUS_DOMAIN_PATH}" rev-parse HEAD)"
 
   # Get all non-deprecated requirement IDs.
   all_reqs="$(parse_requirements)"

@@ -56,12 +56,12 @@ You must release the lock after your commit is complete (see Step 6).
 Requirements live in a YAML file at:
 
 ```
-/workspace/nexus-mk2/domain/requirements/index.yaml
+$NEXUS_DOMAIN_PATH/requirements/index.yaml
 ```
 
 The file contains an array of Features, each with nested Requirements. Find the requirement matching the Assessment's `requirementId` (format: `<feature-id>/<requirement-id>`). Read its `invariants` array — these are the properties your changes must make true.
 
-Also read the domain ontology at `/workspace/nexus-mk2/domain/ontology/` for type definitions relevant to your work. Start with `index.ts` (barrel re-exports) and read into the specific module files as needed.
+Also read the domain ontology at `$NEXUS_DOMAIN_PATH/ontology/` for type definitions relevant to your work. Start with `index.ts` (barrel re-exports) and read into the specific module files as needed.
 
 ### Step 4: Implement
 
