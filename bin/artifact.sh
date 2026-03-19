@@ -12,10 +12,15 @@
 #
 # Valid artifact types:
 #   audit-report, assessment, build-result, transcript, session-doc, publication
+#
+# Persistent types (transcript, session-doc, publication) are stored in the
+# NexusArtifactsRepository at ARTIFACTS_REPO and committed+pushed on store.
+# Non-persistent types are written to workspace-local storage only.
 
 set -euo pipefail
 
 ARTIFACT_ROOT="/workspace/nexus-mk2/.artifacts"
+ARTIFACTS_REPO="/workspace/nexus-mk2-notes"
 
 # --- helpers ----------------------------------------------------------------
 
@@ -42,9 +47,22 @@ validate_type() {
   esac
 }
 
+# Returns 0 if the type is stored in the NexusArtifactsRepository (persistent),
+# non-zero if it is workspace-local only (non-persistent).
+is_persistent() {
+  case "$1" in
+    transcript|session-doc|publication) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Return the store directory for a given type.
 store_dir() {
-  echo "${ARTIFACT_ROOT}/$1"
+  if is_persistent "$1"; then
+    echo "${ARTIFACTS_REPO}/$1"
+  else
+    echo "${ARTIFACT_ROOT}/$1"
+  fi
 }
 
 # --- commands ---------------------------------------------------------------
@@ -160,6 +178,16 @@ cmd_store() {
   echo "$input" > "$file"
 
   echo "Stored artifact: type='$atype' id='$id' -> $file"
+
+  # For persistent types, commit and push to the NexusArtifactsRepository.
+  if is_persistent "$atype"; then
+    git -C "$ARTIFACTS_REPO" add "$file"
+    if ! git -C "$ARTIFACTS_REPO" diff --cached --quiet; then
+      git -C "$ARTIFACTS_REPO" commit -m "artifact: store ${atype}/${id}"
+      git -C "$ARTIFACTS_REPO" push
+      echo "artifact: committed and pushed ${atype}/${id} to NexusArtifactsRepository"
+    fi
+  fi
 }
 
 # --- dispatch ---------------------------------------------------------------
