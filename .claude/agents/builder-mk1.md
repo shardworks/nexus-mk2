@@ -101,7 +101,7 @@ All code changes and the BuildResult artifact must be included in a **single ato
 
 2. **Stage all files** — both the implementation changes and the BuildResult artifact.
 
-3. **Create a single commit.** The commit subject must match the format `implements <requirement-id>`.
+3. **Create a single commit.** The commit subject must match the format `implements <feature-id>/<requirement-id>` using the fully qualified requirement ID (e.g., `implements environment/compliance`, not `implements compliance`).
 
 4. **Backfill the commit hash.** After committing, retrieve the commit hash, update the `commitHash` field in the JSON, and re-store via `bin/artifact.sh store`, then stage the updated artifact and amend the commit (`git commit --amend --no-edit`). This replaces the commit in-place — the result is still one atomic commit. Note: the final commit hash will differ from the value stored in `commitHash` (since amending changes the hash). This is an inherent limitation of content-addressed storage and is acceptable.
 
