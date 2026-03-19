@@ -8,6 +8,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 PROMPT="${1:-}"
 
 if [[ -z "$PROMPT" ]]; then
@@ -16,4 +18,4 @@ if [[ -z "$PROMPT" ]]; then
   exit 1
 fi
 
-claude -p --agent herald "$PROMPT"
+exec "$SCRIPT_DIR/dispatch.sh" herald "$PROMPT"

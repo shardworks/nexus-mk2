@@ -10,17 +10,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [[ $# -eq 0 ]]; then
   echo "Usage: $0 <transcript.jsonl> [<precompact.jsonl> ...]" >&2
   exit 1
 fi
 
-# Validate all provided files exist
-for f in "$@"; do
-  if [[ ! -f "$f" ]]; then
-    echo "Error: file not found: $f" >&2
-    exit 1
-  fi
-done
-
-claude -p --agent scribe "Synthesize session transcripts from the following files: $*"
+exec "$SCRIPT_DIR/dispatch.sh" scribe "$@"

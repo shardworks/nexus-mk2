@@ -5,4 +5,4 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-claude -p "execute your instructions" --agent builder-mk1
+exec "$SCRIPT_DIR/dispatch.sh" builder build
