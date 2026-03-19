@@ -53,10 +53,22 @@ while true; do
     current_head="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
 
     # Check each assessment for failures, respecting feature locks.
+    # The list is sorted newest-first, so we track seen requirement IDs and
+    # skip older assessments for the same requirement — only the most recent
+    # assessment per requirement is authoritative.
+    seen_reqs=""
     for aid in $assessment_ids; do
       # Read assessment JSON via the CLI.
       assessment_json="$("$ARTIFACT_CLI" show assessment "$aid" 2>/dev/null || true)"
       [[ -n "$assessment_json" ]] || continue
+
+      req_id="$(echo "$assessment_json" | grep -m1 '"requirementId"' | sed 's/.*"requirementId" *: *"\([^"]*\)".*/\1/')"
+
+      # Skip if we've already processed a newer assessment for this requirement.
+      if echo "$seen_reqs" | grep -qF "$req_id"; then
+        continue
+      fi
+      seen_reqs="${seen_reqs}${req_id}"$'\n'
 
       result="$(echo "$assessment_json" | grep -m1 '"result"' | sed 's/.*"result" *: *"\([^"]*\)".*/\1/')"
       if [[ "$result" == "fail" ]]; then
@@ -73,8 +85,6 @@ while true; do
           continue
         fi
 
-        # Extract feature id from requirement id (format: feature-id/requirement-id).
-        req_id="$(echo "$assessment_json" | grep -m1 '"requirementId"' | sed 's/.*"requirementId" *: *"\([^"]*\)".*/\1/')"
         feature_id="${req_id%%/*}"
 
         # Check if feature is locked.
