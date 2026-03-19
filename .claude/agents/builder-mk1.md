@@ -75,33 +75,43 @@ Before committing, re-read the requirement's invariants and verify that your cha
 
 ### Step 6: Commit, record, release lock, and push
 
-Commit all changes and push to main.
+All code changes and the BuildResult artifact must be included in a **single atomic commit**. Follow this sequence:
 
-**After a successful commit, record the build by writing an `Artifact<BuildResult>`** as a JSON file at:
+1. **Write the `Artifact<BuildResult>`** as a JSON file at:
 
-```
-/workspace/nexus-mk2/.artifacts/build-result/<id>.json
-```
+   ```
+   /workspace/nexus-mk2/.artifacts/build-result/<id>.json
+   ```
 
-Where `<id>` is an ISO 8601 timestamp in compact format (same convention as assessments). The JSON must conform to:
+   Where `<id>` is an ISO 8601 timestamp in compact format (same convention as assessments). Use `"pending"` as the `commitHash` value initially. The JSON must conform to:
 
-```json
-{
-  "type": "build-result",
-  "id": "<timestamp>",
-  "createdAt": "<ISO 8601 datetime>",
-  "content": {
-    "assessmentId": "<id of the Assessment that triggered this build>",
-    "requirementId": "<fully qualified requirement id that was addressed>",
-    "commitHash": "<git commit hash>",
-    "description": "<what was changed and why>"
-  }
-}
-```
+   ```json
+   {
+     "type": "build-result",
+     "id": "<timestamp>",
+     "createdAt": "<ISO 8601 datetime>",
+     "content": {
+       "assessmentId": "<id of the Assessment that triggered this build>",
+       "requirementId": "<fully qualified requirement id that was addressed>",
+       "commitHash": "pending",
+       "description": "<what was changed and why>"
+     }
+   }
+   ```
 
-Create the directory if it does not exist. This artifact prevents future builder invocations from acting on the same Assessment and provides traceability from commits back to requirements.
+   Create the directory if it does not exist.
 
-**After recording the build result, release the feature lock:**
+2. **Stage all files** — both the implementation changes and the BuildResult artifact.
+
+3. **Create a single commit.** The commit subject must match the format `implements <requirement-id>`.
+
+4. **Backfill the commit hash.** After committing, retrieve the commit hash, update the `commitHash` field in the BuildResult JSON file, stage the updated file, and amend the commit (`git commit --amend --no-edit`). This replaces the commit in-place — the result is still one atomic commit. Note: the final commit hash will differ from the value stored in `commitHash` (since amending changes the hash). This is an inherent limitation of content-addressed storage and is acceptable.
+
+5. **Push to main.**
+
+This artifact prevents future builder invocations from acting on the same Assessment and provides traceability from commits back to requirements.
+
+**After pushing, release the feature lock:**
 
 ```bash
 bin/feature-lock.sh release <feature-id>
