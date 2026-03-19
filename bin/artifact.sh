@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# artifact.sh — CLI for browsing the Artifact store.
+# artifact.sh — CLI for the Artifact store.
 #
 # Abstracts over the filesystem storage layout so humans and agents
 # can discover and inspect Artifacts without knowing path conventions.
@@ -8,6 +8,7 @@
 #   artifact.sh list <type>          List all artifacts of a given type
 #   artifact.sh show <type> <id>     Display full artifact JSON
 #   artifact.sh latest <type>        Display the most recent artifact of a type
+#   artifact.sh store                Store artifact JSON from stdin
 #
 # Valid artifact types:
 #   audit-report, assessment, build-result, transcript, session-doc, publication
@@ -26,6 +27,7 @@ Usage:
   artifact.sh list   <type>        List artifacts (most recent first)
   artifact.sh show   <type> <id>   Show full artifact JSON
   artifact.sh latest <type>        Show the most recent artifact
+  artifact.sh store                Store artifact JSON from stdin
 
 Types: audit-report | assessment | build-result | transcript | session-doc | publication
 EOF
@@ -119,6 +121,47 @@ cmd_latest() {
   cat "$latest"
 }
 
+# store
+# Reads a JSON artifact from stdin, validates required fields, and writes it
+# to the appropriate store directory based on its type field.
+cmd_store() {
+  local input
+  input=$(cat)
+
+  if [[ -z "$input" ]]; then
+    die "store requires JSON input on stdin"
+  fi
+
+  # Extract required fields using grep/sed (no jq dependency).
+  # Use || true to prevent set -e from aborting on missing fields.
+  local atype id createdAt content
+  atype=$(echo "$input" | grep -m1 '"type"' | sed 's/.*"type" *: *"\([^"]*\)".*/\1/' || true)
+  id=$(echo "$input" | grep -m1 '"id"' | sed 's/.*"id" *: *"\([^"]*\)".*/\1/' || true)
+  createdAt=$(echo "$input" | grep -m1 '"createdAt"' | sed 's/.*"createdAt" *: *"\([^"]*\)".*/\1/' || true)
+  # For content, just check that the key exists (value can be any JSON).
+  content=$(echo "$input" | grep '"content"' || true)
+
+  # Validate all required fields are present and non-empty.
+  [[ -n "$atype" ]]     || die "store: missing required field 'type'"
+  [[ -n "$id" ]]        || die "store: missing required field 'id'"
+  [[ -n "$createdAt" ]] || die "store: missing required field 'createdAt'"
+  [[ -n "$content" ]]   || die "store: missing required field 'content'"
+
+  # Validate that type is a known artifact type.
+  validate_type "$atype"
+
+  # Ensure the store directory exists.
+  local dir
+  dir="$(store_dir "$atype")"
+  mkdir -p "$dir"
+
+  # Write the artifact to the store.
+  local file="${dir}/${id}.json"
+  echo "$input" > "$file"
+
+  echo "Stored artifact: type='$atype' id='$id' -> $file"
+}
+
 # --- dispatch ---------------------------------------------------------------
 
 [[ $# -ge 1 ]] || usage
@@ -135,6 +178,9 @@ case "$1" in
   latest)
     [[ $# -ge 2 ]] || die "latest requires a type argument"
     cmd_latest "$2"
+    ;;
+  store)
+    cmd_store
     ;;
   *)
     usage
