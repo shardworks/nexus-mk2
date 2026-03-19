@@ -33,7 +33,7 @@ ARTIFACT_JSONL_PATH="${SCRIPT_DIR}/artifact-jsonl-path.sh"
 
 get_json_field() {
   local json="$1" field="$2"
-  echo "$json" | grep -m1 "\"${field}\"" | sed "s/.*\"${field}\" *: *\"\([^\"]*\)\".*/\1/"
+  echo "$json" | jq -r ".content.${field} // .${field} // empty"
 }
 
 # ── List all Artifact<StagedTranscript> entries ──────────────────────────────
@@ -166,33 +166,28 @@ for session_id in "${SESSION_IDS[@]}"; do
       # Store a durable Artifact<Transcript> in the NexusArtifactsRepository.
       transcript_id="${INGESTION_TS}-${staged_id}"
 
-      # Read the companion JSONL file content to embed as body in the Transcript.
+      # Read the companion JSONL file and embed as body in the Transcript.
+      # Use jq --rawfile to avoid environment variable size limits on large transcripts.
       staged_companion="$("${ARTIFACT_JSONL_PATH}" "${staged_id}")"
       if [[ -n "$staged_companion" && -f "$staged_companion" ]]; then
-        staged_body=$(cat "$staged_companion")
+        jq -n \
+          --arg type "transcript" \
+          --arg id "${transcript_id}" \
+          --arg createdAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --arg sessionId "${session_id}" \
+          --rawfile body "$staged_companion" \
+          '{type: $type, id: $id, createdAt: $createdAt, content: {sessionId: $sessionId, body: $body}}' \
+          | "${ARTIFACT_CLI}" store
       else
-        staged_body=""
-        echo "Warning: JSONL companion not found for '${staged_id}' — body will be empty" >&2
+        echo "Warning: JSONL companion not found for '${staged_id}' — storing transcript without body" >&2
+        jq -n \
+          --arg type "transcript" \
+          --arg id "${transcript_id}" \
+          --arg createdAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --arg sessionId "${session_id}" \
+          '{type: $type, id: $id, createdAt: $createdAt, content: {sessionId: $sessionId, body: ""}}' \
+          | "${ARTIFACT_CLI}" store
       fi
-
-      # Use python3 to safely encode body as a JSON string (handles newlines, quotes, etc.).
-      TRANSCRIPT_ID="${transcript_id}" \
-      CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      SESSION_ID="${session_id}" \
-      BODY="${staged_body}" \
-      python3 -c "
-import json, os
-artifact = {
-  'type': 'transcript',
-  'id': os.environ['TRANSCRIPT_ID'],
-  'createdAt': os.environ['CREATED_AT'],
-  'content': {
-    'sessionId': os.environ['SESSION_ID'],
-    'body': os.environ['BODY']
-  }
-}
-print(json.dumps(artifact, indent=2))
-" | "${ARTIFACT_CLI}" store
 
       # Delete the Artifact<StagedTranscript> (JSON and companion JSONL via CLI).
       "${ARTIFACT_CLI}" delete staged-transcript "$staged_id"
