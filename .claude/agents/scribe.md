@@ -26,45 +26,51 @@ Focus only on `user` and `assistant` message turns when reconstructing the conve
 
 ## Output
 
-Scribe produces a single markdown file at:
+Scribe produces a single `Artifact<SessionDoc>` JSON file at:
 
 ```
-/workspace/nexus-mk2-notes/sessions/<yyyy-mm>/<dd>/<slug>.md
+/workspace/nexus-mk2/.artifacts/session-doc/<id>.json
 ```
 
-The slug is derived from the session topic: lowercase, words separated by hyphens, maximum 6 words. Example: `session-setup-and-agent-config.md`.
+Where `<id>` is an ISO 8601 timestamp in compact format (e.g., `2026-03-19T062937Z`). Create the `.artifacts/session-doc/` directory if it does not exist.
 
-If a file already exists at that path, append an incrementing number: `session-setup-and-agent-config-2.md`, `session-setup-and-agent-config-3.md`, etc.
+The JSON must conform to the `Artifact<SessionDoc>` schema:
 
-### Frontmatter
-
-```yaml
----
-date: <ISO 8601 date, derived from transcript timestamps>
-topic: <short description of the session's primary focus>
-tags: [<1–3 tags from controlled list>]
-significance: low | medium | high
-transcript: <path to primary transcript file>
----
+```json
+{
+  "type": "session-doc",
+  "id": "<compact ISO 8601 timestamp>",
+  "createdAt": "<full ISO 8601 datetime, e.g. 2026-03-19T06:29:37Z>",
+  "content": {
+    "date": "<ISO 8601 date, derived from transcript timestamps>",
+    "topic": "<short description of the session's primary focus>",
+    "tags": ["<1-3 tags from controlled list>"],
+    "significance": "low | medium | high",
+    "transcript": "<path to primary transcript file>",
+    "body": "<markdown narrative - see Body section below>"
+  }
+}
 ```
 
-**Tags (pick 1–3):**
-- `philosophy` — project goals, principles, autonomy model, human-AI research
-- `agent-design` — agent personas, roles, capabilities, interaction rules
-- `architecture` — system structure, components, interfaces, data flow
-- `tooling` — dev environment, infrastructure, CI, build system
-- `workflow` — process, conventions, how work gets done
-- `domain` — vocabulary, ontology, requirements, business logic
-- `meta` — the project reflecting on itself; sessions about the session format, etc.
+### Tags (pick 1-3)
 
-**Significance:**
-- `high` — a major decision, design inflection point, or notable finding
-- `medium` — meaningful progress or a decision with lasting effect
-- `low` — routine, housekeeping, or exploratory without resolution
+- `philosophy` - project goals, principles, autonomy model, human-AI research
+- `agent-design` - agent personas, roles, capabilities, interaction rules
+- `architecture` - system structure, components, interfaces, data flow
+- `tooling` - dev environment, infrastructure, CI, build system
+- `workflow` - process, conventions, how work gets done
+- `domain` - vocabulary, ontology, requirements, business logic
+- `meta` - the project reflecting on itself; sessions about the session format, etc.
+
+### Significance
+
+- `high` - a major decision, design inflection point, or notable finding
+- `medium` - meaningful progress or a decision with lasting effect
+- `low` - routine, housekeeping, or exploratory without resolution
 
 ### Body
 
-The body is a readable narrative account of the session. Write for an agent who needs to understand the current state of the project and pick up where this session left off. Do not write a transcript. Do not write for a public audience. Capture:
+The `body` field is a readable narrative account of the session, formatted as markdown. Write for an agent who needs to understand the current state of the project and pick up where this session left off. Do not write a transcript. Do not write for a public audience. Capture:
 
 - What was discussed
 - What decisions were made and why
@@ -75,41 +81,9 @@ The body is a readable narrative account of the session. Write for an agent who 
 
 Use markdown headings to organize by topic. Keep it concise — a future agent should be able to read this in under two minutes and understand what happened.
 
-### Open Items / Next Steps
+**Open Items / Next Steps.** If the session leaves behind unresolved design questions or concrete implementation TODOs, include an "Open Items / Next Steps" section in the body. Do not pad this section. If nothing is genuinely open or blocked, omit it entirely.
 
-An optional section capturing unresolved work surfaced during the session. Include it when the session leaves behind either:
-
-- **Unresolved design questions** — decisions that would block or constrain future agent work if left unanswered
-- **Concrete implementation TODOs** — tasks explicitly identified in the session (not inferred follow-on work)
-
-Do not pad this section. If nothing is genuinely open or blocked, omit it entirely. The emphasis is on design questions that need human or cross-agent resolution, not routine task lists.
-
-```markdown
-## Open Items / Next Steps
-
-- <item>
-```
-
-### Herald Notes
-
-Herald Notes is an optional section at the end of the document. Include it only if the session contains material that would be meaningful to an outside reader following the project's development.
-
-Herald is a publishing agent that synthesizes session docs into outward-facing content — blog posts, status updates, deep-dives. When writing Herald Notes, write for that audience: someone interested in what's being built, how decisions are being made, and what's being learned about AI-enabled development.
-
-Herald Notes is freeform prose. It might include:
-
-- What makes this session interesting or notable to an outside reader
-- Any tension, tradeoff, or open question worth surfacing
-- A one- or two-sentence snapshot of where the project stands right now
-- A specific insight or decision that would make good deep-dive material
-
-Omit Herald Notes entirely for routine or low-significance sessions.
-
-```markdown
-## Herald Notes
-
-<freeform prose — omit section entirely if nothing publishable>
-```
+**Herald Notes.** If the session contains material meaningful to an outside reader, include a "Herald Notes" section at the end of the body. Herald is a publishing agent that synthesizes session docs into outward-facing content. Omit Herald Notes entirely for routine or low-significance sessions.
 
 ## Behavior
 
