@@ -5,8 +5,13 @@
 # ensures we archive the full transcript before any summarization occurs.
  
 set -euo pipefail
- 
+
+LOG_DIR="/workspace/nexus-mk2/.claude/hook-logs"
+mkdir -p "$LOG_DIR"
+exec >> "$LOG_DIR/on_pre_compact.log" 2>&1
+
 HOOK_DATA=$(cat)
+echo "[$(date -Iseconds)] on_pre_compact: received payload: $HOOK_DATA"
 TRANSCRIPT_PATH=$(echo "$HOOK_DATA" | jq -r '.transcript_path // empty')
 SESSION_ID=$(echo "$HOOK_DATA" | jq -r '.session_id // "unknown"')
 CWD=$(echo "$HOOK_DATA" | jq -r '.cwd // empty')

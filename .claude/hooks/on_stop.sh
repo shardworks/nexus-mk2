@@ -4,8 +4,13 @@
 # Archives the session transcript to the repo before it can be overwritten.
  
 set -euo pipefail
- 
+
+LOG_DIR="/workspace/nexus-mk2/.claude/hook-logs"
+mkdir -p "$LOG_DIR"
+exec >> "$LOG_DIR/on_stop.log" 2>&1
+
 HOOK_DATA=$(cat)
+echo "[$(date -Iseconds)] on_stop: received payload: $HOOK_DATA"
 TRANSCRIPT_PATH=$(echo "$HOOK_DATA" | jq -r '.transcript_path // empty')
 SESSION_ID=$(echo "$HOOK_DATA" | jq -r '.session_id // "unknown"')
 CWD=$(echo "$HOOK_DATA" | jq -r '.cwd // empty')
