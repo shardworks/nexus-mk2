@@ -161,14 +161,34 @@ for session_id in "${SESSION_IDS[@]}"; do
     for staged_id in "${SESSION_ARTIFACT_IDS[@]}"; do
       # Store a durable Artifact<Transcript> in the NexusArtifactsRepository.
       transcript_id="${INGESTION_TS}-${staged_id}"
-      echo "{
-  \"type\": \"transcript\",
-  \"id\": \"${transcript_id}\",
-  \"createdAt\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
-  \"content\": {
-    \"sessionId\": \"${session_id}\"
+
+      # Read the companion JSONL file content to embed as body in the Transcript.
+      staged_companion=$("${ARTIFACT_CLI}" companion-path staged-transcript "$staged_id" 2>/dev/null || true)
+      if [[ -n "$staged_companion" && -f "$staged_companion" ]]; then
+        staged_body=$(cat "$staged_companion")
+      else
+        staged_body=""
+        echo "Warning: JSONL companion not found for '${staged_id}' — body will be empty" >&2
+      fi
+
+      # Use python3 to safely encode body as a JSON string (handles newlines, quotes, etc.).
+      TRANSCRIPT_ID="${transcript_id}" \
+      CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      SESSION_ID="${session_id}" \
+      BODY="${staged_body}" \
+      python3 -c "
+import json, os
+artifact = {
+  'type': 'transcript',
+  'id': os.environ['TRANSCRIPT_ID'],
+  'createdAt': os.environ['CREATED_AT'],
+  'content': {
+    'sessionId': os.environ['SESSION_ID'],
+    'body': os.environ['BODY']
   }
-}" | "${ARTIFACT_CLI}" store
+}
+print(json.dumps(artifact, indent=2))
+" | "${ARTIFACT_CLI}" store
 
       # Delete the Artifact<StagedTranscript> (JSON and companion JSONL via CLI).
       "${ARTIFACT_CLI}" delete staged-transcript "$staged_id"
