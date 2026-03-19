@@ -15,37 +15,35 @@ The auditor is a read-only evaluation agent. It reads the project's requirements
 
 ### Step 1: Load requirements
 
-Requirements live at:
+Requirements live in a YAML file at:
 
 ```
-/workspace/nexus-mk2/domain/requirements/<feature-slug>/<requirement-slug>.md
+/workspace/nexus-mk2/domain/requirements/index.yaml
 ```
 
-Use Glob to discover all requirement files (`domain/requirements/**/*.md`). Each requirement is a single markdown file with YAML frontmatter and a prose body.
+The file contains an array of Features, each with nested Requirements. Parse the YAML to extract:
 
-Parse each file's frontmatter for:
-- `title` — human-readable name
-- `status` — draft, active, or deprecated
-- `acceptance` — array of acceptance criteria strings
+- Feature `id` and `title`
+- For each requirement: `id`, `title`, `status`, `invariants` (array of strings), and optional `notes`
 
-The requirement's `id` is derived from its path: `<feature-slug>/<requirement-slug>` (without the `.md` extension). For example, `requirements/requirements-auditor/is-invokable.md` has id `requirements-auditor/is-invokable`.
+The fully qualified requirement id is `<feature-id>/<requirement-id>` (e.g., `build-loop/continuous-operation`).
 
 Evaluate all requirements regardless of status. Status should inform your assessment (e.g., a "draft" requirement that isn't met yet is less concerning than an "active" one).
 
 ### Step 2: Inspect the project
 
-For each requirement, examine the project to determine whether it is met. Use Glob to discover relevant files, Read to examine their contents, and Grep to search for specific patterns.
+For each requirement, examine the project to determine whether its invariants hold. Use Glob to discover relevant files, Read to examine their contents, and Grep to search for specific patterns.
 
 The project root is `/workspace/nexus-mk2/`. The domain is at `/workspace/nexus-mk2/domain/`.
 
-Be thorough but efficient. Focus your inspection on what each requirement's acceptance criteria actually ask for.
+Be thorough but efficient. Focus your inspection on what each requirement's invariants actually claim.
 
 ### Step 3: Assess each requirement
 
 For each requirement, determine a verdict:
 
-- **pass** — all acceptance criteria are met based on observable evidence
-- **fail** — one or more acceptance criteria are clearly not met
+- **pass** — all invariants hold based on observable evidence
+- **fail** — one or more invariants are clearly violated
 - **unknown** — insufficient evidence to determine; the requirement may reference things that don't exist yet or are ambiguous
 
 Collect evidence for each verdict — specific observations that support your assessment. Evidence should be concrete: file paths, code snippets, presence or absence of expected structures. Keep each evidence string concise (one observation per string).
@@ -71,7 +69,7 @@ The JSON must conform to this structure:
     "summary": "<paragraph overview of the audit findings>",
     "verdicts": [
       {
-        "requirementId": "<feature-slug>/<requirement-slug>",
+        "requirementId": "<feature-id>/<requirement-id>",
         "result": "pass" | "fail" | "unknown",
         "evidence": [
           "<observation 1>",

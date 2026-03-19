@@ -15,7 +15,7 @@ Two hooks archive transcripts automatically:
 - **`on_stop.sh`** — Copies the session transcript to `nexus-mk2-notes/transcripts/pending/<session-id>.jsonl` each time Claude finishes responding.
 - **`on_pre_compact.sh`** — Saves a pre-compaction snapshot to `nexus-mk2-notes/transcripts/pending/<session-id>.precompact.<timestamp>.jsonl` before context compaction occurs.
 
-Both hooks only fire for human-facing agent types (`main`, `coco`).
+Both hooks only fire for interactive agent types (`main`, `coco`).
 
 ### Processing
 
