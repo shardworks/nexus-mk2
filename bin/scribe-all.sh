@@ -2,6 +2,16 @@
 # bin/scribe-all.sh
 # Run scribe.sh for every pending transcript that hasn't been processed yet.
 #
+# TODO: This script bypasses the artifact CLI (artifact.sh) and directly
+#   manipulates the NexusArtifactsRepository filesystem layout. It assumes
+#   a transcripts/pending + transcripts/archived directory structure that
+#   is an implementation detail of the current artifacts repo, not a
+#   contract. Once transcripts are stored via artifact.sh (as the
+#   artifact-cli/exclusive-access requirement demands), this script needs
+#   to be rewritten to use the CLI for both reads and writes. The archive
+#   workflow (pending → archived) may also need its own requirement or
+#   become part of the scribe operator's declared effects.
+#
 # Usage:
 #   ./bin/scribe-all.sh
 
