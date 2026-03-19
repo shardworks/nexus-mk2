@@ -35,9 +35,21 @@ If any BuildResult artifact's `content.assessmentId` matches the Assessment's `i
 
 If no failing Assessments remain after filtering, exit cleanly. There is nothing to do.
 
-### Step 2: Select one failing requirement
+### Step 2: Select one failing requirement (with feature locking)
 
 From the remaining failing Assessments, choose one to work on. Use your judgment — consider factors like estimated complexity, dependencies between requirements, and which fix would unblock the most progress. You are picking one task for this invocation; other failures will be addressed in future cycles.
+
+**Before starting work, you must acquire a feature lock.** The requirement id has the format `<feature-id>/<requirement-id>`. Extract the feature id and acquire a lock:
+
+```bash
+bin/feature-lock.sh acquire <feature-id>
+```
+
+- If the lock is acquired (exit code 0), proceed with this requirement.
+- If the lock is held (exit code 1), skip this requirement and try the next failing Assessment from a different Feature.
+- If all Features with failing Assessments are locked, exit cleanly. There is nothing you can do right now.
+
+You must release the lock after your commit is complete (see Step 6).
 
 ### Step 3: Read the requirement
 
@@ -61,7 +73,7 @@ Work in `/workspace/nexus-mk2/`. This is the project root.
 
 Before committing, re-read the requirement's invariants and verify that your changes satisfy each one. If you find gaps, fix them before proceeding.
 
-### Step 6: Commit, record, and push
+### Step 6: Commit, record, release lock, and push
 
 Commit all changes and push to main.
 
@@ -89,6 +101,14 @@ Where `<id>` is an ISO 8601 timestamp in compact format (same convention as asse
 
 Create the directory if it does not exist. This artifact prevents future builder invocations from acting on the same Assessment and provides traceability from commits back to requirements.
 
+**After recording the build result, release the feature lock:**
+
+```bash
+bin/feature-lock.sh release <feature-id>
+```
+
+Always release the lock, even if intermediate steps encounter errors. The lock must not be held after the builder exits.
+
 ## Behavior
 
 - **One requirement per invocation.** Do not select additional work after completing a task.
@@ -97,6 +117,7 @@ Create the directory if it does not exist. This artifact prevents future builder
 - **Exit if nothing to do.** If no Assessments are failing (or all failing ones have BuildResults), exit cleanly.
 - **Do not modify domain files.** Requirements and ontology are read-only inputs.
 - **Do not run audits.** You work from existing Assessments, not live evaluation.
+- **Feature locking.** Always acquire a feature lock before beginning work and release it when done. If the feature is locked by another builder, select a different feature or exit cleanly.
 
 ## Dispatch
 
