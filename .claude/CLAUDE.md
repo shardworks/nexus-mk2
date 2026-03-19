@@ -9,10 +9,10 @@ Nexus Mk II is an experimental multi-agent AI system.
 
 ## Domain (Human-Owned — Do Not Modify)
 
-Requirements and the typed ontology live in `/workspace/nexus-mk2/domain/` (mounted read-only from `shardworks/nexus-mk2-domain`).
+Requirements and the typed ontology live in `$NEXUS_DOMAIN_PATH` (mounted read-only from `shardworks/nexus-mk2-domain`).
 
-- **Requirements:** `/workspace/nexus-mk2/domain/requirements/index.yaml` — YAML file defining features and their requirements as invariants.
-- **Ontology:** `/workspace/nexus-mk2/domain/ontology/` — TypeScript modules defining every named domain concept. `index.ts` is the barrel; types are split across topical files (`audit.ts`, `agent.ts`, `system.ts`, etc.).
+- **Requirements:** `$NEXUS_DOMAIN_PATH/requirements/index.yaml` — YAML file defining features and their requirements as invariants.
+- **Ontology:** `$NEXUS_DOMAIN_PATH/ontology/` — TypeScript modules defining every named domain concept. `index.ts` is the barrel; types are split across topical files (`audit.ts`, `agent.ts`, `system.ts`, etc.).
 
 These artifacts are owned by the project lead. Agents must not attempt to modify them. All contributions must conform to the types exported by the ontology. If you believe a domain change is needed, surface it to the human operator — do not make the change yourself.
 
