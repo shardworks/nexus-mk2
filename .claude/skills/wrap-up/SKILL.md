@@ -37,6 +37,10 @@ Generate a structured summary of the current session. This summary serves two au
 
 - Concrete actions for the next session or for agents to pick up.
 
+## Agent Adjustments
+
+- Based on direct instructions, corrections, and feedback given list any notable addtions or changes we should consider making to your general agent instructions
+
 ### Notable moments
 
 This is the most important section. Capture quotes, insights, or exchanges that stand out — either for system design or for the research/experiment narrative.
