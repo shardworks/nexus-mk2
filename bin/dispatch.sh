@@ -7,7 +7,7 @@
 #
 # Registered Operators and their Operations:
 #   auditor  — audit    (produces: audit-report, assessment)
-#   builder  — build    (consumes: audit-report; produces: build-result; implements)
+#   builder  — build    (consumes: assessment; produces: build-result; implements)
 #   scribe   — scribe   (consumes: transcript; produces: session-doc)
 #   herald   — herald   (consumes: session-doc; produces: publication)
 #
@@ -121,7 +121,7 @@ Registered Operators:
 
   builder   Implements changes to satisfy failing requirements
             Operations: build
-            Effects: consumes audit-report, produces build-result, implements
+            Effects: consumes assessment, produces build-result, implements
 
   scribe    Synthesizes session transcripts into structured docs
             Operations: scribe <transcript.jsonl> [<precompact.jsonl> ...]
