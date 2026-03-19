@@ -26,13 +26,13 @@ Focus only on `user` and `assistant` message turns when reconstructing the conve
 
 ## Output
 
-Scribe produces a single `Artifact<SessionDoc>` JSON file at:
+Scribe produces a single `Artifact<SessionDoc>` by piping conformant JSON to the artifact CLI:
 
-```
-/workspace/nexus-mk2/.artifacts/session-doc/<id>.json
+```bash
+echo '<json>' | bin/artifact.sh store
 ```
 
-Where `<id>` is an ISO 8601 timestamp in compact format (e.g., `2026-03-19T062937Z`). Create the `.artifacts/session-doc/` directory if it does not exist.
+Where the artifact `id` is an ISO 8601 timestamp in compact format (e.g., `2026-03-19T062937Z`).
 
 The JSON must conform to the `Artifact<SessionDoc>` schema:
 

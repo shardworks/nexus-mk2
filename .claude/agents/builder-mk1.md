@@ -15,23 +15,23 @@ The builder is an autonomous implementation agent. It reads current Assessments 
 
 ### Step 1: Find failing Assessments
 
-Assessments live at:
+List all existing Assessments using the artifact CLI:
 
-```
-/workspace/nexus-mk2/.artifacts/assessment/
+```bash
+bin/artifact.sh list assessment
 ```
 
-Each file is an `Artifact<Assessment>`. For each unique `requirementId`, the most recent file (by timestamp in the filename) is the **current Assessment**.
+For each unique `requirementId`, the most recent Assessment (by `createdAt`) is the **current Assessment**. Read each with `bin/artifact.sh show assessment <id>` to get the full JSON.
 
 Collect all current Assessments where `content.result` is `"fail"`.
 
-**Before acting on a failing Assessment, check for an existing BuildResult.** Look in:
+**Before acting on a failing Assessment, check for an existing BuildResult.** List existing BuildResults:
 
-```
-/workspace/nexus-mk2/.artifacts/build-result/
+```bash
+bin/artifact.sh list build-result
 ```
 
-If any BuildResult artifact's `content.assessmentId` matches the Assessment's `id`, this Assessment has already been acted on. Skip it — a new audit cycle will produce a fresh Assessment against the updated code.
+Read each with `bin/artifact.sh show build-result <id>`. If any BuildResult's `content.assessmentId` matches the failing Assessment's `id`, this Assessment has already been acted on. Skip it — a new audit cycle will produce a fresh Assessment against the updated code.
 
 If no failing Assessments remain after filtering, exit cleanly. There is nothing to do.
 
@@ -77,13 +77,13 @@ Before committing, re-read the requirement's invariants and verify that your cha
 
 All code changes and the BuildResult artifact must be included in a **single atomic commit**. Follow this sequence:
 
-1. **Write the `Artifact<BuildResult>`** as a JSON file at:
+1. **Store the `Artifact<BuildResult>`** by piping conformant JSON to the artifact CLI:
 
-   ```
-   /workspace/nexus-mk2/.artifacts/build-result/<id>.json
+   ```bash
+   echo '<json>' | bin/artifact.sh store
    ```
 
-   Where `<id>` is an ISO 8601 timestamp in compact format (same convention as assessments). Use `"pending"` as the `commitHash` value initially. The JSON must conform to:
+   Where the artifact `id` is an ISO 8601 timestamp in compact format (same convention as assessments). Use `"pending"` as the `commitHash` value initially. The JSON must conform to:
 
    ```json
    {
@@ -99,13 +99,11 @@ All code changes and the BuildResult artifact must be included in a **single ato
    }
    ```
 
-   Create the directory if it does not exist.
-
 2. **Stage all files** — both the implementation changes and the BuildResult artifact.
 
 3. **Create a single commit.** The commit subject must match the format `implements <requirement-id>`.
 
-4. **Backfill the commit hash.** After committing, retrieve the commit hash, update the `commitHash` field in the BuildResult JSON file, stage the updated file, and amend the commit (`git commit --amend --no-edit`). This replaces the commit in-place — the result is still one atomic commit. Note: the final commit hash will differ from the value stored in `commitHash` (since amending changes the hash). This is an inherent limitation of content-addressed storage and is acceptable.
+4. **Backfill the commit hash.** After committing, retrieve the commit hash, update the `commitHash` field in the JSON, and re-store via `bin/artifact.sh store`, then stage the updated artifact and amend the commit (`git commit --amend --no-edit`). This replaces the commit in-place — the result is still one atomic commit. Note: the final commit hash will differ from the value stored in `commitHash` (since amending changes the hash). This is an inherent limitation of content-addressed storage and is acceptable.
 
 5. **Push to main.**
 

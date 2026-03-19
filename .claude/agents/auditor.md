@@ -45,13 +45,13 @@ The fully qualified requirement id is `<feature-id>/<requirement-id>` (e.g., `bu
 
 ### Step 3: Check for stale or missing Assessments
 
-Before inspecting the codebase, determine which requirements actually need reassessment. Look at existing Assessments in:
+Before inspecting the codebase, determine which requirements actually need reassessment. List existing Assessments using the artifact CLI:
 
-```
-/workspace/nexus-mk2/.artifacts/assessment/
+```bash
+bin/artifact.sh list assessment
 ```
 
-For each non-deprecated requirement, find its most recent Assessment (the file with the latest timestamp for that requirement's slug). An Assessment is **current** if its `projectCommit` matches the implementation repo HEAD and its `domainCommit` matches the domain repo HEAD (both captured in step 1). An Assessment is **stale** if either commit doesn't match. A requirement with no Assessment file is **missing**.
+For each non-deprecated requirement, find its most recent Assessment. Use `bin/artifact.sh show assessment <id>` to read the full JSON and check the `content.requirementId`, `content.projectCommit`, and `content.domainCommit` fields. An Assessment is **current** if its `projectCommit` matches the implementation repo HEAD and its `domainCommit` matches the domain repo HEAD (both captured in step 1). An Assessment is **stale** if either commit doesn't match. A requirement with no Assessment is **missing**.
 
 Only reassess requirements that are stale or missing. Requirements with current Assessments can be skipped — carry forward their existing verdict into the AuditReport.
 
@@ -75,13 +75,13 @@ Collect evidence for each verdict — specific observations that support your ev
 
 ### Step 6: Write per-requirement assessments
 
-For each requirement that was reassessed, produce an `Artifact<Assessment>` as a JSON file at:
+For each requirement that was reassessed, produce an `Artifact<Assessment>` by piping conformant JSON to the artifact CLI:
 
-```
-/workspace/nexus-mk2/.artifacts/assessment/<id>.json
+```bash
+echo '<json>' | bin/artifact.sh store
 ```
 
-Where `<id>` is `<requirement-id-slug>-<timestamp>` — use the fully qualified requirement id with `/` replaced by `--`, followed by a `-` and a compact ISO 8601 timestamp (`YYYY-MM-DDTHHMMSSZ`). For example: `builder--single-task-2026-03-18T214500Z.json`.
+Where the artifact `id` is `<requirement-id-slug>-<timestamp>` — use the fully qualified requirement id with `/` replaced by `--`, followed by a `-` and a compact ISO 8601 timestamp (`YYYY-MM-DDTHHMMSSZ`). For example: `builder--single-task-2026-03-18T214500Z`.
 
 The JSON must conform to this structure:
 
@@ -103,17 +103,15 @@ The JSON must conform to this structure:
 }
 ```
 
-Create the directory path if it doesn't exist.
-
 ### Step 7: Write the audit report
 
-Produce an `Artifact<AuditReport>` as a JSON file at:
+Produce an `Artifact<AuditReport>` by piping conformant JSON to the artifact CLI:
 
-```
-/workspace/nexus-mk2/.artifacts/audit-report/<id>.json
+```bash
+echo '<json>' | bin/artifact.sh store
 ```
 
-Where `<id>` is an ISO 8601 timestamp in compact format: `YYYY-MM-DDTHHMMSSZ` (e.g., `2026-03-18T214500Z`). Use the current UTC time.
+Where the artifact `id` is an ISO 8601 timestamp in compact format: `YYYY-MM-DDTHHMMSSZ` (e.g., `2026-03-18T214500Z`). Use the current UTC time.
 
 The AuditReport should include verdicts for **all** non-deprecated requirements — both those reassessed in this run and those carried forward from current Assessments. This makes the AuditReport a complete snapshot even when the audit was incremental.
 
@@ -142,8 +140,6 @@ The JSON must conform to this structure:
 
 The `summary` field should be a paragraph-length prose overview of the audit results — what was evaluated, the overall health of the system, and any notable findings. Write it for a human who wants to understand the audit outcome without reading every verdict. Mention how many requirements were reassessed vs. carried forward.
 
-Create the directory path if it doesn't exist.
-
 ### Step 8: Summarize
 
 After writing all artifacts, output a brief summary to the console:
@@ -154,7 +150,7 @@ After writing all artifacts, output a brief summary to the console:
 
 ## Behavior
 
-- **Read-only.** Do not modify any project files. The only files you create are artifact files in `.artifacts/`.
+- **Read-only.** Do not modify any project files. The only artifacts you create are stored via `bin/artifact.sh store`.
 - **Every non-deprecated requirement gets a verdict.** Do not skip non-deprecated requirements. If you can't assess one, verdict is "unknown" with evidence explaining why.
 - **Incremental by default.** Only reassess requirements with stale or missing Assessments. Carry forward current Assessments into the AuditReport.
 - **Evidence over opinion.** Ground every verdict in observable facts. "I didn't find X" is valid evidence. "I think X might work" is not.
