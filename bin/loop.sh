@@ -63,8 +63,6 @@ while true; do
       echo "[loop] Builder failed. Will retry next iteration."
     else
       echo "[loop] Builder completed."
-      # Update project hash since builder may have committed.
-      last_project_hash="$(get_project_hash)"
     fi
   else
     echo "[loop] All requirements passing. Nothing to build."
