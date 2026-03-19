@@ -56,6 +56,15 @@ while true; do
           continue
         fi
 
+        # Only act on assessments whose projectCommit matches current HEAD.
+        # Stale assessments (from older commits) are skipped — the audit loop
+        # will reassess against the current codebase.
+        project_commit="$(grep -m1 '"projectCommit"' "$f" | sed 's/.*"projectCommit" *: *"\([^"]*\)".*/\1/')"
+        current_head="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
+        if [[ "$project_commit" != "$current_head" ]]; then
+          continue
+        fi
+
         # Extract feature id from requirement id (format: feature-id/requirement-id).
         req_id="$(grep -m1 '"requirementId"' "$f" | sed 's/.*"requirementId" *: *"\([^"]*\)".*/\1/')"
         feature_id="${req_id%%/*}"
