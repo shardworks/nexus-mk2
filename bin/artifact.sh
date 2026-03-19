@@ -15,12 +15,17 @@
 #
 # Persistent types (transcript, session-doc, publication) are stored in the
 # NexusArtifactsRepository at ARTIFACTS_REPO and committed+pushed on store.
+# The CLI lazily clones the repo on first use — no external startup hooks needed.
 # Non-persistent types are written to workspace-local storage only.
 
 set -euo pipefail
 
-ARTIFACT_ROOT="/workspace/nexus-mk2/.artifacts"
-ARTIFACTS_REPO="/workspace/nexus-mk2-notes"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+ARTIFACT_ROOT="${PROJECT_ROOT}/.artifacts"
+ARTIFACTS_REPO="${NEXUS_TEMP_DIR:?NEXUS_TEMP_DIR is not set}/nexus-mk2-artifacts"
+ARTIFACTS_REPO_REMOTE="${NEXUS_ARTIFACTS_REMOTE:?NEXUS_ARTIFACTS_REMOTE is not set}"
 
 # --- helpers ----------------------------------------------------------------
 
@@ -56,6 +61,16 @@ is_persistent() {
   esac
 }
 
+# Ensure the NexusArtifactsRepository is present locally, cloning if needed.
+# Called before any operation on a persistent artifact type.
+ensure_artifacts_repo() {
+  if [[ -d "${ARTIFACTS_REPO}/.git" ]]; then
+    return 0
+  fi
+  echo "artifact: cloning NexusArtifactsRepository to ${ARTIFACTS_REPO}..." >&2
+  git clone "$ARTIFACTS_REPO_REMOTE" "$ARTIFACTS_REPO" >&2
+}
+
 # Return the store directory for a given type.
 store_dir() {
   if is_persistent "$1"; then
@@ -73,6 +88,7 @@ store_dir() {
 cmd_list() {
   local type="$1"
   validate_type "$type"
+  is_persistent "$type" && ensure_artifacts_repo
   local dir
   dir="$(store_dir "$type")"
 
@@ -106,6 +122,7 @@ cmd_list() {
 cmd_show() {
   local type="$1" id="$2"
   validate_type "$type"
+  is_persistent "$type" && ensure_artifacts_repo
   local file
   file="$(store_dir "$type")/${id}.json"
 
@@ -121,6 +138,7 @@ cmd_show() {
 cmd_latest() {
   local type="$1"
   validate_type "$type"
+  is_persistent "$type" && ensure_artifacts_repo
   local dir
   dir="$(store_dir "$type")"
 
@@ -167,6 +185,7 @@ cmd_store() {
 
   # Validate that type is a known artifact type.
   validate_type "$atype"
+  is_persistent "$atype" && ensure_artifacts_repo
 
   # Ensure the store directory exists.
   local dir

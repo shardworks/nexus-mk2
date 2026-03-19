@@ -8,8 +8,18 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PENDING_DIR="/workspace/nexus-mk2-notes/transcripts/pending"
-ARCHIVED_DIR="/workspace/nexus-mk2-notes/transcripts/archived"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# The artifacts repo is not guaranteed locally — clone transiently.
+ARTIFACTS_REPO="${NEXUS_TEMP_DIR:?NEXUS_TEMP_DIR is not set}/nexus-mk2-artifacts"
+ARTIFACTS_REPO_REMOTE="${NEXUS_ARTIFACTS_REMOTE:?NEXUS_ARTIFACTS_REMOTE is not set}"
+if [[ ! -d "${ARTIFACTS_REPO}/.git" ]]; then
+  echo "scribe-all: cloning NexusArtifactsRepository to ${ARTIFACTS_REPO}..." >&2
+  git clone "$ARTIFACTS_REPO_REMOTE" "$ARTIFACTS_REPO" >&2
+fi
+
+PENDING_DIR="${ARTIFACTS_REPO}/transcripts/pending"
+ARCHIVED_DIR="${ARTIFACTS_REPO}/transcripts/archived"
 
 if [[ ! -d "$PENDING_DIR" ]]; then
   echo "No pending directory found at $PENDING_DIR — nothing to process."
