@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# artifact.sh — CLI for browsing the Artifact store.
+#
+# Abstracts over the filesystem storage layout so humans and agents
+# can discover and inspect Artifacts without knowing path conventions.
+#
+# Usage:
+#   artifact.sh list <type>          List all artifacts of a given type
+#   artifact.sh show <type> <id>     Display full artifact JSON
+#   artifact.sh latest <type>        Display the most recent artifact of a type
+#
+# Valid artifact types:
+#   audit-report, assessment, build-result, transcript, session-doc, publication
+
+set -euo pipefail
+
+ARTIFACT_ROOT="/workspace/nexus-mk2/.artifacts"
+
+# --- helpers ----------------------------------------------------------------
+
+die() { echo "error: $*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage:
+  artifact.sh list   <type>        List artifacts (most recent first)
+  artifact.sh show   <type> <id>   Show full artifact JSON
+  artifact.sh latest <type>        Show the most recent artifact
+
+Types: audit-report | assessment | build-result | transcript | session-doc | publication
+EOF
+  exit 1
+}
+
+# Validate that a string is a known ArtifactTypeName.
+validate_type() {
+  case "$1" in
+    audit-report|assessment|build-result|transcript|session-doc|publication) ;;
+    *) die "unknown artifact type: '$1'" ;;
+  esac
+}
+
+# Return the store directory for a given type.
+store_dir() {
+  echo "${ARTIFACT_ROOT}/$1"
+}
+
+# --- commands ---------------------------------------------------------------
+
+# list <type>
+# Lists all artifacts of the given type, ordered by createdAt descending.
+# Output columns: id  createdAt  type
+cmd_list() {
+  local type="$1"
+  validate_type "$type"
+  local dir
+  dir="$(store_dir "$type")"
+
+  if [[ ! -d "$dir" ]] || [[ -z "$(ls -A "$dir" 2>/dev/null)" ]]; then
+    echo "No artifacts of type '$type' found."
+    exit 0
+  fi
+
+  # Collect id, createdAt, type from each artifact JSON, sort by createdAt desc.
+  # We use a lightweight approach: extract fields with grep/sed to avoid
+  # requiring jq as a dependency.
+  local entries=()
+  for f in "$dir"/*.json; do
+    [[ -f "$f" ]] || continue
+    local id created atype
+    id=$(grep -m1 '"id"' "$f" | sed 's/.*"id" *: *"\([^"]*\)".*/\1/')
+    created=$(grep -m1 '"createdAt"' "$f" | sed 's/.*"createdAt" *: *"\([^"]*\)".*/\1/')
+    atype=$(grep -m1 '"type"' "$f" | sed 's/.*"type" *: *"\([^"]*\)".*/\1/')
+    entries+=("${created}	${id}	${atype}")
+  done
+
+  # Sort descending by createdAt (first column), then print with header.
+  printf "%-28s  %-28s  %s\n" "ID" "CREATED" "TYPE"
+  printf '%s\n' "${entries[@]}" | sort -r | while IFS=$'\t' read -r created id atype; do
+    printf "%-28s  %-28s  %s\n" "$id" "$created" "$atype"
+  done
+}
+
+# show <type> <id>
+# Displays the full JSON content of a single artifact.
+cmd_show() {
+  local type="$1" id="$2"
+  validate_type "$type"
+  local file
+  file="$(store_dir "$type")/${id}.json"
+
+  if [[ ! -f "$file" ]]; then
+    die "artifact not found: type='$type' id='$id'"
+  fi
+
+  cat "$file"
+}
+
+# latest <type>
+# Displays the most recent artifact of a given type (by filename sort desc).
+cmd_latest() {
+  local type="$1"
+  validate_type "$type"
+  local dir
+  dir="$(store_dir "$type")"
+
+  if [[ ! -d "$dir" ]] || [[ -z "$(ls -A "$dir" 2>/dev/null)" ]]; then
+    die "no artifacts of type '$type' exist"
+  fi
+
+  # Filenames are ISO 8601 timestamps, so reverse-sorted ls gives most recent.
+  local latest
+  latest=$(ls -1 "$dir"/*.json 2>/dev/null | sort -r | head -1)
+
+  if [[ -z "$latest" ]]; then
+    die "no artifacts of type '$type' exist"
+  fi
+
+  cat "$latest"
+}
+
+# --- dispatch ---------------------------------------------------------------
+
+[[ $# -ge 1 ]] || usage
+
+case "$1" in
+  list)
+    [[ $# -ge 2 ]] || die "list requires a type argument"
+    cmd_list "$2"
+    ;;
+  show)
+    [[ $# -ge 3 ]] || die "show requires type and id arguments"
+    cmd_show "$2" "$3"
+    ;;
+  latest)
+    [[ $# -ge 2 ]] || die "latest requires a type argument"
+    cmd_latest "$2"
+    ;;
+  *)
+    usage
+    ;;
+esac
