@@ -9,6 +9,7 @@
 #   artifact.sh show <type> <id>     Display full artifact JSON
 #   artifact.sh latest <type>        Display the most recent artifact of a type
 #   artifact.sh store                Store artifact JSON from stdin
+#   artifact.sh delete <type> <id>   Delete an artifact by type and id
 #
 # Valid artifact types:
 #   audit-report, assessment, build-result, transcript, session-doc, publication
@@ -38,6 +39,7 @@ Usage:
   artifact.sh show   <type> <id>   Show full artifact JSON
   artifact.sh latest <type>        Show the most recent artifact
   artifact.sh store                Store artifact JSON from stdin
+  artifact.sh delete <type> <id>   Delete an artifact by type and id
 
 Types: audit-report | assessment | build-result | transcript | session-doc | publication
 EOF
@@ -209,6 +211,33 @@ cmd_store() {
   fi
 }
 
+# delete <type> <id>
+# Deletes a single artifact by type and id.
+cmd_delete() {
+  local type="$1" id="$2"
+  validate_type "$type"
+  is_persistent "$type" && ensure_artifacts_repo
+  local file
+  file="$(store_dir "$type")/${id}.json"
+
+  if [[ ! -f "$file" ]]; then
+    die "artifact not found: type='$type' id='$id'"
+  fi
+
+  rm "$file"
+  echo "Deleted artifact: type='$type' id='$id'"
+
+  # For persistent types, commit and push the removal to the NexusArtifactsRepository.
+  if is_persistent "$type"; then
+    git -C "$ARTIFACTS_REPO" add "$file"
+    if ! git -C "$ARTIFACTS_REPO" diff --cached --quiet; then
+      git -C "$ARTIFACTS_REPO" commit -m "artifact: delete ${type}/${id}"
+      git -C "$ARTIFACTS_REPO" push
+      echo "artifact: committed and pushed deletion of ${type}/${id} to NexusArtifactsRepository"
+    fi
+  fi
+}
+
 # --- dispatch ---------------------------------------------------------------
 
 [[ $# -ge 1 ]] || usage
@@ -228,6 +257,10 @@ case "$1" in
     ;;
   store)
     cmd_store
+    ;;
+  delete)
+    [[ $# -ge 3 ]] || die "delete requires type and id arguments"
+    cmd_delete "$2" "$3"
     ;;
   *)
     usage
