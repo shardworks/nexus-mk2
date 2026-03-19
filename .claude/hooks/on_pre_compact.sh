@@ -18,7 +18,7 @@ CWD=$(echo "$HOOK_DATA" | jq -r '.cwd // empty')
 TRIGGER=$(echo "$HOOK_DATA" | jq -r '.trigger // "unknown"')
 AGENT_TYPE=$(echo "$HOOK_DATA" | jq -r '.agent_type // "main"')
 
-# Only archive sessions from human-facing agents
+# Only archive sessions from interactive agents
 ALLOWED_AGENTS=("main" "coco")
 if [[ ! " ${ALLOWED_AGENTS[@]} " =~ " ${AGENT_TYPE} " ]]; then
   exit 0
