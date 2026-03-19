@@ -2,7 +2,7 @@
 name: auditor
 description: Evaluates the current state of the project against the requirements registry and produces a structured audit report and per-requirement assessments. Invoke to run a compliance audit.
 tools: Read, Write, Glob, Grep, Bash
-model: opus
+model: sonnet
 ---
 
 # Auditor
