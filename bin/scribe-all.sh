@@ -14,8 +14,8 @@
 # Convention for staged-transcript artifacts:
 #   - Primary artifact ID:    {sessionId}
 #   - Precompact artifact ID: {sessionId}.precompact.{timestamp}
-#   - Metadata JSON: .artifacts/staged-transcript/{id}.json  (via artifact CLI)
-#   - Transcript JSONL: .artifacts/staged-transcript/{id}.jsonl  (companion file)
+#   - Metadata JSON: managed via artifact CLI (artifact.sh show staged-transcript <id>)
+#   - Transcript JSONL: companion file accessed via artifact CLI (artifact.sh companion-path staged-transcript <id>)
 #
 # Usage:
 #   ./bin/scribe-all.sh
@@ -23,16 +23,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ARTIFACT_CLI="${SCRIPT_DIR}/artifact.sh"
-ARTIFACT_ROOT="${PROJECT_ROOT}/.artifacts"
-STAGED_STORE="${ARTIFACT_ROOT}/staged-transcript"
 
-# ── Helper: extract a string field from artifact JSON ───────────────────────
+# ── Helper: extract a string field from artifact JSON string ─────────────────
 
 get_json_field() {
-  local file="$1" field="$2"
-  grep -m1 "\"${field}\"" "$file" | sed "s/.*\"${field}\" *: *\"\([^\"]*\)\".*/\1/"
+  local json="$1" field="$2"
+  echo "$json" | grep -m1 "\"${field}\"" | sed "s/.*\"${field}\" *: *\"\([^\"]*\)\".*/\1/"
 }
 
 # ── List all Artifact<StagedTranscript> entries ──────────────────────────────
@@ -66,14 +63,14 @@ declare -A SESSION_PRIMARY    # sessionId -> primary artifact ID
 declare -A SESSION_PRECOMPACT # sessionId -> space-separated precompact artifact IDs
 
 for artifact_id in "${ARTIFACT_IDS[@]}"; do
-  json_file="${STAGED_STORE}/${artifact_id}.json"
-  if [[ ! -f "$json_file" ]]; then
-    echo "Warning: JSON not found for artifact '${artifact_id}' — skipping." >&2
+  artifact_json=$("${ARTIFACT_CLI}" show staged-transcript "$artifact_id" 2>/dev/null || true)
+  if [[ -z "$artifact_json" ]]; then
+    echo "Warning: could not read artifact '${artifact_id}' via CLI — skipping." >&2
     continue
   fi
 
-  session_id=$(get_json_field "$json_file" "sessionId")
-  capture_type=$(get_json_field "$json_file" "captureType")
+  session_id=$(get_json_field "$artifact_json" "sessionId")
+  capture_type=$(get_json_field "$artifact_json" "captureType")
 
   if [[ -z "$session_id" ]]; then
     echo "Warning: artifact '${artifact_id}' missing sessionId — skipping." >&2
@@ -117,8 +114,8 @@ for session_id in "${SESSION_IDS[@]}"; do
   precompact_ids="${SESSION_PRECOMPACT[$session_id]:-}"
   if [[ -n "$precompact_ids" ]]; then
     for pc_id in $(echo "$precompact_ids" | tr ' ' '\n' | sort); do
-      pc_file="${STAGED_STORE}/${pc_id}.jsonl"
-      if [[ -f "$pc_file" ]]; then
+      pc_file=$("${ARTIFACT_CLI}" companion-path staged-transcript "$pc_id" 2>/dev/null || true)
+      if [[ -n "$pc_file" && -f "$pc_file" ]]; then
         TRANSCRIPT_FILES+=("$pc_file")
       else
         echo "Warning: JSONL missing for precompact artifact '${pc_id}'" >&2
@@ -128,8 +125,8 @@ for session_id in "${SESSION_IDS[@]}"; do
 
   primary_id="${SESSION_PRIMARY[$session_id]:-}"
   if [[ -n "$primary_id" ]]; then
-    primary_file="${STAGED_STORE}/${primary_id}.jsonl"
-    if [[ -f "$primary_file" ]]; then
+    primary_file=$("${ARTIFACT_CLI}" companion-path staged-transcript "$primary_id" 2>/dev/null || true)
+    if [[ -n "$primary_file" && -f "$primary_file" ]]; then
       TRANSCRIPT_FILES+=("$primary_file")
     else
       echo "Warning: JSONL missing for primary artifact '${primary_id}'" >&2
@@ -173,9 +170,8 @@ for session_id in "${SESSION_IDS[@]}"; do
   }
 }" | "${ARTIFACT_CLI}" store
 
-      # Delete the Artifact<StagedTranscript> (both JSON and companion JSONL).
+      # Delete the Artifact<StagedTranscript> (JSON and companion JSONL via CLI).
       "${ARTIFACT_CLI}" delete staged-transcript "$staged_id"
-      rm -f "${STAGED_STORE}/${staged_id}.jsonl"
 
       echo "scribe-all: ingested staged-transcript '${staged_id}' -> transcript '${transcript_id}'"
     done
