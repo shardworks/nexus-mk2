@@ -35,7 +35,7 @@ if [[ ! -s "$TRANSCRIPT_PATH" ]]; then
 fi
  
 # Resolve archive destination relative to the project working directory
-ARCHIVE_DIR="/workspace/nexus-mk2-notes/transcripts/pending"
+ARCHIVE_DIR="/workspace/nexus-mk2-artifactswe /transcripts/pending"
 mkdir -p "$ARCHIVE_DIR"
 
 DEST="${ARCHIVE_DIR}/${SESSION_ID}.jsonl"
