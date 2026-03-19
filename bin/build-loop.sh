@@ -19,8 +19,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SELF="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 SELF_HASH="$(md5sum "$SELF" | cut -d' ' -f1)"
 
-ASSESSMENT_DIR="$PROJECT_ROOT/.artifacts/assessment"
-BUILD_RESULT_DIR="$PROJECT_ROOT/.artifacts/build-result"
+ARTIFACT_CLI="$SCRIPT_DIR/artifact.sh"
 FEATURE_LOCK="$SCRIPT_DIR/feature-lock.sh"
 
 echo "[build-loop] Build reconciliation loop starting. Ctrl+C to stop."
@@ -33,25 +32,35 @@ while true; do
     exec "$SELF" "$@"
   fi
 
-  # Check for failing assessments.
+  # Check for failing assessments via the artifact CLI.
   has_actionable=false
 
-  if [[ -d "$ASSESSMENT_DIR" ]]; then
-    # Collect acted-on assessment IDs from existing BuildResults.
+  # List all assessments and extract IDs (skip header line).
+  assessment_ids="$("$ARTIFACT_CLI" list assessment 2>/dev/null | tail -n +2 | awk '{print $1}' || true)"
+
+  if [[ -n "$assessment_ids" ]]; then
+    # Collect acted-on assessment IDs from existing BuildResults via the CLI.
     acted_on=""
-    if [[ -d "$BUILD_RESULT_DIR" ]]; then
-      acted_on="$(grep -h '"assessmentId"' "$BUILD_RESULT_DIR"/*.json 2>/dev/null \
-        | sed 's/.*"assessmentId" *: *"\([^"]*\)".*/\1/' || true)"
-    fi
+    build_ids="$("$ARTIFACT_CLI" list build-result 2>/dev/null | tail -n +2 | awk '{print $1}' || true)"
+    for bid in $build_ids; do
+      br_assessment_id="$("$ARTIFACT_CLI" show build-result "$bid" 2>/dev/null \
+        | grep -m1 '"assessmentId"' | sed 's/.*"assessmentId" *: *"\([^"]*\)".*/\1/' || true)"
+      if [[ -n "$br_assessment_id" ]]; then
+        acted_on="${acted_on}${br_assessment_id}"$'\n'
+      fi
+    done
 
-    # Check each assessment file for failures, respecting feature locks.
-    for f in "$ASSESSMENT_DIR"/*.json; do
-      [[ -f "$f" ]] || continue
+    current_head="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
 
-      result="$(grep -m1 '"result"' "$f" | sed 's/.*"result" *: *"\([^"]*\)".*/\1/')"
+    # Check each assessment for failures, respecting feature locks.
+    for aid in $assessment_ids; do
+      # Read assessment JSON via the CLI.
+      assessment_json="$("$ARTIFACT_CLI" show assessment "$aid" 2>/dev/null || true)"
+      [[ -n "$assessment_json" ]] || continue
+
+      result="$(echo "$assessment_json" | grep -m1 '"result"' | sed 's/.*"result" *: *"\([^"]*\)".*/\1/')"
       if [[ "$result" == "fail" ]]; then
         # Check if already acted on.
-        aid="$(grep -m1 '"id"' "$f" | sed 's/.*"id" *: *"\([^"]*\)".*/\1/')"
         if echo "$acted_on" | grep -qF "$aid"; then
           continue
         fi
@@ -59,14 +68,13 @@ while true; do
         # Only act on assessments whose projectCommit matches current HEAD.
         # Stale assessments (from older commits) are skipped — the audit loop
         # will reassess against the current codebase.
-        project_commit="$(grep -m1 '"projectCommit"' "$f" | sed 's/.*"projectCommit" *: *"\([^"]*\)".*/\1/')"
-        current_head="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
+        project_commit="$(echo "$assessment_json" | grep -m1 '"projectCommit"' | sed 's/.*"projectCommit" *: *"\([^"]*\)".*/\1/')"
         if [[ "$project_commit" != "$current_head" ]]; then
           continue
         fi
 
         # Extract feature id from requirement id (format: feature-id/requirement-id).
-        req_id="$(grep -m1 '"requirementId"' "$f" | sed 's/.*"requirementId" *: *"\([^"]*\)".*/\1/')"
+        req_id="$(echo "$assessment_json" | grep -m1 '"requirementId"' | sed 's/.*"requirementId" *: *"\([^"]*\)".*/\1/')"
         feature_id="${req_id%%/*}"
 
         # Check if feature is locked.

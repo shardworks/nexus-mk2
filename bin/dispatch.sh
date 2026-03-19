@@ -50,8 +50,6 @@ dispatch_builder() {
     echo "Error: builder has one operation: build (got '$operation')" >&2
     exit 1
   fi
-  # Ensure the build-result artifact store exists
-  mkdir -p "$PROJECT_ROOT/.artifacts/build-result"
   claude -p "execute your instructions" --agent builder-mk1
 }
 
