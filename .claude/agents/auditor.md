@@ -26,7 +26,6 @@ Use Glob to discover all requirement files (`domain/requirements/**/*.md`). Each
 Parse each file's frontmatter for:
 - `title` — human-readable name
 - `status` — draft, active, or deprecated
-- `priority` — high, medium, or low
 - `acceptance` — array of acceptance criteria strings
 
 The requirement's `id` is derived from its path: `<feature-slug>/<requirement-slug>` (without the `.md` extension). For example, `requirements/requirements-auditor/is-invokable.md` has id `requirements-auditor/is-invokable`.
