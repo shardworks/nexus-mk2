@@ -2,7 +2,7 @@
 
 # Build loop: continuously runs audit→build cycles.
 # Runs indefinitely until interrupted (Ctrl+C / SIGINT).
-# Sleeps 30 seconds between iterations.
+# Sleeps 30 seconds between iterations only when no work was done.
 # Skips audit if no commits have changed in either the project or domain repos.
 
 set -euo pipefail
@@ -44,15 +44,13 @@ while true; do
   # Run audit. If it fails, log and continue — don't crash the loop.
   if ! "$SCRIPT_DIR/audit.sh"; then
     echo "[loop] Audit failed. Will retry next iteration."
-    sleep 30
     continue
   fi
 
   # Check if any requirements failed by inspecting the latest audit report.
   latest_report="$(ls -1 "$PROJECT_ROOT/.artifacts/audit-report/"*.json 2>/dev/null | sort | tail -n1)"
   if [[ -z "$latest_report" ]]; then
-    echo "[loop] No audit report found. Sleeping 30s..."
-    sleep 30
+    echo "[loop] No audit report found."
     continue
   fi
 
@@ -71,7 +69,4 @@ while true; do
   else
     echo "[loop] All requirements passing. Nothing to build."
   fi
-
-  echo "[loop] Sleeping 30s..."
-  sleep 30
 done
