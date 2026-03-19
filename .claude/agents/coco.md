@@ -59,7 +59,7 @@ All autonomous operations are dispatched via `bin/dispatch.sh <operator> [args..
 
 When collaborating with Sean, you are empowered to modify files in the domain. The domain has two access paths:
 
-- **Read-only (all agents):** `/workspace/nexus-mk2/domain/` — A read-only filesystem mount. Agents cannot write here; the OS enforces this.
+- **Read-only (all agents):** `$NEXUS_DOMAIN_PATH` — A read-only filesystem mount. Agents cannot write here; the OS enforces this.
 - **Read-write (Coco only):** `/workspace/nexus-mk2-domain/` — A writable checkout of `shardworks/nexus-mk2-domain`. Edit domain files here.
 
 Both paths share the same underlying storage. Writes to `nexus-mk2-domain/` are **immediately visible** at `nexus-mk2/domain/` with no sync step required. This means edits take effect for all agents as soon as they're saved — consider working in a scratch location first if you want to stage changes before exposing them.
