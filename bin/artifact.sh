@@ -12,12 +12,14 @@
 #   artifact.sh delete <type> <id>   Delete an artifact by type and id
 #
 # Valid artifact types:
-#   audit-report, assessment, build-result, transcript, session-doc, publication
+#   audit-report, assessment, build-result, staged-transcript,
+#   transcript, session-doc, publication
 #
 # Persistent types (transcript, session-doc, publication) are stored in the
 # NexusArtifactsRepository at ARTIFACTS_REPO and committed+pushed on store.
 # The CLI lazily clones the repo on first use — no external startup hooks needed.
-# Non-persistent types are written to workspace-local storage only.
+# Non-persistent types (audit-report, assessment, build-result, staged-transcript)
+# are written to workspace-local storage only ($ARTIFACT_ROOT).
 
 set -euo pipefail
 
@@ -41,7 +43,7 @@ Usage:
   artifact.sh store                Store artifact JSON from stdin
   artifact.sh delete <type> <id>   Delete an artifact by type and id
 
-Types: audit-report | assessment | build-result | transcript | session-doc | publication
+Types: audit-report | assessment | build-result | staged-transcript | transcript | session-doc | publication
 EOF
   exit 1
 }
@@ -49,7 +51,7 @@ EOF
 # Validate that a string is a known ArtifactTypeName.
 validate_type() {
   case "$1" in
-    audit-report|assessment|build-result|transcript|session-doc|publication) ;;
+    audit-report|assessment|build-result|staged-transcript|transcript|session-doc|publication) ;;
     *) die "unknown artifact type: '$1'" ;;
   esac
 }
