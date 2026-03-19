@@ -6,7 +6,7 @@
 # defined in domain/ontology/system.ts.
 #
 # Registered Operators and their Operations:
-#   auditor  — audit    (produces: audit-report, assessment)
+#   auditor  — audit    (produces: assessment)
 #   builder  — build    (consumes: assessment; produces: build-result; implements)
 #   scribe   — scribe   (consumes: transcript; produces: session-doc)
 #   herald   — herald   (consumes: session-doc; produces: publication)
@@ -17,8 +17,8 @@
 # When an operator has only one operation, the operation name is optional.
 #
 # Examples:
-#   ./bin/dispatch.sh auditor              # runs the audit operation
-#   ./bin/dispatch.sh auditor audit        # same as above (explicit)
+#   ./bin/dispatch.sh auditor builder/single-task    # audit one requirement
+#   ./bin/dispatch.sh auditor audit builder/single-task  # same (explicit op)
 #   ./bin/dispatch.sh builder              # runs the build operation
 #   ./bin/dispatch.sh builder build        # same as above (explicit)
 #   ./bin/dispatch.sh scribe <transcript>  # runs the scribe operation
@@ -36,12 +36,24 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # ── Operator dispatch table ────────────────────────────────────
 
 dispatch_auditor() {
-  local operation="${1:-audit}"
-  if [[ "$operation" != "audit" ]]; then
-    echo "Error: auditor has one operation: audit (got '$operation')" >&2
+  local first_arg="${1:-}"
+
+  # If first arg is the operation name "audit", consume it.
+  if [[ "$first_arg" == "audit" ]]; then
+    shift
+    first_arg="${1:-}"
+  fi
+
+  # The requirement ID is required.
+  local requirement_id="$first_arg"
+  if [[ -z "$requirement_id" ]]; then
+    echo "Error: auditor requires a requirement ID" >&2
+    echo "Usage: dispatch.sh auditor <requirement-id>" >&2
+    echo "Example: dispatch.sh auditor builder/single-task" >&2
     exit 1
   fi
-  claude -p "Run an audit against all registered requirements." --agent auditor
+
+  claude -p "Evaluate the requirement: $requirement_id" --agent auditor
 }
 
 dispatch_builder() {
@@ -113,9 +125,9 @@ Usage:
 
 Registered Operators:
 
-  auditor   Evaluates project against requirements registry
-            Operations: audit
-            Effects: produces audit-report, produces assessment
+  auditor   Evaluates a single requirement against current project state
+            Operations: audit <requirement-id>
+            Effects: produces assessment
 
   builder   Implements changes to satisfy failing requirements
             Operations: build
@@ -130,7 +142,7 @@ Registered Operators:
             Effects: consumes session-doc, produces publication
 
 Examples:
-  dispatch.sh auditor
+  dispatch.sh auditor builder/single-task
   dispatch.sh builder
   dispatch.sh scribe /path/to/transcript.jsonl
   dispatch.sh herald "Write a weekly recap"

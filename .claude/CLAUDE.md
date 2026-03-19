@@ -26,7 +26,7 @@ All operations in Nexus Mk II are invoked through a single entry point: `bin/dis
 
 | Operator  | Operation | Effects | Example |
 |-----------|-----------|---------|---------|
-| `auditor` | `audit`   | produces `audit-report`, `assessment` | `bin/dispatch.sh auditor` |
+| `auditor` | `audit`   | produces `assessment` | `bin/dispatch.sh auditor builder/single-task` |
 | `builder` | `build`   | consumes `assessment`, produces `build-result` | `bin/dispatch.sh builder` |
 | `scribe`  | `scribe`  | consumes transcript, produces `session-doc` | `bin/dispatch.sh scribe /path/to/transcript.jsonl` |
 | `herald`  | `herald`  | consumes `session-doc`, produces `publication` | `bin/dispatch.sh herald "Write a weekly recap"` |
