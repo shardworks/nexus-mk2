@@ -294,18 +294,6 @@ cmd_capture_transcript() {
   local now
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  # Build the JSON artifact.
-  local json
-  json="{
-  \"type\": \"staged-transcript\",
-  \"id\": \"${artifact_id}\",
-  \"createdAt\": \"${now}\",
-  \"content\": {
-    \"sessionId\": \"${session_id}\",
-    \"captureType\": \"${capture_type}\"
-  }
-}"
-
   # Ensure the store directory exists.
   local dir
   dir="$(store_dir staged-transcript)"
@@ -313,6 +301,18 @@ cmd_capture_transcript() {
 
   # Write the companion JSONL first (so the artifact is not listed without its data).
   cp "$jsonl_path" "${dir}/${artifact_id}.jsonl"
+
+  # Build the JSON artifact, embedding the raw JSONL content in content.body.
+  # jq handles all escaping so that arbitrary JSONL content is safe.
+  local json
+  json="$(jq -n \
+    --arg type "staged-transcript" \
+    --arg id "${artifact_id}" \
+    --arg createdAt "${now}" \
+    --arg sessionId "${session_id}" \
+    --arg captureType "${capture_type}" \
+    --rawfile body "${dir}/${artifact_id}.jsonl" \
+    '{type: $type, id: $id, createdAt: $createdAt, content: {sessionId: $sessionId, captureType: $captureType, body: $body}}')"
 
   # Store the JSON artifact via the normal store path (without re-calling store to avoid
   # stdin complications; write directly since we are already inside the CLI).
