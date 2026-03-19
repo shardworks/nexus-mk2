@@ -15,7 +15,7 @@
 #   - Primary artifact ID:    {sessionId}
 #   - Precompact artifact ID: {sessionId}.precompact.{timestamp}
 #   - Metadata JSON: managed via artifact CLI (artifact.sh show staged-transcript <id>)
-#   - Transcript JSONL: companion file accessed via artifact CLI (artifact.sh companion-path staged-transcript <id>)
+#   - Transcript JSONL: companion file at ${PROJECT_ROOT}/.artifacts/staged-transcript/<id>.jsonl
 #
 # Usage:
 #   ./bin/scribe-all.sh
@@ -23,7 +23,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ARTIFACT_CLI="${SCRIPT_DIR}/artifact.sh"
+# Companion JSONL files for staged-transcript are stored alongside their JSON artifacts.
+# This mirrors the internal layout of bin/artifact.sh for non-persistent types.
+STAGED_TRANSCRIPT_DIR="${PROJECT_ROOT}/.artifacts/staged-transcript"
 
 # ── Helper: extract a string field from artifact JSON string ─────────────────
 
@@ -114,7 +118,7 @@ for session_id in "${SESSION_IDS[@]}"; do
   precompact_ids="${SESSION_PRECOMPACT[$session_id]:-}"
   if [[ -n "$precompact_ids" ]]; then
     for pc_id in $(echo "$precompact_ids" | tr ' ' '\n' | sort); do
-      pc_file=$("${ARTIFACT_CLI}" companion-path staged-transcript "$pc_id" 2>/dev/null || true)
+      pc_file="${STAGED_TRANSCRIPT_DIR}/${pc_id}.jsonl"
       if [[ -n "$pc_file" && -f "$pc_file" ]]; then
         TRANSCRIPT_FILES+=("$pc_file")
       else
@@ -125,7 +129,7 @@ for session_id in "${SESSION_IDS[@]}"; do
 
   primary_id="${SESSION_PRIMARY[$session_id]:-}"
   if [[ -n "$primary_id" ]]; then
-    primary_file=$("${ARTIFACT_CLI}" companion-path staged-transcript "$primary_id" 2>/dev/null || true)
+    primary_file="${STAGED_TRANSCRIPT_DIR}/${primary_id}.jsonl"
     if [[ -n "$primary_file" && -f "$primary_file" ]]; then
       TRANSCRIPT_FILES+=("$primary_file")
     else
@@ -163,7 +167,7 @@ for session_id in "${SESSION_IDS[@]}"; do
       transcript_id="${INGESTION_TS}-${staged_id}"
 
       # Read the companion JSONL file content to embed as body in the Transcript.
-      staged_companion=$("${ARTIFACT_CLI}" companion-path staged-transcript "$staged_id" 2>/dev/null || true)
+      staged_companion="${STAGED_TRANSCRIPT_DIR}/${staged_id}.jsonl"
       if [[ -n "$staged_companion" && -f "$staged_companion" ]]; then
         staged_body=$(cat "$staged_companion")
       else

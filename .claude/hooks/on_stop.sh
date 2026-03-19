@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hook: Stop
 # Fires when Claude finishes responding (session end or /clear).
-# Captures the session transcript as Artifact<StagedTranscript> via the artifact CLI.
+# Captures the session transcript as Artifact<StagedTranscript>.
 
 set -euo pipefail
 
@@ -37,7 +37,29 @@ if [[ ! -s "$TRANSCRIPT_PATH" ]]; then
   exit 0
 fi
 
-# Store the transcript as Artifact<StagedTranscript> via the artifact CLI.
-# capture-transcript stores both the JSON metadata and companion JSONL atomically.
-"${ARTIFACT_CLI}" capture-transcript "${SESSION_ID}" primary "${TRANSCRIPT_PATH}"
+# Store the transcript as Artifact<StagedTranscript>.
+# Mirrors the layout used by bin/artifact.sh: non-persistent types go to
+# ${PROJECT_ROOT}/.artifacts/<type>/<id>.json with a companion <id>.jsonl.
+ARTIFACT_ROOT="${PROJECT_ROOT}/.artifacts"
+STAGED_DIR="${ARTIFACT_ROOT}/staged-transcript"
+mkdir -p "$STAGED_DIR"
+
+# Primary artifact ID is the session ID.
+ARTIFACT_ID="${SESSION_ID}"
+NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# Write companion JSONL first (artifact must not be listed without its data).
+cp "$TRANSCRIPT_PATH" "${STAGED_DIR}/${ARTIFACT_ID}.jsonl"
+
+# Build and write Artifact<StagedTranscript> JSON (jq handles escaping).
+jq -n \
+  --arg type "staged-transcript" \
+  --arg id "${ARTIFACT_ID}" \
+  --arg createdAt "${NOW}" \
+  --arg sessionId "${SESSION_ID}" \
+  --arg captureType "primary" \
+  --rawfile body "${STAGED_DIR}/${ARTIFACT_ID}.jsonl" \
+  '{type: $type, id: $id, createdAt: $createdAt, content: {sessionId: $sessionId, captureType: $captureType, body: $body}}' \
+  > "${STAGED_DIR}/${ARTIFACT_ID}.json"
+
 echo "on_stop: captured transcript as Artifact<StagedTranscript> (session=${SESSION_ID}, captureType=primary)"

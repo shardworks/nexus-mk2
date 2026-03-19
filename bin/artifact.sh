@@ -10,10 +10,6 @@
 #   artifact.sh latest <type>        Display the most recent artifact of a type
 #   artifact.sh store                Store artifact JSON from stdin
 #   artifact.sh delete <type> <id>   Delete an artifact by type and id
-#   artifact.sh capture-transcript <session-id> <capture-type> <jsonl-path>
-#                                    Capture a transcript as Artifact<StagedTranscript>
-#   artifact.sh companion-path <type> <id>
-#                                    Print the path to the companion JSONL for staged-transcript
 #
 # Valid artifact types:
 #   audit-report, assessment, build-result, staged-transcript,
@@ -30,8 +26,8 @@
 #   holds the raw transcript data. Both files share the same base name:
 #     .artifacts/staged-transcript/<id>.json   — artifact metadata
 #     .artifacts/staged-transcript/<id>.jsonl  — raw transcript content
-#   Use capture-transcript to write both atomically and companion-path to read
-#   the JSONL path. The delete command removes both files.
+#   Callers are responsible for writing and reading the companion JSONL directly.
+#   The delete command removes both files.
 
 set -euo pipefail
 
@@ -54,13 +50,8 @@ Usage:
   artifact.sh latest <type>        Show the most recent artifact
   artifact.sh store                Store artifact JSON from stdin
   artifact.sh delete <type> <id>   Delete an artifact by type and id
-  artifact.sh capture-transcript <session-id> <capture-type> <jsonl-path>
-                                   Capture transcript as Artifact<StagedTranscript>
-  artifact.sh companion-path <type> <id>
-                                   Print the JSONL companion path for staged-transcript
 
 Types: audit-report | assessment | build-result | staged-transcript | transcript | session-doc | publication
-Capture types: primary | precompact
 EOF
   exit 1
 }
@@ -268,72 +259,6 @@ cmd_delete() {
   fi
 }
 
-# capture-transcript <session-id> <capture-type> <jsonl-path>
-# Atomically stores an Artifact<StagedTranscript> and its companion JSONL.
-# Determines the artifact ID from session-id and capture-type.
-# capture-type must be "primary" or "precompact".
-cmd_capture_transcript() {
-  local session_id="$1" capture_type="$2" jsonl_path="$3"
-
-  case "$capture_type" in
-    primary|precompact) ;;
-    *) die "capture-transcript: capture-type must be 'primary' or 'precompact', got '${capture_type}'" ;;
-  esac
-
-  [[ -f "$jsonl_path" ]] || die "capture-transcript: JSONL file not found: '${jsonl_path}'"
-  [[ -s "$jsonl_path" ]] || die "capture-transcript: JSONL file is empty: '${jsonl_path}'"
-
-  # Determine artifact ID: primary uses session-id; precompact appends timestamp.
-  local artifact_id
-  if [[ "$capture_type" == "primary" ]]; then
-    artifact_id="${session_id}"
-  else
-    artifact_id="${session_id}.precompact.$(date -u +%s)"
-  fi
-
-  local now
-  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-  # Ensure the store directory exists.
-  local dir
-  dir="$(store_dir staged-transcript)"
-  mkdir -p "$dir"
-
-  # Write the companion JSONL first (so the artifact is not listed without its data).
-  cp "$jsonl_path" "${dir}/${artifact_id}.jsonl"
-
-  # Build the JSON artifact, embedding the raw JSONL content in content.body.
-  # jq handles all escaping so that arbitrary JSONL content is safe.
-  local json
-  json="$(jq -n \
-    --arg type "staged-transcript" \
-    --arg id "${artifact_id}" \
-    --arg createdAt "${now}" \
-    --arg sessionId "${session_id}" \
-    --arg captureType "${capture_type}" \
-    --rawfile body "${dir}/${artifact_id}.jsonl" \
-    '{type: $type, id: $id, createdAt: $createdAt, content: {sessionId: $sessionId, captureType: $captureType, body: $body}}')"
-
-  # Store the JSON artifact via the normal store path (without re-calling store to avoid
-  # stdin complications; write directly since we are already inside the CLI).
-  echo "$json" > "${dir}/${artifact_id}.json"
-
-  echo "Captured transcript: type='staged-transcript' id='${artifact_id}' capture-type='${capture_type}'"
-}
-
-# companion-path <type> <id>
-# Prints the filesystem path to the companion JSONL file for a staged-transcript artifact.
-# Exits non-zero if the type does not support companion files or if the artifact is not found.
-cmd_companion_path() {
-  local type="$1" id="$2"
-  [[ "$type" == "staged-transcript" ]] || die "companion-path: only staged-transcript has a companion JSONL, got '${type}'"
-  validate_type "$type"
-  local json_file
-  json_file="$(store_dir "$type")/${id}.json"
-  [[ -f "$json_file" ]] || die "companion-path: artifact not found: type='${type}' id='${id}'"
-  echo "$(store_dir "$type")/${id}.jsonl"
-}
-
 # --- dispatch ---------------------------------------------------------------
 
 [[ $# -ge 1 ]] || usage
@@ -357,14 +282,6 @@ case "$1" in
   delete)
     [[ $# -ge 3 ]] || die "delete requires type and id arguments"
     cmd_delete "$2" "$3"
-    ;;
-  capture-transcript)
-    [[ $# -ge 4 ]] || die "capture-transcript requires session-id, capture-type, and jsonl-path arguments"
-    cmd_capture_transcript "$2" "$3" "$4"
-    ;;
-  companion-path)
-    [[ $# -ge 3 ]] || die "companion-path requires type and id arguments"
-    cmd_companion_path "$2" "$3"
     ;;
   *)
     usage
