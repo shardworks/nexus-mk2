@@ -41,8 +41,8 @@ while true; do
   last_project_hash="$current_project_hash"
   last_domain_hash="$current_domain_hash"
 
-  # Run audit. If it fails, log and continue — don't crash the loop.
-  if ! "$SCRIPT_DIR/audit.sh"; then
+  # Run audit via the Dispatcher. If it fails, log and continue.
+  if ! "$SCRIPT_DIR/dispatch.sh" auditor; then
     echo "[loop] Audit failed. Will retry next iteration."
     continue
   fi
@@ -59,7 +59,7 @@ while true; do
 
   if [[ "$fail_count" -gt 0 ]]; then
     echo "[loop] $fail_count failing requirement(s). Running builder..."
-    if ! "$SCRIPT_DIR/build.sh"; then
+    if ! "$SCRIPT_DIR/dispatch.sh" builder; then
       echo "[loop] Builder failed. Will retry next iteration."
     else
       echo "[loop] Builder completed."
