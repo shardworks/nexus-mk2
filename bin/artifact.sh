@@ -146,7 +146,8 @@ cmd_show() {
 }
 
 # latest <type>
-# Displays the most recent artifact of a given type (by filename sort desc).
+# Displays the most recent artifact of a given type, ordered by createdAt
+# field extracted from JSON content (same sort key as cmd_list).
 cmd_latest() {
   local type="$1"
   validate_type "$type"
@@ -158,15 +159,26 @@ cmd_latest() {
     die "no artifacts of type '$type' exist"
   fi
 
-  # Filenames are ISO 8601 timestamps, so reverse-sorted ls gives most recent.
-  local latest
-  latest=$(ls -1 "$dir"/*.json 2>/dev/null | sort -r | head -1)
+  # Extract createdAt from each artifact's JSON content and sort descending,
+  # matching the sort semantics used by cmd_list. This is correct even when
+  # artifact filenames have different prefixes (e.g. "builder--" vs "auditor--").
+  local latest_file=""
+  local latest_created=""
+  for f in "$dir"/*.json; do
+    [[ -f "$f" ]] || continue
+    local created
+    created=$(grep -m1 '"createdAt"' "$f" | sed 's/.*"createdAt" *: *"\([^"]*\)".*/\1/')
+    if [[ -z "$latest_created" || "$created" > "$latest_created" ]]; then
+      latest_created="$created"
+      latest_file="$f"
+    fi
+  done
 
-  if [[ -z "$latest" ]]; then
+  if [[ -z "$latest_file" ]]; then
     die "no artifacts of type '$type' exist"
   fi
 
-  cat "$latest"
+  cat "$latest_file"
 }
 
 # store
