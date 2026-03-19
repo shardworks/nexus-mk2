@@ -57,7 +57,7 @@ while true; do
   fi
 
   # Count failures in the report.
-  fail_count="$(grep -o '"result"[[:space:]]*:[[:space:]]*"fail"' "$latest_report" | wc -l | tr -d ' ')"
+  fail_count="$(grep -o '"result"[[:space:]]*:[[:space:]]*"fail"' "$latest_report" | wc -l | tr -d ' ' || true)"
 
   if [[ "$fail_count" -gt 0 ]]; then
     echo "[loop] $fail_count failing requirement(s). Running builder..."
