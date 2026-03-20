@@ -1,8 +1,3 @@
----
-status: complete
-completedAt: 2026-03-20
----
-
 # Commission: Nexus CLI
 
 ## Repository
