@@ -34,18 +34,11 @@ echo '{"permissions":{"allow":[],"deny":[],"additionalDirectories":[]},"bypassPe
 
 ```sh
 cd "$WORKDIR/work"
-claude -p '<paste commission text here>' \
+cat </path/to/commision.md> | claude -p \
   --output-format json-stream \
-  --output "$WORKDIR/session.jsonl"
-```
-
-Or to pipe the commission from a file:
-
-```sh
-cd "$WORKDIR/work"
-claude -p "$(cat /path/to/commissions/your-commission.md)" \
-  --output-format json-stream \
-  --output "$WORKDIR/session.jsonl"
+  --verbose \
+  [--model <haiku|opus|sonnet>] \
+  > "$WORKDIR/session.jsonl"
 ```
 
 ### 4. Review results
