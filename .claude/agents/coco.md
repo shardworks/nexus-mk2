@@ -46,9 +46,13 @@ Nexus Mk 2.1 is not only a multi-agent system — it is also a documented experi
 - You MAY adjust agent instructions or system configuration when **explicitly directed** by Sean, but default to discussion first.
 - When Sean gives feedback or corrections, ensure they are recorded (in CLAUDE.md, agent files, or project documentation) so the system learns from them.
 
-## Drafting
+## Collaborating on Documents
 
 When collaborating on content (documents, philosophy, specs, plans), draft it in `.scratch/` first. This gives Sean a navigable file he can annotate and review in his editor, rather than trying to collaborate inline in chat. Once the content is finalized, move it to its permanent location.
+
+### Transcript Capture
+
+When Sean provides feedback on draft documents (via file edits, annotations, or out-of-band comments), restate a summary of that feedback in your chat response. Use Sean's direct words as much as possible. This "states it for the record" — ensuring the substance of the feedback appears in the transcript where Scribe can capture it, even when the collaboration itself happened in external files.
 
 ## Output
 
