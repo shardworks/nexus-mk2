@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # Hook: PreCompact
 # Fires before Claude compacts the conversation context.
-# Captures the pre-compaction transcript as Artifact<StagedTranscript>.
-# This preserves full context that would otherwise be summarized.
+# Auto-compaction can destroy transcript fidelity mid-session — this hook
+# ensures we archive the full transcript before any summarization occurs.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-ARTIFACT_CLI="${PROJECT_ROOT}/bin/artifact.sh"
 
 LOG_DIR="${PROJECT_ROOT}/.claude/hook-logs"
 mkdir -p "$LOG_DIR"
@@ -21,7 +20,7 @@ SESSION_ID=$(echo "$HOOK_DATA" | jq -r '.session_id // "unknown"')
 TRIGGER=$(echo "$HOOK_DATA" | jq -r '.trigger // "unknown"')
 AGENT_TYPE=$(echo "$HOOK_DATA" | jq -r '.agent_type // "main"')
 
-# Only capture sessions from interactive agents
+# Only archive sessions from interactive agents
 ALLOWED_AGENTS=("main" "coco")
 if [[ ! " ${ALLOWED_AGENTS[@]} " =~ " ${AGENT_TYPE} " ]]; then
   exit 0
@@ -37,24 +36,13 @@ if [[ ! -s "$TRANSCRIPT_PATH" ]]; then
   exit 0
 fi
 
-# Precompact artifact ID appends a timestamp to avoid collisions across compactions.
-ARTIFACT_ID="${SESSION_ID}.precompact.$(date -u +%s)"
-NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# Archive to the artifacts repo's pending directory
+ARCHIVE_DIR="/workspace/nexus-mk2-artifacts/transcripts/pending"
+mkdir -p "$ARCHIVE_DIR"
 
-# Build and store Artifact<StagedTranscript> via the artifact CLI.
-# The CLI handles path resolution and directory creation.
-jq -n \
-  --arg type "staged-transcript" \
-  --arg id "${ARTIFACT_ID}" \
-  --arg createdAt "${NOW}" \
-  --arg sessionId "${SESSION_ID}" \
-  --arg captureType "precompact" \
-  '{type: $type, id: $id, createdAt: $createdAt, content: {sessionId: $sessionId, captureType: $captureType}}' \
-  | "${ARTIFACT_CLI}" store
+# Use a compaction-specific filename so we don't clobber the Stop archive.
+TIMESTAMP=$(date +%s)
+DEST="${ARCHIVE_DIR}/${SESSION_ID}.precompact.${TIMESTAMP}.jsonl"
 
-# Write companion JSONL via the path helper (callers are responsible for the JSONL
-# companion per bin/artifact.sh convention — the CLI stores JSON metadata only).
-JSONL_PATH="$("${PROJECT_ROOT}/bin/artifact-jsonl-path.sh" "${ARTIFACT_ID}")"
-cp "$TRANSCRIPT_PATH" "$JSONL_PATH"
-
-echo "on_pre_compact: captured transcript as Artifact<StagedTranscript> (session=${SESSION_ID}, captureType=precompact, trigger=${TRIGGER})"
+cp "$TRANSCRIPT_PATH" "$DEST"
+echo "on_pre_compact: snapshot saved to $DEST (trigger: $TRIGGER)"
