@@ -1,5 +1,5 @@
 ---
-description: Complet work and generate a structured session summary for handoff and scribe input. Hidden by default — invoke explicitly at session end.
+description: Complete work and generate a structured session summary for handoff and scribe input. Hidden by default — invoke explicitly at session end.
 disable-model-invocation: true
 ---
 
@@ -7,9 +7,7 @@ disable-model-invocation: true
 
 ## Complete Work
 
-- Commit any changes you have made to the main worktree, if any
-- Examine your own worktree, and commit any remaining work 
-- Push your worktree to main
+- Commit any changes you have made, if any
 - Push main to the remote
 
 ## Generate Summary
@@ -26,24 +24,18 @@ Generate a structured summary of the current session. This summary serves two au
 
 - Bulleted list of concrete actions taken (files created/modified, decisions made, commits pushed). Reference specific files and commit hashes.
 
-## Decisions made
+## Decisions made and/or deferred
+
 - What was decided, including explicit "we chose NOT to" decisions. Brief rationale for each.
 
-## Deferred decisions & open questions
-
-- Things discussed but intentionally left unresolved, with enough context to resume.
-
-## Next steps
+## Next steps & open questions
 
 - Concrete actions for the next session or for agents to pick up.
-
-## Agent Adjustments
-
-- Based on direct instructions, corrections, and feedback given list any notable addtions or changes we should consider making to your general agent instructions
+- Open questions which were raised but not answered
 
 ### Notable moments
 
-This is the most important section. Capture quotes, insights, or exchanges that stand out — either for system design or for the research/experiment narrative.
+Capture quotes, insights, or exchanges that stand out — either for system design or for the research/experiment narrative.
 
 For each notable moment:
 - Include **direct quotes from Sean** when available
@@ -55,5 +47,5 @@ For each notable moment:
 
 - Keep the whole summary under ~500 words. Brevity is a feature.
 - Do not editorialize beyond the "why it's notable" flags.
-- Use precise domain vocabulary as established in the ontology.
-- Present the summary directly — do not write it to a file unless asked.
+- Present the summary directly as part of the conversation
+- Write the summary to `.claude/last-session.md` (overwriting any previous content). This file is read by Coco at startup to resume context.
