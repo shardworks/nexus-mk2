@@ -1,34 +1,48 @@
-# Nexus Mk II — Project Philosophy
+# Nexus Mk 2.1 — Project Philosophy
 
 ## What Is This
 
-Nexus Mk II is an experimental system that utilizes large numbers of autonomous AI agents to achieve goals and solve problems. It is the second iteration of this concept.
+Nexus Mk 2.1 is an experimental multi-agent AI system — and a deliberate departure from its predecessor.
+
+In Mk 2.0, the human was an architect-reviewer: reading code, approving pull requests, steering implementation. The codebase was shared territory. In Mk 2.1, the human is a *user*. The system produces things; the human uses them. The internal workings are the system's own business.
 
 The project serves multiple purposes simultaneously:
 
-1. **Build a multi-agent system** — The primary artifact is a system where AI agents collaborate autonomously to accomplish objectives.
-2. **Explore AI-enabled development** — The process of building the system is itself an experiment in how software development changes when AI agents do most of the work.
-3. **Find the human boundary** — Discover where human oversight adds value and where agents should operate unsupervised.
+1. **Build an autonomous system** — A system where AI agents collaborate to accomplish objectives, delivering usable artifacts without human involvement in implementation.
+2. **Explore the user boundary** — Discover what happens when the human gives up visibility into internals and evaluates the system purely by its outputs.
+3. **Document the experiment** — The process of building and interacting with the system is primary source material for published writing on AI-enabled development.
+
+## Precepts
+
+1. **The system will be known by its fruits.** The human judges the system by using what it produces, not by inspecting how it was made. Quality is measured at the boundary.
+
+2. **If you can't touch it, it doesn't exist.** The system's job isn't done at the commit. It's done when a human can run, use, or interact with what was built.
+
+3. **Point at the mountain, not the trail.** The human names the destination. The system finds its own path. How it gets there is not the human's concern.
+
+4. **The workshop is sacred ground.** This repo is the human's space — for thinking, tooling, and orchestration. The system's code lives elsewhere. Agents do not operate here autonomously. You *could* cross the boundary; the system should never require it.
+
+## Mantras
+
+Personal reminders for the human operator. Not system rules — habits of mind.
+
+- **Let go of the wheel.** Resist the urge to steer implementation. Direct, then trust. The hardest part isn't building the system; it's not reaching in to fix it yourself.
+- **Speak in wishes, not blueprints.** Express what you want, not how to build it. The more you specify, the less the system can surprise you — and surprise is the point.
 
 ## Tech Stack
 
 - **Language:** TypeScript
 - **Runtime:** Node.js (v24)
 
-## Agent Autonomy Principles
+## Topology
 
-- **Act autonomously.** Unless an agent's persona specifies otherwise, agents should make their own decisions about implementation, code quality, style, and tooling. Humans do not dictate coding style or standards.
-- **Self-document for other agents.** Write commit messages, code comments, and documentation with the assumption that your primary audience is other agents who will continue the work. Be precise and concise; include enough context for an agent to pick up where you left off.
-- **Code is agent-owned.** Humans are not expected to read or review implementation code. Agents are responsible for their own quality standards, consistency, and maintainability.
-- **Respect the human boundary.** Certain agents are interactive (they engage in conversation with a human). These agents have different interaction rules defined in their agent files. All other agents are autonomous and should minimize unnecessary human interaction.
+This repository (`nexus-mk2`) is the workshop — the human's space for thinking, planning, and building tools to direct and evaluate the system. Agent configurations, session transcripts, evaluation scripts, and orchestration tooling live here.
+
+The system's own code lives in separate repositories within the same organization. The human does not clone, review, or contribute to those repositories during normal operation. The boundary is maintained by discipline, not access control.
 
 ## Agent Architecture
 
 Agents are defined in `.claude/agents/`. Each agent file specifies a persona with its own responsibilities and interaction style. All agents inherit the shared directives in `.claude/CLAUDE.md`.
 
-### SubagentTypes
-
-The system defines its agents as SubagentTypes — static definitions that describe identity and interaction modality. See the ontology's `agent.ts` for the formal definitions and known instances.
-
-- **Interactive** — Engage in conversation with a human. Sessions are captured as Transcripts. (e.g., Coco)
-- **Autonomous** — Invoked programmatically, run without human interaction, and exit when their task is complete. (e.g., Auditor, Builder, Scribe, Herald)
+- **Interactive agents** engage in conversation with the human. Sessions are captured as transcripts. (e.g., Coco)
+- **Autonomous agents** are invoked programmatically, run without human interaction, and exit when their task is complete.
