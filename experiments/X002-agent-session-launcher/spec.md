@@ -1,70 +1,113 @@
 ---
-status: draft
+status: ready
 ---
 
 # X002 — Agent Session Launcher
 
-## The Wish
+## Research Question
 
-"I want to point an autonomous agent at a task and get back a structured report of what happened."
+Can an autonomous agent build a tool that launches *other* agent sessions and captures structured telemetry — effectively building part of its own factory's infrastructure?
 
-## What "Done" Looks Like
+Secondary questions:
+- Can the agent discover the right data sources on its own when given only an output contract (not implementation hints)?
+- How does commission complexity affect agent success rate? X001 was a simple CLI; X002 requires process orchestration, stream parsing, and structured output.
+- Does the "clean room + commission" pattern from X001 hold up for a more complex task?
 
-Sean runs the CLI (delivered by the first mountain) with a task description. The tool:
+## Hypothesis
 
-1. Launches a Claude Code agent session with the given task
-2. The agent does its work autonomously
-3. When the session ends, Sean gets a structured result containing:
-   - The actual result of whatever was requested
-   - Cost information (dollars, tokens — whatever's capturable)
-   - Timestamps (start, end, duration)
-   - Possibly: turn count, git diff, success/fail status
+A single autonomous agent session can produce a working session launcher given only a description of the desired inputs and outputs — no implementation hints about where the data comes from or how to extract it.
 
-Details of the structured output format are TBD.
+We expect this to be achievable in one attempt if the commission is well-specified, based on X001's lesson that commission clarity compounds.
 
-## Data Available from Claude Code JSONL Logs
+## What We're Trying to Prove
 
-From the X001 experiment, we confirmed the following data is available in the `--output-format json-stream` JSONL output:
+1. **The factory can build its own plumbing.** If agents can build the session launcher, the system bootstraps — agents building the tools that manage agents.
+2. **Commission-driven development scales.** The pattern (spec → commission → clean room → fruit) worked for a trivial CLI. Does it work for something with real moving parts?
+3. **"Mountain not trail" works for data problems.** We specify *what we want to see*, not *where to find it*. The agent must discover Claude Code's output format and figure out how to extract the data we need.
 
-### Per-turn (each `type: "assistant"` event)
-- `message.usage.input_tokens` — but appears to be a delta/minimal value (often 1-2), not cumulative
-- `message.usage.output_tokens` — similarly small per-turn values
-- `message.usage.cache_creation_input_tokens` — tokens written to cache this turn
-- `message.usage.cache_read_input_tokens` — tokens read from cache this turn
-- `message.usage.service_tier` — e.g., "standard"
-- `message.model` — model used (e.g., "claude-opus-4-6")
+## Output Contract
 
-### End-of-session (`type: "result"` event) — the jackpot
-- `total_cost_usd` — **real dollar cost** (e.g., 0.30042725). This is the number we want.
-- `duration_ms` — wall clock time
-- `duration_api_ms` — time spent in API calls
-- `num_turns` — total conversation turns
-- `stop_reason` — how the session ended (e.g., "end_turn")
-- `subtype` — "success" or presumably "error"
-- `usage` — aggregated token counts:
-  - `input_tokens`, `output_tokens`
-  - `cache_creation_input_tokens`, `cache_read_input_tokens`
-- `modelUsage` — per-model breakdown with `costUSD`, `inputTokens`, `outputTokens`, `cacheReadInputTokens`, `cacheCreationInputTokens`, `contextWindow`, `maxOutputTokens`
+The tool takes a prompt (and optionally a working directory) and produces:
 
-### Other notable events
-- `type: "rate_limit_event"` — rate limit status, type (e.g., "five_hour"), reset time
-- `type: "system", subtype: "init"` — session metadata: model, tools, permissions, cwd, session_id, claude_code_version
+### stderr — Streaming progress
+A human-readable stream of the agent's activity as it happens. Ideally the agent's thinking and running commentary — not raw tool-use events. The user should be able to watch this and get a sense of what's happening in real time.
 
-### Implications for X002
-- The session launcher should use `--output-format json-stream` to capture structured logs.
-- The `result` event at the end contains everything needed for cost tracking and session reporting.
-- Per-turn token data exists but the aggregated `result` event is simpler and more reliable.
-- `total_cost_usd` is available even on Max subscriptions (apiKeySource was "none"), which answers a key open question from earlier — we CAN get dollar costs.
+### stdout — Structured result (JSON)
+When the session completes, stdout receives a single JSON object:
 
-## Why This Second
+```json
+{
+  "exitCode": 0,
+  "result": "the agent's final text output",
+  "totalCost": 0.30,
+  "durationMs": 106000,
+  "numTurns": 17,
+  "stopReason": "end_turn",
+  "stopReasonSubtype": "success",
+  "usage": {
+    "inputTokens": 16,
+    "outputTokens": 3604,
+    "cacheCreationInputTokens": 12547,
+    "cacheReadInputTokens": 263657
+  },
+  "modelUsage": {
+    "claude-opus-4-6": {
+      "costUsd": 0.30,
+      "inputTokens": 16,
+      "outputTokens": 3604,
+      "cacheCreationInputTokens": 12547,
+      "cacheReadInputTokens": 263657
+    }
+  }
+}
+```
 
-- **It's the kernel of the factory.** Every future capability — multi-agent orchestration, cost tracking, quality evaluation — builds on "launch a session and observe what happened."
-- **It depends on the first mountain.** The delivery mechanism has to exist before this tool can reach Sean's hands.
-- **It captures data from day one.** Even the simplest session log starts building the dataset needed for cost analysis and debugging.
+Field names use camelCase. Costs are in dollars (number, not string). Token breakdowns are required, not optional.
 
-## What It Doesn't Need To Be
+## Procedure
 
-- Not a multi-agent orchestrator
-- Not a queue or scheduler
-- Not a web UI
-- Not the final architecture — just the first usable thing
+1. **Write the commission.** Task spec for the agent, following patterns established in X001 (explicit constraints, negative boundaries, self-testing mandate).
+2. **Provision the environment.** Fresh clone of the target system repo in `/tmp/work`. Copy `bypassPermissions` config.
+3. **Run the agent.** `cat commission.md | claude -p --output-format json-stream` from the clean room.
+4. **Capture the session log.** Save the JSONL output as an artifact.
+5. **Validate the fruit.** See Validation Criteria below.
+
+## Validation Criteria
+
+### Must-have (experiment succeeds)
+- [ ] Running the tool with a trivial prompt produces streaming progress on stderr
+- [ ] On completion, stdout contains a valid JSON object matching the output contract
+- [ ] Token usage and per-model breakdown are present and populated
+- [ ] The tool handles a failing/erroring agent session without crashing
+- [ ] Sean can run it without cloning the agent's repo (same delivery bar as X001)
+
+### Validation approach
+
+**Vibe-testing with real runs.** Run the tool several times with a spread of prompts:
+- Trivial prompts (e.g., "say hello") — expect low cost, fast duration, few turns
+- Meatier prompts (e.g., "write a function that...") — expect proportionally larger numbers
+
+Verify that the numbers move in the right direction and are internally consistent. If trivial and meaty prompts produce suspiciously similar telemetry, something is wrong.
+
+For error handling, give it a prompt or configuration that should cause the spawned session to fail, and verify the tool reports the failure cleanly rather than crashing.
+
+**Out of scope (but maybe useful later):** A mock harness that replaces the `claude` CLI with a script emitting known data, allowing deterministic assertion against expected values. This would catch fabrication and enable automated regression testing, but is more infrastructure than X002 needs.
+
+### Meta-observations to capture
+- Number of attempts required
+- Where did the agent struggle, if anywhere?
+- Did the agent make architectural choices we wouldn't have?
+- Did the self-testing mandate change behavior vs X001?
+- What did the agent discover about Claude Code's output format, and how?
+
+## What This Experiment Is NOT
+
+- Not designing the final orchestration architecture
+- Not proving multi-agent coordination
+- Not building a queue, scheduler, or web UI
+- Not optimizing for production reliability — this is a prototype
+
+## Depends On
+
+- X001 (delivery mechanism proven)
+- A pre-provisioned system repo for the agent to build in

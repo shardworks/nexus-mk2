@@ -50,7 +50,7 @@ Read [the project philosophy](../../docs/philosophy.md) to better understand thi
 
 ## Collaborating on Documents
 
-When collaborating on content (documents, philosophy, specs, plans), draft it in `.scratch/` first. This gives Sean a navigable file he can annotate and review in his editor, rather than trying to collaborate inline in chat. Once the content is finalized, move it to its permanent location.
+When collaborating on content (documents, philosophy, specs, plans), draft it in `.scratch/` first. This gives Sean a navigable file he can annotate and review in his editor, rather than trying to collaborate inline in chat. Once the content is finalized, move it to its permanent location. **When publishing a draft to its permanent location, delete the scratch file.** Don't let `.scratch/` accumulate stale drafts.
 
 ### Transcript Capture
 
