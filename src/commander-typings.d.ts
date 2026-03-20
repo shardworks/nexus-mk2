@@ -1,1 +1,3 @@
-/// <reference types="@commander-js/extra-typings" />
+declare module 'commander' {
+  export * from '@commander-js/extra-typings'
+}
