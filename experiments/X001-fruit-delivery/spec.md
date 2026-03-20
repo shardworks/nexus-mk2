@@ -1,5 +1,6 @@
 ---
-status: ready
+status: complete
+completedAt: 2026-03-20
 relatedCommissions:
   - nexus-cli
 ---
