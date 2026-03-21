@@ -107,6 +107,10 @@ For error handling, give it a prompt or configuration that should cause the spaw
 - Not building a queue, scheduler, or web UI
 - Not optimizing for production reliability — this is a prototype
 
+## Controlled Variables
+
+- **Model: Claude Opus** — consistent with X001. Model comparison is out of scope for this experiment.
+
 ## Depends On
 
 - X001 (delivery mechanism proven)

@@ -76,3 +76,17 @@ The existing CLI is already runnable via `npx` from this repo. The new subcomman
 - I will inspect the JSON result on stdout and verify it matches the schema above.
 - I will run it multiple times with different prompts and check that the numbers change appropriately.
 - I will try to make it fail and see if it handles the failure gracefully.
+- I will run the `version` subcommand and verify it shows the tool name and version.
+- I will watch stderr during a multi-tool session and verify I can see the agent's thinking and reasoning between tool calls, not just tool name markers.
+
+## Amendments
+
+This repository contains working code from a previous run of this commission. You are iterating on it, not starting over.
+
+### A1 — Version should be an explicit subcommand
+
+Running the CLI with no arguments currently shows version info. This should require an explicit `version` subcommand instead. Running with no arguments should show usage/help.
+
+### A2 — Stderr streaming missing agent thinking
+
+The stderr streaming currently shows `[tool: ToolName]` markers but nothing between them — the agent's thinking and reasoning text is missing. The streaming should include the agent's commentary and reasoning as it works, not just which tools it's invoking. The result should be a readable narrative of the agent's activity.

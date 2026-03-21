@@ -24,10 +24,6 @@ gh repo create "shardworks/$REPO_ID" --private --description "System repository 
 # Clone the target repo into a temp directory
 WORKDIR=$(mktemp -d)
 git clone "git@github.com:shardworks/$REPO_ID.git" "$WORKDIR/work"
-
-# Copy the permission bypass config (required for non-interactive runs)
-mkdir -p "$WORKDIR/work/.claude"
-echo '{"permissions":{"allow":[],"deny":[],"additionalDirectories":[]},"bypassPermissions":true}' > "$WORKDIR/work/.claude/settings.json"
 ```
 
 ### 3. Run the agent
@@ -35,8 +31,9 @@ echo '{"permissions":{"allow":[],"deny":[],"additionalDirectories":[]},"bypassPe
 ```sh
 cd "$WORKDIR/work"
 cat </path/to/commision.md> | claude -p \
-  --output-format json-stream \
+  --output-format stream-json \
   --verbose \
+  --dangerously-skip-permissions \
   [--model <haiku|opus|sonnet>] \
   > "$WORKDIR/session.jsonl"
 ```
@@ -53,6 +50,6 @@ The session log at `$WORKDIR/session.jsonl` contains full structured output. The
 ### Notes
 
 - **Clean room is essential.** Always run agents from the target repo directory, never from the workshop. Agents will use whatever context is available to them.
-- **`bypassPermissions` must be set.** Without it, the agent will hang waiting for permission prompts that no one can answer.
-- **Use `--output-format json-stream`** to capture structured logs for later analysis.
+- **Use `--dangerously-skip-permissions`.** Without it, the agent will hang waiting for permission prompts that no one can answer. The settings.json `bypassPermissions` flag alone is insufficient — it doesn't cover bash output redirection or nested CLI invocations.
+- **Use `--output-format stream-json`** to capture structured logs for later analysis.
 - **Save the session log** as an experiment artifact when relevant.

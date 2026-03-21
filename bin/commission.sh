@@ -66,10 +66,8 @@ echo "Clean room: $WORKDIR" >&2
 # Clone the target repo
 git clone "$REPO_URL" "$WORKDIR/work" 2>&1 | sed 's/^/  [git] /' >&2
 
-# Set up bypass permissions for non-interactive run
-mkdir -p "$WORKDIR/work/.claude"
-echo '{"permissions":{"allow":[],"deny":[],"additionalDirectories":[]},"bypassPermissions":true}' \
-  > "$WORKDIR/work/.claude/settings.json"
+# Note: --dangerously-skip-permissions flag handles permissions at the CLI level.
+# No need for .claude/settings.json — the flag is more comprehensive.
 
 # ── Run the agent ─────────────────────────────────────────────
 
@@ -85,12 +83,13 @@ fi
 
 cd "$WORKDIR/work"
 cat "$COMMISSION_FILE" | claude -p \
-  --output-format json-stream \
+  --output-format stream-json \
   --verbose \
+  --dangerously-skip-permissions \
   $MODEL_FLAG \
-  > "$LOGFILE"
+  | tee "$LOGFILE" >&2
 
-EXIT_CODE=$?
+EXIT_CODE=${PIPESTATUS[1]}
 
 echo "---" >&2
 echo "Agent exited with code: $EXIT_CODE" >&2

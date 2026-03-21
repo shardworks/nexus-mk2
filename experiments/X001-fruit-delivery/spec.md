@@ -31,6 +31,7 @@ The delivered artifact must do something that requires real computation — not 
 
 - A repo will be pre-provisioned for the agent to build in.
 - The agent decides everything else: language, tooling, delivery mechanism, what the tool actually does.
+- **Model: Claude Opus** — all X001 attempts used Opus exclusively.
 
 ## Internal Notes (not for the agent)
 
