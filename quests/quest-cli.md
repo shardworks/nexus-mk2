@@ -59,6 +59,7 @@ The CLI is already runnable via `npx` from this repo. The new subcommand should 
 
 - Extend the existing CLI — do not rewrite or replace the existing structure.
 - Test your work end-to-end before you're done. Post a quest, send it, check its status, list all quests, delete a new quest, verify the full lifecycle works.
+- Commit and push all of your work when done. Do not leave uncommitted changes.
 
 ## How I'll Evaluate
 
@@ -75,3 +76,19 @@ The CLI is already runnable via `npx` from this repo. The new subcommand should 
 - I will run `nexus quest delete <id>` on a `new` quest and verify it's removed from storage.
 - I will run `nexus quest delete <id>` on an `in-progress` quest and verify it returns an error.
 - I will pipe JSON output from one command into another tool (e.g., `jq`) and verify it parses cleanly.
+
+## Amendments
+
+This repository contains working code from a previous run of this quest. You are iterating on it, not starting over.
+
+### A1 — `send` must ensure the agent commits and pushes its work
+
+When `quest send` dispatches work to an agent, the agent must be instructed to commit and push all of its work before finishing. Without this, completed work is lost when the execution environment is cleaned up.
+
+### A2 — Quests are scoped to a repository
+
+Every quest targets a specific git repository. `post` must accept a repository URL (required), stored as first-class metadata in the quest record. `send` must clone the target repository and run the agent inside that clone — the agent should not execute in whatever directory `send` was invoked from.
+
+### A3 — Validate the repository on post
+
+When posting a quest, validate that the repository is accessible. If validation fails, reject the post with a clear error.
