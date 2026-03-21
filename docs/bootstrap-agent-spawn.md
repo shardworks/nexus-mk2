@@ -1,6 +1,6 @@
 # Spawning Agents — Bootstrap Phase
 
-During the bootstrap phase (before the system can launch its own agents), use this manual recipe to run commissions.
+During the bootstrap phase (before the system can launch its own agents), use this manual recipe to run quests.
 
 ## Prerequisites
 

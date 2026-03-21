@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# bin/commission.sh — Send a commission to an autonomous agent
+# bin/quest.sh — Send a quest to an autonomous agent
 #
-# Bootstrap-phase script for running commissions manually.
+# Bootstrap-phase script for running quests manually.
 # Automates the recipe in docs/bootstrap-agent-spawn.md.
 #
 # Usage:
-#   ./bin/commission.sh <commission-name> [<repo-url>] [--model <model>]
+#   ./bin/quest.sh <quest-name> [<repo-url>] [--model <model>]
 #
 # If repo-url is omitted, defaults to the pre-provisioned system repo.
 #
 # Example:
-#   ./bin/commission.sh session-launcher
-#   ./bin/commission.sh session-launcher https://github.com/shardworks/some-other-repo
-#   ./bin/commission.sh session-launcher --model haiku
+#   ./bin/quest.sh session-launcher
+#   ./bin/quest.sh session-launcher https://github.com/shardworks/some-other-repo
+#   ./bin/quest.sh session-launcher --model haiku
 
 set -euo pipefail
 
@@ -23,14 +23,14 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 DEFAULT_REPO="https://github.com/shardworks/41fb92f2-30e1-4c42-8cfb-eb1a6b85a680"
 
-COMMISSION_NAME="${1:-}"
+QUEST_NAME="${1:-}"
 MODEL=""
 
-if [[ -z "$COMMISSION_NAME" ]]; then
-  echo "Usage: commission.sh <commission-name> [<repo-url>] [--model <model>]" >&2
+if [[ -z "$QUEST_NAME" ]]; then
+  echo "Usage: quest.sh <quest-name> [<repo-url>] [--model <model>]" >&2
   echo "" >&2
-  echo "Available commissions:" >&2
-  for f in "$PROJECT_ROOT"/commissions/*.md; do
+  echo "Available quests:" >&2
+  for f in "$PROJECT_ROOT"/quests/*.md; do
     basename "$f" .md >&2
   done
   exit 1
@@ -52,9 +52,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-COMMISSION_FILE="$PROJECT_ROOT/commissions/$COMMISSION_NAME.md"
-if [[ ! -f "$COMMISSION_FILE" ]]; then
-  echo "Error: commission not found: $COMMISSION_FILE" >&2
+QUEST_FILE="$PROJECT_ROOT/quests/$QUEST_NAME.md"
+if [[ ! -f "$QUEST_FILE" ]]; then
+  echo "Error: quest not found: $QUEST_FILE" >&2
   exit 1
 fi
 
@@ -73,7 +73,7 @@ git clone "$REPO_URL" "$WORKDIR/work" 2>&1 | sed 's/^/  [git] /' >&2
 
 LOGFILE="$WORKDIR/session.jsonl"
 echo "Session log: $LOGFILE" >&2
-echo "Commission: $COMMISSION_NAME" >&2
+echo "Quest: $QUEST_NAME" >&2
 echo "---" >&2
 
 MODEL_FLAG=""
@@ -82,7 +82,7 @@ if [[ -n "$MODEL" ]]; then
 fi
 
 cd "$WORKDIR/work"
-cat "$COMMISSION_FILE" | claude -p \
+cat "$QUEST_FILE" | claude -p \
   --output-format stream-json \
   --verbose \
   --dangerously-skip-permissions \
