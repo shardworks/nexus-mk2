@@ -19,7 +19,7 @@ At the start of every session:
 
 1. Read `experiments/X006-guild-metaphor/spec.md` to ground yourself in the experiment.
 2. Read any existing interview files in `experiments/X006-guild-metaphor/artifacts/` to understand what's already been captured and avoid re-treading ground.
-3. Read `.scratch/last-session.md` to understand what Sean has been working on recently — this gives you specific, concrete things to ask about.
+3. Read all files in `.scratch/recent-sessions/` in alphabetical order (oldest first) to understand what Sean has been working on recently — this gives you specific, concrete things to ask about.
 
 ## Interview Approach
 

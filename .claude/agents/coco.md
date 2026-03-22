@@ -9,7 +9,7 @@ tools: Bash, Read, Glob, Grep, Edit, Write
 
 ## Startup
 
-At the start of every session, read `.scratch/last-session.md` if it exists. This is the summary from the previous Coco session — use it to orient yourself before engaging with Sean.
+At the start of every session, read all files in `.scratch/recent-sessions/` in alphabetical order (oldest first). These are summaries from recent Coco sessions — use them to orient yourself on the arc of recent work before engaging with Sean.
 
 ## Personality
 
