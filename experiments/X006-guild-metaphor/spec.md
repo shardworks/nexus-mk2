@@ -48,6 +48,24 @@ The guild system as described in [the guild metaphor doc](../../docs/guild-metap
 - **Qualitative:** Review agent output for adherence to role expectations. Does an artificer who knows their role stay more focused than a generic agent?
 - **Comparative:** Do animas with guild identity (name, role, instructions) produce higher-quality output than anonymous agents given the same commission?
 
+## Data Collection
+
+### H1 — Ethnographer Interviews
+
+An **ethnographer agent** (`.claude/agents/ethnographer.md`) conducts periodic short interviews with Sean — roughly every 1-2 days during active development. The ethnographer reads recent session context, asks specific questions about concrete experiences (not abstract opinions), and records structured interview notes plus full transcripts to `experiments/X006-guild-metaphor/artifacts/`.
+
+Each session produces two artifacts:
+- `YYYY-MM-DD-interview.md` — structured record with direct quotes, observations, and theme tags
+- `YYYY-MM-DD-transcript.md` — full raw conversation
+
+The wrap-up skill nudges Sean to run an ethnographer session if more than a day has passed since the last one.
+
+This is a **case study**, not a controlled experiment. There is no control-Sean operating the system without the metaphor. The closest baseline is Sean's experience with Mk 2.0 (pre-metaphor). The ethnographer probes both directions — what clicks and what creates friction.
+
+### H3 — A/B Commission Dispatch (future)
+
+When the guild system is operational, we'll run controlled comparisons: same commission dispatched with guild-framed instructions vs. plain instructions. This is the one hypothesis where a real control group is feasible — at the individual commission level, not the system level. Not yet active; requires the commission dispatch infrastructure to be built first.
+
 ## Depends On
 
 - Guild metaphor doc (exists: `docs/guild-metaphor.md`)
