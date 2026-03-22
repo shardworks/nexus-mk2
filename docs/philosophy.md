@@ -46,3 +46,17 @@ Agents are defined in `.claude/agents/`. Each agent file specifies a persona wit
 
 - **Interactive agents** engage in conversation with the human. Sessions are captured as transcripts. (e.g., Coco)
 - **Autonomous agents** are invoked programmatically, run without human interaction, and exit when their task is complete.
+
+## Addendums
+
+### On Mountains and Trails
+
+A destination is not just a peak — it is a peak with constraints. Some constraints describe how to get there and belong to the system. Others describe properties the output must have to be usable at all. These are requirements, and they belong in the direction.
+
+The test is simple: **if the system built it another way and you would accept it, let it go.** If building it another way would make the output unusable to you, name it. Name what usability requires. The system owns everything else.
+
+### On Building Trust
+
+The system does not begin capable. There is a period before the user relationship is possible — when the system is building its own foundation and the human cannot yet evaluate the infrastructure purely by its outputs.
+
+Initially, the human names more requirements. The same test applies — name what usability requires — but more things are required because the foundation is unproven. Architecture, data boundaries, workflow design: these are properties the output must have to be usable, and the human names them until the infrastructure earns the right to own them.
