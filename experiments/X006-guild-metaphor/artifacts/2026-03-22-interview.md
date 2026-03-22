@@ -1,0 +1,41 @@
+# X006 Interview — 2026-03-22
+
+## Context
+First interview. Sean has just completed a major vocabulary refactor (Hero→Artificer, Quest→Commission, Treasure→Works) and resolved a philosophical tension around the patron/workshop boundary. No animas have been named yet; no commissions have been dispatched. The guild metaphor exists on paper but has not been tested in practice. This session establishes a baseline.
+
+## Key Quotes
+
+**"I really wanted an adventurer's guild going on quests, but I couldn't overcome the tension that, at the end of the day, the system is building... not venturing out. So I had to resign myself to accepting it's a guild of craftsmen."**
+— Explains the core reason for the refactor. The word "resign" is significant: this was an acceptance, not an embrace. He wanted something he couldn't have.
+
+**"It had more life."**
+— Sean on the adventurer framing. Spontaneous, unqualified. The current framing is more coherent but, by his own account, less alive.
+
+**"I'm still excited at the idea of having these named agents with specific training lineages, being assigned roles in this big structure that's alive. So I'm hopeful I will overcome the disappointment at this latest change soon enough, once things start coming together."**
+— Two things notable here: (1) the word "disappointment" confirms the adventurer loss is felt, not just acknowledged; (2) his excitement is forward-looking and specifically attached to anima identity and lineage, not the vocabulary itself.
+
+**"Commission and works both feel natural, because they 100% are what we are doing."**
+— Contrast with his take on "artificer." The terms that feel natural are the ones grounded in literal function. No metaphor required.
+
+**"Artificer might be trying too hard... like the hint of magic is me clinging to the 'quest' and 'adventure' ideals. This may end up back at 'artisan' or something eventually."**
+— Unprompted self-analysis. He recognizes "artificer" as a compromise word — functional but still reaching for something. The magical connotation is residue of the adventure ideal, not an independently chosen value.
+
+## Observations
+
+Sean is in a transitional state: he made a decision he believes was correct but hasn't fully made peace with it yet. The excitement is real but prospective — it's about what the system will be, not what it is now. This is a reasonable baseline position; the interesting data will come once animas are named and commissions are running.
+
+The vocabulary split he described is meaningful: *commission* and *works* feel natural because they describe what's actually happening. *Artificer* feels effortful because it's carrying aesthetic weight the other words don't. This suggests the metaphor is working best where it's grounded in function and wobbling where it's reaching for atmosphere.
+
+Watch for: whether "artificer" settles or gets replaced once real agents are running. If the word clicks when he's watching an agent actually *make* something, it worked. If it still feels like a costume, "artisan" or something flatter may win out.
+
+The phrase "a big structure that's alive" — said unprompted when describing what he's excited about — is the most revealing data point of this session. That's what he's actually building toward. The metaphor is in service of that feeling of aliveness.
+
+## Themes
+
+- `engagement` — present but future-oriented; grounded in anticipation not current experience
+- `frustration` — mild, specifically around losing the adventurer framing; word used: "disappointment"
+- `vocabulary-adoption` — commission/works: natural; artificer: effortful, possibly temporary
+- `metaphor-fit` — strong where functional, weak where atmospheric
+- `metaphor-friction` — adventurer→craftsman trade-off; "resign" language
+- `agent-identity` — not yet live, but the primary source of forward excitement
+- `baseline` — first interview; no operational data yet
