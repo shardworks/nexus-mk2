@@ -2,29 +2,51 @@
 
 ## What we did
 
-- **Renamed `quests/` → `commissions/` throughout** — directory, `bin/quest.sh` → `bin/commission.sh`, bootstrap scratch file, all draft specs updated to commission vocabulary. (`56ded5f`)
-- **Tightened bootstrap scope** — dropped Guild Houses (Q3) from bootstrap. Revised to C1 (Register + Roster), C2 (Sage Pipeline), C3 (Full Integration). Workshop management deferred.
-- **Updated X006 spec** — promoted to `status: active`, refreshed vocabulary, revised "What We're Building" to match actual bootstrap scope, added honest data collection methodology section. (`5231fc5`)
-- **Created ethnographer agent** (`.claude/agents/ethnographer.md`) — Sonnet-powered interviewer for H1 qualitative data, produces structured interviews + full transcripts to `experiments/X006-guild-metaphor/artifacts/`.
-- **Created CLI rename commission** (`commissions/ready/cli-quest-to-commission-rename.md`) — ready for dispatch to an artificer.
-- **Updated wrap-up skill** to nudge for ethnographer sessions if >1 day since last interview.
-- **Updated transcript archive hooks** (`on_stop.sh`, `on_pre_compact.sh`) to allow ethnographer sessions.
+- Reviewed the full Johnny Doomsayer experiment: retrieved his instructions, sage advice, Valdris's execution logs, and the post-hoc consult transcript
+- Reverted commission #4 on the CLI repo (version subcommand restored, commit `d77e867`)
+- Reassigned master-sage role from Johnny Doomsayer → Valdris the Unwritten on the roster
+- Created X006 artifact documenting the full Johnny Doomsayer experiment (`experiments/X006-guild-metaphor/artifacts/2026-03-22-johnny-doomsayer-experiment.md`) with full appendices (Johnny's instructions, sage advice, consult transcript)
+- Committed and pushed all accumulated session work (`cded05c`): 7 completed commissions, 2 draft commissions, Valdris instruction backup, Coco instruction update, todo updates, scratch cleanup
 
 ## Decisions made and/or deferred
 
-- **Decided: Houses out of bootstrap.** The bootstrap repo is implicitly a workshop; explicit workshop management and houses are deferred.
-- **Decided: H1 is a case study, not controlled experiment.** No control-Sean. Mk 2.0 experience is the closest baseline. Ethnographer interviews are the primary data collection instrument.
-- **Decided: H3 A/B testing is future work.** Run controlled comparisons at the commission level when dispatch infrastructure exists. No ambient data capture needed now.
-- **Decided: CLI rename alias `com` not `c`.** Sean changed alias from `c` to `com` in the commission spec.
+- **Johnny not retired** — stays active but unassigned, on the bench with Leeroy
+- **Valdris is now both artificer and master-sage** — consolidating roles on the founder
+- **Commission #4 reverted** — the version subcommand stays; the commission was faithful but unwanted
 
 ## Next steps & open questions
 
-- Dispatch the CLI rename commission (`./bin/commission.sh cli-quest-to-commission-rename`)
-- Bootstrap commission C1 (Register + Roster) needs to move from scratch planning doc to a ready commission spec
-- X006 H2 measurement (external legibility A/B test) is designed but has no timeline
+- **Test isolation commission** (`commissions/draft/test-isolation.md`) — ready to dispatch; NEXUS_HOME env var + backup before dispatch
+- **Anima naming system** (`commissions/draft/anima-naming-system.md`) — still in draft
+- **Token efficiency question** — does personality framing produce better plans or just more decorated ones? Needs controlled comparison (X006 H3)
+- **Trust/oversight gap** — no natural mechanism for patron to review agent code before it lands. The revert pattern works but is reactive
 
 ### Notable moments
 
-- **"I don't really see myself building this whole thing a second time with the 'plain language' control group, so what's our point of reference?"** — Sean challenged the implicit experimental design of X006. Led to reframing H1 as case study and H3 as the only hypothesis with a feasible control group (A/B at commission level). Notable because it forced honesty about what we can actually measure vs. what sounds rigorous.
+- **Valdris doesn't know his work was reverted.** He proudly cited commit `6c31ffb` in the consult session. The system has no mechanism for agents to learn about post-hoc corrections. Notable because it highlights the gap between agent confidence and actual system state.
+- **"I haven't opened node_modules since the commit."** Valdris engaged with Johnny's doom narrative *only in conversation*, never during execution. Suggests the metaphor lives in the conversational layer, not the execution layer — relevant to H1 and H3.
+- Sean's trust concern: feeling uneasy about "not trusting the code and feeling uneasy about implementation details without looking at it myself" — the narrative layer may create an illusion of oversight. Commission #4 is the proof case: the pipeline worked perfectly and produced an unwanted result.
 
-- **"Should the ethnographer also capture the full transcript? Feels like it should."** — Sean's instinct to preserve raw primary source data alongside structured analysis. Notable for the research methodology: the interview summary is the ethnographer's interpretation, the transcript is the evidence.
+--- 
+
+❯ NOTE to Scribe: the final summary misses key content because this conversation was compacted                                                 
+                                                                                               
+● Good catch — yeah, this session was a long one that got compacted mid-stream. The summary only covers what happened after compaction (the    
+  tail end of the Johnny Doomsayer debrief and wrap-up). The bulk of the session — the entire guild bootstrap, anima creation, commission
+  dispatching, spec iteration, sage pipeline testing — is only captured in the compaction summary, not in the final session summary.           
+   
+  Scribe should treat the compaction summary in this conversation as the primary source for session content. The key things the final summary  
+  misses:                                                         
+                                                                                                                                               
+  - Full guild bootstrap: creating Valdris, Leeroy, Johnny; dispatching commissions 1-4; iterating on commission spec style (prescriptive →    
+  mountain-focused)
+  - Commission spec philosophy: Sean's repeated pushback on "trail-heavy" specs, leading to progressively leaner mountain-style commissions.   
+  Key quotes like "too much trail here" and "we do NOT want to prescribe this"                                                                 
+  - Training vs composition decision: baking guild knowledge into anima instructions (academy model) rather than composing at dispatch time or
+  using CLAUDE.md                                                                                                                              
+  - The Valdris incident: rogue agent wiped the register with rm -f *.json, leading to data durability and test isolation todos
+  - Dispatch architecture evolution: hard-coded → standing orders → anima clerk → back to golem                                                
+  - Multiple commission dispatches and evaluations: rename, register, roster, consult, clean-room, guild-aware dispatch, sage trials           
+  - Sean's iterative feedback on every draft — the back-and-forth on commission style is some of the richest H1/H3 data from this session      
+                                                                                                                                               
+  The full compaction summary is embedded at the top of this conversation and has all of it.      
