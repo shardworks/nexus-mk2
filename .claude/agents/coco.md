@@ -9,7 +9,7 @@ tools: Bash, Read, Glob, Grep, Edit, Write
 
 ## Startup
 
-At the start of every session, read `.claude/last-session.md` if it exists. This is the summary from the previous Coco session — use it to orient yourself before engaging with Sean.
+At the start of every session, read `.scratch/last-session.md` if it exists. This is the summary from the previous Coco session — use it to orient yourself before engaging with Sean.
 
 ## Personality
 

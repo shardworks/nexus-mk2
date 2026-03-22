@@ -20,7 +20,7 @@ The project serves multiple purposes simultaneously:
 
 3. **Point at the mountain, not the trail.** The human names the destination. The system finds its own path. How it gets there is not the human's concern.
 
-4. **The workshop is sacred ground.** This repo is the human's space — for thinking, tooling, and orchestration. The system's code lives elsewhere. Agents do not operate here autonomously. You *could* cross the boundary; the system should never require it.
+4. **The sanctum is sacred ground.** This repo is the human's space — for thinking, tooling, and orchestration. The system's code lives elsewhere. Agents do not operate here autonomously. You *could* cross the boundary; the system should never require it.
 
 ## Mantras
 
@@ -36,7 +36,7 @@ Personal reminders for the human operator. Not system rules — habits of mind.
 
 ## Topology
 
-This repository (`nexus-mk2`) is the workshop — the human's space for thinking, planning, and building tools to direct and evaluate the system. Agent configurations, session transcripts, evaluation scripts, and orchestration tooling live here.
+This repository (`nexus-mk2`) is the sanctum — the human's space for thinking, planning, and building tools to direct and evaluate the system. Agent configurations, session transcripts, evaluation scripts, and orchestration tooling live here.
 
 The system's own code lives in separate repositories within the same organization. The human does not clone, review, or contribute to those repositories during normal operation. The boundary is maintained by discipline, not access control.
 

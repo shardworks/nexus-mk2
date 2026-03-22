@@ -48,4 +48,4 @@ For each notable moment:
 - Keep the whole summary under ~500 words. Brevity is a feature.
 - Do not editorialize beyond the "why it's notable" flags.
 - Present the summary directly as part of the conversation
-- Write the summary to `.claude/last-session.md` (overwriting any previous content). This file is read by Coco at startup to resume context.
+- Write the summary to `.scratch/last-session.md` (overwriting any previous content). This file is read by Coco at startup to resume context.
