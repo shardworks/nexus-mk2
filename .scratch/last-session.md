@@ -2,33 +2,29 @@
 
 ## What we did
 
-- **Major guild metaphor refactor** — renamed Hero→Artificer, Quest→Commission, retired Treasure/Storehouse, introduced Workshop (repos as guild space) and Works (guild output). (`78917d1`)
-- **Resolved patron/guild boundary tension** — repos are guild workshops, not patron property. Patron commissions work and judges by output ("works"), never enters workshops. Aligns with philosophy precepts.
-- **Renamed patron's space** — "workshop" → "sanctum" in `docs/philosophy.md` to avoid collision with guild workshops.
-- **Split metaphor doc** — foundational concepts in `docs/guild-metaphor.md`, emerging/speculative concepts in `.scratch/guild-metaphor-draft.md`.
-- **Housekeeping** — moved `last-session.md` from `.claude/` to `.scratch/`, removed `.scratch/` from `.gitignore`, updated coco agent and wrap-up skill references.
+- **Renamed `quests/` → `commissions/` throughout** — directory, `bin/quest.sh` → `bin/commission.sh`, bootstrap scratch file, all draft specs updated to commission vocabulary. (`56ded5f`)
+- **Tightened bootstrap scope** — dropped Guild Houses (Q3) from bootstrap. Revised to C1 (Register + Roster), C2 (Sage Pipeline), C3 (Full Integration). Workshop management deferred.
+- **Updated X006 spec** — promoted to `status: active`, refreshed vocabulary, revised "What We're Building" to match actual bootstrap scope, added honest data collection methodology section. (`5231fc5`)
+- **Created ethnographer agent** (`.claude/agents/ethnographer.md`) — Sonnet-powered interviewer for H1 qualitative data, produces structured interviews + full transcripts to `experiments/X006-guild-metaphor/artifacts/`.
+- **Created CLI rename commission** (`commissions/ready/cli-quest-to-commission-rename.md`) — ready for dispatch to an artificer.
+- **Updated wrap-up skill** to nudge for ethnographer sessions if >1 day since last interview.
+- **Updated transcript archive hooks** (`on_stop.sh`, `on_pre_compact.sh`) to allow ethnographer sessions.
 
 ## Decisions made and/or deferred
 
-- **Decided: Artificer** as the implementation role. Craft + magical resonance, no adventurer baggage.
-- **Decided: Commission** as the unit of work. "Post a commission", "active commissions."
-- **Decided: Works** as the guild's output noun. Plain, exact, doesn't try too hard.
-- **Decided: Workshop** for guild repos, **Sanctum** for patron's repo.
-- **Decided: No `.workshop` directory** — entire repo is guild space, no need for a carve-out.
-- **Decided: Seal deferred** — git authorship is interim stand-in. Mechanics undefined.
-- **Decided: "Fruit" stays in philosophy precepts only** — too weird for the guild metaphor vocabulary.
-- **Deferred: Workshop/repo naming for nexus-mk2's own `workshop` repo** — potential ambiguity noted but not resolved.
+- **Decided: Houses out of bootstrap.** The bootstrap repo is implicitly a workshop; explicit workshop management and houses are deferred.
+- **Decided: H1 is a case study, not controlled experiment.** No control-Sean. Mk 2.0 experience is the closest baseline. Ethnographer interviews are the primary data collection instrument.
+- **Decided: H3 A/B testing is future work.** Run controlled comparisons at the commission level when dispatch infrastructure exists. No ambient data capture needed now.
+- **Decided: CLI rename alias `com` not `c`.** Sean changed alias from `c` to `com` in the commission spec.
 
 ## Next steps & open questions
 
-- Other docs still use old terminology: `system-architecture.md`, `quest-cli.md`, `sage-trials.md`, `X006` spec. Decide whether to update or leave as historical.
-- Bootstrap commission specs need updating with new vocabulary.
-- Foundational metaphor is stable enough to start building against.
+- Dispatch the CLI rename commission (`./bin/commission.sh cli-quest-to-commission-rename`)
+- Bootstrap commission C1 (Register + Roster) needs to move from scratch planning doc to a ready commission spec
+- X006 H2 measurement (external legibility A/B test) is designed but has no timeline
 
 ### Notable moments
 
-- **"The code produced by the guild is now 'patron property' — that very much implies I _will_ be looking at it"** — Sean caught that the "patron holdings" framing contradicted the core philosophy of not inspecting implementation. This drove the entire workshop reframe. Notable because it shows how the metaphor actively shapes expectations about system behavior.
+- **"I don't really see myself building this whole thing a second time with the 'plain language' control group, so what's our point of reference?"** — Sean challenged the implicit experimental design of X006. Led to reframing H1 as case study and H3 as the only hypothesis with a feasible control group (A/B at commission level). Notable because it forced honesty about what we can actually measure vs. what sounds rigorous.
 
-- **"I don't really wanna go in there unless there are weird smells"** — Sean's description of his relationship to guild workshops. Captures the discipline-not-access-control boundary perfectly. Notable for the published narrative: the patron *can* enter but chooses not to.
-
-- **"The word 'fruit' is... really weird... outside of the vaguely Biblical line in our precepts"** — Led to choosing "works" instead. Notable because it shows Sean distinguishing between philosophical language (evocative, allowed to be strange) and operational vocabulary (needs to be natural and presentable).
+- **"Should the ethnographer also capture the full transcript? Feels like it should."** — Sean's instinct to preserve raw primary source data alongside structured analysis. Notable for the research methodology: the interview summary is the ethnographer's interpretation, the transcript is the evidence.
