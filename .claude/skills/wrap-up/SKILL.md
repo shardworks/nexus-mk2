@@ -10,6 +10,12 @@ disable-model-invocation: true
 - Commit any changes you have made, if any
 - Push main to the remote
 
+## Reminders
+
+Check for things Sean should be nudged about:
+
+- **Ethnographer interview:** Check the most recent interview file in `experiments/X006-guild-metaphor/artifacts/` (files named `YYYY-MM-DD-interview.md`). If the most recent one is more than a day old — or if none exist yet — remind Sean to run an ethnographer session. Keep it light: *"It's been a couple days since your last X006 interview — might be a good time to check in with the ethnographer."*
+
 ## Generate Summary
 
 Generate a structured summary of the current session. This summary serves two audiences:

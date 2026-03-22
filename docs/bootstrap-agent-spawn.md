@@ -1,6 +1,6 @@
 # Spawning Agents — Bootstrap Phase
 
-During the bootstrap phase (before the system can launch its own agents), use this manual recipe to run quests.
+During the bootstrap phase (before the system can launch its own agents), use this manual recipe to run commissions.
 
 ## Prerequisites
 
@@ -30,7 +30,7 @@ git clone "git@github.com:shardworks/$REPO_ID.git" "$WORKDIR/work"
 
 ```sh
 cd "$WORKDIR/work"
-cat </path/to/commision.md> | claude -p \
+cat </path/to/commission.md> | claude -p \
   --output-format stream-json \
   --verbose \
   --dangerously-skip-permissions \
