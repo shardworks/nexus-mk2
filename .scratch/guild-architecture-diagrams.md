@@ -9,7 +9,7 @@ graph TB
     subgraph NEXUS_HOME
         ledger[(Ledger<br/><small>SQLite</small>)]
 
-        subgraph hq[HQ Repository]
+        subgraph guildhall_repo[Guildhall Repository]
             guild_json[guild.json]
             workshops_json[workshops.json]
             commons_json[commons.json]
@@ -30,11 +30,11 @@ graph TB
                     impl_manifest[manifest.json]
                     impl_instructions[instructions.md]
                 end
-                subgraph machines_block[Machines]
-                    summon_machine[Summon]
-                    worktree_machine[Worktree Setup]
-                    dispatch_machine[Dispatch]
-                    migrate_machine[Ledger Migrate]
+                subgraph engines_block[Engines]
+                    summon_engine[Summon]
+                    worktree_engine[Worktree Setup]
+                    dispatch_engine[Dispatch]
+                    migrate_engine[Ledger Migrate]
                 end
             end
 
@@ -44,26 +44,26 @@ graph TB
         end
 
         subgraph workshops[Workshops]
-            forge[Forge<br/><small>builds implements<br/>& machines</small>]
+            forge[Forge<br/><small>builds implements<br/>& engines</small>]
             academy[Academy<br/><small>builds curricula<br/>& temperaments</small>]
             workshop_n[Workshop N<br/><small>patron's<br/>commissioned work</small>]
         end
 
         subgraph worktrees[Worktrees]
-            hq_main[hq/main<br/><small>standing</small>]
+            guildhall_main[guildhall/main<br/><small>standing</small>]
             wt_commission[workshop/commission-N<br/><small>ephemeral</small>]
         end
     end
 
     relic[Relic<br/><small>nx CLI</small><br/><small>~/.nexus/</small>]
 
-    patron -->|commissions| dispatch_machine
-    dispatch_machine -->|triggers| summon_machine
-    summon_machine -->|reads| ledger
-    summon_machine -->|reads| hq
-    summon_machine -->|launches agent in| wt_commission
-    migrate_machine -->|applies| migrations
-    migrate_machine -->|writes| ledger
+    patron -->|commissions| dispatch_engine
+    dispatch_engine -->|triggers| summon_engine
+    summon_engine -->|reads| ledger
+    summon_engine -->|reads| guildhall_repo
+    summon_engine -->|launches agent in| wt_commission
+    migrate_engine -->|applies| migrations
+    migrate_engine -->|writes| ledger
 
     forge -->|publish| stores
     academy -->|publish| formation
@@ -72,10 +72,10 @@ graph TB
 
     style relic fill:#888,stroke:#555,color:#fff
     style patron fill:#f5d67a,stroke:#c9a830
-    style summon_machine fill:#7ab8f5,stroke:#3080c9
+    style summon_engine fill:#7ab8f5,stroke:#3080c9
 ```
 
-## Instruction Composer (Summon Machine)
+## Instruction Composer (Summon Engine)
 
 ```mermaid
 graph LR
@@ -96,7 +96,7 @@ graph LR
         clarifications[Clarification Thread]
     end
 
-    subgraph summon[Summon Machine]
+    subgraph summon[Summon Engine]
         direction TB
         resolve[Resolve Composition<br/><small>Ledger lookup</small>]
         template[Compose Template]
@@ -140,7 +140,7 @@ graph LR
 stateDiagram-v2
     [*] --> Posted: patron posts commission
     Posted --> Dispatched: dispatch implement assigns anima
-    Dispatched --> InProgress: summon machine launches session
+    Dispatched --> InProgress: summon engine launches session
 
     InProgress --> Blocked: anima requests clarification
     Blocked --> InProgress: patron responds + resume

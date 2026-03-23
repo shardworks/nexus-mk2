@@ -16,7 +16,7 @@ The patron knows the workshops exist and may assign them ("build the next thing 
 
 ### Anima
 
-The fundamental unit of identity in the system. Every anima has a name — no exceptions, no anonymous instances. An anima is an AI entity with persistent identity: named, instructed, tracked, and accountable for its work. The word comes from Latin, meaning "the animating principle" — the thing that makes something alive rather than mechanical. This is the core distinction in the system: **animas are animated** (backed by AI, capable of judgment), **golems are inanimate** (no AI, purely mechanical). *(We pluralize as "animas" rather than the Latin "animae" — we know, we know.)*
+The fundamental unit of identity in the system. Every anima has a name — no exceptions, no anonymous instances. An anima is an AI entity with persistent identity: named, instructed, tracked, and accountable for its work. The word comes from Latin, meaning "the animating principle" — the thing that makes something alive rather than mechanical. This is the core distinction in the system: **animas are animated** (backed by AI, capable of judgment), **engines are inanimate** (no AI, purely mechanical). *(We pluralize as "animas" rather than the Latin "animae" — we know, we know.)*
 
 #### States
 
@@ -39,11 +39,11 @@ Concretely, standing and commissioned animas are the same thing: entries in the 
 
 ### Register
 
-The authoritative record of every anima that has ever existed. The register is the guild's institutional memory — it contains aspirants in training, active members, and retired animas. Each register entry records the anima's name, instructions, skills, and full state history.
+The authoritative record of every anima that has ever existed. The register is the guild's institutional memory — it contains aspirants in training, active members, and retired animas. Each register entry records the anima's name, composition, and full state history.
 
 ### Roster
 
-The active subset of the register. The roster is a filtered view, not a separate store — it shows all animas currently in `active` state. The roster is the system's source of truth for "who can do what right now," including each anima's role, standing/commissioned status, and operational instructions.
+The active subset of the register. The roster is a filtered view, not a separate store — it shows all animas currently in `active` state. The roster is the system's source of truth for "who can do what right now," including each anima's role and standing/commissioned status.
 
 ## Roles
 
@@ -79,13 +79,47 @@ A repository where the guild does its work. Workshops are guild space — the pa
 
 Some workshops produce works for the patron (applications, services, tools). Others are purely guild infrastructure — tools, training materials, databases. These aren't built for the patron; they are how the guild operates. Both kinds are guild space.
 
+## Knowledge & Training
+
+### Codex
+
+The guild's institutional body of policy, procedure, and operational standards — the employee handbook. Maintained by leadership, followed by all members. The codex defines how the guild operates: procedures, standards, policies, and environmental facts. Every anima receives the codex when summoned.
+
+### Curriculum
+
+A named, versioned, immutable body of training content. A curriculum defines what an anima knows and how it approaches work — skills, craft knowledge, methodology. Curricula are never edited after creation; new thinking produces a new version. The Thomson curriculum v2 is a distinct artifact from v1.
+
+### Temperament
+
+A named, versioned, immutable personality template. A temperament governs an anima's disposition, communication style, and character — who they are, as distinct from what they know (curriculum) or what they must do (codex). Same lifecycle as curricula: immutable per version, new thinking produces a new version.
+
 ## Infrastructure
 
-### Golem
+### Guildhall
 
-An inanimate servant — mechanical glue code with no AI. Golems are scripts, cron jobs, queue readers, and other deterministic processes that handle the repeatable, mechanical work of the guild: reading a message from a queue and delivering it to a member's agent, moving files between workshops, triggering lifecycle transitions, etc.
+The guild's institutional center — a repository, not a workshop. The guildhall is where the codex hangs on the wall, where the tools are stored, where the register is kept, where training content lives. Work doesn't happen here; this is where the guild's knowledge, configuration, and equipment are maintained. Always present, always accessible.
 
-The distinction is essential: **animas are animated** (backed by AI, capable of judgment and creativity, expensive), **golems are inanimate** (no AI, purely mechanical, perfectly repeatable, cheap). Golems are the connective tissue that lets animas focus on the work that requires intelligence.
+Distinct from workshops: workshops are where animas do their craft. The guildhall is the building they come from — the place that tells them who they are and equips them for the job.
+
+### Engine
+
+An automated mechanical process with no AI — scripts, cron jobs, queue readers, and other deterministic processes built into the guild's infrastructure. Engines handle the repeatable, mechanical work of the guild: summoning animas, setting up work environments, running migrations, triggering lifecycle transitions. They are not entities that walk the halls — they are the halls working. The pulleys, the waterworks, the clockwork mechanisms built into the walls.
+
+The distinction is essential: **animas are animated** (backed by AI, capable of judgment and creativity, expensive), **engines are inanimate** (no AI, purely mechanical, perfectly repeatable, cheap). Engines are the infrastructure that lets animas focus on the work that requires intelligence.
+
+### Implement
+
+A tool an anima actively wields during work. Implements are the guild's toolkit — tools that animas use to interact with guild systems, query information, record notes, and perform operations. Each implement ships with instructions that are delivered to the anima at summon, so the anima knows how to use its tools.
+
+Distinct from engines: implements are wielded by animas during work; engines run automatically without anima involvement.
+
+### Summon
+
+The act of bringing an anima to life for a specific task. When an anima is summoned, its identity is assembled from its components — codex, curriculum, temperament — and delivered as a complete instruction set. The anima arrives fully formed, knowing who it is, how the guild operates, what tools it has, and what it's been asked to build.
+
+### Relic
+
+An artifact the guild depends on but does not maintain or fully understand. Load-bearing and sacred, not deprecated — a relic is respected for what it carries. Relics are a natural lifecycle stage for tools built fast during periods of rapid growth.
 
 ### Threshold
 

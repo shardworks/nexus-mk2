@@ -1,6 +1,6 @@
 # The Nexus Guild — Organization and Migration Plan
 
-This document describes the specific organizational decisions and migration plan for Sean's guild, built on the Nexus framework. For the universal system architecture, see `guild-infrastructure-plan.md`.
+This document describes the specific organizational decisions and migration plan for Sean's guild, built on the Nexus framework. For the universal system architecture, see `docs/nexus-architecture.md`.
 
 ---
 
@@ -12,15 +12,19 @@ This guild separates its internal work into dedicated workshops:
 
 | Workshop | Purpose | Produces |
 |----------|---------|----------|
-| **The Forge** | Builds guild-authored implements and machines | Published to HQ `stores/` |
-| **The Academy** | Authors curricula and temperaments | Published to HQ `training/` |
+| **The Forge** | Builds guild-authored implements and engines | Published to guildhall `stores/` |
+| **The Academy** | Authors curricula and temperaments | Published to guildhall `training/` |
 | **Other workshops** | Patron-commissioned application work | Works delivered to the patron |
 
-This is an organizational choice, not a framework requirement. Another guildmaster could hand-author all guild implements, curricula, and temperaments directly in HQ. This guild isolates the work into separate repos because:
+**The Forge** is where the guild's next generation of infrastructure is commissioned and built. Implements, engines, and any tooling the guild uses to operate — all forged here. The forge's output is consumed by other guild members, not by the patron directly.
+
+**The Academy** produces the training content that shapes animas. Curricula define what animas know; temperaments define who they are. The academy may eventually have instructors — standing animas who author training content and whose lineage is tracked as provenance on the curricula they produce.
+
+This is an organizational choice, not a framework requirement. Another guildmaster could hand-author all guild implements, curricula, and temperaments directly in the guildhall. This guild isolates the work into separate repos because:
 
 - **Blast radius** — an artificer building an implement can't damage training materials, and vice versa
 - **Swappability** — if the academy's approach isn't working, it can be replaced wholesale
-- **Clarity** — commissioning "build this implement" targeting the forge is cleaner than commissioning work in HQ itself
+- **Clarity** — commissioning "build this implement" targeting the forge is cleaner than commissioning work in the guildhall itself
 
 ### Topology
 
@@ -64,7 +68,7 @@ The relic stores data in `~/.nexus/` as flat JSON files. The new system uses the
 
 ## Migration Sequence
 
-1. **Build the Nexus framework** — Implement the Nexus CLI with `init`, `install`, `repair`. Build the base implements and machines (summon, dispatch, publish, promote, instantiate, worktree-setup, ledger-migrate). Write the initial Ledger schema.
+1. **Build the Nexus framework** — Implement the Nexus CLI with `init`, `install`, `repair`. Build the base implements and engines (summon, dispatch, publish, promote, instantiate, worktree-setup, ledger-migrate). Write the initial Ledger schema.
 2. **`nexus init`** — Bootstrap this guild. Creates HQ, Ledger, installs base tools.
 3. **Populate HQ** — Extract the codex from existing anima instructions and teachings. Author initial curricula and temperaments. Configure `guild.json`.
 4. **Create the forge and academy** — Set up workshop repositories, register in `guild.json`.
@@ -77,4 +81,4 @@ Migration of data from relic (`~/.nexus/` flat JSON) to new topology: manual one
 
 ## Open Questions
 
-- **Machine authorship governance** — Machines start hand-authored in HQ. Could the forge build machines too? What triggers that transition?
+- **Engine authorship governance** — Engines start hand-authored in HQ. Could the forge build engines too? What triggers that transition?
