@@ -49,7 +49,7 @@ Edicts may amend the codex or stand alone. They are tracked in the Ledger with f
 
 **Integration points:**
 - Ledger: edict records and lifecycle state
-- Instruction composer: active edicts injected into system prompt
+- Manifest engine: active edicts injected into system prompt
 - Codex: edicts may reference or amend codex content
 
 ---
@@ -58,11 +58,11 @@ Edicts may amend the codex or stand alone. They are tracked in the Ledger with f
 
 Identity-level binding commitments, per-anima. "I will never modify files outside my commission scope." "I will always run tests before sealing my work." The codex is institutional; oaths are personal.
 
-Oaths are stored in the Ledger as part of an anima's composition. They are assigned at instantiation and injected into the system prompt at compose time. Oaths are what make two animas from the same school distinct — same curriculum, same temperament, different commitments.
+Oaths are stored in the Ledger as part of an anima's composition. They are assigned at instantiation and injected into the system prompt at manifest time. Oaths are what make two animas from the same school distinct — same curriculum, same temperament, different commitments.
 
 **Integration points:**
 - Ledger: stored per-anima in composition record
-- Instruction composer: injected into system prompt
+- Manifest engine: injected into system prompt
 - Anima composition: one of the three composition components (curriculum + temperament + oaths)
 
 ---

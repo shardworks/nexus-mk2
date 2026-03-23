@@ -34,7 +34,7 @@ Logs, transcripts, and metadata produced by guild activities. Session logs, comm
 - **Stories naming:** The working term "stories" doesn't quite land. Need to find the right guild-flavored word for the system's operational records.
 - **Inbox mechanics:** What does the inbox look like? File-based queue? Database rows? How does an engine know when to deliver? Polling? Event-driven?
 - **Seal mechanics:** The concept of a seal (a member's mark of authorship) is clear, but the format is undefined. Git authorship serves as an interim stand-in. See Coco's suggestions below for the full concept.
-- ~~**"Summons" vs "Summon":** Resolved — "summon" removed from foundational metaphor (engine renamed to "compose"). "Summons" is free for its natural use as an urgent, targeted request for a member's attention.~~
+- ~~**"Summons" vs "Summon":** Resolved — "summon" removed from foundational metaphor (engine renamed to "compose", later to "manifest"). "Summons" is free for its natural use as an urgent, targeted request for a member's attention.~~
 
 ---
 
@@ -90,15 +90,15 @@ Everything below is Coco riffing. Unvetted, unfiltered, organized loosely by the
 
 **Vigil** — a period of watching and waiting. After a commission is dispatched, someone (or something) keeps vigil — monitoring progress, watching for failures, waiting for completion. System mapping: the background monitoring that checks commission status, detects failures, and triggers alerts. Currently a manual status check. An engine could keep vigil automatically.
 
-**Rite of Naming** — the ceremony by which a new anima is created in the register and given their identity. Not just "add to database" — the naming is when the anima receives its poetic name and seal, becoming a distinct entity. The rite could include an initial training session at the Academy (aspirant phase), a trial by craft, and formal induction to the roster as an active anima.
+**Rite of Naming** — the ceremony by which a new anima is called into being and given their identity. Not just "add to database" — the naming is when the spirit receives its name and seal, becoming a distinct presence in the guild. The rite could include an initial training session at the Academy (aspirant phase), a trial by craft, and formal induction to the roster as an active anima.
 
-**Requiem** — the process of retiring an anima. Not deletion — the anima's record persists in the register forever, their seals remain on their work, their lore is preserved. But they transition to `retired` state and are no longer dispatchable. System mapping: a formal process that includes archiving the anima's current instructions and recording why they were retired.
+**Requiem** — the process of retiring an anima. Not dissolution — the anima's record persists in the register forever, their seals remain on their work, their lore is preserved. But the spirit passes to rest: `retired` state, no longer manifested. System mapping: a formal process that includes archiving the anima's current instructions and recording why they were retired.
 
 ### Communication & Coordination
 
 **Herald** — a specialized engine (or role?) that announces events across the guild. Commission completed. New member inducted. Petition granted. House chartered. The herald doesn't decide anything — it broadcasts. System mapping: an event/notification system. Webhooks, log events, Slack notifications, whatever — the herald is the abstraction over "tell everyone something happened."
 
-**Summons** — a formal request for a specific member's attention. Different from a message in the inbox — a summons is urgent and targeted. "The Oracle is summoned to examine the authentication module." System mapping: a high-priority, synchronous invocation of a specific member, as opposed to async inbox delivery. *(Naming conflict resolved — "summon" removed from foundational metaphor, engine renamed to "compose.")*
+**Summons** — a formal request for a specific member's attention. Different from a message in the inbox — a summons is urgent and targeted. "The Oracle is summoned to examine the authentication module." System mapping: a high-priority, synchronous invocation of a specific member, as opposed to async inbox delivery. *(Naming conflict resolved — "summon" removed from foundational metaphor, engine renamed to "compose", later to "manifest.")*
 
 **Parley** — a structured conversation between two or more members. When the Master Sage convenes the Council, that's a parley. When an artificer encounters something unexpected and needs to consult the Oracle mid-commission, that's a parley. System mapping: agent-to-agent communication within a commission lifecycle. This is the multi-agent coordination primitive — how do two AI agents actually talk to each other?
 

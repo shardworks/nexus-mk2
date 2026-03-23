@@ -68,7 +68,7 @@ The relic stores data in `~/.nexus/` as flat JSON files. The new system uses the
 
 ## Migration Sequence
 
-1. **Build the Nexus framework** — Implement the Nexus CLI with `init`, `install`, `repair`. Build the base implements and engines (compose, dispatch, publish, promote, instantiate, worktree-setup, ledger-migrate). Write the initial Ledger schema.
+1. **Build the Nexus framework** — Implement the Nexus CLI with `init`, `install`, `repair`. Build the base implements and engines (manifest, dispatch, publish, promote, instantiate, worktree-setup, ledger-migrate). Write the initial Ledger schema.
 2. **`nexus init`** — Bootstrap this guild. Creates guildhall, Ledger, installs base tools.
 3. **Populate guildhall** — Extract the codex from existing anima instructions and teachings. Author initial curricula and temperaments. Configure `guild.json`.
 4. **Create the forge and academy** — Set up workshop repositories, register in `guild.json`.

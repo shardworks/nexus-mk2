@@ -16,7 +16,9 @@ The patron knows the workshops exist and may assign them ("build the next thing 
 
 ### Anima
 
-The fundamental unit of identity in the system. Every anima has a name — no exceptions, no anonymous instances. An anima is an AI entity with persistent identity: named, instructed, tracked, and accountable for its work. The word comes from Latin, meaning "the animating principle" — the thing that makes something alive rather than mechanical. This is the core distinction in the system: **animas are animated** (backed by AI, capable of judgment), **engines are inanimate** (no AI, purely mechanical). *(We pluralize as "animas" rather than the Latin "animae" — we know, we know.)*
+The fundamental unit of identity in the system. An anima is an ephemeral presence (akin to a spirit) animated by an AI agent. They have a persistent identity that is manifested when called upon, composed from the anima's own nature (training, temperament, etc.) and the guild's institutional records each time they are needed. The word comes from Latin, meaning "animating principle" — the thing that makes something alive rather than mechanical. Between manifestations, an anima exists in the register as identity and history; the guild maintains their continuity, not the individual.
+
+This is the core distinction in the system: **animas are animated** (backed by AI, capable of judgment, spirited), **engines are inanimate** (no AI, purely mechanical). *(We pluralize as "animas" rather than the Latin "animae" — we know, we know.)*
 
 #### States
 
@@ -83,7 +85,7 @@ Some workshops produce works for the patron (applications, services, tools). Oth
 
 ### Codex
 
-The guild's institutional body of policy, procedure, and operational standards — the employee handbook. Maintained by leadership, followed by all members. The codex defines how the guild operates: procedures, standards, policies, and environmental facts. Every anima receives the codex when activated for a commission.
+The guild's institutional body of policy, procedure, and operational standards — the employee handbook. Maintained by leadership, followed by all members. The codex defines how the guild operates: procedures, standards, policies, and environmental facts. Every anima receives the codex when manifested for a session.
 
 ### Curriculum
 
@@ -101,7 +103,7 @@ A binding commitment made by a specific anima — identity-level, not institutio
 
 ### Edict
 
-A directive from leadership that applies across the guild. An edict doesn't produce deliverables — it changes *how the guild operates*. "All artificers must write tests." "No commission may exceed 500k tokens." Edicts are tracked with full lifecycle (issued, active, superseded, revoked) and injected into anima instructions at compose time alongside the codex. The distinction: the codex is standing policy; an edict is a temporal directive with a lifecycle.
+A directive from leadership that applies across the guild. An edict doesn't produce deliverables — it changes *how the guild operates*. "All artificers must write tests." "No commission may exceed 500k tokens." Edicts are tracked with full lifecycle (issued, active, superseded, revoked) and injected into anima instructions at manifest time alongside the codex. The distinction: the codex is standing policy; an edict is a temporal directive with a lifecycle.
 
 ## Infrastructure
 
@@ -113,13 +115,13 @@ Distinct from workshops: workshops are where animas do their craft. The guildhal
 
 ### Engine
 
-An automated mechanical process with no AI — scripts, cron jobs, queue readers, and other deterministic processes built into the guild's infrastructure. Engines handle the repeatable, mechanical work of the guild: composing animas for work, setting up work environments, running migrations, triggering lifecycle transitions. They are not entities that walk the halls — they are the halls working. The pulleys, the waterworks, the clockwork mechanisms built into the walls.
+An automated mechanical process with no AI — scripts, cron jobs, queue readers, and other deterministic processes built into the guild's infrastructure. Engines handle the repeatable, mechanical work of the guild: manifesting animas for work, setting up work environments, running migrations, triggering lifecycle transitions. Where animas are spirits, engines are clockwork — the pulleys, the waterworks, the mechanisms built into the walls. They are not presences; they are the building working.
 
 The distinction is essential: **animas are animated** (backed by AI, capable of judgment and creativity, expensive), **engines are inanimate** (no AI, purely mechanical, perfectly repeatable, cheap). Engines are the infrastructure that lets animas focus on the work that requires intelligence.
 
 ### Implement
 
-A tool an anima actively wields during work. Implements are the guild's toolkit — tools that animas use to interact with guild systems, query information, record notes, and perform operations. Each implement ships with instructions that are delivered to the anima when composed for a session, so the anima knows how to use its tools.
+A tool an anima actively wields during work. Implements are the guild's toolkit — tools that animas use to interact with guild systems, query information, record notes, and perform operations. Each implement ships with instructions that are delivered to the anima when manifested for a session, so the anima knows how to use its tools.
 
 Distinct from engines: implements are wielded by animas during work; engines run automatically without anima involvement.
 
