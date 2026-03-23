@@ -32,7 +32,7 @@ Every anima exists in one of three states:
 
 The meaningful distinction among active animas is not named vs. unnamed (all animas are named) but **standing** vs. **commissioned**:
 
-- **Standing** — available indefinitely, summoned by name. A standing anima persists on the roster across commissions. They are always there, always available.
+- **Standing** — available indefinitely, called on by name. A standing anima persists on the roster across commissions. They are always there, always available.
 - **Commissioned** — instantiated for a specific commission. A commissioned anima's roster membership lasts only as long as the commission it was created for. Artificers are typically commissioned — a fresh anima is created (or an existing one is commissioned) for each commission, and their tenure ends when the commission completes.
 
 Concretely, standing and commissioned animas are the same thing: entries in the register with names, instructions, and history. The difference is tenure, not nature.
@@ -83,7 +83,7 @@ Some workshops produce works for the patron (applications, services, tools). Oth
 
 ### Codex
 
-The guild's institutional body of policy, procedure, and operational standards — the employee handbook. Maintained by leadership, followed by all members. The codex defines how the guild operates: procedures, standards, policies, and environmental facts. Every anima receives the codex when summoned.
+The guild's institutional body of policy, procedure, and operational standards — the employee handbook. Maintained by leadership, followed by all members. The codex defines how the guild operates: procedures, standards, policies, and environmental facts. Every anima receives the codex when activated for a commission.
 
 ### Curriculum
 
@@ -92,6 +92,16 @@ A named, versioned, immutable body of training content. A curriculum defines wha
 ### Temperament
 
 A named, versioned, immutable personality template. A temperament governs an anima's disposition, communication style, and character — who they are, as distinct from what they know (curriculum) or what they must do (codex). Same lifecycle as curricula: immutable per version, new thinking produces a new version.
+
+### Oath *(v2)*
+
+A binding commitment made by a specific anima — identity-level, not institutional. "I will never modify files outside my commission scope." "I will always run tests before sealing my work." The codex is the guild's policy; an oath is personal. Oaths are part of an anima's composition alongside curriculum and temperament — they are what make two animas from the same curriculum distinct. Assigned at instantiation, immutable after creation.
+
+## Governance *(v2)*
+
+### Edict
+
+A directive from leadership that applies across the guild. An edict doesn't produce deliverables — it changes *how the guild operates*. "All artificers must write tests." "No commission may exceed 500k tokens." Edicts are tracked with full lifecycle (issued, active, superseded, revoked) and injected into anima instructions at compose time alongside the codex. The distinction: the codex is standing policy; an edict is a temporal directive with a lifecycle.
 
 ## Infrastructure
 
@@ -103,19 +113,19 @@ Distinct from workshops: workshops are where animas do their craft. The guildhal
 
 ### Engine
 
-An automated mechanical process with no AI — scripts, cron jobs, queue readers, and other deterministic processes built into the guild's infrastructure. Engines handle the repeatable, mechanical work of the guild: summoning animas, setting up work environments, running migrations, triggering lifecycle transitions. They are not entities that walk the halls — they are the halls working. The pulleys, the waterworks, the clockwork mechanisms built into the walls.
+An automated mechanical process with no AI — scripts, cron jobs, queue readers, and other deterministic processes built into the guild's infrastructure. Engines handle the repeatable, mechanical work of the guild: composing animas for work, setting up work environments, running migrations, triggering lifecycle transitions. They are not entities that walk the halls — they are the halls working. The pulleys, the waterworks, the clockwork mechanisms built into the walls.
 
 The distinction is essential: **animas are animated** (backed by AI, capable of judgment and creativity, expensive), **engines are inanimate** (no AI, purely mechanical, perfectly repeatable, cheap). Engines are the infrastructure that lets animas focus on the work that requires intelligence.
 
 ### Implement
 
-A tool an anima actively wields during work. Implements are the guild's toolkit — tools that animas use to interact with guild systems, query information, record notes, and perform operations. Each implement ships with instructions that are delivered to the anima at summon, so the anima knows how to use its tools.
+A tool an anima actively wields during work. Implements are the guild's toolkit — tools that animas use to interact with guild systems, query information, record notes, and perform operations. Each implement ships with instructions that are delivered to the anima when composed for a session, so the anima knows how to use its tools.
 
 Distinct from engines: implements are wielded by animas during work; engines run automatically without anima involvement.
 
-### Summon
+### Ledger
 
-The act of bringing an anima to life for a specific task. When an anima is summoned, its identity is assembled from its components — codex, curriculum, temperament — and delivered as a complete instruction set. The anima arrives fully formed, knowing who it is, how the guild operates, what tools it has, and what it's been asked to build.
+The guild's operational record book — who exists, what they've done, what they were told. The ledger holds runtime state: anima records, roster, commission history, audit trail. It does not track what's installed or what artifacts exist — that's the guildhall's filesystem and configuration. The ledger answers the questions that matter over time: who was activated, what were they composed of, what did they build, and what happened.
 
 ### Relic
 

@@ -24,18 +24,16 @@ graph TB
                 temperaments[Temperaments<br/><small>stoic/v1.md ...</small>]
             end
 
-            subgraph stores[Stores]
-                subgraph implements_block[Implements]
-                    impl_bundle[foo.js]
-                    impl_manifest[manifest.json]
-                    impl_instructions[instructions.md]
-                end
-                subgraph engines_block[Engines]
-                    summon_engine[Summon]
-                    worktree_engine[Worktree Setup]
-                    dispatch_engine[Dispatch]
-                    migrate_engine[Ledger Migrate]
-                end
+            subgraph implements_block[Implements]
+                impl_bundle[foo.js]
+                impl_manifest[manifest.json]
+                impl_instructions[instructions.md]
+            end
+            subgraph engines_block[Engines]
+                compose_engine[Compose]
+                worktree_engine[Worktree Setup]
+                dispatch_engine[Dispatch]
+                migrate_engine[Ledger Migrate]
             end
 
             subgraph schema[Ledger Schema]
@@ -58,24 +56,25 @@ graph TB
     relic[Relic<br/><small>nx CLI</small><br/><small>~/.nexus/</small>]
 
     patron -->|commissions| dispatch_engine
-    dispatch_engine -->|triggers| summon_engine
-    summon_engine -->|reads| ledger
-    summon_engine -->|reads| guildhall_repo
-    summon_engine -->|launches agent in| wt_commission
+    dispatch_engine -->|triggers| compose_engine
+    compose_engine -->|reads| ledger
+    compose_engine -->|reads| guildhall_repo
+    compose_engine -->|launches agent in| wt_commission
     migrate_engine -->|applies| migrations
     migrate_engine -->|writes| ledger
 
-    forge -->|publish| stores
+    forge -->|publish| implements_block
+    forge -->|publish| engines_block
     academy -->|publish| formation
 
     patron -.->|manual, during transition| relic
 
     style relic fill:#888,stroke:#555,color:#fff
     style patron fill:#f5d67a,stroke:#c9a830
-    style summon_engine fill:#7ab8f5,stroke:#3080c9
+    style compose_engine fill:#7ab8f5,stroke:#3080c9
 ```
 
-## Instruction Composer (Summon Engine)
+## Instruction Composer (Compose Engine)
 
 ```mermaid
 graph LR
@@ -86,7 +85,7 @@ graph LR
         temperament[Temperament<br/><small>e.g. curious/v1.md</small>]
         oaths[Oaths<br/><small>per-anima, from Ledger</small>]
         edicts[Active Edicts<br/><small>from Ledger</small>]
-        impl_inst[Implement Instructions<br/><small>per-role, from stores</small>]
+        impl_inst[Implement Instructions<br/><small>per-role, from guildhall</small>]
     end
 
     subgraph task[Task Context]
@@ -96,7 +95,7 @@ graph LR
         clarifications[Clarification Thread]
     end
 
-    subgraph summon[Summon Engine]
+    subgraph compose[Compose Engine]
         direction TB
         resolve[Resolve Composition<br/><small>Ledger lookup</small>]
         template[Compose Template]
@@ -129,7 +128,7 @@ graph LR
 
     template --> snapshot
 
-    style summon fill:#7ab8f5,stroke:#3080c9
+    style compose fill:#7ab8f5,stroke:#3080c9
     style session fill:#9bf57a,stroke:#5cc930
     style ledger fill:#f5a67a,stroke:#c96830
 ```
@@ -140,7 +139,7 @@ graph LR
 stateDiagram-v2
     [*] --> Posted: patron posts commission
     Posted --> Dispatched: dispatch implement assigns anima
-    Dispatched --> InProgress: summon engine launches session
+    Dispatched --> InProgress: compose engine launches session
 
     InProgress --> Blocked: anima requests clarification
     Blocked --> InProgress: patron responds + resume

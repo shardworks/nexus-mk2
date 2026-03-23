@@ -12,13 +12,13 @@ Registered in the guildhall as metadata (a `commons.json` or similar registry). 
 
 **Integration points:**
 - Guildhall: commons registry (metadata only, no secrets)
-- Summon engine: injects available commons into anima's environment
+- Compose engine: injects available commons into anima's environment
 - Codex: may contain policies about commons usage ("always use the staging AWS account for commissions")
 
 **Open questions:**
 - What does the registry format look like? Name + type + credential reference?
 - How are credentials actually passed to anima sessions? Environment variables? Mounted files?
-- Does the engine validate that required commons are accessible before summoning?
+- Does the engine validate that required commons are accessible before composing?
 
 ---
 
@@ -36,7 +36,7 @@ The `promote` implement handles status changes (experimental → active), updati
 
 **Integration points:**
 - guild.json: status tracked per artifact
-- Summon engine: default resolution considers status (experimental artifacts require explicit assignment)
+- Compose engine: default resolution considers status (experimental artifacts require explicit assignment)
 - `promote` implement: base framework implement for status changes
 
 ---
@@ -58,7 +58,7 @@ Edicts may amend the codex or stand alone. They are tracked in the Ledger with f
 
 Identity-level binding commitments, per-anima. "I will never modify files outside my commission scope." "I will always run tests before sealing my work." The codex is institutional; oaths are personal.
 
-Oaths are stored in the Ledger as part of an anima's composition. They are assigned at instantiation and injected into the system prompt at summon time. Oaths are what make two animas from the same school distinct — same curriculum, same temperament, different commitments.
+Oaths are stored in the Ledger as part of an anima's composition. They are assigned at instantiation and injected into the system prompt at compose time. Oaths are what make two animas from the same school distinct — same curriculum, same temperament, different commitments.
 
 **Integration points:**
 - Ledger: stored per-anima in composition record

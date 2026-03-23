@@ -34,7 +34,7 @@ Logs, transcripts, and metadata produced by guild activities. Session logs, comm
 - **Stories naming:** The working term "stories" doesn't quite land. Need to find the right guild-flavored word for the system's operational records.
 - **Inbox mechanics:** What does the inbox look like? File-based queue? Database rows? How does an engine know when to deliver? Polling? Event-driven?
 - **Seal mechanics:** The concept of a seal (a member's mark of authorship) is clear, but the format is undefined. Git authorship serves as an interim stand-in. See Coco's suggestions below for the full concept.
-- **"Summons" vs "Summon":** The foundational metaphor defines "summon" as the act of bringing an anima to life (an engine). The draft concept "Summons" below describes an urgent, targeted request for a specific member's attention. These are related but different — one creates a session, the other is a communication pattern. Can they coexist, or does one subsume the other?
+- ~~**"Summons" vs "Summon":** Resolved — "summon" removed from foundational metaphor (engine renamed to "compose"). "Summons" is free for its natural use as an urgent, targeted request for a member's attention.~~
 
 ---
 
@@ -98,7 +98,7 @@ Everything below is Coco riffing. Unvetted, unfiltered, organized loosely by the
 
 **Herald** — a specialized engine (or role?) that announces events across the guild. Commission completed. New member inducted. Petition granted. House chartered. The herald doesn't decide anything — it broadcasts. System mapping: an event/notification system. Webhooks, log events, Slack notifications, whatever — the herald is the abstraction over "tell everyone something happened."
 
-**Summons** — a formal request for a specific member's attention. Different from a message in the inbox — a summons is urgent and targeted. "The Oracle is summoned to examine the authentication module." System mapping: a high-priority, synchronous invocation of a specific member, as opposed to async inbox delivery. *(Note: the foundational metaphor now defines "summon" as the engine that brings animas to life. See open questions for the naming overlap.)*
+**Summons** — a formal request for a specific member's attention. Different from a message in the inbox — a summons is urgent and targeted. "The Oracle is summoned to examine the authentication module." System mapping: a high-priority, synchronous invocation of a specific member, as opposed to async inbox delivery. *(Naming conflict resolved — "summon" removed from foundational metaphor, engine renamed to "compose.")*
 
 **Parley** — a structured conversation between two or more members. When the Master Sage convenes the Council, that's a parley. When an artificer encounters something unexpected and needs to consult the Oracle mid-commission, that's a parley. System mapping: agent-to-agent communication within a commission lifecycle. This is the multi-agent coordination primitive — how do two AI agents actually talk to each other?
 

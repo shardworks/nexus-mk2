@@ -12,7 +12,7 @@ This guild separates its internal work into dedicated workshops:
 
 | Workshop | Purpose | Produces |
 |----------|---------|----------|
-| **The Forge** | Builds guild-authored implements and engines | Published to guildhall `stores/` |
+| **The Forge** | Builds guild-authored implements and engines | Published to guildhall `implements/` and `engines/` |
 | **The Academy** | Authors curricula and temperaments | Published to guildhall `training/` |
 | **Other workshops** | Patron-commissioned application work | Works delivered to the patron |
 
@@ -30,13 +30,13 @@ This is an organizational choice, not a framework requirement. Another guildmast
 
 ```
 NEXUS_HOME/
-  hq/                     ← bare clone
+  guildhall/              ← bare clone
   forge/                  ← bare clone (the forge workshop)
   academy/                ← bare clone (the academy workshop)
   my-app/                 ← bare clone (a patron project)
   nexus.db                ← Ledger
   worktrees/
-    hq/
+    guildhall/
       main/               ← standing worktree, always present
     forge/
       commission-42/
@@ -62,15 +62,15 @@ The current `nx` CLI is this guild's first relic. It was bootstrapped through 14
 
 But its architecture was not prescribed by the patron, its internals are not fully understood from the sanctum, and it will not be evolved further. It is load-bearing and sacred — the guild depends on it while the Nexus framework and guild-authored implements replace its functions.
 
-The relic stores data in `~/.nexus/` as flat JSON files. The new system uses the Ledger (SQLite) and HQ flat files.
+The relic stores data in `~/.nexus/` as flat JSON files. The new system uses the Ledger (SQLite) and guildhall flat files.
 
 ---
 
 ## Migration Sequence
 
-1. **Build the Nexus framework** — Implement the Nexus CLI with `init`, `install`, `repair`. Build the base implements and engines (summon, dispatch, publish, promote, instantiate, worktree-setup, ledger-migrate). Write the initial Ledger schema.
-2. **`nexus init`** — Bootstrap this guild. Creates HQ, Ledger, installs base tools.
-3. **Populate HQ** — Extract the codex from existing anima instructions and teachings. Author initial curricula and temperaments. Configure `guild.json`.
+1. **Build the Nexus framework** — Implement the Nexus CLI with `init`, `install`, `repair`. Build the base implements and engines (compose, dispatch, publish, promote, instantiate, worktree-setup, ledger-migrate). Write the initial Ledger schema.
+2. **`nexus init`** — Bootstrap this guild. Creates guildhall, Ledger, installs base tools.
+3. **Populate guildhall** — Extract the codex from existing anima instructions and teachings. Author initial curricula and temperaments. Configure `guild.json`.
 4. **Create the forge and academy** — Set up workshop repositories, register in `guild.json`.
 5. **Parallel operation** — New framework and guild implements come online alongside the relic. The relic continues to handle anything not yet replaced.
 6. **Relic retirement** — When all functions are replaced, the relic is archived.
@@ -81,4 +81,4 @@ Migration of data from relic (`~/.nexus/` flat JSON) to new topology: manual one
 
 ## Open Questions
 
-- **Engine authorship governance** — Engines start hand-authored in HQ. Could the forge build engines too? What triggers that transition?
+- **Engine authorship governance** — Engines start hand-authored in the guildhall. Could the forge build engines too? What triggers that transition?

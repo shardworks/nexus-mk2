@@ -10,13 +10,13 @@ The guild is an autonomous workforce. The patron gives it work; it delivers resu
 
 The guild receives work as commissions and routes them through a structured lifecycle of phases — planning, building, reviewing, integrating, and whatever else the work demands. Each phase is handled by a named anima in a defined role, working in an isolated environment. The pipeline is not a fixed sequence; it's a framework for composing phases as the guild's sophistication grows. Today it's simple. Tomorrow it decomposes large commissions, runs parallel workstreams, and has dedicated reviewers and integrators. The infrastructure supports both.
 
-### 2. The Stores
+### 2. Implements & Engines
 
-The guild equips its members with **implements** — versioned CLI tools that follow a consistent pattern: a single-file JS bundle, a provenance manifest, and an instruction document. Implements live in the guildhall's stores alongside **engines** — mechanical processes that handle the guild's automated operations (summoning agents, setting up worktrees, running migrations). The stores are the guild's toolkit and its operational backbone.
+The guild equips its members with **implements** — versioned CLI tools that follow a consistent pattern: a single-file JS bundle, a provenance manifest, and an instruction document. The guildhall also houses **engines** — mechanical processes that handle the guild's automated operations (composing animas for sessions, setting up worktrees, running migrations). Together, the guild's implements and engines form its toolkit and operational backbone.
 
 ### 3. The Instruction Composer
 
-When an anima is summoned to work, the guild assembles a complete instruction set from multiple sources: the codex (institutional policy), the anima's curriculum (skills and training), its temperament (personality and disposition), and the instruction documents for every implement available to the anima's role. This composed identity is delivered as a system prompt; the commission context arrives as the task prompt. The anima arrives fully formed — knowing who it is, how the guild operates, what tools it has, and what it's been asked to build.
+When an anima is composed for a session, the guild assembles a complete instruction set from multiple sources: the codex (institutional policy), the anima's curriculum (skills and training), its temperament (personality and disposition), and the instruction documents for every implement available to the anima's role. This composed identity is delivered as a system prompt; the commission context arrives as the task prompt. The anima arrives at the workbench fully equipped — knowing who it is, how the guild operates, what tools it has, and what it's been asked to build.
 
 ### 4. The Register
 
@@ -35,12 +35,12 @@ Nexus is the runtime that makes the guild system operational. It provides the ba
 ### What Nexus provides
 
 **Base engines:**
-- `summon` — bring animas to life (resolve composition, compose instructions, select model, launch session)
+- `compose` — prepare animas for sessions (resolve composition, assemble instructions, select model, launch session)
 - `worktree-setup` — prepare isolated work environments for commissions
 - `ledger-migrate` — manage Ledger schema
 
 **Base implements:**
-- `dispatch` — post commissions targeting a workshop, trigger the summon engine
+- `dispatch` — post commissions targeting a workshop, trigger the compose engine
 - `publish` — move artifacts from workshops into the guildhall
 - `promote` *(v2)* — change artifact status tiers
 - `instantiate` — create animas from curriculum + temperament
@@ -70,15 +70,14 @@ guildhall/
       publish/v1/
       instantiate/v1/
     engines/
-      summon/v1/
+      compose/v1/
       worktree-setup/v1/
       ledger-migrate/v1/
     migrations/
       001-initial-schema.sql
       002-add-curricula.sql
-  stores/                   ← guild-managed, leadership owns this
-    implements/
-    engines/
+  implements/               ← guild-managed, leadership owns this
+  engines/                  ← guild-managed, leadership owns this
   codex/
   training/
   guild.json
@@ -86,9 +85,9 @@ guildhall/
 
 **`nexus/`** is framework territory. The Nexus CLI writes it; the guild doesn't touch it. `nexus repair` wipes and restores this directory without affecting anything else.
 
-**`stores/`** is guild territory. Leadership authors and publishes into it; the framework doesn't touch it.
+**Guild implements and engines** live at the guildhall root level. Leadership authors and publishes into them; the framework doesn't touch them. The guildhall itself is the organizational unit — no wrapper directory needed.
 
-Both locations follow the same artifact pattern (single JS bundle + manifest + instructions for implements). `guild.json` indexes tools from both locations, tracking their source:
+Both framework and guild tools follow the same artifact pattern (single JS bundle + manifest + instructions for implements). `guild.json` indexes tools from both locations, tracking their source:
 
 ```json
 {
@@ -96,37 +95,37 @@ Both locations follow the same artifact pattern (single JS bundle + manifest + i
   "model": "claude-sonnet-4-20250514",
   "workshops": [ ... ],
   "implements": {
-    "dispatch":       { "source": "nexus",  "version": "v1" },
-    "publish":        { "source": "nexus",  "version": "v1" },
-    "my-custom-tool": { "source": "stores", "version": "v1" }
+    "dispatch":       { "source": "nexus", "version": "v1" },
+    "publish":        { "source": "nexus", "version": "v1" },
+    "my-custom-tool": { "source": "guild", "version": "v1" }
   },
   "engines": {
-    "summon":           { "source": "nexus",  "version": "v1" },
-    "worktree-setup":   { "source": "nexus",  "version": "v1" },
-    "my-custom-engine": { "source": "stores", "version": "v1" }
+    "compose":          { "source": "nexus", "version": "v1" },
+    "worktree-setup":   { "source": "nexus", "version": "v1" },
+    "my-custom-engine": { "source": "guild", "version": "v1" }
   },
   "curricula": { ... },
   "temperaments": { ... }
 }
 ```
 
-The summon engine resolves tool paths based on `source` — `nexus` means look in `nexus/`, `stores` means look in `stores/`. Animas don't know or care where their tools came from.
+The compose engine resolves tool paths based on `source` — `nexus` means look in `nexus/implements/` or `nexus/engines/`, `guild` means look in the guildhall's root-level `implements/` or `engines/`. Animas don't know or care where their tools came from.
 
 ### What this protects against
 
 - **Bad guild publish** — a custom implement breaks things. `nexus repair` restores base tools. Guild content untouched.
-- **Corrupted guildhall** — someone mangles framework files. `nexus repair` restores the framework layer. Guild content (codex, training, custom stores) is the guild's problem, but the machinery works.
+- **Corrupted guildhall** — someone mangles framework files. `nexus repair` restores the framework layer. Guild content (codex, training, guild-authored implements and engines) is the guild's problem, but the machinery works.
 - **Framework upgrade** — `nexus install 2.4` brings new base tools and migrations. Guild tools untouched. Rollback with `nexus install 2.3`.
 
 ---
 
 ## Topology
 
-Everything lives under a single parent directory (`NEXUS_HOME`). The guildhall and all workshops are bare git clones, siblings under `NEXUS_HOME`. All active work happens in worktrees spun off the bare clones. A standing `guildhall/main` worktree is always present — the stable reference point for codex, training content, and stores.
+Everything lives under a single parent directory (`NEXUS_HOME`). The guildhall and all workshops are bare git clones, siblings under `NEXUS_HOME`. All active work happens in worktrees spun off the bare clones. A standing `guildhall/main` worktree is always present — the stable reference point for codex, training content, implements, and engines.
 
 One env var (`NEXUS_HOME`) is all the system needs to locate everything. Workshops are registered in `guild.json` and cloned into `NEXUS_HOME` when they are added. The Ledger sits at the `NEXUS_HOME` level, sibling to all repos.
 
-Sessions run in **bare mode** (no CLAUDE.md). Animas do not receive instructions from the workshop repository itself — all instruction content is composed by the summon engine and delivered directly. If a workshop needs to communicate conventions to animas, those conventions belong in the codex or as implement instructions, not in repo-level config files. The cwd is always a worktree directory; path references within composed instructions are resolved by the summon engine.
+Sessions run in **bare mode** (no CLAUDE.md). Animas do not receive instructions from the workshop repository itself — all instruction content is composed by the compose engine and delivered directly. If a workshop needs to communicate conventions to animas, those conventions belong in the codex or as implement instructions, not in repo-level config files. The cwd is always a worktree directory; path references within composed instructions are resolved by the compose engine.
 
 ### Directory Structure
 
@@ -152,7 +151,7 @@ The guild's central configuration file. Contains:
 - **Nexus version** — the installed framework version
 - **Default model** — the model used for anima sessions unless overridden. Model resolution is designed to be flexible — future layers (per-role, per-curriculum, per-anima, per-commission) can be added as the system matures. For now, only the guild-wide default exists.
 - **Workshop registry** — list of registered workshops with their repo URLs.
-- **Active implements** — which implements are available, at what version, and their source (`nexus` or `stores`).
+- **Active implements** — which implements are available, at what version, and their source (`nexus` or `guild`).
 - **Active engines** — which engines are available, at what version, and their source.
 - **Curricula** — which curricula are available and default per role.
 - **Temperaments** — which temperaments are available and default.
@@ -172,8 +171,8 @@ Authored artifacts, git-managed, meaningful as text:
 - **Codex, per-role** — `codex/roles/artificer.md` etc
 - **Curricula** — `training/curricula/thomson/v1.md` etc — each version a separate immutable file, never edited after creation
 - **Temperaments** — `training/temperaments/stoic/v1.md` etc — same immutable-versioned-file pattern as curricula
-- **Guild implements** — `stores/implements/foo/v1/foo.js` plus companion `manifest.json` and `instructions.md` — immutable per version, single-file JS bundles committed to git
-- **Guild engines** — `stores/engines/` — same bundle pattern as implements
+- **Guild implements** — `implements/foo/v1/foo.js` plus companion `manifest.json` and `instructions.md` — immutable per version, single-file JS bundles committed to git
+- **Guild engines** — `engines/` — same bundle pattern as implements
 - **Framework implements and engines** — `nexus/implements/` and `nexus/engines/` — same bundle pattern, managed by Nexus CLI
 - **Framework migrations** — `nexus/migrations/*.sql` — managed by Nexus CLI
 
@@ -211,9 +210,9 @@ An anima is not a monolithic instruction file. It is composed from discrete, reu
 
 ### Assembly
 
-At instantiation, the Ledger records which curriculum (name + version) and temperament (name + version) were assigned. *(v2 adds oaths as a third composition component.)* The **summon engine** composes these components — along with guild-level content from the codex and available implement instructions — into the full instruction set delivered to the AI model.
+At instantiation, the Ledger records which curriculum (name + version) and temperament (name + version) were assigned. *(v2 adds oaths as a third composition component.)* The **compose engine** composes these components — along with guild-level content from the codex and available implement instructions — into the full instruction set delivered to the AI model.
 
-The composition template is part of the summon engine and versioned with it. When the template changes, a new framework version is published.
+The composition template is part of the compose engine and versioned with it. When the template changes, a new framework version is published.
 
 ```
 template(
@@ -234,7 +233,7 @@ No per-anima markdown files on the filesystem. The anima's identity is the *comb
 
 ## Commissions and Workshops
 
-All commission infrastructure lives in the guildhall — the pipeline, the engines, the dispatch logic. When leadership posts a commission, they specify a **target workshop**: the repo where the anima will do the work. The anima is summoned into a worktree of that target workshop, but the commission lifecycle (posting, tracking, status transitions) is managed centrally through the guildhall's implements and engines.
+All commission infrastructure lives in the guildhall — the pipeline, the engines, the dispatch logic. When leadership posts a commission, they specify a **target workshop**: the repo where the anima will do the work. The anima is composed and launched into a worktree of that target workshop, but the commission lifecycle (posting, tracking, status transitions) is managed centrally through the guildhall's implements and engines.
 
 Some workshops produce works for the patron (applications, services, tools). Others produce artifacts that get published back to the guildhall — new implements, engines, curricula, or temperaments. The guild system doesn't distinguish between these; the publication step is a separate, deliberate act by leadership after the commission completes.
 
@@ -243,7 +242,7 @@ Some workshops produce works for the patron (applications, services, tools). Oth
 When a commission produces artifacts destined for the guildhall (new implements, curricula, etc.), the `publish` implement handles the boundary crossing:
 
 1. Takes a completed artifact from a workshop
-2. Copies files to the correct guildhall location (`stores/implements/foo/v2/`, `training/curricula/thomson/v2.md`, etc.)
+2. Copies files to the correct guildhall location (`implements/foo/v2/`, `training/curricula/thomson/v2.md`, etc.)
 3. Updates `guild.json` with the new version entry
 4. Commits to the guildhall
 
@@ -253,11 +252,11 @@ When a commission produces artifacts destined for the guildhall (new implements,
 
 ## The Instruction Environment
 
-When an anima is summoned, its instructions are composed by the summon engine from its components and guild context, then delivered to the model.
+When an anima is activated, its instructions are assembled by the compose engine from its components and guild context, then delivered to the model.
 
 ### Delivery
 
-- **System prompt**: Anima-specific instructions — codex, curriculum, temperament, implement instructions. Everything that defines *who this anima is and how they operate*. Frozen at summon time. *(v2 adds oaths and edicts.)*
+- **System prompt**: Anima-specific instructions — codex, curriculum, temperament, implement instructions. Everything that defines *who this anima is and how they operate*. Frozen at compose time. *(v2 adds oaths and edicts.)*
 - **Initial prompt**: Commission context — the spec, sage advice, clarification thread, task-specific instructions. Everything about *what to do right now*.
 
 ### What reaches an anima
@@ -281,7 +280,7 @@ SYSTEM PROMPT (identity + environment):
 │     (from the Ledger)               │
 ├─────────────────────────────────────┤
 │  6. Implement instructions          │  instructions.md for each implement
-│     (from nexus/ and stores/,       │  the anima has access to
+│     (from nexus/ and guild,         │  the anima has access to
 │      gated by role)                 │
 └─────────────────────────────────────┘
 
@@ -292,7 +291,7 @@ INITIAL PROMPT (task):
 └─────────────────────────────────────┘
 ```
 
-Instructions are composed at summon time and frozen for the duration of the session. The guildhall may change during a commission; the anima does not see those changes.
+Instructions are composed at compose time and frozen for the duration of the session. The guildhall may change during a commission; the anima does not see those changes.
 
 Sessions run in bare mode (no CLAUDE.md), with session persistence disabled, and with appropriate permissions flags.
 
@@ -316,27 +315,26 @@ The Ledger is guild infrastructure — owned by the institution, maintained by f
 
 ## Vocabulary
 
-This document uses the guild vocabulary defined in [`docs/guild-metaphor.md`](guild-metaphor.md) and the project philosophy in [`docs/philosophy.md`](philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, works, workshop, threshold, codex, curriculum, temperament, engine, implement, summon, relic.
+This document uses the guild vocabulary defined in [`docs/guild-metaphor.md`](guild-metaphor.md) and the project philosophy in [`docs/philosophy.md`](philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, works, workshop, threshold, codex, curriculum, temperament, oath *(v2)*, edict *(v2)*, engine, implement, relic, guildhall, ledger.
 
-Terms specific to this architecture (not defined in the metaphor):
+One term is specific to this architecture and not defined in the metaphor:
 
 **Nexus** — the framework that makes guilds operational. Provides the base implements, engines, and Ledger schema. Managed via the Nexus CLI.
 
-**Guildhall** — the guild's home repository. Contains the codex, training content, stores, framework tools (`nexus/`), and guild configuration. Always present as a standing worktree. The institutional center — not a workshop where work happens, but the building where the guild's knowledge, tools, and records live.
+---
 
-**Ledger** — the guild's operational database. SQLite, lives at `NEXUS_HOME` level. Holds runtime state: anima records, roster, commissions, audit log. Schema owned by the framework, access mediated through implements.
+## Dispatch / Compose Boundary
 
-**Stores** — where the guild keeps its own implements and engines. Lives in the guildhall under `stores/`. Separate from `nexus/` (framework-provided tools).
+The dispatch implement and compose engine have a clean separation of concerns:
 
-**Edicts** *(v2)* — see `.scratch/nexus-architecture-v2.md`.
+- **Dispatch** (implement, wielded by leadership) — the *decision*. Posts a commission, assigns an anima, records the assignment in the Ledger, and triggers the compose engine.
+- **Compose** (engine, mechanical) — the *preparation*. Reads the assignment from the Ledger, resolves the anima's composition, gathers all instruction sources (codex, curriculum, temperament, implement instructions), assembles the system prompt via template, prepares the commission brief as the initial prompt, configures the session (model, worktree cwd, flags), and launches it.
 
-**Oaths** *(v2)* — see `.scratch/nexus-architecture-v2.md`.
+The boundary: dispatch writes to the Ledger and triggers; compose reads from the Ledger and executes. Dispatch decides *who does what*; compose handles *assembling their identity and sending them to work*.
 
 ---
 
 ## Open Questions
-
-- **Dispatch/summon boundary detail** — The high-level split is defined (dispatch is an implement wielded by leadership, summon is an engine that launches the session). The exact handoff needs specification: what state does dispatch set up before summon takes over?
 
 ---
 
