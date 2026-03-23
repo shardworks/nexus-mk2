@@ -55,4 +55,5 @@ For each notable moment:
 - Do not editorialize beyond the "why it's notable" flags.
 - Present the summary directly as part of the conversation
 - Write the summary to `.scratch/recent-sessions/<timestamp>.md`, where `<timestamp>` is the current ISO 8601 timestamp with colons removed for filesystem safety (e.g., `2026-03-22T143052.md`). Each session gets its own file — never overwrite a previous one.
-- After writing, check the directory: if there are more than 5 files, delete the oldest ones to keep only the 5 most recent.
+- After writing, check the directory: if there are more than 12 files, delete the oldest ones to keep only the 12 most recent.
+- Commit all `recent-sessions` changes to git and push those changes.
