@@ -1,7 +1,7 @@
 # X006 Interview — 2026-03-23
 
 ## Context
-Third interview (first of today with Sean present). Significant vocabulary and architecture work has happened across four sessions today: guild system architecture designed, terminology overhauled (golem→engine, HQ→guildhall, stores cut, summon→marshal→compose→manifest), and most significantly, animas reframed as spirits rather than craftspeople. No code has been built; all activity has been ideation, architecture, and naming. This is the first interview since the spirits reframe and the Nexus-as-framework insight.
+Third interview (first of today with Sean present). Significant vocabulary and architecture work has happened across four sessions today: guild system architecture designed, terminology overhauled (golem→machine→engine, HQ→guildhall, stores cut, summon→marshal→compose→manifest), and most significantly, animas reframed as spirits rather than craftspeople. No code has been built; all activity has been ideation, architecture, and naming. This is the first interview since the spirits reframe and the Nexus-as-framework insight.
 
 ## Key Quotes
 
