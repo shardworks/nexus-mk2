@@ -1,0 +1,335 @@
+# Implements, Engines, Curricula & Temperaments
+
+This document describes the artifact model for the guild system — how implements, engines, curricula, and temperaments are structured, packaged, installed, and resolved. All four follow the same packaging pattern: a descriptor file, content, and a registration entry in `guild.json`. For the broader system architecture, see [overview.md](overview.md).
+
+---
+
+## What they are
+
+**Implements** are tools wielded by animas during work — CLI tools that animas invoke to interact with guild systems, query information, record notes, and perform operations. Each implement ships with an instruction document (`instructions.md`) that is delivered to the anima when manifested for a session.
+
+**Engines** are automated mechanical processes with no AI involvement — scripts, queue readers, and other deterministic processes built into the guild's infrastructure. Engines handle the repeatable, mechanical work: manifesting animas, setting up worktrees, running migrations. They do not have instruction documents because no anima wields them.
+
+Both follow the same packaging model. Curricula and temperaments also follow this model — see [below](#curricula--temperaments).
+
+---
+
+## The descriptor file
+
+Every tool has a descriptor at its root:
+
+- **`nexus-implement.json`** for implements
+- **`nexus-engine.json`** for engines
+
+### Schema
+
+Required fields marked with `*`:
+
+```json
+{
+  "entry": "dispatch.js",               // * entry point (JS file or executable)
+  "kind": "javascript",                 // execution kind (default: "javascript")
+  "instructions": "instructions.md",    // implements only — delivered to animas
+  "version": "1.11.3",                  // upstream version (semver)
+  "description": "Post commissions and trigger the manifest engine",
+  "repository": "https://github.com/nexus/dispatch",
+  "license": "MIT",
+  "nexusVersion": ">=0.1.0"             // compatible Nexus version range
+}
+```
+
+Only `entry` is required. All other fields are optional.
+
+There is no `name` field — the **directory name is the tool's identity**. After installation, the directory name (`dispatch/`, `my-engine/`) is the canonical name. During installation from npm, the directory name is derived from the package name (strip scope: `@nexus/dispatch` → `dispatch`) or specified with `--name`.
+
+### Kind
+
+The `kind` field tells the runtime how to execute the tool's entry point:
+
+| Kind | Entry point | How it runs | Default? |
+|------|-------------|-------------|----------|
+| `"javascript"` | `.js` file | `node <entry>` | Yes (if `kind` omitted) |
+| `"executable"` | Any executable | Invoked directly (must be `+x`) | No |
+
+This means the simplest possible tool is a `nexus-engine.json` and a shell script — no JavaScript required. For example, a minimal engine:
+
+```
+my-engine/
+  nexus-engine.json     →  { "entry": "run.sh", "kind": "executable" }
+  run.sh                →  #!/usr/bin/env bash ...
+```
+
+And a minimal implement:
+
+```
+my-tool/
+  nexus-implement.json  →  { "entry": "run.sh", "kind": "executable" }
+  instructions.md       →  How to use this tool
+  run.sh                →  #!/usr/bin/env bash ...
+```
+
+### `package.json` fallback
+
+If a `package.json` also exists in the package, the descriptor fields take precedence. Fields present only in `package.json` (e.g. `version`, `description`, `repository`) are used as fallbacks. This means:
+
+- An npm package can omit duplicated fields from the descriptor and let `package.json` provide them
+- A hand-built tool with no `package.json` puts everything in the descriptor
+- Either way, the installer resolves from the same merged view
+
+For `entry` specifically: if absent from the descriptor, the installer falls back to `package.json`'s `main` / `exports` / `bin`.
+
+---
+
+## On-disk layout
+
+Installed tools live in versioned **slot** directories:
+
+```
+guildhall/
+  nexus/                          ← framework-managed
+    implements/
+      dispatch/1.0.0/
+        nexus-implement.json
+        dispatch.js
+        instructions.md
+        package.json              ← optional, from upstream package
+        README.md                 ← optional
+      publish/1.0.0/
+      install-tool/1.0.0/
+      instantiate/1.0.0/
+    engines/
+      manifest/1.0.0/
+        nexus-engine.json
+        manifest.js
+        package.json              ← optional
+      worktree-setup/1.0.0/
+      ledger-migrate/1.0.0/
+  implements/                     ← guild-managed
+    my-tool/0.3.0/
+      nexus-implement.json
+      run.sh
+      instructions.md
+  engines/                        ← guild-managed
+    my-engine/1.0.0/
+      nexus-engine.json
+      run.sh
+```
+
+Installed directories are **pristine copies** of the source package — the installer never modifies their contents. All provenance metadata (where the tool came from, when it was installed) lives in `guild.json`, not in the installed files.
+
+Other files (`README.md`, `LICENSE`, `package.json`, source maps, etc.) are installed as-is alongside the descriptor and entry point. The entire package contents end up in the slot directory — no cherry-picking.
+
+---
+
+## guild.json registration
+
+A tool that exists on disk but is not registered in `guild.json` is invisible to the guild — the manifest engine won't resolve it, and animas can't use it. **Registration** is what makes a tool operational.
+
+Registration means adding (or updating) the tool's entry in `guild.json`'s `implements` or `engines` record:
+
+```json
+{
+  "implements": {
+    "dispatch": {
+      "source": "nexus",
+      "slot": "1.0.0",
+      "upstream": "@nexus/dispatch@1.0.0",
+      "installedAt": "2026-03-23T12:00:00Z"
+    },
+    "my-custom-tool": {
+      "source": "guild",
+      "slot": "0.3.0",
+      "upstream": null,
+      "installedAt": "2026-03-22T09:30:00Z"
+    }
+  },
+  "engines": {
+    "manifest": {
+      "source": "nexus",
+      "slot": "1.0.0",
+      "upstream": "@nexus/manifest@1.0.0",
+      "installedAt": "2026-03-23T12:00:00Z"
+    }
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `source` | `"nexus"` (framework-provided) or `"guild"` (guild-authored/installed) |
+| `slot` | Directory name under `{implements\|engines}/{name}/` |
+| `upstream` | npm package specifier the tool was installed from, or `null` for locally-built tools |
+| `installedAt` | ISO-8601 timestamp of installation |
+
+The manifest engine resolves tool paths from `source` + `slot`: `nexus` → `nexus/implements/{name}/{slot}/`, `guild` → `implements/{name}/{slot}/`.
+
+---
+
+## Version slots
+
+The **slot** is the name of the on-disk directory for a particular installation of a tool. It decouples the guild's operational versioning from upstream release cadence.
+
+### Slot naming
+
+When installing, the slot name is determined as follows:
+
+| Source | Slot name | Example |
+|--------|-----------|---------|
+| npm package | The installed package version | `@nexus/dispatch@1.11.3` → slot `1.11.3` |
+| Local directory or tarball with `version` in descriptor | The descriptor's `version` field | `{ "version": "0.3.0" }` → slot `0.3.0` |
+| Local directory or tarball without `version` | Must be specified with `--slot` | `install-tool ./my-tool --slot 0.1.0` |
+| Explicit override | Always wins | `install-tool @nexus/dispatch@1.11.3 --slot v1` |
+
+For npm packages, the default is clean — the upstream version *is* the slot name. For local sources without a version, requiring `--slot` avoids ambiguity.
+
+### Slot lifecycle
+
+- **New slot**: Installing a version that doesn't match an existing slot creates a new directory. Both old and new remain on disk; `guild.json` points at whichever is active.
+- **Overwrite**: Installing a version that matches an existing slot replaces it in place (e.g. reinstalling `1.11.3` after a rebuild).
+- **Rollback**: Point `guild.json`'s `slot` field back to the previous directory. The files are still there.
+
+---
+
+## Installation
+
+### The `install-tool` implement
+
+`install-tool` is a base implement provided by Nexus. It accepts a polymorphic **tool source** argument:
+
+| Input shape | Example | Behavior |
+|-------------|---------|----------|
+| npm specifier | `install-tool @nexus/dispatch@^2.0.0` | Fetch from registry, unpack to slot |
+| Bare name | `install-tool dispatch` | Shorthand for `@nexus/dispatch@latest` |
+| Local tarball | `install-tool ./dispatch-1.0.0.tgz` | Unpack, read descriptor |
+| Local directory | `install-tool ./path/to/tool` | Copy directory, read descriptor |
+
+Every path converges to the same core operation: "I have a directory with a descriptor. Validate it, place it in a slot, register it."
+
+The install process:
+
+1. Resolve the source to a local directory (fetch/unpack if needed)
+2. Find and validate the descriptor (`nexus-implement.json`, `nexus-engine.json`, `nexus-curriculum.json`, or `nexus-temperament.json`)
+3. Determine the tool name (from `--name`, or derived from package/directory name)
+4. Determine the slot name (from version, or `--slot` flag)
+5. Copy the entire directory to the appropriate location
+6. Register in `guild.json` (source, slot, upstream, timestamp, roles for implements)
+7. Commit to the guildhall
+
+Both the CLI (`nexus install-tool`) and the implement (wielded by animas) share the same core logic. The CLI adds operator niceties (interactive prompts, `--dry-run`); the implement provides the anima-facing interface.
+
+### Installation sources
+
+| Source | Example | How it resolves |
+|--------|---------|-----------------|
+| npm registry | `install-tool dispatch` | Fetches from npm, unpacks to slot |
+| Scoped / private | `install-tool @org/tool` | Same, with registry auth |
+| Local tarball | `install-tool ./tool.tgz` | Unpacks tarball, reads descriptor |
+| Local directory | `install-tool ./path/` | Copies directory, reads descriptor |
+| In-repo build | *(no install step)* | Tool lives directly in `implements/` or `engines/` |
+
+### Framework tools: embedded in the CLI
+
+Base tools provided by Nexus ship embedded in the CLI package itself. `nexus init` copies them to `nexus/implements/` and `nexus/engines/`. `nexus repair` restores them from the embedded copies. No network required. Framework tools are always version-coherent with the CLI.
+
+---
+
+## Ad-hoc / in-repo development
+
+Guild-authored tools can live directly in `implements/` or `engines/` without a publishing step. A tool directory with a valid descriptor is installable as-is. For development, the tool can have a `src/` subdirectory with TypeScript source and a build script — the built artifact goes into the versioned directory.
+
+When ready to share, `npm pack` from the tool directory creates a `.tgz` that any guild can install. Since the descriptor is the contract, sharing works regardless of whether the tool was originally built with npm in mind.
+
+### Animas building tools
+
+An anima commissioned to build a new implement works in a workshop worktree like any other commission. When the commission completes:
+
+1. Leadership reviews the output
+2. `install-tool ./path/to/built-tool --slot 0.1.0` installs it into the guild
+3. The tool is now operational — registered in `guild.json`, resolved by the manifest engine
+
+Since `install-tool` is itself an implement, animas with appropriate access can install tools directly — enabling the guild to extend its own toolkit autonomously.
+
+---
+
+## Curricula & Temperaments
+
+Curricula and temperaments follow the same packaging model as implements and engines — a descriptor file, content, versioned slot directories, and registration in `guild.json`. The key difference: they are not executed, they are **read as text** and delivered to animas as part of their composition.
+
+### Descriptors
+
+- **`nexus-curriculum.json`** — for curricula
+- **`nexus-temperament.json`** — for temperaments
+
+Schema (required fields marked with `*`):
+
+```json
+{
+  "content": "curriculum.md",    // * path to the content file
+  "version": "2.0.0",            // upstream version (semver)
+  "description": "Craft-focused builder — TDD, clean code, iterative delivery"
+}
+```
+
+Only `content` is required — the path to the markdown file within the package. As with tools, the **directory name is identity** (no `name` field), and `version`/`description` fall back to `package.json` if present.
+
+### On-disk layout
+
+```
+training/
+  curricula/
+    artificer-craft/2.0.0/
+      nexus-curriculum.json
+      curriculum.md
+    guild-standards/1.0.0/
+      nexus-curriculum.json
+      curriculum.md
+  temperaments/
+    stoic/1.0.0/
+      nexus-temperament.json
+      temperament.md
+    candid/1.0.0/
+      nexus-temperament.json
+      temperament.md
+```
+
+### guild.json registration
+
+Curricula and temperaments have simpler registry entries than implements — no `source` (there is no framework/guild split for training content) and no `roles` (they are composition, not access control):
+
+```json
+{
+  "curricula": {
+    "artificer-craft": {
+      "slot": "2.0.0",
+      "upstream": "@nexus/curriculum-artificer@2.0.0",
+      "installedAt": "2026-03-23T12:00:00Z"
+    },
+    "guild-standards": {
+      "slot": "1.0.0",
+      "upstream": null,
+      "installedAt": "2026-03-23T10:00:00Z"
+    }
+  },
+  "temperaments": {
+    "stoic": {
+      "slot": "1.0.0",
+      "upstream": null,
+      "installedAt": "2026-03-23T10:00:00Z"
+    }
+  }
+}
+```
+
+The registry answers "what training content is available in this guild." It does *not* assign curricula to roles — that's the wrong layer. Curricula and temperaments are assigned to individual **animas** at instantiation time (recorded in the Ledger). The `instantiate` implement picks from the available set.
+
+### How they differ from tools
+
+| | Implements/Engines | Curricula/Temperaments |
+|---|---|---|
+| Executed? | Yes (`kind`: javascript or executable) | No — read as text |
+| `roles` gating? | Yes (implements only) | No — assigned per-anima |
+| `source` field? | Yes (nexus vs guild) | No |
+| Instructions doc? | Yes (implements only) | N/A — they *are* the instructions |
+| Installed by | `install-tool` | `install-tool` (same command) |
+| Registered in | `guild.json` implements/engines | `guild.json` curricula/temperaments |
+| Consumed by | Animas at runtime | Manifest engine at assembly time |

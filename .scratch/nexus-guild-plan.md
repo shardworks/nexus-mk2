@@ -1,6 +1,6 @@
 # The Nexus Guild — Organization and Migration Plan
 
-This document describes the specific organizational decisions and migration plan for Sean's guild, built on the Nexus framework. For the universal system architecture, see `docs/nexus-architecture.md`.
+This document describes the specific organizational decisions and migration plan for Sean's guild, built on the Nexus framework. For the universal system architecture, see `docs/architecture/overview.md`.
 
 ---
 
