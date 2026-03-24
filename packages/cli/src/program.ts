@@ -9,6 +9,9 @@ import { makeInstantiateCommand } from './commands/instantiate.ts';
 import { makeManifestCommand } from './commands/manifest.ts';
 import { makeStatusCommand } from './commands/status.ts';
 import { makeConsultCommand } from './commands/consult.ts';
+import { makeSignalCommand } from './commands/signal.ts';
+import { makeClockCommand } from './commands/clock.ts';
+import { makeWorkshopCommand } from './commands/workshop.ts';
 
 export const program = createCommand('nsg')
   .description('Nexus Mk 2.1 — experimental multi-agent AI system')
@@ -20,6 +23,10 @@ program.addCommand(makeInitCommand());
 program.addCommand(makeConsultCommand());
 program.addCommand(makeDispatchCommand());
 program.addCommand(makeStatusCommand());
+program.addCommand(makeSignalCommand());
+program.addCommand(makeClockCommand());
+
+program.addCommand(makeWorkshopCommand());
 
 // ── nsg tool [install|remove|rehydrate] ─────────────────────────────────
 const toolGroup = createCommand('tool')

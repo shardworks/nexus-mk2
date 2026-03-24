@@ -29,6 +29,28 @@ export interface ToolEntry {
   bundle?: string;
 }
 
+/** A custom event declaration in guild.json clockworks.events. */
+export interface EventDeclaration {
+  /** Human-readable description of what this event means. */
+  description?: string;
+  /** Optional payload schema hint (not enforced in Phase 1). */
+  schema?: Record<string, string>;
+}
+
+/** A standing order — a registered response to an event. */
+export type StandingOrder =
+  | { on: string; run: string }
+  | { on: string; summon: string }
+  | { on: string; brief: string };
+
+/** The clockworks configuration block in guild.json. */
+export interface ClockworksConfig {
+  /** Custom event declarations. */
+  events?: Record<string, EventDeclaration>;
+  /** Standing orders — event → action mappings. */
+  standingOrders?: StandingOrder[];
+}
+
 /** A reference to a curriculum or temperament registered in guild.json. */
 export interface TrainingEntry {
   /** Upstream package identifier, or null for locally-authored content. */
@@ -39,6 +61,14 @@ export interface TrainingEntry {
   bundle?: string;
 }
 
+/** A registered workshop — a repository where the guild does its work. */
+export interface WorkshopEntry {
+  /** Git remote URL (the clone source). */
+  remoteUrl: string;
+  /** ISO-8601 timestamp of when the workshop was added. */
+  addedAt: string;
+}
+
 /** The guild's central configuration file shape (`guild.json`). */
 export interface GuildConfig {
   /** Guild name — used as the guildhall npm package name. */
@@ -47,8 +77,8 @@ export interface GuildConfig {
   nexus: string;
   /** Default model for anima sessions. */
   model: string;
-  /** Registered workshop names. */
-  workshops: string[];
+  /** Registered workshops indexed by name. */
+  workshops: Record<string, WorkshopEntry>;
   /** Guild roles — structural positions that animas fill. */
   roles: Record<string, RoleDefinition>;
   /** Tools available to all animas regardless of role. */
@@ -61,6 +91,8 @@ export interface GuildConfig {
   curricula: Record<string, TrainingEntry>;
   /** Available temperaments indexed by name. */
   temperaments: Record<string, TrainingEntry>;
+  /** Clockworks configuration — events, standing orders. */
+  clockworks?: ClockworksConfig;
 }
 
 /**
@@ -72,7 +104,7 @@ export function createInitialGuildConfig(name: string, nexusVersion: string, mod
     name,
     nexus: nexusVersion,
     model,
-    workshops: [],
+    workshops: {},
     roles: {},
     baseTools: [],
     tools: {},

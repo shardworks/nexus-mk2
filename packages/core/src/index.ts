@@ -11,12 +11,42 @@ export {
   tool,
 } from './tool.ts';
 
+export {
+  type GuildEvent,
+  type EngineContext,
+  type EngineDefinition,
+  engine,
+  isClockworkEngine,
+} from './engine.ts';
+
+export {
+  signalEvent,
+  validateCustomEvent,
+  isFrameworkEvent,
+  readPendingEvents,
+  readEvent,
+  markEventProcessed,
+  recordDispatch,
+} from './events.ts';
+
+export {
+  type TickResult,
+  type DispatchSummary,
+  type ClockRunResult,
+  clockTick,
+  clockRun,
+} from './clockworks.ts';
+
 export { createLedger } from './ledger.ts';
 export {
   type GuildConfig,
   type RoleDefinition,
   type ToolEntry,
   type TrainingEntry,
+  type WorkshopEntry,
+  type EventDeclaration,
+  type StandingOrder,
+  type ClockworksConfig,
   createInitialGuildConfig,
   guildConfigPath,
   readGuildConfig,
@@ -68,6 +98,19 @@ export {
   type RehydrateResult,
   rehydrate,
 } from './rehydrate.ts';
+export {
+  type AddWorkshopOptions,
+  type AddWorkshopResult,
+  type RemoveWorkshopOptions,
+  type WorkshopInfo,
+  type CreateWorkshopOptions,
+  addWorkshop,
+  removeWorkshop,
+  listWorkshops,
+  createWorkshop,
+  checkGhAuth,
+  deriveWorkshopName,
+} from './workshop.ts';
 export {
   type Precondition,
   type CommandPrecondition,

@@ -13,7 +13,7 @@ describe('createInitialGuildConfig', () => {
 
   it('has empty registries', () => {
     const config = createInitialGuildConfig('test-guild', '0.1.0', 'test-model');
-    assert.deepEqual(config.workshops, []);
+    assert.deepEqual(config.workshops, {});
     assert.deepEqual(config.roles, {});
     assert.deepEqual(config.baseTools, []);
     assert.deepEqual(config.tools, {});
