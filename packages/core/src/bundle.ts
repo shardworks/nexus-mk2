@@ -212,7 +212,7 @@ export function readBundleManifest(bundleDir: string): BundleManifest {
  * Install an inline content artifact (curriculum or temperament) from a
  * path relative to the bundle directory.
  *
- * Copies the full directory to the guild slot and registers in guild.json.
+ * Copies the full directory to the guild and registers in guild.json.
  */
 function installInlineContent(
   home: string,
@@ -235,14 +235,10 @@ function installInlineContent(
   const descriptor = readJson(descriptorPath);
 
   const name = entry.name || path.basename(contentDir);
-  const slot = descriptor['version'] as string;
-  if (!slot) {
-    throw new Error(`No version in ${descriptorPath}`);
-  }
 
-  // Copy full directory to guild slot
+  // Copy full directory to guild
   const parentDir = DIR_MAP[category]!;
-  const targetDir = path.join(home, parentDir, name, slot);
+  const targetDir = path.join(home, parentDir, name);
   if (fs.existsSync(targetDir)) {
     fs.rmSync(targetDir, { recursive: true });
   }
@@ -252,7 +248,6 @@ function installInlineContent(
   // Register in guild.json
   const config = readGuildConfig(home);
   config[category][name] = {
-    slot,
     upstream: null,
     installedAt: new Date().toISOString(),
     ...(bundleSource ? { bundle: bundleSource } : {}),
@@ -455,16 +450,12 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
     }
     const descriptor = readJson(descriptorPath);
 
-    // Determine artifact name and slot
+    // Determine artifact name
     const name = entry.name || packageName.replace(/^@[^/]+\//, '');
-    const slot = descriptor['version'] as string;
-    if (!slot) {
-      throw new Error(`No version in ${descriptorPath}`);
-    }
 
-    // Copy metadata to guild slot
+    // Copy metadata to guild directory
     const parentDir = DIR_MAP[category]!;
-    const targetDir = path.join(home, parentDir, name, slot);
+    const targetDir = path.join(home, parentDir, name);
     if (fs.existsSync(targetDir)) {
       fs.rmSync(targetDir, { recursive: true });
     }
@@ -497,7 +488,6 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
 
     if (category === 'implements' || category === 'engines') {
       config[category][name] = {
-        slot,
         upstream: `${packageName}@${descriptor['version'] as string}`,
         installedAt: now,
         package: packageName,
@@ -512,7 +502,6 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
       }
     } else {
       config[category][name] = {
-        slot,
         upstream: `${packageName}@${descriptor['version'] as string}`,
         installedAt: now,
         ...(bundleSource ? { bundle: bundleSource } : {}),

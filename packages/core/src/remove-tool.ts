@@ -23,7 +23,6 @@ export interface RemoveToolOptions {
 export interface RemoveResult {
   category: 'implements' | 'engines' | 'curricula' | 'temperaments';
   name: string;
-  slot: string;
   removedFrom: string;
 }
 
@@ -65,7 +64,6 @@ export function removeTool(opts: RemoveToolOptions): RemoveResult {
   }
 
   const entry = config[foundCategory][name];
-  const slot = 'slot' in entry ? entry.slot : '';
 
   // Clean up npm-installed packages from node_modules
   const packageName = getPackageName(entry as unknown as Record<string, unknown>);
@@ -97,17 +95,12 @@ export function removeTool(opts: RemoveToolOptions): RemoveResult {
     }
   }
 
-  // Remove on-disk directory (the specific slot)
+  // Remove on-disk directory
   const parentDir = DIR_MAP[foundCategory];
-  const toolDir = path.join(home, parentDir, name, slot);
-  const toolParent = path.join(home, parentDir, name);
+  const toolDir = path.join(home, parentDir, name);
 
   if (fs.existsSync(toolDir)) {
     fs.rmSync(toolDir, { recursive: true });
-  }
-  // Remove the parent name directory if now empty
-  if (fs.existsSync(toolParent) && fs.readdirSync(toolParent).length === 0) {
-    fs.rmdirSync(toolParent);
   }
 
   // Deregister from guild.json
@@ -135,5 +128,5 @@ export function removeTool(opts: RemoveToolOptions): RemoveResult {
   git(['add', '-A'], home);
   git(['commit', '-m', `Remove ${foundCategory.slice(0, -1)} ${name}`], home);
 
-  return { category: foundCategory, name, slot, removedFrom: toolDir };
+  return { category: foundCategory, name, removedFrom: toolDir };
 }

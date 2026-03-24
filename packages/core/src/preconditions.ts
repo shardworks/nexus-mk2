@@ -198,17 +198,16 @@ export function checkPreconditions(preconditions: Precondition[]): PreconditionC
 /**
  * Resolve the descriptor path for a tool registered in guild.json.
  *
- * Tools live at: `{home}/{categoryDir}/{name}/{slot}/{descriptorFile}`
+ * Tools live at: `{home}/{categoryDir}/{name}/{descriptorFile}`
  */
 function resolveDescriptorPath(
   home: string,
   name: string,
-  slot: string,
   category: 'implements' | 'engines',
 ): string {
   const categoryDir = category === 'implements' ? 'implements' : 'engines';
   const descriptorFile = category === 'implements' ? 'nexus-implement.json' : 'nexus-engine.json';
-  return path.join(home, categoryDir, name, slot, descriptorFile);
+  return path.join(home, categoryDir, name, descriptorFile);
 }
 
 /**
@@ -219,12 +218,12 @@ function resolveDescriptorPath(
  */
 export function checkAllPreconditions(
   home: string,
-  config: { implements: Record<string, { slot: string }>; engines: Record<string, { slot: string }> },
+  config: { implements: Record<string, unknown>; engines: Record<string, unknown> },
 ): ToolPreconditionResult[] {
   const results: ToolPreconditionResult[] = [];
 
-  for (const [name, entry] of Object.entries(config.implements)) {
-    const descriptorPath = resolveDescriptorPath(home, name, entry.slot, 'implements');
+  for (const name of Object.keys(config.implements)) {
+    const descriptorPath = resolveDescriptorPath(home, name, 'implements');
     const preconditions = readPreconditions(descriptorPath);
     const checks = checkPreconditions(preconditions);
     const failures = checks.filter(c => !c.passed).map(c => c.message!);
@@ -237,8 +236,8 @@ export function checkAllPreconditions(
     });
   }
 
-  for (const [name, entry] of Object.entries(config.engines)) {
-    const descriptorPath = resolveDescriptorPath(home, name, entry.slot, 'engines');
+  for (const name of Object.keys(config.engines)) {
+    const descriptorPath = resolveDescriptorPath(home, name, 'engines');
     const preconditions = readPreconditions(descriptorPath);
     const checks = checkPreconditions(preconditions);
     const failures = checks.filter(c => !c.passed).map(c => c.message!);

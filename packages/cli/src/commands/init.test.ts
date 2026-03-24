@@ -159,7 +159,7 @@ describe('installBundle with starter kit', () => {
     for (const name of expectedImplements) {
       assert.ok(config.implements[name], `${name} not registered`);
       assert.ok(config.implements[name].package, `${name} missing package field`);
-      const implDir = path.join(home, 'implements', name, config.implements[name].slot);
+      const implDir = path.join(home, 'implements', name);
       assert.ok(fs.existsSync(path.join(implDir, 'nexus-implement.json')), `${name} descriptor missing`);
     }
 
@@ -167,7 +167,7 @@ describe('installBundle with starter kit', () => {
     const expectedEngines = ['manifest', 'mcp-server', 'worktree-setup', 'ledger-migrate'];
     for (const name of expectedEngines) {
       assert.ok(config.engines[name], `${name} not registered`);
-      const engDir = path.join(home, 'engines', name, config.engines[name].slot);
+      const engDir = path.join(home, 'engines', name);
       assert.ok(fs.existsSync(path.join(engDir, 'nexus-engine.json')), `${name} descriptor missing`);
     }
 
@@ -175,11 +175,11 @@ describe('installBundle with starter kit', () => {
     assert.ok(config.curricula['guild-operations'], 'guild-operations curriculum not registered');
     assert.ok(config.temperaments['guide'], 'guide temperament not registered');
     assert.ok(
-      fs.existsSync(path.join(home, 'training', 'curricula', 'guild-operations', '0.1.0', 'content.md')),
+      fs.existsSync(path.join(home, 'training', 'curricula', 'guild-operations', 'content.md')),
       'curriculum content missing',
     );
     assert.ok(
-      fs.existsSync(path.join(home, 'training', 'temperaments', 'guide', '0.1.0', 'content.md')),
+      fs.existsSync(path.join(home, 'training', 'temperaments', 'guide', 'content.md')),
       'temperament content missing',
     );
 

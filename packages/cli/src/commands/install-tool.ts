@@ -32,10 +32,9 @@ export function makeInstallToolCommand() {
     .description('Install an implement, engine, curriculum, temperament, or bundle into the guild')
     .argument('<source>', 'Local directory, npm package specifier, tarball path, or bundle')
     .option('--name <name>', 'Override the tool name (defaults to package name or directory name)')
-    .option('--slot <slot>', 'Override the version slot (defaults to version from descriptor)')
     .option('--roles <roles>', 'Assign to specific roles instead of baseImplements (comma-separated)')
     .option('--link', 'Symlink local directory instead of copying (for active development)')
-    .action((source: string, options: { name?: string; slot?: string; roles?: string; link?: boolean }, cmd) => {
+    .action((source: string, options: { name?: string; roles?: string; link?: boolean }, cmd) => {
       const home = resolveHome(cmd);
       const roles = options.roles?.split(',').map(r => r.trim()).filter(Boolean);
 
@@ -60,12 +59,11 @@ export function makeInstallToolCommand() {
           home,
           source,
           name: options.name,
-          slot: options.slot,
           roles,
           link: options.link,
         });
 
-        console.log(`Installed ${result.category.slice(0, -1)} "${result.name}" at slot ${result.slot}`);
+        console.log(`Installed ${result.category.slice(0, -1)} "${result.name}"`);
         if (result.warnings.length > 0) {
           console.log(`\n  ⚠ Precondition warnings (tool installed but may not be operational):`);
           for (const w of result.warnings) {

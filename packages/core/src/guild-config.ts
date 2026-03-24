@@ -19,11 +19,9 @@ export interface RoleDefinition {
 
 /** A reference to an implement or engine registered in guild.json. */
 export interface ToolEntry {
-  /** Guild-local version slot — the directory name under {implements|engines}/{name}/. */
-  slot: string;
   /** Upstream package identifier, e.g. "@shardworks/implement-dispatch@1.11.3". Null for locally-built tools. */
   upstream: string | null;
-  /** ISO-8601 timestamp of when the tool was installed into this slot. */
+  /** ISO-8601 timestamp of when the tool was installed. */
   installedAt: string;
   /** npm package name for runtime resolution via node_modules. Omitted for script-only tools. */
   package?: string;
@@ -33,11 +31,9 @@ export interface ToolEntry {
 
 /** A reference to a curriculum or temperament registered in guild.json. */
 export interface TrainingEntry {
-  /** Guild-local version slot — the directory name under training/{curricula|temperaments}/{name}/. */
-  slot: string;
   /** Upstream package identifier, or null for locally-authored content. */
   upstream: string | null;
-  /** ISO-8601 timestamp of when the content was installed into this slot. */
+  /** ISO-8601 timestamp of when the content was installed. */
   installedAt: string;
   /** Bundle that delivered this artifact, e.g. "@shardworks/guild-starter-kit@0.1.0". */
   bundle?: string;

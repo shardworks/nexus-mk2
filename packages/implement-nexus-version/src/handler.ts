@@ -11,7 +11,7 @@ import { z } from 'zod';
 export default implement({
   description: 'Report version information for the guild\'s Nexus installation and base implements',
   params: {
-    verbose: z.boolean().optional().describe('Include full guild.json tool entries with slots and timestamps'),
+    verbose: z.boolean().optional().describe('Include full guild.json tool entries with timestamps'),
   },
   handler: (params, { home }) => {
     const config = readGuildConfig(home);
@@ -20,21 +20,15 @@ export default implement({
     const isBase = (entry: { bundle?: string }) =>
       entry.bundle != null && entry.bundle.startsWith('@shardworks/');
 
-    // Collect base (framework) implements
-    const baseImplements: Record<string, string> = {};
-    for (const [name, entry] of Object.entries(config.implements)) {
-      if (isBase(entry)) {
-        baseImplements[name] = entry.slot;
-      }
-    }
+    // Collect base (framework) implement names
+    const baseImplements = Object.keys(config.implements).filter(
+      name => isBase(config.implements[name]),
+    );
 
-    // Collect base (framework) engines
-    const baseEngines: Record<string, string> = {};
-    for (const [name, entry] of Object.entries(config.engines)) {
-      if (isBase(entry)) {
-        baseEngines[name] = entry.slot;
-      }
-    }
+    // Collect base (framework) engine names
+    const baseEngines = Object.keys(config.engines).filter(
+      name => isBase(config.engines[name]),
+    );
 
     if (params.verbose) {
       return {

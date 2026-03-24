@@ -40,7 +40,6 @@ export default implement({
   params: {
     source: z.string().describe('npm package specifier, git URL, workshop ref, tarball path, or bundle specifier'),
     name: z.string().optional().describe('Override the tool name (defaults to package name or directory name)'),
-    slot: z.string().optional().describe('Override the version slot (defaults to version from descriptor)'),
     roles: z.array(z.string()).optional().describe('Roles for implement access gating'),
     link: z.boolean().optional().describe('Symlink local directory instead of copying (for active development)'),
   },

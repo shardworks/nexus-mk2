@@ -84,17 +84,17 @@ describe('installTool (registry via npm-local)', () => {
     // Package exists in guild root node_modules
     assert.ok(fs.existsSync(path.join(home, 'node_modules', 'test-npm-tool', 'handler.js')));
 
-    // Metadata copied to guild slot
-    const slotDir = path.join(home, 'implements', 'test-npm-tool', '1.0.0');
-    assert.ok(fs.existsSync(path.join(slotDir, 'nexus-implement.json')));
-    assert.ok(fs.existsSync(path.join(slotDir, 'instructions.md')));
+    // Metadata copied to guild directory
+    const implDir = path.join(home, 'implements', 'test-npm-tool');
+    assert.ok(fs.existsSync(path.join(implDir, 'nexus-implement.json')));
+    assert.ok(fs.existsSync(path.join(implDir, 'instructions.md')));
 
-    // Slot descriptor is pristine (no package field injected)
-    const descriptor = JSON.parse(fs.readFileSync(path.join(slotDir, 'nexus-implement.json'), 'utf-8'));
+    // Descriptor is pristine (no package field injected)
+    const descriptor = JSON.parse(fs.readFileSync(path.join(implDir, 'nexus-implement.json'), 'utf-8'));
     assert.equal(descriptor.package, undefined);
 
-    // Handler source NOT in slot (only metadata)
-    assert.ok(!fs.existsSync(path.join(slotDir, 'handler.js')));
+    // Handler source NOT in tool dir (only metadata)
+    assert.ok(!fs.existsSync(path.join(implDir, 'handler.js')));
 
     // guild.json has upstream and package
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
@@ -117,9 +117,9 @@ describe('installTool (registry via npm-local)', () => {
     const target = fs.readlinkSync(linkPath);
     assert.equal(target, toolDir);
 
-    // Metadata in slot
-    const slotDir = path.join(home, 'implements', 'linked-tool', '1.0.0');
-    assert.ok(fs.existsSync(path.join(slotDir, 'nexus-implement.json')));
+    // Metadata in tool dir
+    const implDir = path.join(home, 'implements', 'linked-tool');
+    assert.ok(fs.existsSync(path.join(implDir, 'nexus-implement.json')));
 
     // guild.json upstream is null for linked tools
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
@@ -181,7 +181,7 @@ describe('installTool (registry via npm-local)', () => {
     installTool({ home, source: toolDir, link: true });
 
     const log = execFileSync('git', ['log', '--oneline', '-1'], { cwd: home, encoding: 'utf-8' });
-    assert.ok(log.includes('Install implement committed-tool@1.0.0'));
+    assert.ok(log.includes('Install implement committed-tool'));
   });
 });
 
@@ -199,41 +199,41 @@ describe('installTool tarball', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('installs tarball with full source in slot', () => {
+  it('installs tarball with full source in tool directory', () => {
     // Create a minimal npm package and pack it
-    const toolDir = path.join(tmpDir, 'tarball-tool');
-    fs.mkdirSync(toolDir, { recursive: true });
-    fs.writeFileSync(path.join(toolDir, 'package.json'), JSON.stringify({
+    const srcDir = path.join(tmpDir, 'tarball-tool');
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.writeFileSync(path.join(srcDir, 'package.json'), JSON.stringify({
       name: 'tarball-tool',
       version: '1.0.0',
       type: 'module',
     }));
-    fs.writeFileSync(path.join(toolDir, 'nexus-implement.json'), JSON.stringify({
+    fs.writeFileSync(path.join(srcDir, 'nexus-implement.json'), JSON.stringify({
       entry: 'handler.js',
       version: '1.0.0',
       description: 'Tarball test',
       instructions: 'instructions.md',
     }));
-    fs.writeFileSync(path.join(toolDir, 'handler.js'), 'export default {};');
-    fs.writeFileSync(path.join(toolDir, 'instructions.md'), '# Tarball\nUse it.');
+    fs.writeFileSync(path.join(srcDir, 'handler.js'), 'export default {};');
+    fs.writeFileSync(path.join(srcDir, 'instructions.md'), '# Tarball\nUse it.');
 
     // Create tarball
     const packOutput = execFileSync('npm', ['pack'], {
-      cwd: toolDir,
+      cwd: srcDir,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
-    const tarballPath = path.join(toolDir, packOutput);
+    const tarballPath = path.join(srcDir, packOutput);
 
     const result = installTool({ home, source: tarballPath });
 
     assert.equal(result.sourceKind, 'tarball');
     assert.equal(result.name, 'tarball-tool');
 
-    // Full source is in the slot (not just metadata)
-    const slotDir = path.join(home, 'implements', 'tarball-tool', '1.0.0');
-    assert.ok(fs.existsSync(path.join(slotDir, 'handler.js')), 'handler should be in slot');
-    assert.ok(fs.existsSync(path.join(slotDir, 'package.json')), 'package.json should be in slot');
+    // Full source is in the tool dir (not just metadata)
+    const implDir = path.join(home, 'implements', 'tarball-tool');
+    assert.ok(fs.existsSync(path.join(implDir, 'handler.js')), 'handler should be in tool dir');
+    assert.ok(fs.existsSync(path.join(implDir, 'package.json')), 'package.json should be in tool dir');
 
     // guild.json upstream is null for tarballs
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));

@@ -3,8 +3,8 @@
  *
  * After a fresh clone, the guild's node_modules is empty. This function:
  * 1. Runs `npm install` to resolve registry/git-url deps from package.json
- * 2. For each tool with full source in its slot (workshop/tarball), runs
- *    `npm install --no-save <slot-path>` to install from the tracked source
+ * 2. For each tool with full source on disk (workshop/tarball), runs
+ *    `npm install --no-save <tool-path>` to install from the tracked source
  * 3. Reports any linked tools that need to be re-linked manually
  */
 import fs from 'node:fs';
@@ -24,7 +24,7 @@ const DIR_MAP: Record<string, string> = {
 export interface RehydrateResult {
   /** Tools restored from package.json (registry/git-url). */
   fromPackageJson: number;
-  /** Tools restored from slot source (workshop/tarball). */
+  /** Tools restored from on-disk source (workshop/tarball). */
   fromSlotSource: string[];
   /** Tools that need manual re-linking. */
   needsRelink: string[];
@@ -53,7 +53,7 @@ export function rehydrate(home: string): RehydrateResult {
     }
   }
 
-  // 2. Scan guild.json for tools that have full source in their slot
+  // 2. Scan guild.json for tools that have full source on disk
   const config = readGuildConfig(home);
 
   for (const [category, registry] of Object.entries({
@@ -64,16 +64,16 @@ export function rehydrate(home: string): RehydrateResult {
       const toolEntry = entry as ToolEntry;
       const upstream = toolEntry.upstream;
       const parentDir = DIR_MAP[category]!;
-      const slotDir = path.join(home, parentDir, name, toolEntry.slot);
+      const toolDir = path.join(home, parentDir, name);
 
-      // Check if this is a workshop/tarball tool with full source in slot
+      // Check if this is a workshop/tarball tool with full source on disk
       if (upstream === null || (upstream && upstream.startsWith('workshop:'))) {
-        // Check if slot has a package.json (indicating full source)
-        const slotPkgPath = path.join(slotDir, 'package.json');
-        if (fs.existsSync(slotPkgPath)) {
-          // Install from slot source
+        // Check if tool dir has a package.json (indicating full source)
+        const toolPkgPath = path.join(toolDir, 'package.json');
+        if (fs.existsSync(toolPkgPath)) {
+          // Install from tool source
           try {
-            execFileSync('npm', ['install', '--no-save', slotDir], {
+            execFileSync('npm', ['install', '--no-save', toolDir], {
               cwd: home,
               stdio: 'pipe',
             });
@@ -84,10 +84,10 @@ export function rehydrate(home: string): RehydrateResult {
         }
       }
 
-      // Check if this was a linked tool (no upstream, no full source in slot,
+      // Check if this was a linked tool (no upstream, no full source,
       // but has a package field in the descriptor)
       if (upstream === null) {
-        const hasFullSource = fs.existsSync(path.join(slotDir, 'package.json'));
+        const hasFullSource = fs.existsSync(path.join(toolDir, 'package.json'));
         if (!hasFullSource) {
           // This was likely a linked tool — needs manual re-linking
           result.needsRelink.push(name);

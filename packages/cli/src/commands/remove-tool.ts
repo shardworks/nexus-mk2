@@ -22,6 +22,6 @@ export function makeRemoveToolCommand() {
       }
 
       const result = removeTool({ home, name, category });
-      console.log(`Removed ${result.category.slice(0, -1)} "${result.name}" (was at slot ${result.slot})`);
+      console.log(`Removed ${result.category.slice(0, -1)} "${result.name}"`);
     });
 }

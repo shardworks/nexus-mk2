@@ -58,8 +58,6 @@ export interface InstallToolOptions {
   source: string;
   /** Override the tool name (defaults to package name or directory basename). */
   name?: string;
-  /** Override the version slot. */
-  slot?: string;
   /**
    * For implements: which roles should have access. If specified, adds the
    * implement to these roles' implement lists. If omitted, adds to baseImplements.
@@ -81,7 +79,6 @@ export interface InstallToolOptions {
 export interface InstallResult {
   category: 'implements' | 'engines' | 'curricula' | 'temperaments';
   name: string;
-  slot: string;
   installedTo: string;
   sourceKind: SourceKind;
   /** Precondition warnings — unmet environment requirements. Tool is still installed. */
@@ -146,9 +143,9 @@ function copyDir(src: string, dest: string): void {
 
 /**
  * Copy only the metadata files (descriptor + instructions) from a source
- * directory into the guild slot. This is used for npm-installed tools
- * where the runtime code lives in node_modules but the metadata needs to
- * be git-tracked in the guild.
+ * directory into the guild tool directory. This is used for npm-installed
+ * tools where the runtime code lives in node_modules but the metadata
+ * needs to be git-tracked in the guild.
  */
 function copyMetadata(sourceDir: string, targetDir: string, descriptorFile: string, descriptor: Record<string, unknown>): void {
   fs.mkdirSync(targetDir, { recursive: true });
@@ -355,12 +352,12 @@ function installViaLink(
  * Supports five source types:
  * - **Registry** — npm package specifier, fully durable via package.json
  * - **Git URL** — `git+https://...`, fully durable via package.json
- * - **Workshop** — `workshop:name#ref`, durable within the guild via full source in slot
- * - **Tarball** — `.tgz` file, durable via full source in slot
+ * - **Workshop** — `workshop:name#ref`, durable within the guild via full source on disk
+ * - **Tarball** — `.tgz` file, durable via full source on disk
  * - **Link** — symlinked local dir (dev mode), NOT durable
  *
  * For npm-installed tools, runtime code lives in node_modules. Metadata
- * (descriptor + instructions) is copied to the guild slot for git tracking.
+ * (descriptor + instructions) is copied to the tool directory for git tracking.
  * The `package` field in guild.json tells the manifest engine to resolve by package name.
  */
 export function installTool(opts: InstallToolOptions): InstallResult {
@@ -411,7 +408,7 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     copyFullSource = true;
     upstream = source; // Store the original workshop:name#ref specifier
   } else {
-    // ── Tarball: npm install --no-save, full source to slot ───────────
+    // ── Tarball: npm install --no-save, full source to tool dir ────────
     const resolvedSource = path.resolve(source);
     const result = installViaNpmDetect(home, resolvedSource, false);
     descriptorFile = result.descriptorFile;
@@ -433,22 +430,12 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     throw new Error('Could not determine tool name. Use --name to specify one.');
   }
 
-  // Resolve slot: --slot flag > descriptor version > package.json version > error
-  const version = (descriptor['version'] as string | undefined)
-    || (pkg['version'] as string | undefined);
-  const slot = opts.slot || version;
-  if (!slot) {
-    throw new Error(
-      'No version found in descriptor or package.json. Use --slot to specify a version slot.',
-    );
-  }
-
   // Determine target directory for metadata/files in the guild.
   const parentDir = DIR_MAP[category]!;
-  const targetDir = path.join(home, parentDir, name, slot);
+  const targetDir = path.join(home, parentDir, name);
 
   if (isNpmInstalled && copyFullSource) {
-    // Workshop/tarball: copy full source to slot for durability
+    // Workshop/tarball: copy full source to tool dir for durability
     const pkgSourceDir = resolveInstalledPackage(home, packageName!);
 
     if (fs.existsSync(targetDir)) {
@@ -456,7 +443,7 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     }
     copyDir(pkgSourceDir, targetDir);
   } else if (isNpmInstalled) {
-    // Registry/git-url/link: copy only metadata to slot
+    // Registry/git-url/link: copy only metadata to tool dir
     const pkgSourceDir = sourceKind === 'link'
       ? path.resolve(source)
       : resolveInstalledPackage(home, packageName!);
@@ -473,7 +460,6 @@ export function installTool(opts: InstallToolOptions): InstallResult {
 
   if (category === 'implements' || category === 'engines') {
     const entry: ToolEntry = {
-      slot,
       upstream,
       installedAt: now,
     };
@@ -506,7 +492,6 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     }
   } else {
     const entry: TrainingEntry = {
-      slot,
       upstream,
       installedAt: now,
     };
@@ -521,7 +506,7 @@ export function installTool(opts: InstallToolOptions): InstallResult {
   // Commit (unless suppressed -- e.g. during bootstrap)
   if (commit) {
     git(['add', '-A'], home);
-    git(['commit', '-m', `Install ${category.slice(0, -1)} ${name}@${slot}`], home);
+    git(['commit', '-m', `Install ${category.slice(0, -1)} ${name}`], home);
   }
 
   // Check preconditions for implements and engines — warn but don't fail
@@ -537,7 +522,7 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     }
   }
 
-  return { category, name, slot, installedTo: targetDir, sourceKind, warnings };
+  return { category, name, installedTo: targetDir, sourceKind, warnings };
 }
 
 // ── Workshop source parsing ─────────────────────────────────────────────

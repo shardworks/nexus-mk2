@@ -160,12 +160,12 @@ The guild's central configuration file. Contains:
 - **Nexus version** — the installed framework version
 - **Default model** — the model used for anima sessions unless overridden. Model resolution is designed to be flexible — future layers (per-role, per-curriculum, per-anima, per-commission) can be added as the system matures. For now, only the guild-wide default exists.
 - **Workshop registry** — list of registered workshops with their repo URLs.
-- **Active implements** — which implements are available, at what slot, their source (`nexus` or `guild`), installation provenance, and role-gating.
-- **Active engines** — which engines are available, at what slot, their source, and installation provenance.
-- **Curricula** — which curricula are available, at what slot, with installation provenance.
-- **Temperaments** — which temperaments are available, at what slot, with installation provenance.
+- **Active implements** — which implements are available, their installation provenance, and package info.
+- **Active engines** — which engines are available, their provenance, and package info.
+- **Curricula** — which curricula are available, with installation provenance.
+- **Temperaments** — which temperaments are available, with installation provenance.
 
-`guild.json` is the source of truth for "what's installed and what version is active." The filesystem holds the actual artifacts; `guild.json` is the index.
+`guild.json` is the source of truth for "what's installed." The filesystem holds the actual artifacts; `guild.json` is the index.
 
 ---
 
@@ -178,11 +178,10 @@ Authored artifacts, git-managed, meaningful as text:
 - **Guild configuration** — `guild.json`
 - **Codex, all-members** — `codex/all.md` — included in every anima's instructions
 - **Codex, per-role** — `codex/roles/artificer.md` etc — included only for animas that hold the matching role
-- **Curricula** — `training/curricula/artificer-craft/2.0.0/` — contains `nexus-curriculum.json` and content markdown. Immutable per version slot, committed to git.
-- **Temperaments** — `training/temperaments/stoic/1.0.0/` — same pattern as curricula, with `nexus-temperament.json`.
-- **Guild implements** — `implements/foo/1.0.0/` — contains `nexus-implement.json`, entry point, `instructions.md`, and any other files from the source package. Immutable per version slot, committed to git.
-- **Guild engines** — `engines/` — same pattern as implements but with `nexus-engine.json` and no `instructions.md`
-- **Framework implements and engines** — `nexus/implements/` and `nexus/engines/` — same artifact pattern, managed by Nexus CLI
+- **Curricula** — `training/curricula/artificer-craft/` — contains `nexus-curriculum.json` and content markdown. Committed to git.
+- **Temperaments** — `training/temperaments/stoic/` — same pattern as curricula, with `nexus-temperament.json`.
+- **Implements** — `implements/foo/` — contains `nexus-implement.json`, entry point, `instructions.md`, and any other files from the source package. Committed to git.
+- **Engines** — `engines/` — same pattern as implements but with `nexus-engine.json` and no `instructions.md`
 - **Framework migrations** — `nexus/migrations/*.sql` — managed by Nexus CLI
 
 ### Ledger (SQLite at `.nexus/nexus.db`)
@@ -213,8 +212,8 @@ An anima is not a monolithic instruction file. It is composed from discrete, reu
 
 | Component | What it provides | Source |
 |-----------|-----------------|--------|
-| **Curriculum** | Training content — skills, approach to work, craft knowledge. "What you know and how you work." | Packaged artifact in the guildhall (`training/curricula/`), referenced by name + slot in Ledger |
-| **Temperament** | Personality, disposition, communication style. "Who you are." | Packaged artifact in the guildhall (`training/temperaments/`), referenced by name + slot in Ledger |
+| **Curriculum** | Training content — skills, approach to work, craft knowledge. "What you know and how you work." | Packaged artifact in the guildhall (`training/curricula/`), referenced by name in Ledger |
+| **Temperament** | Personality, disposition, communication style. "Who you are." | Packaged artifact in the guildhall (`training/temperaments/`), referenced by name in Ledger |
 | **Oaths** *(v2)* | Identity-level binding commitments. "What you will always/never do." | Stored in Ledger, per-anima |
 
 ### Assembly
@@ -246,7 +245,7 @@ All commission infrastructure lives in the guildhall — the pipeline, the engin
 
 Some workshops produce works for the patron (applications, services, tools). Others produce artifacts destined for the guildhall — new implements, engines, curricula, or temperaments. The guild system doesn't distinguish between these at the commission level.
 
-When a commission produces artifacts for the guildhall (new implements, curricula, etc.), `install-tool` handles the boundary crossing. The anima commits its work to the workshop repo, and the artifact is installed into the guild via `install-tool workshop:<name>#<ref>`. This resolves the git ref from the workshop's bare clone, installs the package into `node_modules/` for dependency resolution, and copies the full source to a guild slot for durability. The guildhall itself is never a workspace — artifacts flow in through deliberate install operations.
+When a commission produces artifacts for the guildhall (new implements, curricula, etc.), `install-tool` handles the boundary crossing. The anima commits its work to the workshop repo, and the artifact is installed into the guild via `install-tool workshop:<name>#<ref>`. This resolves the git ref from the workshop's bare clone, installs the package into `node_modules/` for dependency resolution, and copies the full source to the tool directory for durability. The guildhall itself is never a workspace — artifacts flow in through deliberate install operations.
 
 ---
 

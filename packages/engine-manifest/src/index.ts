@@ -44,9 +44,7 @@ export interface AnimaRecord {
 export interface ResolvedImplement {
   /** Tool name — how the anima sees it. */
   name: string;
-  /** Version slot. */
-  slot: string;
-  /** Absolute path to the implement's slot directory on disk. */
+  /** Absolute path to the implement's directory on disk. */
   path: string;
   /** Instructions content (if instructions.md exists). */
   instructions: string | null;
@@ -181,7 +179,7 @@ export function resolveImplements(
     }
 
     // Resolve on-disk path
-    const implPath = path.join(home, 'implements', name, entry.slot);
+    const implPath = path.join(home, 'implements', name);
     const descriptorPath = path.join(implPath, 'nexus-implement.json');
 
     // Check preconditions before including in the available set
@@ -213,7 +211,6 @@ export function resolveImplements(
 
     available.push({
       name,
-      slot: entry.slot,
       path: implPath,
       instructions,
       package: entry.package ?? null,

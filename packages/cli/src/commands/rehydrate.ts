@@ -15,7 +15,7 @@ export function makeRehydrateCommand() {
           console.log(`Restored ${result.fromPackageJson} package(s) from package.json`);
         }
         for (const name of result.fromSlotSource) {
-          console.log(`Restored "${name}" from slot source`);
+          console.log(`Restored "${name}" from on-disk source`);
         }
         if (result.needsRelink.length > 0) {
           console.log('\nThe following linked tools need manual re-linking:');

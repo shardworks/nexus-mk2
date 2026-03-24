@@ -237,10 +237,10 @@ describe('installBundle', () => {
     assert.deepEqual(result.artifacts.implements, ['test-impl']);
     assert.deepEqual(result.artifacts.engines, ['test-engine']);
 
-    // Metadata in guild slots
-    assert.ok(fs.existsSync(path.join(home, 'implements', 'test-impl', '1.0.0', 'nexus-implement.json')));
-    assert.ok(fs.existsSync(path.join(home, 'implements', 'test-impl', '1.0.0', 'instructions.md')));
-    assert.ok(fs.existsSync(path.join(home, 'engines', 'test-engine', '1.0.0', 'nexus-engine.json')));
+    // Metadata in guild directories
+    assert.ok(fs.existsSync(path.join(home, 'implements', 'test-impl', 'nexus-implement.json')));
+    assert.ok(fs.existsSync(path.join(home, 'implements', 'test-impl', 'instructions.md')));
+    assert.ok(fs.existsSync(path.join(home, 'engines', 'test-engine', 'nexus-engine.json')));
 
     // Packages in node_modules
     assert.ok(fs.existsSync(path.join(home, 'node_modules', 'test-impl')));
@@ -248,12 +248,10 @@ describe('installBundle', () => {
 
     // guild.json entries
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.equal(config.implements['test-impl'].slot, '1.0.0');
     assert.equal(config.implements['test-impl'].package, 'test-impl');
     assert.equal(config.implements['test-impl'].bundle, 'test-bundle@1.0.0');
     // Bundle-installed implements go to baseImplements
     assert.ok(config.baseImplements.includes('test-impl'));
-    assert.equal(config.engines['test-engine'].slot, '1.0.0');
     assert.equal(config.engines['test-engine'].bundle, 'test-bundle@1.0.0');
   });
 
@@ -287,27 +285,25 @@ describe('installBundle', () => {
     assert.deepEqual(result.artifacts.curricula, ['basics']);
     assert.deepEqual(result.artifacts.temperaments, ['guide']);
 
-    // Full content copied to guild slots
-    assert.ok(fs.existsSync(path.join(home, 'training', 'curricula', 'basics', '1.0.0', 'nexus-curriculum.json')));
+    // Full content copied to guild directories
+    assert.ok(fs.existsSync(path.join(home, 'training', 'curricula', 'basics', 'nexus-curriculum.json')));
     const curriculumContent = fs.readFileSync(
-      path.join(home, 'training', 'curricula', 'basics', '1.0.0', 'content.md'),
+      path.join(home, 'training', 'curricula', 'basics', 'content.md'),
       'utf-8',
     );
     assert.ok(curriculumContent.includes('Guild Basics'));
 
-    assert.ok(fs.existsSync(path.join(home, 'training', 'temperaments', 'guide', '1.0.0', 'nexus-temperament.json')));
+    assert.ok(fs.existsSync(path.join(home, 'training', 'temperaments', 'guide', 'nexus-temperament.json')));
     const temperamentContent = fs.readFileSync(
-      path.join(home, 'training', 'temperaments', 'guide', '1.0.0', 'content.md'),
+      path.join(home, 'training', 'temperaments', 'guide', 'content.md'),
       'utf-8',
     );
     assert.ok(temperamentContent.includes('helpful and patient'));
 
     // guild.json entries
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.equal(config.curricula['basics'].slot, '1.0.0');
     assert.equal(config.curricula['basics'].upstream, null);
     assert.equal(config.curricula['basics'].bundle, 'content-bundle@1.0.0');
-    assert.equal(config.temperaments['guide'].slot, '1.0.0');
     assert.equal(config.temperaments['guide'].bundle, 'content-bundle@1.0.0');
   });
 
@@ -515,7 +511,7 @@ describe('installBundle', () => {
 
     // Temperament content on disk
     const tempContent = fs.readFileSync(
-      path.join(home, 'training', 'temperaments', 'guide', '0.1.0', 'content.md'),
+      path.join(home, 'training', 'temperaments', 'guide', 'content.md'),
       'utf-8',
     );
     assert.ok(tempContent.includes('Guide Temperament'));
@@ -523,7 +519,7 @@ describe('installBundle', () => {
 
     // Curriculum content on disk
     const currContent = fs.readFileSync(
-      path.join(home, 'training', 'curricula', 'guild-operations', '0.1.0', 'content.md'),
+      path.join(home, 'training', 'curricula', 'guild-operations', 'content.md'),
       'utf-8',
     );
     assert.ok(currContent.includes('Guild Operations Curriculum'));
@@ -540,9 +536,7 @@ describe('installBundle', () => {
     // guild.json entries have provenance
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
     assert.equal(config.temperaments['guide'].bundle, '@shardworks/guild-starter-kit@0.1.5');
-    assert.equal(config.temperaments['guide'].slot, '0.1.0');
     assert.equal(config.curricula['guild-operations'].bundle, '@shardworks/guild-starter-kit@0.1.5');
-    assert.equal(config.curricula['guild-operations'].slot, '0.1.0');
 
     // Migration provenance returned for applyMigrations() to use
     assert.ok(result.migrationProvenance);
@@ -578,6 +572,6 @@ describe('installBundle', () => {
 
     // The inner bundle's implement should be installed
     assert.ok(result.artifacts.implements.includes('inner-impl'));
-    assert.ok(fs.existsSync(path.join(home, 'implements', 'inner-impl', '1.0.0', 'nexus-implement.json')));
+    assert.ok(fs.existsSync(path.join(home, 'implements', 'inner-impl', 'nexus-implement.json')));
   });
 });

@@ -100,10 +100,10 @@ See `packages/implement-install-tool/` for the canonical example. Key files:
 Fields:
 - `entry` — (required) path to the handler module, relative to the package root
 - `instructions` — (optional) path to instructions file for animas
-- `version` — version slot for the guild directory
+- `version` — the tool's version (informational, recorded in `upstream`)
 - `description` — human-readable description
 
-Note: `installTool` records a `package` field in `guild.json` (read from your `package.json` name). This tells the manifest engine to resolve by npm package name at runtime. The slot descriptor itself is not modified.
+Note: `installTool` records a `package` field in `guild.json` (read from your `package.json` name). This tells the manifest engine to resolve by npm package name at runtime. The descriptor itself is not modified.
 
 ### `instructions.md`
 
@@ -127,7 +127,7 @@ nexus install-tool some-tool@1.0 --roles artificer
 
 Installs from the npm registry via `npm install --save`. The package is added to the guild's `package.json` as a dependency, so it survives `npm install` on a fresh clone.
 
-- Descriptor and instructions are copied to the guild slot for git tracking
+- Descriptor and instructions are copied to the tool directory for git tracking
 - Runtime code and dependencies live in `node_modules/`
 - `upstream` in `guild.json`: `<package>@<version>` (e.g. `some-tool@1.0.0`)
 - **Fully durable.** `package.json` has the specifier. `npm install` on fresh clone resolves it.
@@ -151,11 +151,11 @@ nexus install-tool workshop:forge#tool/fetch-jira@1.0 --roles artificer
 
 Installs from a workshop bare repo in `.nexus/workshops/`. The source specifier format is `workshop:<name>#<ref>` where `<name>` is the workshop name and `<ref>` is a git ref (branch, tag, or commit).
 
-Workshop installs use `--no-save` semantics — the package is **not** added to `package.json` (since the `git+file://` URL would be machine-specific). Instead, the full source is copied to the guild slot for durability.
+Workshop installs use `--no-save` semantics — the package is **not** added to `package.json` (since the `git+file://` URL would be machine-specific). Instead, the full source is copied to the tool directory for durability.
 
-- Full source (not just metadata) is stored in the guild slot and git-tracked
+- Full source (not just metadata) is stored in the tool directory and git-tracked
 - `upstream` in `guild.json`: the original `workshop:name#ref` specifier
-- **Durable within the guild.** On fresh clone, `nexus rehydrate` reinstalls from the slot source.
+- **Durable within the guild.** On fresh clone, `nexus rehydrate` reinstalls from the on-disk source.
 
 This is the path used by forge agents installing tools they've built in a commission worktree.
 
@@ -165,12 +165,12 @@ This is the path used by forge agents installing tools they've built in a commis
 nexus install-tool ./my-tool-1.0.0.tgz --roles artificer
 ```
 
-Installs from a local `.tgz` or `.tar.gz` file (e.g. a CI artifact). Uses `--no-save` semantics with full source copied to the guild slot.
+Installs from a local `.tgz` or `.tar.gz` file (e.g. a CI artifact). Uses `--no-save` semantics with full source copied to the tool directory.
 
 - npm extracts and installs the tarball to resolve dependencies
-- Full source is copied to the guild slot and git-tracked
+- Full source is copied to the tool directory and git-tracked
 - `upstream` in `guild.json`: `null` (local artifact, not a durable reference)
-- **Durable via slot.** On fresh clone, `nexus rehydrate` reinstalls from the slot source.
+- **Durable.** On fresh clone, `nexus rehydrate` reinstalls from the on-disk source.
 
 ### Link — dev mode with symlinks
 
@@ -181,7 +181,7 @@ nexus install-tool ~/projects/my-tool --link --roles artificer
 Creates a symlink in `node_modules/` pointing to the source directory. Changes to the handler are reflected immediately at runtime — no reinstall needed. The tool's own `node_modules` (from the developer's project) resolves dependencies.
 
 - Requires a directory with `package.json`
-- Only metadata is copied to the guild slot
+- Only metadata is copied to the tool directory
 - `upstream` in `guild.json`: `null`
 - **NOT durable.** The symlink target must exist on the local machine. Other clones will not have this tool — `nexus rehydrate` will report it as needing manual re-linking.
 
@@ -203,11 +203,9 @@ nexus remove-tool my-tool
 
 Removal behavior depends on how the tool was installed:
 
-- **Registry/git-url** — runs `npm uninstall` to clean up `node_modules` and `package.json`, removes the guild slot, and deregisters from `guild.json`
-- **Workshop/tarball** — removes the package from `node_modules` manually (it's not in `package.json`), removes the guild slot (including full source), and deregisters from `guild.json`
-- **Link** — removes the symlink from `node_modules`, removes the guild slot, and deregisters from `guild.json`
-
-Framework tools (source: `nexus`) cannot be removed with `remove-tool` — use `nexus repair` to manage those.
+- **Registry/git-url** — runs `npm uninstall` to clean up `node_modules` and `package.json`, removes the tool directory, and deregisters from `guild.json`
+- **Workshop/tarball** — removes the package from `node_modules` manually (it's not in `package.json`), removes the tool directory (including full source), and deregisters from `guild.json`
+- **Link** — removes the symlink from `node_modules`, removes the tool directory, and deregisters from `guild.json`
 
 ## Rehydrating after a fresh clone
 
@@ -220,7 +218,7 @@ nexus rehydrate
 This reconstructs the runtime environment:
 
 1. **Registry/git-url tools** — `npm install` resolves dependencies from `package.json`
-2. **Workshop/tarball tools** — `npm install --no-save <slot-path>` reinstalls from the full source stored in each tool's guild slot
+2. **Workshop/tarball tools** — `npm install --no-save <tool-path>` reinstalls from the full source stored in each tool's directory
 3. **Linked tools** — reported as needing manual re-linking (the symlink target is machine-specific)
 
 Rehydrate is idempotent and safe to run at any time.

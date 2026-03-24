@@ -76,7 +76,7 @@ describe('implement SDK', () => {
       description: 'Shape test',
       params: {
         name: z.string().describe('Tool name'),
-        slot: z.string().optional().describe('Version slot'),
+        version: z.string().optional().describe('Tool version'),
       },
       handler: () => ({}),
     });
@@ -84,6 +84,6 @@ describe('implement SDK', () => {
     // The MCP engine uses .params.shape to register tool input schemas
     const shape = def.params.shape;
     assert.ok(shape.name);
-    assert.ok(shape.slot);
+    assert.ok(shape.version);
   });
 });

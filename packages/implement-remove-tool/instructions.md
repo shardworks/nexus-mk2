@@ -5,15 +5,14 @@ Remove a guild-managed tool — deregisters it from guild.json and removes its o
 ## Usage
 
 ```
-remove-tool <name> [--slot <slot>]
+remove-tool <name>
 ```
 
 ## Arguments
 
 - `<name>` — Name of the tool to remove
-- `--slot <slot>` — Specific version slot to remove (removes the active slot if omitted)
 
 ## Constraints
 
-- **Framework tools cannot be removed.** Tools with `source: "nexus"` are managed by the framework (`nexus repair` / `nexus install`). Attempting to remove them will fail.
-- If removing a tool leaves its parent name directory empty, the parent directory is also cleaned up.
+- If the tool was installed via npm, the package is also removed from `node_modules`.
+- Linked tools have their symlink removed.

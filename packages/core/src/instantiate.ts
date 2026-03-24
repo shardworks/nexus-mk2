@@ -42,16 +42,14 @@ export interface InstantiateResult {
  * @param guildRoot - Path to the guild root.
  * @param category - 'curricula' or 'temperaments'.
  * @param name - The training content name.
- * @param slot - The version slot.
  * @returns Object with version and the actual content text.
  */
 function readTrainingContent(
   guildRoot: string,
   category: 'curricula' | 'temperaments',
   name: string,
-  slot: string,
 ): { version: string; content: string } {
-  const dir = path.join(guildRoot, 'training', category, name, slot);
+  const dir = path.join(guildRoot, 'training', category, name);
   const descriptorFile = category === 'curricula'
     ? 'nexus-curriculum.json'
     : 'nexus-temperament.json';
@@ -59,7 +57,7 @@ function readTrainingContent(
 
   if (!fs.existsSync(descriptorPath)) {
     throw new Error(
-      `${category.slice(0, -1)} "${name}" slot "${slot}" not found on disk at ${dir}`,
+      `${category.slice(0, -1)} "${name}" not found on disk at ${dir}`,
     );
   }
 
@@ -73,8 +71,10 @@ function readTrainingContent(
     );
   }
 
+  const version = (descriptor.version as string) || 'unknown';
+
   return {
-    version: slot,
+    version,
     content: fs.readFileSync(contentPath, 'utf-8'),
   };
 }
@@ -125,15 +125,13 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
   // Read and snapshot training content
   let curriculumSnapshot: { name: string; version: string; content: string } | null = null;
   if (curriculum) {
-    const entry = config.curricula[curriculum]!;
-    const { version, content } = readTrainingContent(home, 'curricula', curriculum, entry.slot);
+    const { version, content } = readTrainingContent(home, 'curricula', curriculum);
     curriculumSnapshot = { name: curriculum, version, content };
   }
 
   let temperamentSnapshot: { name: string; version: string; content: string } | null = null;
   if (temperament) {
-    const entry = config.temperaments[temperament]!;
-    const { version, content } = readTrainingContent(home, 'temperaments', temperament, entry.slot);
+    const { version, content } = readTrainingContent(home, 'temperaments', temperament);
     temperamentSnapshot = { name: temperament, version, content };
   }
 
