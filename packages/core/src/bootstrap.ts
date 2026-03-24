@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { guildhallWorktreePath } from './nexus-home.ts';
 import { installTool } from './install-tool.ts';
 import { BASE_IMPLEMENTS, BASE_ENGINES } from './base-tools.ts';
 
@@ -10,7 +9,7 @@ import { BASE_IMPLEMENTS, BASE_ENGINES } from './base-tools.ts';
  * the same code path used for all tool installation. Individual installs do not
  * commit; a single "Bootstrap base tools" commit is created at the end.
  *
- * @param home - Absolute path to NEXUS_HOME.
+ * @param home - Absolute path to the guild root.
  * @param resolvePackage - Resolves a package name to its root directory on disk.
  *   The caller owns resolution because it depends on the runtime module system
  *   (workspace links, node_modules layout, etc.) which varies by context.
@@ -45,7 +44,6 @@ export function bootstrapBaseTools(
   }
 
   // Single commit for all bootstrap installs
-  const worktree = guildhallWorktreePath(home);
-  execFileSync('git', ['add', '-A'], { cwd: worktree, stdio: 'pipe' });
-  execFileSync('git', ['commit', '-m', 'Bootstrap base tools'], { cwd: worktree, stdio: 'pipe' });
+  execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-m', 'Bootstrap base tools'], { cwd: home, stdio: 'pipe' });
 }

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { guildhallWorktreePath } from './nexus-home.ts';
+import { workshopBarePath } from './nexus-home.ts';
 import { readGuildConfig, writeGuildConfig } from './guild-config.ts';
 import type { ToolEntry, TrainingEntry } from './guild-config.ts';
 
@@ -23,7 +23,7 @@ const CATEGORY_MAP: Record<DescriptorFile, 'implements' | 'engines' | 'curricula
   'nexus-temperament.json': 'temperaments',
 };
 
-/** Map category -> on-disk parent directory (relative to guildhall worktree). */
+/** Map category -> on-disk parent directory (relative to guild root). */
 const DIR_MAP: Record<string, string> = {
   implements: 'implements',
   engines: 'engines',
@@ -34,23 +34,25 @@ const DIR_MAP: Record<string, string> = {
 /**
  * How the source was classified for installation.
  *
- * - `npm-local`    — local directory with package.json; npm install (copy) or symlink
- * - `npm-registry` — npm package specifier (e.g. `foo@1.0`, `@scope/tool`)
- * - `npm-tarball`  — local .tgz/.tar.gz file
- * - `bare-local`   — local directory without package.json; plain file copy
+ * - `registry`  — npm package specifier (e.g. `foo@1.0`, `@scope/tool`)
+ * - `git-url`   — git URL (e.g. `git+https://github.com/org/repo.git#v1.0`)
+ * - `workshop`  — workshop ref (e.g. `workshop:forge#tool/fetch-jira@1.0`)
+ * - `tarball`   — local .tgz/.tar.gz file
+ * - `link`      — symlinked local directory (dev mode)
  */
-export type SourceKind = 'npm-local' | 'npm-registry' | 'npm-tarball' | 'bare-local';
+export type SourceKind = 'registry' | 'git-url' | 'workshop' | 'tarball' | 'link';
 
 export interface InstallToolOptions {
-  /** Absolute path to the NEXUS_HOME directory. */
+  /** Absolute path to the guild root directory. */
   home: string;
   /**
-   * Source — local directory path, npm package specifier, or tarball path.
+   * Source specifier:
    *
-   * - Local directory with `package.json`: installed via npm (copy) or symlink (`link: true`)
-   * - Local directory without `package.json`: copied as bare files (no dep resolution)
-   * - `.tgz` / `.tar.gz` file: installed via npm
-   * - Anything else: treated as an npm registry specifier
+   * - npm package specifier: `some-tool@1.0`, `@scope/tool`
+   * - Git URL: `git+https://github.com/org/repo.git#v1.0`
+   * - Workshop ref: `workshop:forge#tool/fetch-jira@1.0`
+   * - Tarball: `./my-tool-1.0.0.tgz`
+   * - Local directory (with `--link`): `~/projects/my-tool`
    */
   source: string;
   /** Override the tool name (defaults to package name or directory basename). */
@@ -71,6 +73,7 @@ export interface InstallToolOptions {
    * Symlink a local directory instead of copying (dev mode).
    * Only valid for local directories with `package.json`.
    * Changes to the source are reflected immediately at runtime.
+   * **Not durable** — will not survive a fresh clone.
    */
   link?: boolean;
 }
@@ -125,7 +128,6 @@ function copyDir(src: string, dest: string): void {
         copyDir(srcPath, destPath);
       }
     } else if (entry.isSymbolicLink()) {
-      // Resolve symlink and copy the target
       const realPath = fs.realpathSync(srcPath);
       if (fs.statSync(realPath).isDirectory()) {
         if (!SKIP_DIRS.has(entry.name)) {
@@ -142,9 +144,9 @@ function copyDir(src: string, dest: string): void {
 
 /**
  * Copy only the metadata files (descriptor + instructions) from a source
- * directory into the guildhall slot. This is used for npm-installed tools
+ * directory into the guild slot. This is used for npm-installed tools
  * where the runtime code lives in node_modules but the metadata needs to
- * be git-tracked in the guildhall.
+ * be git-tracked in the guild.
  */
 function copyMetadata(sourceDir: string, targetDir: string, descriptorFile: string, descriptor: Record<string, unknown>): void {
   fs.mkdirSync(targetDir, { recursive: true });
@@ -164,41 +166,24 @@ function copyMetadata(sourceDir: string, targetDir: string, descriptorFile: stri
 
 /**
  * Classify a source string to determine the installation method.
+ *
+ * @param source - The source specifier.
+ * @param link - Whether the --link flag was set.
  */
-export function classifySource(source: string): SourceKind {
-  // Tarball detection
-  if (source.endsWith('.tgz') || source.endsWith('.tar.gz')) {
-    return 'npm-tarball';
-  }
-
-  // Local path detection: starts with /, ./, ../, or is an absolute path on the system
-  const isPath = source.startsWith('/') || source.startsWith('./') || source.startsWith('../');
-  if (isPath || path.isAbsolute(source)) {
-    const resolved = path.resolve(source);
-    if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
-      // Check for package.json to distinguish npm-local from bare-local
-      if (fs.existsSync(path.join(resolved, 'package.json'))) {
-        return 'npm-local';
-      }
-      return 'bare-local';
-    }
-    // Path-like but not a directory — could be a nonexistent path (error later)
-    // or a relative tarball handled above. Treat as bare-local for error messaging.
-    return 'bare-local';
-  }
-
-  // Everything else is an npm registry specifier
-  return 'npm-registry';
+export function classifySource(source: string, link: boolean = false): SourceKind {
+  if (link) return 'link';
+  if (source.startsWith('workshop:')) return 'workshop';
+  if (source.startsWith('git+')) return 'git-url';
+  if (source.endsWith('.tgz') || source.endsWith('.tar.gz')) return 'tarball';
+  return 'registry';
 }
 
 /**
  * Resolve the installed package directory in node_modules after npm install.
- * Reads the package name from the source (or node_modules) and returns the path.
  */
-function resolveInstalledPackage(worktree: string, packageName: string): string {
-  const pkgDir = path.join(worktree, 'node_modules', packageName);
+function resolveInstalledPackage(guildRoot: string, packageName: string): string {
+  const pkgDir = path.join(guildRoot, 'node_modules', packageName);
   if (!fs.existsSync(pkgDir)) {
-    // Handle scoped packages — npm might nest them
     throw new Error(`Could not find installed package at ${pkgDir}`);
   }
   return pkgDir;
@@ -220,56 +205,59 @@ function readPackageName(dir: string): string {
   return name;
 }
 
+/**
+ * Parse a registry source specifier to extract the package name.
+ * e.g. "foo@1.0" -> "foo", "@scope/foo@1.0" -> "@scope/foo"
+ */
+function parsePackageName(source: string): string {
+  // Scoped packages: @scope/name@version
+  if (source.startsWith('@') && source.lastIndexOf('@') > 0) {
+    return source.substring(0, source.lastIndexOf('@'));
+  }
+  // Unscoped: name@version
+  if (source.includes('@')) {
+    return source.split('@')[0]!;
+  }
+  // Bare name without version
+  return source;
+}
+
+/**
+ * Determine package name from guild's package.json dependencies.
+ * Used when we can't derive the name from the source specifier (e.g. tarballs).
+ */
+function findNewDependency(guildRoot: string): string {
+  const guildhallPkg = readJson(path.join(guildRoot, 'package.json'));
+  const deps = guildhallPkg['dependencies'] as Record<string, string> | undefined ?? {};
+  const depNames = Object.keys(deps);
+  const packageName = depNames[depNames.length - 1];
+  if (!packageName) {
+    throw new Error('Could not determine package name after npm install');
+  }
+  return packageName;
+}
+
 // ── Install paths ───────────────────────────────────────────────────────
 
 /**
- * Install via npm (covers local dirs with package.json, registry specifiers, and tarballs).
- * Runs `npm install --save <source>` in the guildhall worktree, then copies
- * metadata (descriptor + instructions) to the guildhall slot for git tracking.
+ * Install via npm --save (registry and git-url sources).
+ * Package is added to guild's package.json for durability.
  */
-function installViaNpm(
-  worktree: string,
+function installViaNpmSave(
+  guildRoot: string,
   source: string,
   sourceKind: SourceKind,
 ): { packageName: string; packageDir: string; descriptorFile: DescriptorFile; descriptor: Record<string, unknown>; pkg: Record<string, unknown> } {
-  // For local dirs, resolve to absolute path so npm gets a valid reference
-  const npmSource = sourceKind === 'npm-local'
-    ? path.resolve(source)
-    : source;
+  npm(['install', '--save', source], guildRoot);
 
-  npm(['install', '--save', npmSource], worktree);
+  // For registry specifiers (e.g. "foo@1.0"), parse the name directly.
+  // For local paths and git-url sources, read from package.json after install.
+  const isLocalPath = source.startsWith('/') || source.startsWith('./') || source.startsWith('../');
+  const packageName = (sourceKind === 'registry' && !isLocalPath)
+    ? parsePackageName(source)
+    : findNewDependency(guildRoot);
 
-  // Determine the package name
-  let packageName: string;
-  if (sourceKind === 'npm-local') {
-    packageName = readPackageName(path.resolve(source));
-  } else if (sourceKind === 'npm-tarball') {
-    // For tarballs, read the name from the installed package
-    // npm outputs the package name during install, but parsing the
-    // guildhall package.json dependencies is more reliable
-    const guildhallPkg = readJson(path.join(worktree, 'package.json'));
-    const deps = guildhallPkg['dependencies'] as Record<string, string> | undefined ?? {};
-    // The most recently added dependency is our package
-    const depNames = Object.keys(deps);
-    packageName = depNames[depNames.length - 1];
-    if (!packageName) {
-      throw new Error('Could not determine package name after npm install');
-    }
-  } else {
-    // Registry specifier — strip version suffix to get the package name
-    // e.g. "foo@1.0" -> "foo", "@scope/foo@1.0" -> "@scope/foo"
-    packageName = source.replace(/@[^/]*$/, '');
-    // Handle bare names without version
-    if (packageName === source && source.includes('@') && !source.startsWith('@')) {
-      packageName = source.split('@')[0];
-    }
-    // Scoped packages: @scope/name@version
-    if (source.startsWith('@') && source.lastIndexOf('@') > 0) {
-      packageName = source.substring(0, source.lastIndexOf('@'));
-    }
-  }
-
-  const packageDir = resolveInstalledPackage(worktree, packageName);
+  const packageDir = resolveInstalledPackage(guildRoot, packageName);
   const descriptorFile = findDescriptor(packageDir);
   const descriptor = readJson(path.join(packageDir, descriptorFile));
   const pkg = readJson(path.join(packageDir, 'package.json'));
@@ -278,18 +266,58 @@ function installViaNpm(
 }
 
 /**
+ * Install via npm, detect package name, optionally remove from package.json.
+ * Used for tarball and workshop sources where we need --no-save semantics
+ * but need to discover the package name.
+ */
+function installViaNpmDetect(
+  guildRoot: string,
+  npmSource: string,
+  save: boolean,
+): { packageName: string; packageDir: string; descriptorFile: DescriptorFile; descriptor: Record<string, unknown>; pkg: Record<string, unknown> } {
+  // Always install with --save first to detect the package name
+  npm(['install', '--save', npmSource], guildRoot);
+
+  const packageName = findNewDependency(guildRoot);
+  const packageDir = resolveInstalledPackage(guildRoot, packageName);
+  const descriptorFile = findDescriptor(packageDir);
+  const descriptor = readJson(path.join(packageDir, descriptorFile));
+  const pkg = readJson(path.join(packageDir, 'package.json'));
+
+  // If we don't want to save, remove from package.json but keep in node_modules
+  if (!save) {
+    const guildPkg = readJson(path.join(guildRoot, 'package.json'));
+    const deps = guildPkg['dependencies'] as Record<string, string> | undefined;
+    if (deps && packageName in deps) {
+      delete deps[packageName];
+      writeJson(path.join(guildRoot, 'package.json'), guildPkg);
+    }
+  }
+
+  return { packageName, packageDir, descriptorFile, descriptor, pkg };
+}
+
+/**
  * Install via symlink (dev mode for local dirs with package.json).
- * Creates a symlink in guildhall/node_modules pointing to the source directory.
+ * Creates a symlink in node_modules pointing to the source directory.
  */
 function installViaLink(
-  worktree: string,
+  guildRoot: string,
   source: string,
 ): { packageName: string; packageDir: string; descriptorFile: DescriptorFile; descriptor: Record<string, unknown>; pkg: Record<string, unknown> } {
   const sourceDir = path.resolve(source);
+
+  if (!fs.existsSync(sourceDir) || !fs.statSync(sourceDir).isDirectory()) {
+    throw new Error(`Source is not a directory: ${sourceDir}`);
+  }
+  if (!fs.existsSync(path.join(sourceDir, 'package.json'))) {
+    throw new Error('The --link option requires a directory with a package.json.');
+  }
+
   const packageName = readPackageName(sourceDir);
 
   // Ensure node_modules exists
-  const nodeModulesDir = path.join(worktree, 'node_modules');
+  const nodeModulesDir = path.join(guildRoot, 'node_modules');
   fs.mkdirSync(nodeModulesDir, { recursive: true });
 
   // Handle scoped packages: @scope/name needs @scope/ directory
@@ -315,37 +343,31 @@ function installViaLink(
 /**
  * Install a tool (implement, engine, curriculum, or temperament) into the guild.
  *
- * Supports multiple source types:
- * - Local directory with package.json: installed via npm (or symlinked with `link: true`)
- * - Local directory without package.json: copied as bare files
- * - npm registry specifier: installed via npm
- * - Tarball (.tgz): installed via npm
+ * Supports five source types:
+ * - **Registry** — npm package specifier, fully durable via package.json
+ * - **Git URL** — `git+https://...`, fully durable via package.json
+ * - **Workshop** — `workshop:name#ref`, durable within the guild via full source in slot
+ * - **Tarball** — `.tgz` file, durable via full source in slot
+ * - **Link** — symlinked local dir (dev mode), NOT durable
  *
- * For npm-installed tools, the runtime code lives in the guildhall's node_modules.
- * Metadata (descriptor + instructions) is copied to the guildhall slot for git tracking.
- * The descriptor's `package` field is set so the manifest engine resolves by package name.
+ * For npm-installed tools, runtime code lives in node_modules. Metadata
+ * (descriptor + instructions) is copied to the guild slot for git tracking.
+ * The `package` field in guild.json tells the manifest engine to resolve by package name.
  */
 export function installTool(opts: InstallToolOptions): InstallResult {
   const { home, source, roles, framework = false, commit = true, link = false } = opts;
-  const worktree = guildhallWorktreePath(home);
-  const sourceKind = classifySource(source);
-
-  // Validate link option
-  if (link && sourceKind !== 'npm-local') {
-    throw new Error('The --link option is only valid for local directories with a package.json.');
-  }
+  const sourceKind = classifySource(source, link);
 
   let descriptorFile: DescriptorFile;
   let descriptor: Record<string, unknown>;
   let pkg: Record<string, unknown>;
   let packageName: string | null = null;
   let isNpmInstalled = false;
+  let copyFullSource = false;
+  let upstream: string | null = null;
 
-  if (sourceKind === 'bare-local' || framework) {
-    // ── Bare local or framework: copy files directly ──────────────────
-    // Framework tools always use copyDir — they resolve by package name
-    // at runtime (via the `package` field in their descriptors) and don't
-    // need npm installation in the guildhall.
+  if (framework) {
+    // ── Framework: copy files directly from workspace packages ────────
     const sourceDir = path.resolve(source);
     if (!fs.existsSync(sourceDir) || !fs.statSync(sourceDir).isDirectory()) {
       throw new Error(`Source is not a directory: ${sourceDir}`);
@@ -355,22 +377,52 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     descriptor = readJson(path.join(sourceDir, descriptorFile));
     const pkgJsonPath = path.join(sourceDir, 'package.json');
     pkg = fs.existsSync(pkgJsonPath) ? readJson(pkgJsonPath) : {};
-  } else if (link) {
+  } else if (sourceKind === 'link') {
     // ── Link mode: symlink local dir ──────────────────────────────────
-    const result = installViaLink(worktree, source);
+    const result = installViaLink(home, source);
     descriptorFile = result.descriptorFile;
     descriptor = result.descriptor;
     pkg = result.pkg;
     packageName = result.packageName;
     isNpmInstalled = true;
+    upstream = null;
+  } else if (sourceKind === 'registry' || sourceKind === 'git-url') {
+    // ── Registry / Git URL: npm install --save ────────────────────────
+    const result = installViaNpmSave(home, source, sourceKind);
+    descriptorFile = result.descriptorFile;
+    descriptor = result.descriptor;
+    pkg = result.pkg;
+    packageName = result.packageName;
+    isNpmInstalled = true;
+    upstream = sourceKind === 'git-url' ? source : `${result.packageName}@${result.pkg['version'] as string}`;
+  } else if (sourceKind === 'workshop') {
+    // ── Workshop: resolve to git+file:// URL, npm install, full source ─
+    const parsed = parseWorkshopSource(source);
+    const barePath = workshopBarePath(home, parsed.workshop);
+    if (!fs.existsSync(barePath)) {
+      throw new Error(`Workshop bare repo not found: ${barePath}`);
+    }
+    const gitFileUrl = `git+file://${barePath}#${parsed.ref}`;
+
+    const result = installViaNpmDetect(home, gitFileUrl, false);
+    descriptorFile = result.descriptorFile;
+    descriptor = result.descriptor;
+    pkg = result.pkg;
+    packageName = result.packageName;
+    isNpmInstalled = true;
+    copyFullSource = true;
+    upstream = source; // Store the original workshop:name#ref specifier
   } else {
-    // ── npm install: local dir, registry, or tarball ──────────────────
-    const result = installViaNpm(worktree, source, sourceKind);
+    // ── Tarball: npm install --no-save, full source to slot ───────────
+    const resolvedSource = path.resolve(source);
+    const result = installViaNpmDetect(home, resolvedSource, false);
     descriptorFile = result.descriptorFile;
     descriptor = result.descriptor;
     pkg = result.pkg;
     packageName = result.packageName;
     isNpmInstalled = true;
+    copyFullSource = true;
+    upstream = null;
   }
 
   const category = CATEGORY_MAP[descriptorFile];
@@ -393,52 +445,48 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     );
   }
 
-  // Determine target directory for metadata/files in the guildhall.
+  // Determine target directory for metadata/files in the guild.
   // Framework tools go under nexus/{implements,engines}/.
   // Guild tools go under {implements,engines}/ (or training/ for curricula/temperaments).
   const parentDir = DIR_MAP[category]!;
   const prefix = framework && (category === 'implements' || category === 'engines')
     ? path.join('nexus', parentDir)
     : parentDir;
-  const targetDir = path.join(worktree, prefix, name, slot);
+  const targetDir = path.join(home, prefix, name, slot);
 
-  if (isNpmInstalled) {
-    // npm-installed: copy only metadata to the guildhall slot, set package field
-    const pkgSourceDir = link
-      ? path.resolve(source)
-      : resolveInstalledPackage(worktree, packageName!);
-
-    if (fs.existsSync(targetDir)) {
-      fs.rmSync(targetDir, { recursive: true });
-    }
-    copyMetadata(pkgSourceDir, targetDir, descriptorFile, descriptor);
-
-    // Write package field into the slot's descriptor so the manifest engine
-    // resolves by package name at runtime (from guildhall's node_modules).
-    const slotDescriptor = readJson(path.join(targetDir, descriptorFile));
-    slotDescriptor['package'] = packageName;
-    writeJson(path.join(targetDir, descriptorFile), slotDescriptor);
-  } else {
-    // Bare local or framework: copy entire source directory
+  if (framework) {
+    // Framework: copy entire source directory
     if (fs.existsSync(targetDir)) {
       fs.rmSync(targetDir, { recursive: true });
     }
     copyDir(path.resolve(source), targetDir);
 
-    // For sources with a package.json, write the package name into the slot
-    // descriptor so the manifest engine resolves by package name at runtime.
-    // This covers framework tools (which always have package.json) and any
-    // bare-local tools that happen to be proper npm packages.
-    const sourcePkgPath = path.join(path.resolve(source), 'package.json');
-    if (fs.existsSync(sourcePkgPath)) {
-      const sourcePkg = readJson(sourcePkgPath);
-      const sourcePkgName = sourcePkg['name'] as string | undefined;
-      if (sourcePkgName) {
-        const slotDescriptor = readJson(path.join(targetDir, descriptorFile));
-        slotDescriptor['package'] = sourcePkgName;
-        writeJson(path.join(targetDir, descriptorFile), slotDescriptor);
+    // Read the package name from source if available (stored in guild.json, not descriptor)
+    if (!packageName) {
+      const sourcePkgPath = path.join(path.resolve(source), 'package.json');
+      if (fs.existsSync(sourcePkgPath)) {
+        const sourcePkg = readJson(sourcePkgPath);
+        packageName = (sourcePkg['name'] as string | undefined) ?? null;
       }
     }
+  } else if (isNpmInstalled && copyFullSource) {
+    // Workshop/tarball: copy full source to slot for durability
+    const pkgSourceDir = resolveInstalledPackage(home, packageName!);
+
+    if (fs.existsSync(targetDir)) {
+      fs.rmSync(targetDir, { recursive: true });
+    }
+    copyDir(pkgSourceDir, targetDir);
+  } else if (isNpmInstalled) {
+    // Registry/git-url/link: copy only metadata to slot
+    const pkgSourceDir = sourceKind === 'link'
+      ? path.resolve(source)
+      : resolveInstalledPackage(home, packageName!);
+
+    if (fs.existsSync(targetDir)) {
+      fs.rmSync(targetDir, { recursive: true });
+    }
+    copyMetadata(pkgSourceDir, targetDir, descriptorFile, descriptor);
   }
 
   // Register in guild.json
@@ -449,17 +497,20 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     const entry: ToolEntry = {
       source: framework ? 'nexus' : 'guild',
       slot,
-      upstream: isNpmInstalled ? `${packageName}@${slot}` : null,
+      upstream,
       installedAt: now,
     };
     if (category === 'implements' && roles && roles.length > 0) {
       entry.roles = roles;
     }
+    if (packageName) {
+      entry.package = packageName;
+    }
     config[category][name] = entry;
   } else {
     const entry: TrainingEntry = {
       slot,
-      upstream: isNpmInstalled ? `${packageName}@${slot}` : null,
+      upstream,
       installedAt: now,
     };
     config[category][name] = entry;
@@ -469,9 +520,29 @@ export function installTool(opts: InstallToolOptions): InstallResult {
 
   // Commit (unless suppressed -- e.g. during bootstrap)
   if (commit) {
-    git(['add', '-A'], worktree);
-    git(['commit', '-m', `Install ${category.slice(0, -1)} ${name}@${slot}`], worktree);
+    git(['add', '-A'], home);
+    git(['commit', '-m', `Install ${category.slice(0, -1)} ${name}@${slot}`], home);
   }
 
   return { category, name, slot, installedTo: targetDir, sourceKind };
+}
+
+// ── Workshop source parsing ─────────────────────────────────────────────
+
+/**
+ * Parse a workshop source specifier.
+ * Format: `workshop:<name>#<ref>`
+ */
+function parseWorkshopSource(source: string): { workshop: string; ref: string } {
+  const withoutPrefix = source.substring('workshop:'.length);
+  const hashIndex = withoutPrefix.indexOf('#');
+  if (hashIndex === -1) {
+    throw new Error(
+      `Invalid workshop source "${source}". Expected format: workshop:<name>#<ref>`,
+    );
+  }
+  return {
+    workshop: withoutPrefix.substring(0, hashIndex),
+    ref: withoutPrefix.substring(hashIndex + 1),
+  };
 }

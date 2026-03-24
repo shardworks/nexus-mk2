@@ -8,7 +8,7 @@ import Database from 'better-sqlite3';
 import { ledgerPath } from './nexus-home.ts';
 
 export interface PublishOptions {
-  /** Absolute path to NEXUS_HOME. */
+  /** Absolute path to the guild root. */
   home: string;
   /** Commission ID to publish. */
   commissionId: number;

@@ -39,30 +39,33 @@ describe('initGuild (skeleton only)', () => {
     const home = path.join(tmpDir, 'guild');
     initGuild(home, 'test-guild', 'test-model');
 
-    // Bare repo
-    assert.ok(fs.existsSync(path.join(home, 'guildhall', 'HEAD')), 'guildhall bare repo missing');
+    // Git repo at guild root
+    assert.ok(fs.existsSync(path.join(home, '.git')), '.git directory missing');
 
-    // Standing worktree
-    const wt = path.join(home, 'worktrees', 'guildhall', 'main');
-    assert.ok(fs.existsSync(path.join(wt, 'guild.json')), 'guild.json missing');
-    assert.ok(fs.existsSync(path.join(wt, 'codex', 'all.md')), 'codex/all.md missing');
-    assert.ok(fs.existsSync(path.join(wt, 'nexus', 'migrations', '001-initial-schema.sql')), 'migration missing');
+    // Guild files at root
+    assert.ok(fs.existsSync(path.join(home, 'guild.json')), 'guild.json missing');
+    assert.ok(fs.existsSync(path.join(home, 'codex', 'all.md')), 'codex/all.md missing');
+    assert.ok(fs.existsSync(path.join(home, 'nexus', 'migrations', '001-initial-schema.sql')), 'migration missing');
 
     // Guild-managed directories
-    assert.ok(fs.existsSync(path.join(wt, 'implements')), 'guild implements/ missing');
-    assert.ok(fs.existsSync(path.join(wt, 'engines')), 'guild engines/ missing');
+    assert.ok(fs.existsSync(path.join(home, 'implements')), 'guild implements/ missing');
+    assert.ok(fs.existsSync(path.join(home, 'engines')), 'guild engines/ missing');
 
     // Training directories
-    assert.ok(fs.existsSync(path.join(wt, 'training', 'curricula')), 'curricula/ missing');
-    assert.ok(fs.existsSync(path.join(wt, 'training', 'temperaments')), 'temperaments/ missing');
+    assert.ok(fs.existsSync(path.join(home, 'training', 'curricula')), 'curricula/ missing');
+    assert.ok(fs.existsSync(path.join(home, 'training', 'temperaments')), 'temperaments/ missing');
+
+    // .nexus infrastructure
+    assert.ok(fs.existsSync(path.join(home, '.nexus', 'workshops')), '.nexus/workshops/ missing');
+    assert.ok(fs.existsSync(path.join(home, '.nexus', 'worktrees')), '.nexus/worktrees/ missing');
 
     // No base tools installed yet (just .gitkeep)
-    const config = JSON.parse(fs.readFileSync(path.join(wt, 'guild.json'), 'utf-8'));
+    const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
     assert.deepEqual(config.implements, {});
     assert.deepEqual(config.engines, {});
 
     // No ledger yet
-    assert.ok(!fs.existsSync(path.join(home, 'nexus.db')), 'ledger should not exist yet');
+    assert.ok(!fs.existsSync(path.join(home, '.nexus', 'nexus.db')), 'ledger should not exist yet');
   });
 
   it('has an initial commit', () => {
@@ -70,8 +73,7 @@ describe('initGuild (skeleton only)', () => {
     const home = path.join(tmpDir, 'guild');
     initGuild(home, 'test-guild', 'test-model');
 
-    const wt = path.join(home, 'worktrees', 'guildhall', 'main');
-    const log = execFileSync('git', ['log', '--oneline'], { cwd: wt, encoding: 'utf-8' });
+    const log = execFileSync('git', ['log', '--oneline'], { cwd: home, encoding: 'utf-8' });
     assert.ok(log.includes('Initialize guild'), 'initial commit not found');
   });
 
@@ -88,7 +90,7 @@ describe('initGuild (skeleton only)', () => {
     const home = path.join(tmpDir, 'guild');
     fs.mkdirSync(home);
     initGuild(home, 'test-guild', 'test-model');
-    assert.ok(fs.existsSync(path.join(home, 'guildhall', 'HEAD')));
+    assert.ok(fs.existsSync(path.join(home, '.git')));
   });
 });
 
@@ -105,17 +107,15 @@ describe('bootstrapBaseTools', () => {
     initGuild(home, 'test-guild', 'test-model');
     bootstrapBaseTools(home, resolvePackage);
 
-    const wt = path.join(home, 'worktrees', 'guildhall', 'main');
-
     // All registered in guild.json with source: 'nexus'
-    const config = JSON.parse(fs.readFileSync(path.join(wt, 'guild.json'), 'utf-8'));
+    const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
 
     // Base implements installed to nexus/implements/
     for (const ref of BASE_IMPLEMENTS) {
       const entry = config.implements[ref.name];
       assert.ok(entry, `${ref.name} not registered`);
       assert.equal(entry.source, 'nexus');
-      const implDir = path.join(wt, 'nexus', 'implements', ref.name, entry.slot);
+      const implDir = path.join(home, 'nexus', 'implements', ref.name, entry.slot);
       assert.ok(fs.existsSync(path.join(implDir, 'nexus-implement.json')), `${ref.name} descriptor missing`);
       assert.ok(fs.existsSync(path.join(implDir, 'instructions.md')), `${ref.name} instructions missing`);
     }
@@ -125,7 +125,7 @@ describe('bootstrapBaseTools', () => {
       const entry = config.engines[ref.name];
       assert.ok(entry, `${ref.name} not registered`);
       assert.equal(entry.source, 'nexus');
-      const engDir = path.join(wt, 'nexus', 'engines', ref.name, entry.slot);
+      const engDir = path.join(home, 'nexus', 'engines', ref.name, entry.slot);
       assert.ok(fs.existsSync(path.join(engDir, 'nexus-engine.json')), `${ref.name} descriptor missing`);
     }
   });
@@ -136,8 +136,7 @@ describe('bootstrapBaseTools', () => {
     initGuild(home, 'test-guild', 'test-model');
     bootstrapBaseTools(home, resolvePackage);
 
-    const wt = path.join(home, 'worktrees', 'guildhall', 'main');
-    const log = execFileSync('git', ['log', '--oneline'], { cwd: wt, encoding: 'utf-8' });
+    const log = execFileSync('git', ['log', '--oneline'], { cwd: home, encoding: 'utf-8' });
     const lines = log.trim().split('\n');
     assert.equal(lines.length, 2, 'should have exactly 2 commits');
     assert.ok(lines[0]!.includes('Bootstrap base tools'));
@@ -157,8 +156,7 @@ describe('full init sequence', () => {
     const home = path.join(tmpDir, 'guild');
     fullInit(home, 'test-model');
 
-    const wt = path.join(home, 'worktrees', 'guildhall', 'main');
-    const config = JSON.parse(fs.readFileSync(path.join(wt, 'guild.json'), 'utf-8'));
+    const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
 
     assert.equal(typeof config.nexus, 'string');
     assert.equal(config.model, 'test-model');
@@ -180,7 +178,7 @@ describe('full init sequence', () => {
     const home = path.join(tmpDir, 'guild');
     fullInit(home, 'test-model');
 
-    const db = new Database(path.join(home, 'nexus.db'));
+    const db = new Database(path.join(home, '.nexus', 'nexus.db'));
     try {
       const tables = db.prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -202,7 +200,7 @@ describe('full init sequence', () => {
     const home = path.join(tmpDir, 'guild');
     fullInit(home, 'test-model');
 
-    const db = new Database(path.join(home, 'nexus.db'));
+    const db = new Database(path.join(home, '.nexus', 'nexus.db'));
     try {
       const rows = db.prepare('SELECT * FROM _migrations').all() as { sequence: number; filename: string }[];
       assert.equal(rows.length, 1);

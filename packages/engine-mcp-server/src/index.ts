@@ -20,7 +20,7 @@
  *
  * Config shape:
  *   {
- *     "home": "/absolute/path/to/NEXUS_HOME",
+ *     "home": "/absolute/path/to/guild-root",
  *     "implements": [
  *       { "name": "install-tool", "modulePath": "@shardworks/implement-install-tool" },
  *       { "name": "my-tool", "modulePath": "/absolute/path/to/handler.ts" }
@@ -43,7 +43,7 @@ export interface ImplementSpec {
 
 /** Configuration for the MCP server engine. */
 export interface ServerConfig {
-  /** Absolute path to NEXUS_HOME. */
+  /** Absolute path to the guild root. */
   home: string;
   /** Implements to register as MCP tools. */
   implements: ImplementSpec[];

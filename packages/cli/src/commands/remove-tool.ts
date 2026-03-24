@@ -1,13 +1,14 @@
 import { createCommand } from 'commander';
-import { resolveNexusHome, removeTool } from '@shardworks/nexus-core';
+import { removeTool } from '@shardworks/nexus-core';
+import { resolveHome } from '../resolve-home.ts';
 
 export function makeRemoveToolCommand() {
-  return createCommand('remove-tool')
+  return createCommand('remove')
     .description('Remove an implement, engine, curriculum, or temperament from the guild')
     .argument('<name>', 'Name of the tool to remove')
     .option('--type <type>', 'Restrict to a specific category (implements, engines, curricula, temperaments)')
-    .action((name: string, options: { type?: string }) => {
-      const home = resolveNexusHome();
+    .action((name: string, options: { type?: string }, cmd) => {
+      const home = resolveHome(cmd);
       const validTypes = ['implements', 'engines', 'curricula', 'temperaments'] as const;
       let category: typeof validTypes[number] | undefined;
 

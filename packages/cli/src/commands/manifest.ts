@@ -1,14 +1,14 @@
 import { createCommand } from 'commander';
-import { resolveNexusHome } from '@shardworks/nexus-core';
 import { manifest } from '@shardworks/engine-manifest';
+import { resolveHome } from '../resolve-home.ts';
 
 export function makeManifestCommand() {
   return createCommand('manifest')
-    .description('Manifest an anima — resolve composition and show session config')
+    .description('Resolve an anima\'s composition and show session config')
     .argument('<anima>', 'Anima name to manifest')
     .option('--json', 'Output full session config as JSON')
-    .action(async (animaName: string, options: { json?: boolean }) => {
-      const home = resolveNexusHome();
+    .action(async (animaName: string, options: { json?: boolean }, cmd) => {
+      const home = resolveHome(cmd);
 
       try {
         const result = await manifest(home, animaName);

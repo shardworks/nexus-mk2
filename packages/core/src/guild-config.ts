@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { guildhallWorktreePath } from './nexus-home.ts';
 
 /** A reference to an implement or engine registered in guild.json. */
 export interface ToolEntry {
@@ -14,6 +13,8 @@ export interface ToolEntry {
   installedAt: string;
   /** Which roles have access (implements only). ["*"] means all roles. */
   roles?: string[];
+  /** npm package name for runtime resolution via node_modules. Omitted for script-only tools. */
+  package?: string;
 }
 
 /** A reference to a curriculum or temperament registered in guild.json. */
@@ -63,18 +64,18 @@ export function createInitialGuildConfig(name: string, nexusVersion: string, mod
   };
 }
 
-/** Resolve the path to guild.json in the standing worktree. */
+/** Resolve the path to guild.json in the guild root. */
 export function guildConfigPath(home: string): string {
-  return path.join(guildhallWorktreePath(home), 'guild.json');
+  return path.join(home, 'guild.json');
 }
 
-/** Read and parse guild.json from the standing worktree. */
+/** Read and parse guild.json from the guild root. */
 export function readGuildConfig(home: string): GuildConfig {
   const configFile = guildConfigPath(home);
   return JSON.parse(fs.readFileSync(configFile, 'utf-8')) as GuildConfig;
 }
 
-/** Write guild.json to the standing worktree. */
+/** Write guild.json to the guild root. */
 export function writeGuildConfig(home: string, config: GuildConfig): void {
   const configFile = guildConfigPath(home);
   fs.writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');

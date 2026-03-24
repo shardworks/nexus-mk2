@@ -20,8 +20,8 @@ install-tool <source> [--name <name>] [--slot <slot>] [--roles <roles>] [--link]
 
 The source is automatically classified:
 
-- **Local directory with `package.json`** — installed via `npm install` into the guildhall's `node_modules`. Dependencies are resolved automatically.
-- **Local directory without `package.json`** — copied directly to the guildhall. No dependency resolution.
+- **Local directory with `package.json`** — installed via `npm install` into the guild's `node_modules`. Dependencies are resolved automatically.
+- **Local directory without `package.json`** — copied directly to the guild. No dependency resolution.
 - **npm specifier** (e.g. `my-tool@1.0`, `@scope/tool`) — installed from the npm registry.
 - **Tarball** (`.tgz`/`.tar.gz`) — installed via npm from a local archive.
 

@@ -9,7 +9,7 @@ import { ledgerPath } from './nexus-home.ts';
 import { readGuildConfig } from './guild-config.ts';
 
 export interface DispatchOptions {
-  /** Absolute path to NEXUS_HOME. */
+  /** Absolute path to the guild root. */
   home: string;
   /** Commission specification — what needs to be done. */
   spec: string;

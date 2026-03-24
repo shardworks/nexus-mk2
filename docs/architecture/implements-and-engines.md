@@ -66,7 +66,7 @@ export default implement({
 });
 ```
 
-The `implement()` factory wraps the params into a Zod object schema and returns an `ImplementDefinition` — a typed object that the framework can introspect. The handler receives two arguments: validated params (typed from the Zod schemas) and a framework-injected context (`{ home }` — the NEXUS_HOME path).
+The `implement()` factory wraps the params into a Zod object schema and returns an `ImplementDefinition` — a typed object that the framework can introspect. The handler receives two arguments: validated params (typed from the Zod schemas) and a framework-injected context (`{ home }` — the guild root path).
 
 For MCP, the Nexus MCP engine dynamically imports the module, reads `.params.shape` for the tool's input schema, and wraps `.handler` as the tool callback. For CLI, Commander options can be auto-generated from the Zod schema. For direct import, other code calls `.handler` as a function.
 
@@ -77,7 +77,8 @@ The entry point is any executable — shell script, Python, compiled binary:
 ```bash
 #!/usr/bin/env bash
 # get-anima — look up an anima by name
-echo "$(sqlite3 "$NEXUS_HOME/nexus.db" "SELECT * FROM animas WHERE name = '$1'" -json)"
+GUILD_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+echo "$(sqlite3 "$GUILD_ROOT/.nexus/nexus.db" "SELECT * FROM animas WHERE name = '$1'" -json)"
 ```
 
 Scripts receive arguments as CLI args and return results on stdout (plain text or JSON). The framework wraps them for MCP by shelling out to the script when the tool is called. For CLI, the `nexus` command delegates to the script directly.
@@ -208,14 +209,13 @@ For `entry` specifically: if absent from the descriptor, the installer falls bac
 Installed tools live in versioned **slot** directories:
 
 ```
-guildhall/
+GUILD_ROOT/
   nexus/                          ← framework-managed
     implements/
       dispatch/0.1.0/
         nexus-implement.json      →  { "entry": "handler.js", ... }
         handler.js                →  module exporting the implement handler
         instructions.md
-      publish/0.1.0/
       install-tool/0.1.0/
       remove-tool/0.1.0/
       instantiate/0.1.0/
@@ -232,8 +232,7 @@ guildhall/
       001-initial-schema.sql
   implements/                     ← guild-managed
     my-tool/0.3.0/
-      nexus-implement.json
-      handler.js
+      nexus-implement.json        ← descriptor + instructions (metadata only for registry/git-url)
       instructions.md
   engines/                        ← guild-managed
     my-engine/1.0.0/
@@ -245,9 +244,9 @@ guildhall/
 
 **Framework engines** (manifest, mcp-server, worktree-setup, ledger-migrate) follow the same pattern — each has a descriptor and an entry point module. The MCP engine is the framework engine that serves implements as MCP tools during anima sessions.
 
-**Guild-installed tools** are pristine copies of the source package — the installer never modifies their contents. Guild implements can be either `module` or `script` kind. All provenance metadata (where the tool came from, when it was installed) lives in `guild.json`, not in the installed files.
+**Guild-installed tools** have different slot contents depending on how they were installed. For **registry** and **git-url** installs, only metadata (descriptor + instructions) is copied to the slot — the runtime code lives in `node_modules/`, managed by npm. For **workshop** and **tarball** installs, the full package source is copied to the slot for durability (these tools are not tracked in `package.json`). For **link** installs, only metadata is in the slot — the runtime code is symlinked from the developer's local directory.
 
-Other files (`README.md`, `LICENSE`, `package.json`, source maps, etc.) are installed as-is alongside the descriptor and entry point. The entire package contents end up in the slot directory — no cherry-picking.
+All provenance and routing metadata lives in `guild.json` — including the `package` field that tells the manifest engine to resolve the tool by npm package name rather than file path. Slot descriptors are pristine copies of what the tool author shipped.
 
 ---
 
@@ -265,6 +264,7 @@ Role permissions are declared in `guild.json` as part of each implement's regist
       "slot": "0.1.0",
       "roles": ["*"],
       "upstream": null,
+      "package": "@shardworks/implement-dispatch",
       "installedAt": "2026-03-23T12:00:00Z"
     },
     "install-tool": {
@@ -272,13 +272,15 @@ Role permissions are declared in `guild.json` as part of each implement's regist
       "slot": "0.1.0",
       "roles": ["*"],
       "upstream": null,
+      "package": "@shardworks/implement-install-tool",
       "installedAt": "2026-03-23T12:00:00Z"
     },
     "my-custom-tool": {
       "source": "guild",
       "slot": "0.3.0",
       "roles": ["sage"],
-      "upstream": null,
+      "upstream": "my-custom-tool@0.3.0",
+      "package": "my-custom-tool",
       "installedAt": "2026-03-22T09:30:00Z"
     }
   }
@@ -291,6 +293,7 @@ Role permissions are declared in `guild.json` as part of each implement's regist
 | `slot` | Directory name under `{implements\|engines}/{name}/` |
 | `roles` | Array of roles that may use this implement. `["*"]` means all roles. |
 | `upstream` | npm package specifier the tool was installed from, or `null` for locally-built tools |
+| `package` | npm package name for runtime resolution via `node_modules`. Omitted for script-only tools. |
 | `installedAt` | ISO-8601 timestamp of installation |
 
 At manifest time, the manifest engine computes the implement set:
@@ -345,12 +348,12 @@ When installing, the slot name is determined as follows:
 
 | Source | Slot name | Example |
 |--------|-----------|---------|
-| npm package | The installed package version | `@shardworks/dispatch@1.11.3` → slot `1.11.3` |
-| Local directory or tarball with `version` in descriptor | The descriptor's `version` field | `{ "version": "0.3.0" }` → slot `0.3.0` |
-| Local directory or tarball without `version` | Must be specified with `--slot` | `install-tool ./my-tool --slot 0.1.0` |
+| Registry / git-url | The installed package version | `@shardworks/dispatch@1.11.3` → slot `1.11.3` |
+| Workshop / tarball / link with `version` in descriptor | The descriptor's `version` field | `{ "version": "0.3.0" }` → slot `0.3.0` |
+| Any source without `version` | Must be specified with `--slot` | `install-tool ./my-tool.tgz --slot 0.1.0` |
 | Explicit override | Always wins | `install-tool @shardworks/dispatch@1.11.3 --slot v1` |
 
-For npm packages, the default is clean — the upstream version *is* the slot name. For local sources without a version, requiring `--slot` avoids ambiguity.
+For registry and git-url packages, the default is clean — the upstream version *is* the slot name. For sources without a version, requiring `--slot` avoids ambiguity.
 
 ### Slot lifecycle
 
@@ -364,44 +367,37 @@ For npm packages, the default is clean — the upstream version *is* the slot na
 
 ### The `install-tool` implement
 
-`install-tool` is a base implement provided by Nexus. It accepts a polymorphic **tool source** argument:
+`install-tool` is a base implement provided by Nexus. It accepts a polymorphic **tool source** argument and classifies it into one of five install types:
 
-| Input shape | Example | Behavior |
-|-------------|---------|----------|
-| npm specifier | `install-tool @shardworks/dispatch@^2.0.0` | Fetch from registry, unpack to slot |
-| Bare name | `install-tool dispatch` | Shorthand for `@shardworks/dispatch@latest` |
-| Local tarball | `install-tool ./dispatch-1.0.0.tgz` | Unpack, read descriptor |
-| Local directory | `install-tool ./path/to/tool` | Copy directory, read descriptor |
+| Source pattern | Type | Example |
+|----------------|------|---------|
+| `--link` flag + local dir | link | `install-tool ~/projects/my-tool --link` |
+| `workshop:<name>#<ref>` | workshop | `install-tool workshop:forge#tool/fetch-jira@1.0` |
+| Starts with `git+` | git-url | `install-tool git+https://github.com/someone/tool.git#v1.0` |
+| Ends with `.tgz` or `.tar.gz` | tarball | `install-tool ./my-tool-1.0.0.tgz` |
+| Everything else | registry | `install-tool some-tool@1.0`, `install-tool @scope/tool` |
 
-Every path converges to the same core operation: "I have a directory with a descriptor. Validate it, place it in a slot, register it."
+Each type has different durability semantics — see [the building implements guide](../guides/building-implements.md) for full details on each install type and the rehydrate workflow.
 
 The install process:
 
-1. Resolve the source to a local directory (fetch/unpack if needed)
+1. Classify the source and install via npm (or symlink for link mode)
 2. Find and validate the descriptor (`nexus-implement.json`, `nexus-engine.json`, `nexus-curriculum.json`, or `nexus-temperament.json`)
-3. Determine the tool name (from `--name`, or derived from package/directory name)
+3. Determine the tool name (from `--name`, or derived from package name)
 4. Determine the slot name (from version, or `--slot` flag)
-5. Copy the entire directory to the appropriate location
-6. Register in `guild.json` (source, slot, upstream, timestamp, roles for implements)
-7. Commit to the guildhall
+5. Copy metadata or full source to the guild slot (depending on install type)
+6. Register in `guild.json` (source, slot, upstream, package name, timestamp, roles for implements)
+8. Commit to the guild
 
-Both the CLI (`nexus install-tool`) and the implement (wielded by animas via MCP) share the same core logic. Currently only local directory sources are implemented; npm and tarball sources are planned. The CLI adds operator niceties (interactive prompts, `--dry-run`); the MCP interface provides the anima-facing tool.
+Both the CLI (`nexus install-tool`) and the implement (wielded by animas via MCP) share the same core logic.
 
 ### The `remove-tool` implement
 
-`remove-tool` is the counterpart to `install-tool`. It deregisters a tool from `guild.json` and removes its on-disk directory. Only guild-managed tools can be removed — framework tools (`source: "nexus"`) are managed by `nexus repair` / `nexus install` and cannot be removed through this implement.
+`remove-tool` is the counterpart to `install-tool`. It deregisters a tool from `guild.json`, removes its guild slot, and cleans up `node_modules/`. Removal behavior depends on install type: registry/git-url tools are removed via `npm uninstall`; workshop/tarball tools are removed from `node_modules/` directly; linked tools have their symlink removed.
+
+Only guild-managed tools can be removed — framework tools (`source: "nexus"`) are managed by `nexus repair` / `nexus install` and cannot be removed through this implement.
 
 If removing a tool leaves its parent name directory empty (e.g. `implements/my-tool/` after removing the only slot), the parent directory is also cleaned up.
-
-### Installation sources
-
-| Source | Example | How it resolves |
-|--------|---------|-----------------|
-| npm registry | `install-tool dispatch` | Fetches from npm, unpacks to slot |
-| Scoped / private | `install-tool @org/tool` | Same, with registry auth |
-| Local tarball | `install-tool ./tool.tgz` | Unpacks tarball, reads descriptor |
-| Local directory | `install-tool ./path/` | Copies directory, reads descriptor |
-| In-repo build | *(no install step)* | Tool lives directly in `implements/` or `engines/` |
 
 ### Framework tools: workspace packages
 
@@ -438,31 +434,38 @@ This model means:
 
 ---
 
-## Ad-hoc / in-repo development
+## Local development
 
-Guild-authored tools can live directly in `implements/` or `engines/` without a publishing step. A tool directory with a valid descriptor is installable as-is. For development, the tool can have a `src/` subdirectory with TypeScript source and a build script — the built artifact goes into the versioned directory.
+During development, use `--link` to symlink a local tool directory into the guild:
+
+```
+nexus install-tool ~/projects/my-tool --link --roles artificer
+```
+
+Changes to the handler are reflected immediately — no reinstall needed. When done iterating, reinstall via a durable method (registry, tarball, workshop).
 
 The simplest possible guild implement is a shell script and a one-line descriptor:
 
 ```
-my-tool/0.1.0/
-  nexus-implement.json  →  { "entry": "run.sh" }
-  run.sh                →  #!/usr/bin/env bash ...
+my-tool/
+  package.json            →  { "name": "my-tool", "version": "0.1.0" }
+  nexus-implement.json    →  { "entry": "run.sh" }
+  run.sh                  →  #!/usr/bin/env bash ...
 ```
 
 No SDK, no TypeScript, no build step. The framework infers `kind: "script"` from the `.sh` extension, wraps it for MCP automatically, and the anima can call it as a typed tool.
 
-When ready to share, `npm pack` from the tool directory creates a `.tgz` that any guild can install. Since the descriptor is the contract, sharing works regardless of whether the tool was originally built with npm in mind.
+When ready to share, `npm pack` creates a `.tgz` that any guild can install. Since the descriptor is the contract, sharing works regardless of whether the tool was originally built with npm in mind.
 
 ### Animas building tools
 
 An anima commissioned to build a new implement works in a workshop worktree like any other commission. When the commission completes:
 
 1. Leadership reviews the output
-2. `install-tool ./path/to/built-tool --slot 0.1.0` installs it into the guild
-3. The tool is now operational — registered in `guild.json`, resolved by the manifest engine
+2. `install-tool workshop:forge#tool/my-tool@0.1.0` installs it into the guild from the workshop repo
+3. The tool is now operational — registered in `guild.json`, full source stored in the guild slot, resolved by the manifest engine
 
-Since `install-tool` is itself an implement, animas with appropriate access can install tools directly — enabling the guild to extend its own toolkit autonomously.
+The guildhall is never a workspace — artifacts flow in through deliberate install operations. Since `install-tool` is itself an implement, animas with appropriate access can install tools directly — enabling the guild to extend its own toolkit autonomously.
 
 ---
 

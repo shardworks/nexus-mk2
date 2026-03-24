@@ -34,7 +34,7 @@ type ZodShape = Record<string, z.ZodType>;
  * or calling engine) provides it.
  */
 export interface ImplementContext {
-  /** Absolute path to NEXUS_HOME. */
+  /** Absolute path to the guild root. */
   home: string;
 }
 
@@ -64,7 +64,7 @@ export interface ImplementDefinition<TShape extends ZodShape = ZodShape> {
  *
  * The handler receives two arguments:
  * - `params` — the validated input, typed from your Zod schemas
- * - `context` — framework-injected context (NEXUS_HOME path, etc.)
+ * - `context` — framework-injected context (guild root path, etc.)
  *
  * Return any JSON-serializable value. The MCP engine wraps it as tool output;
  * the CLI prints it; engines use it directly.

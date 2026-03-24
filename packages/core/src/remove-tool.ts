@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { guildhallWorktreePath } from './nexus-home.ts';
 import { readGuildConfig, writeGuildConfig } from './guild-config.ts';
 
 const DIR_MAP: Record<string, string> = {
@@ -33,30 +32,11 @@ function git(args: string[], cwd: string): void {
 }
 
 /**
- * Read a JSON file.
+ * Read the npm package name from a tool's guild.json entry.
+ * Returns null if the tool has no package field (e.g. script-only tools).
  */
-function readJson(filePath: string): Record<string, unknown> {
-  return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-}
-
-/**
- * Determine the npm package name for a tool from its slot descriptor's `package` field.
- * Returns null if the tool was not npm-installed.
- */
-function getPackageName(worktree: string, category: string, name: string, slot: string): string | null {
-  const parentDir = DIR_MAP[category];
-  const slotDir = path.join(worktree, parentDir, name, slot);
-
-  // Check all possible descriptor files
-  const descriptorFiles = ['nexus-implement.json', 'nexus-engine.json', 'nexus-curriculum.json', 'nexus-temperament.json'];
-  for (const descriptorFile of descriptorFiles) {
-    const descriptorPath = path.join(slotDir, descriptorFile);
-    if (fs.existsSync(descriptorPath)) {
-      const descriptor = readJson(descriptorPath);
-      return (descriptor['package'] as string) ?? null;
-    }
-  }
-  return null;
+function getPackageName(entry: Record<string, unknown>): string | null {
+  return (entry['package'] as string) ?? null;
 }
 
 /**
@@ -70,7 +50,6 @@ function getPackageName(worktree: string, category: string, name: string, slot: 
  */
 export function removeTool(opts: RemoveToolOptions): RemoveResult {
   const { home, name } = opts;
-  const worktree = guildhallWorktreePath(home);
   const config = readGuildConfig(home);
 
   // Find the tool in guild.json
@@ -99,32 +78,39 @@ export function removeTool(opts: RemoveToolOptions): RemoveResult {
   }
 
   // Clean up npm-installed packages from node_modules
-  const packageName = getPackageName(worktree, foundCategory, name, slot);
+  const packageName = getPackageName(entry as Record<string, unknown>);
+  const upstream = 'upstream' in entry ? (entry.upstream as string | null) : null;
+
   if (packageName) {
-    const linkPath = path.join(worktree, 'node_modules', packageName);
+    const linkPath = path.join(home, 'node_modules', packageName);
     if (fs.existsSync(linkPath) && fs.lstatSync(linkPath).isSymbolicLink()) {
       // Linked tool: just remove the symlink
       fs.unlinkSync(linkPath);
       // Clean up empty scoped directory if needed
       const scopeDir = path.dirname(linkPath);
-      if (scopeDir !== path.join(worktree, 'node_modules') &&
+      if (scopeDir !== path.join(home, 'node_modules') &&
           fs.existsSync(scopeDir) && fs.readdirSync(scopeDir).length === 0) {
         fs.rmdirSync(scopeDir);
       }
-    } else {
-      // npm-installed tool: use npm uninstall
+    } else if (upstream && !upstream.startsWith('workshop:')) {
+      // Registry/git-url tool saved to package.json: use npm uninstall
       try {
-        execFileSync('npm', ['uninstall', packageName], { cwd: worktree, stdio: 'pipe' });
+        execFileSync('npm', ['uninstall', packageName], { cwd: home, stdio: 'pipe' });
       } catch {
         // If npm uninstall fails (e.g. package already gone), continue with cleanup
+      }
+    } else {
+      // Workshop/tarball tool (not in package.json): remove from node_modules manually
+      if (fs.existsSync(linkPath)) {
+        fs.rmSync(linkPath, { recursive: true });
       }
     }
   }
 
   // Remove on-disk directory (the specific slot)
   const parentDir = DIR_MAP[foundCategory];
-  const toolDir = path.join(worktree, parentDir, name, slot);
-  const toolParent = path.join(worktree, parentDir, name);
+  const toolDir = path.join(home, parentDir, name, slot);
+  const toolParent = path.join(home, parentDir, name);
 
   if (fs.existsSync(toolDir)) {
     fs.rmSync(toolDir, { recursive: true });
@@ -139,8 +125,8 @@ export function removeTool(opts: RemoveToolOptions): RemoveResult {
   writeGuildConfig(home, config);
 
   // Commit
-  git(['add', '-A'], worktree);
-  git(['commit', '-m', `Remove ${foundCategory.slice(0, -1)} ${name}`], worktree);
+  git(['add', '-A'], home);
+  git(['commit', '-m', `Remove ${foundCategory.slice(0, -1)} ${name}`], home);
 
   return { category: foundCategory, name, slot, removedFrom: toolDir };
 }

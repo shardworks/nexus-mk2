@@ -23,7 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { ledgerPath, guildhallWorktreePath } from '@shardworks/nexus-core';
+import { ledgerPath } from '@shardworks/nexus-core';
 
 /** A migration file discovered on disk. */
 export interface MigrationFile {
@@ -106,12 +106,11 @@ function getAppliedSequences(db: Database.Database): Set<number> {
  * compares against the _migrations tracking table, and applies any that
  * haven't been run yet. Each migration runs in its own transaction.
  *
- * @param home - Absolute path to NEXUS_HOME.
+ * @param home - Absolute path to the guild root.
  * @returns Summary of what was applied and skipped.
  */
 export function applyMigrations(home: string): MigrateResult {
-  const worktree = guildhallWorktreePath(home);
-  const migrationsDir = path.join(worktree, 'nexus', 'migrations');
+  const migrationsDir = path.join(home, 'nexus', 'migrations');
   const dbPath = ledgerPath(home);
 
   // Discover available migrations

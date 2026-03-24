@@ -61,7 +61,7 @@ export function makeInitCommand() {
       const home = path.resolve(guildPath);
 
       try {
-        // 1. Create guild skeleton (bare repo, worktree, dirs, guild.json, migration file)
+        // 1. Create guild skeleton (git repo, dirs, guild.json, migration file)
         initGuild(home, guildName, model);
 
         // 2. Install all framework tools via installTool
@@ -77,6 +77,6 @@ export function makeInitCommand() {
       }
 
       console.log(`Guild created at ${home}`);
-      console.log(`\n  export NEXUS_HOME=${home}\n`);
+      console.log(`\n  cd ${home}\n`);
     });
 }

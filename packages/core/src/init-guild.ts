@@ -2,7 +2,6 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { VERSION } from './index.ts';
-import { guildhallBarePath, guildhallWorktreePath } from './nexus-home.ts';
 import { createInitialGuildConfig } from './guild-config.ts';
 import { INITIAL_SCHEMA } from './ledger.ts';
 
@@ -11,21 +10,24 @@ function git(args: string[], cwd?: string): void {
 }
 
 /**
- * Create a new guild skeleton at the given path.
+ * Create a new guild at the given path.
  *
- * Sets up the NEXUS_HOME directory structure: bare guildhall repo,
- * standing worktree with scaffolded directories, empty guild.json,
- * the initial migration file, and an initial git commit.
+ * Sets up a regular git repo at `home` with the guild directory structure:
+ * guild.json, package.json, .gitignore, scaffolded directories, the initial
+ * migration file, and an initial git commit.
+ *
+ * The .nexus/ directory (gitignored) holds framework-managed state: the Ledger,
+ * workshop bare clones, and commission worktrees.
  *
  * This is the first step of guild creation. After this, the caller
  * should bootstrap base tools and apply migrations:
  *
- *   initGuild(home, model)        // skeleton
- *   bootstrapBaseTools(home, ...)  // install framework tools via installTool
- *   applyMigrations(home)          // create ledger via migration engine
+ *   initGuild(home, name, model)    // skeleton
+ *   bootstrapBaseTools(home, ...)    // install framework tools via installTool
+ *   applyMigrations(home)           // create ledger via migration engine
  *
- * @param home - Absolute path for the new NEXUS_HOME directory.
- * @param name - Guild name (used in guild.json and as the guildhall npm package name).
+ * @param home - Absolute path for the new guild directory.
+ * @param name - Guild name (used in guild.json and as the npm package name).
  * @param model - Default model identifier for anima sessions.
  * @throws If `home` exists and is not empty.
  */
@@ -38,18 +40,15 @@ export function initGuild(home: string, name: string, model: string): void {
     }
   }
 
-  // Create NEXUS_HOME skeleton
-  const ghWorktree = guildhallWorktreePath(home);
-  fs.mkdirSync(path.dirname(ghWorktree), { recursive: true });
+  // Create guild root and initialize git repo
+  fs.mkdirSync(home, { recursive: true });
+  git(['init'], home);
 
-  // Create guildhall bare repo
-  const ghBare = guildhallBarePath(home);
-  git(['init', '--bare', ghBare]);
+  // Create .nexus infrastructure directory
+  fs.mkdirSync(path.join(home, '.nexus', 'workshops'), { recursive: true });
+  fs.mkdirSync(path.join(home, '.nexus', 'worktrees'), { recursive: true });
 
-  // Create standing worktree
-  git(['-C', ghBare, 'worktree', 'add', '-b', 'main', ghWorktree]);
-
-  // Scaffold guildhall directory structure
+  // Scaffold guild directory structure
   const dirs = [
     'nexus/implements',
     'nexus/engines',
@@ -62,41 +61,41 @@ export function initGuild(home: string, name: string, model: string): void {
   ];
 
   for (const dir of dirs) {
-    const full = path.join(ghWorktree, dir);
+    const full = path.join(home, dir);
     fs.mkdirSync(full, { recursive: true });
     fs.writeFileSync(path.join(full, '.gitkeep'), '');
   }
 
   // Write initial migration
   fs.writeFileSync(
-    path.join(ghWorktree, 'nexus/migrations/001-initial-schema.sql'),
+    path.join(home, 'nexus/migrations/001-initial-schema.sql'),
     INITIAL_SCHEMA.trimStart(),
   );
   // Remove .gitkeep from migrations since it now has a real file
-  const migrationsGitkeep = path.join(ghWorktree, 'nexus/migrations/.gitkeep');
+  const migrationsGitkeep = path.join(home, 'nexus/migrations/.gitkeep');
   if (fs.existsSync(migrationsGitkeep)) {
     fs.unlinkSync(migrationsGitkeep);
   }
 
   // Write codex placeholder
-  fs.writeFileSync(path.join(ghWorktree, 'codex/all.md'), '');
+  fs.writeFileSync(path.join(home, 'codex/all.md'), '');
 
   // Write guild.json — empty registries, tools will be installed via bootstrapBaseTools
   const config = createInitialGuildConfig(name, VERSION, model);
   fs.writeFileSync(
-    path.join(ghWorktree, 'guild.json'),
+    path.join(home, 'guild.json'),
     JSON.stringify(config, null, 2) + '\n',
   );
 
   // Make the guildhall an npm package so guild tools can be installed as
   // npm dependencies with proper dependency resolution.
   fs.writeFileSync(
-    path.join(ghWorktree, 'package.json'),
+    path.join(home, 'package.json'),
     JSON.stringify({ name: `guild-${name}`, private: true, version: '0.0.0' }, null, 2) + '\n',
   );
-  fs.writeFileSync(path.join(ghWorktree, '.gitignore'), 'node_modules/\n');
+  fs.writeFileSync(path.join(home, '.gitignore'), 'node_modules/\n.nexus/\n');
 
   // Initial commit
-  git(['add', '-A'], ghWorktree);
-  git(['commit', '-m', 'Initialize guild'], ghWorktree);
+  git(['add', '-A'], home);
+  git(['commit', '-m', 'Initialize guild'], home);
 }

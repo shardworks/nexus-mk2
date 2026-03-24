@@ -34,7 +34,7 @@ export default implement({
   },
   handler: async (params, context) => {
     // params — validated input, typed from your Zod schemas
-    // context.home — absolute path to NEXUS_HOME
+    // context.home — absolute path to the guild root
 
     // Return any JSON-serializable value
     return { result: 'done' };
@@ -46,7 +46,7 @@ export default implement({
 
 1. **Default export.** The handler must be the default export. The MCP engine does `import(modulePath)` and reads `.default`.
 2. **Zod params.** Every parameter is a Zod schema. The `.describe()` string becomes the parameter description in MCP — make it clear.
-3. **Context injection.** The framework passes `{ home: string }` as the second argument. Use `home` to find the guildhall, ledger, etc. Never read `NEXUS_HOME` from the environment directly.
+3. **Context injection.** The framework passes `{ home: string }` as the second argument. Use `home` to find guild files, the ledger, etc. The guild root is auto-detected from cwd (walks up looking for `guild.json`).
 4. **Return JSON.** The MCP engine serializes the return value as JSON. Return objects, arrays, strings, or numbers. Throw errors for failures — the engine catches them and returns an MCP error.
 5. **Sync or async.** Handlers can be sync or async. The framework `await`s either way.
 
@@ -100,10 +100,10 @@ See `packages/implement-install-tool/` for the canonical example. Key files:
 Fields:
 - `entry` — (required) path to the handler module, relative to the package root
 - `instructions` — (optional) path to instructions file for animas
-- `version` — version slot for the guildhall directory
+- `version` — version slot for the guild directory
 - `description` — human-readable description
 
-Note: `installTool` automatically adds a `package` field to the guildhall copy of this descriptor (read from your `package.json` name). This tells the manifest engine to resolve by package name at runtime. You don't need to set it yourself.
+Note: `installTool` records a `package` field in `guild.json` (read from your `package.json` name). This tells the manifest engine to resolve by npm package name at runtime. The slot descriptor itself is not modified.
 
 ### `instructions.md`
 
@@ -117,59 +117,83 @@ MCP already provides the parameter schema and description. Instructions teach *c
 
 ## Installing tools
 
-### From a local directory (with `package.json`)
+There are five install types, each with different durability guarantees.
+
+### Registry — published npm packages
 
 ```
-nexus install-tool ./path/to/my-tool --roles artificer
+nexus install-tool some-tool@1.0 --roles artificer
 ```
 
-The tool is installed via `npm install` into the guildhall's `node_modules`. Its dependencies are resolved automatically. The descriptor and instructions are copied to the guildhall slot for git tracking, but the runtime code and dependencies live in `node_modules`.
+Installs from the npm registry via `npm install --save`. The package is added to the guild's `package.json` as a dependency, so it survives `npm install` on a fresh clone.
 
-This is the path used by forge agents installing tools they've built in a commission worktree. The worktree can be cleaned up afterward — npm copied the package.
+- Descriptor and instructions are copied to the guild slot for git tracking
+- Runtime code and dependencies live in `node_modules/`
+- `upstream` in `guild.json`: `<package>@<version>` (e.g. `some-tool@1.0.0`)
+- **Fully durable.** `package.json` has the specifier. `npm install` on fresh clone resolves it.
 
-### From a local directory (dev mode with `--link`)
-
-```
-nexus install-tool ~/projects/my-tool --link --roles artificer
-```
-
-Creates a symlink in the guildhall's `node_modules` pointing to the source directory. Changes to the handler are reflected immediately at runtime — no reinstall needed. The tool's own `node_modules` (from the developer's project) resolves dependencies.
-
-Use this while actively developing a tool. When done iterating, reinstall without `--link` for a proper copy.
-
-### From the npm registry
+### Git URL — packages from git repositories
 
 ```
-nexus install-tool some-guild-tool@1.0 --roles herald
+nexus install-tool git+https://github.com/someone/tool.git#v1.0 --roles artificer
 ```
 
-Installs the package from npm into the guildhall's `node_modules`, resolving all dependencies. The descriptor and instructions are copied from the installed package to the guildhall slot.
+Same flow as registry — npm handles `git+` URLs natively. The URL is saved to `package.json`.
 
-### From a tarball
+- `upstream` in `guild.json`: the full git URL
+- **Fully durable.** `package.json` has the git URL. `npm install` on fresh clone resolves it.
+
+### Workshop — forge-built tools
+
+```
+nexus install-tool workshop:forge#tool/fetch-jira@1.0 --roles artificer
+```
+
+Installs from a workshop bare repo in `.nexus/workshops/`. The source specifier format is `workshop:<name>#<ref>` where `<name>` is the workshop name and `<ref>` is a git ref (branch, tag, or commit).
+
+Workshop installs use `--no-save` semantics — the package is **not** added to `package.json` (since the `git+file://` URL would be machine-specific). Instead, the full source is copied to the guild slot for durability.
+
+- Full source (not just metadata) is stored in the guild slot and git-tracked
+- `upstream` in `guild.json`: the original `workshop:name#ref` specifier
+- **Durable within the guild.** On fresh clone, `nexus rehydrate` reinstalls from the slot source.
+
+This is the path used by forge agents installing tools they've built in a commission worktree.
+
+### Tarball — local archive files
 
 ```
 nexus install-tool ./my-tool-1.0.0.tgz --roles artificer
 ```
 
-Installs from a local `.tgz` file (e.g. a CI artifact). Same behavior as a registry install — npm extracts the tarball, resolves dependencies, and installs to `node_modules`.
+Installs from a local `.tgz` or `.tar.gz` file (e.g. a CI artifact). Uses `--no-save` semantics with full source copied to the guild slot.
 
-### Bare files (no `package.json`)
+- npm extracts and installs the tarball to resolve dependencies
+- Full source is copied to the guild slot and git-tracked
+- `upstream` in `guild.json`: `null` (local artifact, not a durable reference)
+- **Durable via slot.** On fresh clone, `nexus rehydrate` reinstalls from the slot source.
+
+### Link — dev mode with symlinks
 
 ```
-nexus install-tool ./my-script-tool --roles artificer
+nexus install-tool ~/projects/my-tool --link --roles artificer
 ```
 
-For non-Node tools (shell scripts, etc.) or simple handlers with no third-party dependencies. The source files are copied directly to the guildhall slot. No npm involvement, no dependency resolution.
+Creates a symlink in `node_modules/` pointing to the source directory. Changes to the handler are reflected immediately at runtime — no reinstall needed. The tool's own `node_modules` (from the developer's project) resolves dependencies.
+
+- Requires a directory with `package.json`
+- Only metadata is copied to the guild slot
+- `upstream` in `guild.json`: `null`
+- **NOT durable.** The symlink target must exist on the local machine. Other clones will not have this tool — `nexus rehydrate` will report it as needing manual re-linking.
+
+Use this while actively developing a tool. When done iterating, reinstall via a durable method (registry, tarball, etc.).
 
 ## How dependencies resolve at runtime
 
-The guildhall is an npm package (it has a `package.json` at its root). When a guild tool is installed via npm, it becomes a dependency in `guildhall/node_modules/`.
+The guild root is an npm package (it has a `package.json` at its root). When a guild tool is installed via npm, it becomes a dependency in `node_modules/`.
 
-At runtime, the manifest engine sets `NODE_PATH` to the guildhall's `node_modules` when launching the MCP server process. This ensures that `import("some-guild-tool")` resolves correctly regardless of where the MCP engine's own code lives.
+At runtime, the manifest engine sets `NODE_PATH` to the guild root's `node_modules` when launching the MCP server process. This ensures that `import("some-guild-tool")` resolves correctly regardless of where the MCP engine's own code lives.
 
 For tools with a `package` field in their descriptor, the manifest engine passes the package name (not a file path) to the MCP engine, which imports it by name. Node's module resolution + `NODE_PATH` handles the rest.
-
-For bare-local tools (no `package` field), the manifest engine passes an absolute file path. These tools can only import Node builtins and `@shardworks/nexus-core` — no third-party dependencies.
 
 ## Removing tools
 
@@ -177,7 +201,29 @@ For bare-local tools (no `package` field), the manifest engine passes an absolut
 nexus remove-tool my-tool
 ```
 
-For npm-installed tools, this runs `npm uninstall` to clean up `node_modules`, removes the guildhall slot, and deregisters from `guild.json`. For linked tools, the symlink is removed. For bare-local tools, the slot directory is deleted.
+Removal behavior depends on how the tool was installed:
+
+- **Registry/git-url** — runs `npm uninstall` to clean up `node_modules` and `package.json`, removes the guild slot, and deregisters from `guild.json`
+- **Workshop/tarball** — removes the package from `node_modules` manually (it's not in `package.json`), removes the guild slot (including full source), and deregisters from `guild.json`
+- **Link** — removes the symlink from `node_modules`, removes the guild slot, and deregisters from `guild.json`
+
+Framework tools (source: `nexus`) cannot be removed with `remove-tool` — use `nexus repair` to manage those.
+
+## Rehydrating after a fresh clone
+
+After cloning a guild repo, `node_modules/` will be empty. Run:
+
+```
+nexus rehydrate
+```
+
+This reconstructs the runtime environment:
+
+1. **Registry/git-url tools** — `npm install` resolves dependencies from `package.json`
+2. **Workshop/tarball tools** — `npm install --no-save <slot-path>` reinstalls from the full source stored in each tool's guild slot
+3. **Linked tools** — reported as needing manual re-linking (the symlink target is machine-specific)
+
+Rehydrate is idempotent and safe to run at any time.
 
 ## Using `@shardworks/nexus-core`
 
@@ -188,17 +234,18 @@ The core library provides utilities that implement handlers commonly need:
 | `VERSION` | Framework version string |
 | `readGuildConfig(home)` | Read and parse `guild.json` |
 | `writeGuildConfig(home, config)` | Write `guild.json` |
-| `guildhallWorktreePath(home)` | Resolve path to the standing worktree |
-| `ledgerPath(home)` | Resolve path to the Ledger SQLite database |
+| `findGuildRoot(startDir?)` | Discover the guild root from cwd |
+| `ledgerPath(home)` | Resolve path to the Ledger SQLite database (`.nexus/nexus.db`) |
 | `installTool(opts)` | Core install logic (used by `install-tool` implement) |
 | `removeTool(opts)` | Core remove logic (used by `remove-tool` implement) |
+| `rehydrate(home)` | Reconstruct `node_modules` from tracked guild state |
 | `createLedger(path)` | Create a new Ledger database |
 | `implement(def)` | The implement SDK factory |
 
 Import from `@shardworks/nexus-core`:
 
 ```typescript
-import { readGuildConfig, guildhallWorktreePath } from '@shardworks/nexus-core';
+import { readGuildConfig, findGuildRoot } from '@shardworks/nexus-core';
 ```
 
 ## How it gets loaded
@@ -240,7 +287,7 @@ import { initGuild } from '@shardworks/nexus-core';
 
 const home = '/tmp/test-guild';
 initGuild(home, 'test-guild', 'test-model');
-// Now home has a real guildhall, guild.json, and ledger
+// Now home has a real guild with guild.json, package.json, and .git
 ```
 
 ## Adding to base tools

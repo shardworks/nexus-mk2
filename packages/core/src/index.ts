@@ -22,11 +22,12 @@ export {
   writeGuildConfig,
 } from './guild-config.ts';
 export {
-  resolveNexusHome,
-  guildhallBarePath,
-  guildhallWorktreePath,
+  findGuildRoot,
+  nexusDir,
   ledgerPath,
   worktreesPath,
+  workshopsPath,
+  workshopBarePath,
 } from './nexus-home.ts';
 export {
   type InstallToolOptions,
@@ -63,3 +64,7 @@ export {
 } from './base-tools.ts';
 export { initGuild } from './init-guild.ts';
 export { bootstrapBaseTools } from './bootstrap.ts';
+export {
+  type RehydrateResult,
+  rehydrate,
+} from './rehydrate.ts';

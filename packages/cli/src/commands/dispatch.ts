@@ -1,5 +1,6 @@
 import { createCommand } from 'commander';
-import { resolveNexusHome, dispatch } from '@shardworks/nexus-core';
+import { dispatch } from '@shardworks/nexus-core';
+import { resolveHome } from '../resolve-home.ts';
 
 export function makeDispatchCommand() {
   return createCommand('dispatch')
@@ -7,8 +8,8 @@ export function makeDispatchCommand() {
     .argument('<spec>', 'Commission specification — what needs to be done')
     .requiredOption('--workshop <workshop>', 'Target workshop')
     .option('--anima <anima>', 'Target anima name')
-    .action((spec: string, options: { workshop: string; anima?: string }) => {
-      const home = resolveNexusHome();
+    .action((spec: string, options: { workshop: string; anima?: string }, cmd) => {
+      const home = resolveHome(cmd);
 
       try {
         const result = dispatch({

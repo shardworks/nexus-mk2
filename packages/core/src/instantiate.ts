@@ -8,11 +8,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { ledgerPath, guildhallWorktreePath } from './nexus-home.ts';
+import { ledgerPath } from './nexus-home.ts';
 import { readGuildConfig } from './guild-config.ts';
 
 export interface InstantiateOptions {
-  /** Absolute path to NEXUS_HOME. */
+  /** Absolute path to the guild root. */
   home: string;
   /** Name for the new anima. Must be unique within the guild. */
   name: string;
@@ -35,19 +35,19 @@ export interface InstantiateResult {
 /**
  * Read training content from disk given its guild.json entry.
  *
- * @param worktree - Path to the guildhall worktree.
+ * @param guildRoot - Path to the guild root.
  * @param category - 'curricula' or 'temperaments'.
  * @param name - The training content name.
  * @param slot - The version slot.
  * @returns Object with version and the actual content text.
  */
 function readTrainingContent(
-  worktree: string,
+  guildRoot: string,
   category: 'curricula' | 'temperaments',
   name: string,
   slot: string,
 ): { version: string; content: string } {
-  const dir = path.join(worktree, 'training', category, name, slot);
+  const dir = path.join(guildRoot, 'training', category, name, slot);
   const descriptorFile = category === 'curricula'
     ? 'nexus-curriculum.json'
     : 'nexus-temperament.json';
@@ -84,8 +84,6 @@ function readTrainingContent(
  */
 export function instantiate(opts: InstantiateOptions): InstantiateResult {
   const { home, name, roles, curriculum, temperament } = opts;
-  const worktree = guildhallWorktreePath(home);
-
   if (roles.length === 0) {
     throw new Error('At least one role is required.');
   }
@@ -109,14 +107,14 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
   let curriculumSnapshot: { name: string; version: string; content: string } | null = null;
   if (curriculum) {
     const entry = config.curricula[curriculum]!;
-    const { version, content } = readTrainingContent(worktree, 'curricula', curriculum, entry.slot);
+    const { version, content } = readTrainingContent(home, 'curricula', curriculum, entry.slot);
     curriculumSnapshot = { name: curriculum, version, content };
   }
 
   let temperamentSnapshot: { name: string; version: string; content: string } | null = null;
   if (temperament) {
     const entry = config.temperaments[temperament]!;
-    const { version, content } = readTrainingContent(worktree, 'temperaments', temperament, entry.slot);
+    const { version, content } = readTrainingContent(home, 'temperaments', temperament, entry.slot);
     temperamentSnapshot = { name: temperament, version, content };
   }
 

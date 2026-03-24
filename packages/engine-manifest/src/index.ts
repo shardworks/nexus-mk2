@@ -21,7 +21,6 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import {
   ledgerPath,
-  guildhallWorktreePath,
   readGuildConfig,
 } from '@shardworks/nexus-core';
 import type { GuildConfig, ToolEntry } from '@shardworks/nexus-core';
@@ -50,6 +49,8 @@ export interface ResolvedImplement {
   path: string;
   /** Instructions content (if instructions.md exists). */
   instructions: string | null;
+  /** npm package name for runtime resolution, or null for file-path resolution. */
+  package: string | null;
 }
 
 /** The fully-resolved session configuration. */
@@ -64,7 +65,7 @@ export interface ManifestResult {
 
 /** Configuration passed to the MCP server engine. */
 export interface McpServerConfig {
-  /** Absolute path to NEXUS_HOME. */
+  /** Absolute path to the guild root. */
   home: string;
   /** Implements to register as MCP tools. */
   implements: Array<{ name: string; modulePath: string }>;
@@ -127,7 +128,6 @@ export function resolveImplements(
   config: GuildConfig,
   animaRoles: string[],
 ): ResolvedImplement[] {
-  const worktree = guildhallWorktreePath(home);
   const resolved: ResolvedImplement[] = [];
 
   for (const [name, entry] of Object.entries(config.implements)) {
@@ -142,7 +142,7 @@ export function resolveImplements(
 
     // Resolve on-disk path
     const parentDir = toolEntry.source === 'nexus' ? 'nexus/implements' : 'implements';
-    const implPath = path.join(worktree, parentDir, name, toolEntry.slot);
+    const implPath = path.join(home, parentDir, name, toolEntry.slot);
 
     // Read instructions if they exist
     let instructions: string | null = null;
@@ -167,6 +167,7 @@ export function resolveImplements(
       slot: toolEntry.slot,
       path: implPath,
       instructions,
+      package: toolEntry.package ?? null,
     });
   }
 
@@ -186,8 +187,7 @@ export function resolveImplements(
  * holds the matching role. The filename (minus .md) is the role name.
  */
 export function readCodex(home: string, animaRoles: string[]): string {
-  const worktree = guildhallWorktreePath(home);
-  const codexDir = path.join(worktree, 'codex');
+  const codexDir = path.join(home, 'codex');
 
   if (!fs.existsSync(codexDir)) return '';
 
@@ -260,9 +260,9 @@ export function assembleSystemPrompt(
 /**
  * Generate the MCP server config for the resolved implement set.
  *
- * For module-kind implements, the modulePath is the package name (for framework
- * implements) or an absolute path to the handler (for guild implements).
- * For script-kind implements, the MCP engine wraps them as shell-out calls.
+ * For implements with a `package` field in guild.json, the modulePath is the
+ * npm package name (resolved via NODE_PATH at runtime). For implements without
+ * a package field, the modulePath is an absolute path to the entry point.
  */
 export function generateMcpConfig(
   home: string,
@@ -271,27 +271,25 @@ export function generateMcpConfig(
   const mcpImplements: Array<{ name: string; modulePath: string }> = [];
 
   for (const impl of implements_) {
-    // Read descriptor to determine kind and entry point
-    const descriptorPath = path.join(impl.path, 'nexus-implement.json');
-    if (!fs.existsSync(descriptorPath)) continue;
+    // If guild.json has a `package` field, resolve by npm package name
+    // (the MCP server process uses NODE_PATH to find it in node_modules).
+    // Otherwise, read the entry point from the descriptor and use the absolute file path.
+    if (impl.package) {
+      mcpImplements.push({ name: impl.name, modulePath: impl.package });
+    } else {
+      const descriptorPath = path.join(impl.path, 'nexus-implement.json');
+      if (!fs.existsSync(descriptorPath)) continue;
 
-    const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf-8'));
-    const entry = descriptor.entry as string;
-
-    // If the descriptor has a `package` field, use that as the module path
-    // (this is how framework implements reference their workspace packages).
-    // Otherwise, use the absolute path to the entry point.
-    const modulePath = descriptor.package
-      ? descriptor.package as string
-      : path.join(impl.path, entry);
-
-    mcpImplements.push({ name: impl.name, modulePath });
+      const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf-8'));
+      const entry = descriptor.entry as string;
+      mcpImplements.push({ name: impl.name, modulePath: path.join(impl.path, entry) });
+    }
   }
 
   // Set NODE_PATH so the MCP server process can resolve npm-installed guild
   // tools from the guildhall's node_modules, regardless of where the MCP
   // engine code itself lives on disk.
-  const nodePath = path.join(guildhallWorktreePath(home), 'node_modules');
+  const nodePath = path.join(home, 'node_modules');
   return { home, implements: mcpImplements, env: { NODE_PATH: nodePath } };
 }
 

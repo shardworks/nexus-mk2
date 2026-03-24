@@ -1,15 +1,16 @@
 import { createCommand } from 'commander';
-import { resolveNexusHome, instantiate } from '@shardworks/nexus-core';
+import { instantiate } from '@shardworks/nexus-core';
+import { resolveHome } from '../resolve-home.ts';
 
 export function makeInstantiateCommand() {
-  return createCommand('instantiate')
+  return createCommand('create')
     .description('Create a new anima in the guild')
     .argument('<name>', 'Name for the new anima')
     .requiredOption('--roles <roles>', 'Comma-separated roles (e.g. artificer,sage)')
     .option('--curriculum <curriculum>', 'Curriculum to assign')
     .option('--temperament <temperament>', 'Temperament to assign')
-    .action((name: string, options: { roles: string; curriculum?: string; temperament?: string }) => {
-      const home = resolveNexusHome();
+    .action((name: string, options: { roles: string; curriculum?: string; temperament?: string }, cmd) => {
+      const home = resolveHome(cmd);
       const roles = options.roles.split(',').map(r => r.trim()).filter(Boolean);
 
       if (roles.length === 0) {
