@@ -8,6 +8,7 @@ import { makeDispatchCommand } from './commands/dispatch.ts';
 import { makeInstantiateCommand } from './commands/instantiate.ts';
 import { makeManifestCommand } from './commands/manifest.ts';
 import { makeStatusCommand } from './commands/status.ts';
+import { makeConsultCommand } from './commands/consult.ts';
 
 export const program = createCommand('nsg')
   .description('Nexus Mk 2.1 — experimental multi-agent AI system')
@@ -16,6 +17,7 @@ export const program = createCommand('nsg')
 
 // ── Top-level commands ──────────────────────────────────────────────────
 program.addCommand(makeInitCommand());
+program.addCommand(makeConsultCommand());
 program.addCommand(makeDispatchCommand());
 program.addCommand(makeStatusCommand());
 
