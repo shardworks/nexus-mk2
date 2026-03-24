@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { VERSION } from './index.ts';
 import { createInitialGuildConfig } from './guild-config.ts';
-import { INITIAL_SCHEMA } from './ledger.ts';
 
 function git(args: string[], cwd?: string): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
@@ -13,18 +12,18 @@ function git(args: string[], cwd?: string): void {
  * Create a new guild at the given path.
  *
  * Sets up a regular git repo at `home` with the guild directory structure:
- * guild.json, package.json, .gitignore, scaffolded directories, the initial
- * migration file, and an initial git commit.
+ * guild.json, package.json, .gitignore, scaffolded directories, and an
+ * initial git commit.
  *
  * The .nexus/ directory (gitignored) holds framework-managed state: the Ledger,
  * workshop bare clones, and commission worktrees.
  *
- * This is the first step of guild creation. After this, the caller
- * should bootstrap base tools and apply migrations:
+ * This creates only the skeleton. After this, the caller should install a
+ * bundle (which delivers tools, training, and migrations) and apply migrations:
  *
- *   initGuild(home, name, model)    // skeleton
- *   bootstrapBaseTools(home, ...)    // install framework tools via installTool
- *   applyMigrations(home)           // create ledger via migration engine
+ *   initGuild(home, name, model)           // skeleton
+ *   installBundle({ home, bundleDir })      // tools, training, migrations
+ *   applyMigrations(home)                  // create ledger
  *
  * @param home - Absolute path for the new guild directory.
  * @param name - Guild name (used in guild.json and as the npm package name).
@@ -50,8 +49,6 @@ export function initGuild(home: string, name: string, model: string): void {
 
   // Scaffold guild directory structure
   const dirs = [
-    'nexus/implements',
-    'nexus/engines',
     'nexus/migrations',
     'implements',
     'engines',
@@ -66,21 +63,10 @@ export function initGuild(home: string, name: string, model: string): void {
     fs.writeFileSync(path.join(full, '.gitkeep'), '');
   }
 
-  // Write initial migration
-  fs.writeFileSync(
-    path.join(home, 'nexus/migrations/001-initial-schema.sql'),
-    INITIAL_SCHEMA.trimStart(),
-  );
-  // Remove .gitkeep from migrations since it now has a real file
-  const migrationsGitkeep = path.join(home, 'nexus/migrations/.gitkeep');
-  if (fs.existsSync(migrationsGitkeep)) {
-    fs.unlinkSync(migrationsGitkeep);
-  }
-
   // Write codex placeholder
   fs.writeFileSync(path.join(home, 'codex/all.md'), '');
 
-  // Write guild.json — empty registries, tools will be installed via bootstrapBaseTools
+  // Write guild.json — empty registries, tools installed via bundle
   const config = createInitialGuildConfig(name, VERSION, model);
   fs.writeFileSync(
     path.join(home, 'guild.json'),

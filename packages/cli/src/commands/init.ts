@@ -1,27 +1,12 @@
 import { createCommand } from 'commander';
-import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import readline from 'node:readline/promises';
-import { initGuild, bootstrapBaseTools } from '@shardworks/nexus-core';
+import { initGuild, installBundle } from '@shardworks/nexus-core';
 import { applyMigrations } from '@shardworks/engine-ledger-migrate';
 
 const DEFAULT_MODEL = 'sonnet';
-
-/** Resolve a package name to its root directory on disk. */
-function makePackageResolver(): (packageName: string) => string {
-  const require = createRequire(import.meta.url);
-  return (packageName: string) => {
-    // Resolve the package's main entry, then walk up to find package.json
-    const entry = require.resolve(packageName);
-    let dir = path.dirname(entry);
-    while (dir !== path.dirname(dir)) {
-      if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
-      dir = path.dirname(dir);
-    }
-    throw new Error(`Could not find package root for ${packageName}`);
-  };
-}
+const DEFAULT_BUNDLE = '@shardworks/guild-starter-kit';
 
 async function prompt(question: string, defaultValue?: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -34,12 +19,32 @@ async function prompt(question: string, defaultValue?: string): Promise<string> 
   }
 }
 
+/**
+ * Fetch a bundle package into the guild's node_modules (without saving to package.json),
+ * and return the path to the installed bundle directory.
+ */
+function fetchBundle(home: string, bundleSpec: string): string {
+  execFileSync('npm', ['install', '--no-save', bundleSpec], { cwd: home, stdio: 'pipe' });
+
+  // Resolve the installed package name from the specifier
+  // Strip version range: "@scope/name@^1.0" → "@scope/name"
+  let packageName = bundleSpec;
+  if (packageName.startsWith('@') && packageName.lastIndexOf('@') > 0) {
+    packageName = packageName.substring(0, packageName.lastIndexOf('@'));
+  } else if (packageName.includes('@') && !packageName.startsWith('@')) {
+    packageName = packageName.split('@')[0]!;
+  }
+
+  return path.join(home, 'node_modules', packageName);
+}
+
 export function makeInitCommand() {
   return createCommand('init')
     .description('Create a new guild — guildhall, directory structure, guild.json, and Ledger')
     .argument('[path]', 'Path for the new guild (interactive prompt if omitted)')
     .option('--model <model>', 'Default model for anima sessions', DEFAULT_MODEL)
-    .action(async (pathArg: string | undefined, options: { model: string }) => {
+    .option('--bundle <spec>', 'Bundle to install (npm specifier or local path)', DEFAULT_BUNDLE)
+    .action(async (pathArg: string | undefined, options: { model: string; bundle: string }) => {
       let guildPath: string;
       let guildName: string;
 
@@ -61,22 +66,27 @@ export function makeInitCommand() {
       const home = path.resolve(guildPath);
 
       try {
-        // 1. Create guild skeleton (git repo, dirs, guild.json, migration file)
+        // 1. Create guild skeleton (git repo, dirs, guild.json)
         initGuild(home, guildName, model);
 
-        // 2. Install all framework tools via installTool
-        const resolvePackage = makePackageResolver();
-        bootstrapBaseTools(home, resolvePackage);
+        // 2. Fetch and install the starter kit bundle
+        const bundleDir = fetchBundle(home, options.bundle);
+        installBundle({ home, bundleDir, commit: false });
 
         // 3. Create ledger via migration engine
         applyMigrations(home);
+
+        // 4. Commit everything from the bundle install + migration
+        execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
+        execFileSync('git', ['commit', '-m', 'Install starter kit'], { cwd: home, stdio: 'pipe' });
       } catch (err) {
         console.error(`Error: ${(err as Error).message}`);
         process.exitCode = 1;
         return;
       }
 
-      console.log(`Guild created at ${home}`);
-      console.log(`\n  cd ${home}\n`);
+      console.log(`Guild "${guildName}" created at ${home}`);
+      console.log(`\n  cd ${guildPath}`);
+      console.log(`  nsg consult advisor    # ask your guild advisor for help\n`);
     });
 }

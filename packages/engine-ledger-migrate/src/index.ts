@@ -35,6 +35,14 @@ export interface MigrationFile {
   path: string;
 }
 
+/** Provenance metadata for migrations installed via bundles. */
+export interface MigrationProvenance {
+  /** Bundle that delivered this migration (e.g. "@shardworks/guild-starter-kit@0.1.5"). */
+  bundle: string;
+  /** Original filename in the bundle before renumbering (e.g. "001-initial-schema.sql"). */
+  originalName: string;
+}
+
 /** Result of applying migrations. */
 export interface MigrateResult {
   /** Migrations that were applied in this run. */
@@ -57,11 +65,24 @@ const MIGRATION_PATTERN = /^(\d{3})-(.+)\.sql$/;
 function ensureMigrationsTable(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS _migrations (
-      sequence    INTEGER PRIMARY KEY,
-      filename    TEXT    NOT NULL,
-      applied_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+      sequence        INTEGER PRIMARY KEY,
+      filename        TEXT    NOT NULL,
+      applied_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+      bundle          TEXT,
+      original_name   TEXT
     );
   `);
+
+  // Add provenance columns if upgrading from an older schema.
+  // SQLite errors on duplicate ADD COLUMN, so check first.
+  const cols = db.pragma('table_info(_migrations)') as { name: string }[];
+  const colNames = new Set(cols.map(c => c.name));
+  if (!colNames.has('bundle')) {
+    db.exec(`ALTER TABLE _migrations ADD COLUMN bundle TEXT;`);
+  }
+  if (!colNames.has('original_name')) {
+    db.exec(`ALTER TABLE _migrations ADD COLUMN original_name TEXT;`);
+  }
 }
 
 /**
@@ -102,14 +123,19 @@ function getAppliedSequences(db: Database.Database): Set<number> {
 /**
  * Apply pending migrations to the Ledger.
  *
- * Reads migration files from nexus/migrations/ in the guildhall worktree,
- * compares against the _migrations tracking table, and applies any that
- * haven't been run yet. Each migration runs in its own transaction.
+ * Reads migration files from the guild's nexus/migrations/ directory, compares
+ * against the _migrations tracking table, and applies any that haven't been
+ * run yet. Each migration runs in its own transaction.
  *
  * @param home - Absolute path to the guild root.
+ * @param provenance - Optional map of guild filename → bundle provenance,
+ *   supplied by the bundle installer for migrations it copied into the guild.
  * @returns Summary of what was applied and skipped.
  */
-export function applyMigrations(home: string): MigrateResult {
+export function applyMigrations(
+  home: string,
+  provenance?: Record<string, MigrationProvenance>,
+): MigrateResult {
   const migrationsDir = path.join(home, 'nexus', 'migrations');
   const dbPath = ledgerPath(home);
 
@@ -150,11 +176,18 @@ export function applyMigrations(home: string): MigrateResult {
         db.exec(pragma);
       }
 
+      const prov = provenance?.[migration.filename];
+
       db.transaction(() => {
         if (body) db.exec(body);
         db.prepare(
-          `INSERT INTO _migrations (sequence, filename) VALUES (?, ?)`,
-        ).run(migration.sequence, migration.filename);
+          `INSERT INTO _migrations (sequence, filename, bundle, original_name) VALUES (?, ?, ?, ?)`,
+        ).run(
+          migration.sequence,
+          migration.filename,
+          prov?.bundle ?? null,
+          prov?.originalName ?? null,
+        );
       })();
 
       result.applied.push(migration.filename);

@@ -62,8 +62,6 @@ export function rehydrate(home: string): RehydrateResult {
   })) {
     for (const [name, entry] of Object.entries(registry)) {
       const toolEntry = entry as ToolEntry;
-      if (toolEntry.source === 'nexus') continue; // Framework tools don't need rehydration
-
       const upstream = toolEntry.upstream;
       const parentDir = DIR_MAP[category]!;
       const slotDir = path.join(home, parentDir, name, toolEntry.slot);

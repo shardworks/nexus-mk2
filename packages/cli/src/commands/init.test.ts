@@ -3,28 +3,56 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { initGuild, bootstrapBaseTools, VERSION, BASE_IMPLEMENTS, BASE_ENGINES } from '@shardworks/nexus-core';
+import { initGuild, installBundle, VERSION } from '@shardworks/nexus-core';
 import { applyMigrations } from '@shardworks/engine-ledger-migrate';
 
-const require = createRequire(import.meta.url);
-function resolvePackage(name: string): string {
-  const entry = require.resolve(name);
-  let dir = path.dirname(entry);
-  while (dir !== path.dirname(dir)) {
-    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
-    dir = path.dirname(dir);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** Root of the monorepo packages directory. */
+const PACKAGES_DIR = path.resolve(__dirname, '../../../../packages');
+
+/** Path to the guild-starter-kit package in the workspace. */
+const STARTER_KIT_DIR = path.join(PACKAGES_DIR, 'guild-starter-kit');
+
+/**
+ * Create a workspace-local copy of the starter kit bundle that resolves
+ * package specifiers to local workspace paths instead of npm registry.
+ * This lets the test run without depending on npm-published versions.
+ */
+function makeLocalBundle(tmpDir: string): string {
+  const bundleDir = path.join(tmpDir, 'local-starter-kit');
+  fs.cpSync(STARTER_KIT_DIR, bundleDir, { recursive: true });
+
+  // Rewrite the manifest to point at local workspace packages
+  const manifest = JSON.parse(fs.readFileSync(path.join(bundleDir, 'nexus-bundle.json'), 'utf-8'));
+
+  for (const entry of manifest.implements ?? []) {
+    // "@shardworks/implement-dispatch@0.x" → local path
+    const name = entry.package.replace(/@0\.x$/, '').replace('@shardworks/', '');
+    entry.package = path.join(PACKAGES_DIR, name);
   }
-  throw new Error(`Could not find package root for ${name}`);
+  for (const entry of manifest.engines ?? []) {
+    const name = entry.package.replace(/@0\.x$/, '').replace('@shardworks/', '');
+    entry.package = path.join(PACKAGES_DIR, name);
+  }
+
+  fs.writeFileSync(
+    path.join(bundleDir, 'nexus-bundle.json'),
+    JSON.stringify(manifest, null, 2),
+  );
+  return bundleDir;
 }
 
-/** Run the full init sequence: skeleton → bootstrap → migrate. */
-function fullInit(home: string, model: string): void {
+/** Run the full init sequence: skeleton → bundle install → migrate. */
+function fullInit(home: string, model: string, bundleDir: string): void {
   initGuild(home, 'test-guild', model);
-  bootstrapBaseTools(home, resolvePackage);
+  installBundle({ home, bundleDir, commit: false });
   applyMigrations(home);
+  execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-m', 'Install starter kit'], { cwd: home, stdio: 'pipe' });
 }
 
 describe('initGuild (skeleton only)', () => {
@@ -45,11 +73,13 @@ describe('initGuild (skeleton only)', () => {
     // Guild files at root
     assert.ok(fs.existsSync(path.join(home, 'guild.json')), 'guild.json missing');
     assert.ok(fs.existsSync(path.join(home, 'codex', 'all.md')), 'codex/all.md missing');
-    assert.ok(fs.existsSync(path.join(home, 'nexus', 'migrations', '001-initial-schema.sql')), 'migration missing');
 
-    // Guild-managed directories
-    assert.ok(fs.existsSync(path.join(home, 'implements')), 'guild implements/ missing');
-    assert.ok(fs.existsSync(path.join(home, 'engines')), 'guild engines/ missing');
+    // Migrations directory (empty, bundle delivers content)
+    assert.ok(fs.existsSync(path.join(home, 'nexus', 'migrations')), 'nexus/migrations/ missing');
+
+    // Artifact directories
+    assert.ok(fs.existsSync(path.join(home, 'implements')), 'implements/ missing');
+    assert.ok(fs.existsSync(path.join(home, 'engines')), 'engines/ missing');
 
     // Training directories
     assert.ok(fs.existsSync(path.join(home, 'training', 'curricula')), 'curricula/ missing');
@@ -59,10 +89,12 @@ describe('initGuild (skeleton only)', () => {
     assert.ok(fs.existsSync(path.join(home, '.nexus', 'workshops')), '.nexus/workshops/ missing');
     assert.ok(fs.existsSync(path.join(home, '.nexus', 'worktrees')), '.nexus/worktrees/ missing');
 
-    // No base tools installed yet (just .gitkeep)
+    // No tools, training, or migration content yet
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
     assert.deepEqual(config.implements, {});
     assert.deepEqual(config.engines, {});
+    assert.deepEqual(config.curricula, {});
+    assert.deepEqual(config.temperaments, {});
 
     // No ledger yet
     assert.ok(!fs.existsSync(path.join(home, '.nexus', 'nexus.db')), 'ledger should not exist yet');
@@ -75,6 +107,16 @@ describe('initGuild (skeleton only)', () => {
 
     const log = execFileSync('git', ['log', '--oneline'], { cwd: home, encoding: 'utf-8' });
     assert.ok(log.includes('Initialize guild'), 'initial commit not found');
+  });
+
+  it('does not write migration file (bundle delivers it)', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
+    const home = path.join(tmpDir, 'guild');
+    initGuild(home, 'test-guild', 'test-model');
+
+    const migrationsDir = path.join(home, 'nexus', 'migrations');
+    const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql'));
+    assert.equal(files.length, 0, 'no migration files should exist in skeleton');
   });
 
   it('fails on non-empty directory', () => {
@@ -94,53 +136,76 @@ describe('initGuild (skeleton only)', () => {
   });
 });
 
-describe('bootstrapBaseTools', () => {
+describe('installBundle with starter kit', () => {
   let tmpDir: string;
 
   afterEach(() => {
     if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('installs all base implements and engines via installTool', () => {
+  it('installs all implements, engines, training, and migrations', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
     const home = path.join(tmpDir, 'guild');
     initGuild(home, 'test-guild', 'test-model');
-    bootstrapBaseTools(home, resolvePackage);
 
-    // All registered in guild.json with source: 'nexus'
+    const bundleDir = makeLocalBundle(tmpDir);
+    const result = installBundle({ home, bundleDir, commit: false });
+
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
 
-    // Base implements installed to nexus/implements/
-    for (const ref of BASE_IMPLEMENTS) {
-      const entry = config.implements[ref.name];
-      assert.ok(entry, `${ref.name} not registered`);
-      assert.equal(entry.source, 'nexus');
-      const implDir = path.join(home, 'nexus', 'implements', ref.name, entry.slot);
-      assert.ok(fs.existsSync(path.join(implDir, 'nexus-implement.json')), `${ref.name} descriptor missing`);
-      assert.ok(fs.existsSync(path.join(implDir, 'instructions.md')), `${ref.name} instructions missing`);
+    // Implements registered
+    const expectedImplements = ['install-tool', 'remove-tool', 'dispatch', 'instantiate', 'nexus-version'];
+    for (const name of expectedImplements) {
+      assert.ok(config.implements[name], `${name} not registered`);
+      assert.ok(config.implements[name].package, `${name} missing package field`);
+      const implDir = path.join(home, 'implements', name, config.implements[name].slot);
+      assert.ok(fs.existsSync(path.join(implDir, 'nexus-implement.json')), `${name} descriptor missing`);
     }
 
-    // Base engines installed to nexus/engines/
-    for (const ref of BASE_ENGINES) {
-      const entry = config.engines[ref.name];
-      assert.ok(entry, `${ref.name} not registered`);
-      assert.equal(entry.source, 'nexus');
-      const engDir = path.join(home, 'nexus', 'engines', ref.name, entry.slot);
-      assert.ok(fs.existsSync(path.join(engDir, 'nexus-engine.json')), `${ref.name} descriptor missing`);
+    // Engines registered
+    const expectedEngines = ['manifest', 'mcp-server', 'worktree-setup', 'ledger-migrate'];
+    for (const name of expectedEngines) {
+      assert.ok(config.engines[name], `${name} not registered`);
+      const engDir = path.join(home, 'engines', name, config.engines[name].slot);
+      assert.ok(fs.existsSync(path.join(engDir, 'nexus-engine.json')), `${name} descriptor missing`);
     }
+
+    // Training installed
+    assert.ok(config.curricula['guild-operations'], 'guild-operations curriculum not registered');
+    assert.ok(config.temperaments['guide'], 'guide temperament not registered');
+    assert.ok(
+      fs.existsSync(path.join(home, 'training', 'curricula', 'guild-operations', '0.1.0', 'content.md')),
+      'curriculum content missing',
+    );
+    assert.ok(
+      fs.existsSync(path.join(home, 'training', 'temperaments', 'guide', '0.1.0', 'content.md')),
+      'temperament content missing',
+    );
+
+    // Migration delivered
+    assert.ok(result.artifacts.migrations.length > 0, 'no migrations installed');
+    assert.ok(
+      fs.existsSync(path.join(home, 'nexus', 'migrations', result.artifacts.migrations[0]!)),
+      'migration file missing on disk',
+    );
+
+    // Bundle provenance recorded
+    assert.ok(config.implements['dispatch'].bundle, 'bundle provenance missing');
   });
 
-  it('creates a single "Bootstrap base tools" commit', () => {
+  it('creates a single commit when commit=true', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
     const home = path.join(tmpDir, 'guild');
     initGuild(home, 'test-guild', 'test-model');
-    bootstrapBaseTools(home, resolvePackage);
+
+    const bundleDir = makeLocalBundle(tmpDir);
+    installBundle({ home, bundleDir });
 
     const log = execFileSync('git', ['log', '--oneline'], { cwd: home, encoding: 'utf-8' });
     const lines = log.trim().split('\n');
     assert.equal(lines.length, 2, 'should have exactly 2 commits');
-    assert.ok(lines[0]!.includes('Bootstrap base tools'));
-    assert.ok(lines[1]!.includes('Initialize guild'));
+    assert.ok(lines[0]!.includes('Install bundle'), 'bundle commit not found');
+    assert.ok(lines[1]!.includes('Initialize guild'), 'init commit not found');
   });
 });
 
@@ -154,29 +219,29 @@ describe('full init sequence', () => {
   it('guild.json has correct shape', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
     const home = path.join(tmpDir, 'guild');
-    fullInit(home, 'test-model');
+    const bundleDir = makeLocalBundle(tmpDir);
+    fullInit(home, 'test-model', bundleDir);
 
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
 
     assert.equal(typeof config.nexus, 'string');
     assert.equal(config.model, 'test-model');
     assert.deepEqual(config.workshops, []);
-    assert.deepEqual(config.curricula, {});
-    assert.deepEqual(config.temperaments, {});
 
-    // All base tools registered
-    for (const ref of BASE_IMPLEMENTS) {
-      assert.ok(config.implements[ref.name], `${ref.name} not registered`);
-    }
-    for (const ref of BASE_ENGINES) {
-      assert.ok(config.engines[ref.name], `${ref.name} not registered`);
-    }
+    // Tools registered
+    assert.ok(config.implements['dispatch'], 'dispatch not registered');
+    assert.ok(config.engines['manifest'], 'manifest not registered');
+
+    // Training registered
+    assert.ok(config.curricula['guild-operations'], 'curriculum not registered');
+    assert.ok(config.temperaments['guide'], 'temperament not registered');
   });
 
   it('Ledger has expected tables via migration engine', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
     const home = path.join(tmpDir, 'guild');
-    fullInit(home, 'test-model');
+    const bundleDir = makeLocalBundle(tmpDir);
+    fullInit(home, 'test-model', bundleDir);
 
     const db = new Database(path.join(home, '.nexus', 'nexus.db'));
     try {
@@ -198,7 +263,8 @@ describe('full init sequence', () => {
   it('migration 001 is tracked in _migrations', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
     const home = path.join(tmpDir, 'guild');
-    fullInit(home, 'test-model');
+    const bundleDir = makeLocalBundle(tmpDir);
+    fullInit(home, 'test-model', bundleDir);
 
     const db = new Database(path.join(home, '.nexus', 'nexus.db'));
     try {

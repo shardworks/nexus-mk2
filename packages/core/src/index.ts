@@ -11,7 +11,7 @@ export {
   implement,
 } from './implement.ts';
 
-export { createLedger, INITIAL_SCHEMA } from './ledger.ts';
+export { createLedger } from './ledger.ts';
 export {
   type GuildConfig,
   type ToolEntry,
@@ -47,23 +47,21 @@ export {
   dispatch,
 } from './dispatch.ts';
 export {
-  type PublishOptions,
-  type PublishResult,
-  publish,
-} from './publish.ts';
-export {
   type InstantiateOptions,
   type InstantiateResult,
   instantiate,
 } from './instantiate.ts';
-export {
-  type BaseToolRef,
-  BASE_IMPLEMENTS,
-  BASE_ENGINES,
-  BASE_TOOLS,
-} from './base-tools.ts';
 export { initGuild } from './init-guild.ts';
-export { bootstrapBaseTools } from './bootstrap.ts';
+export {
+  type BundleManifest,
+  type BundlePackageEntry,
+  type BundleContentEntry,
+  type BundleMigrationEntry,
+  type InstallBundleOptions,
+  type InstallBundleResult,
+  readBundleManifest,
+  installBundle,
+} from './bundle.ts';
 export {
   type RehydrateResult,
   rehydrate,

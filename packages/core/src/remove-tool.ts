@@ -44,9 +44,6 @@ function getPackageName(entry: Record<string, unknown>): string | null {
  *
  * For npm-installed tools, also runs `npm uninstall` to clean up node_modules.
  * For linked tools, removes the symlink from node_modules.
- *
- * Only guild-managed tools can be removed. Framework (nexus) tools are managed
- * by `nexus repair` / `nexus install`.
  */
 export function removeTool(opts: RemoveToolOptions): RemoveResult {
   const { home, name } = opts;
@@ -70,15 +67,8 @@ export function removeTool(opts: RemoveToolOptions): RemoveResult {
   const entry = config[foundCategory][name];
   const slot = 'slot' in entry ? entry.slot : '';
 
-  // Prevent removal of framework tools
-  if ('source' in entry && entry.source === 'nexus') {
-    throw new Error(
-      `"${name}" is a framework tool (source: nexus). Use "nexus repair" to manage framework tools.`,
-    );
-  }
-
   // Clean up npm-installed packages from node_modules
-  const packageName = getPackageName(entry as Record<string, unknown>);
+  const packageName = getPackageName(entry as unknown as Record<string, unknown>);
   const upstream = 'upstream' in entry ? (entry.upstream as string | null) : null;
 
   if (packageName) {

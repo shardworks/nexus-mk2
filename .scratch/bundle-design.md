@@ -76,6 +76,7 @@ The manifest has explicit top-level arrays for each artifact category. This enfo
 | `engines` | ✅ required | ❌ error | Same as implements |
 | `curricula` | ✅ allowed | ✅ allowed | Content-only — inline or packaged |
 | `temperaments` | ✅ allowed | ✅ allowed | Content-only — inline or packaged |
+| `migrations` | ❌ error | ✅ required | SQL files — always inline, renumbered on install |
 
 If a bundle author puts a `path` entry in `implements` or `engines`, installation fails immediately with a clear error: "Implements must be npm packages or git URLs. Use a `package` specifier instead of `path`."
 
@@ -138,7 +139,15 @@ installBundle(guildRoot, bundleDir, bundleSource):
        - upstream: null
        - bundle: <bundleSource@version> (provenance)
 
-  6. Git add + commit all changes in one batch
+  6. For each migration (inline path only):
+     → Resolve path relative to bundleDir
+     → Determine guild's current highest migration sequence (from files on disk)
+     → Renumber: bundle's 001 → guild's (max+1), 002 → (max+2), etc.
+     → Copy to guild's migrations/ with new sequence number
+     → Build provenance map: { guildFilename → { bundle, originalName } }
+     → Provenance is recorded by applyMigrations() when it runs next
+
+  7. Git add + commit all changes in one batch
 ```
 
 ### How the bundle itself is fetched
@@ -313,10 +322,12 @@ Guild "my-guild" created at /home/sean/my-guild
 | `init.ts` (CLI) | Replace `bootstrapBaseTools` with bundle install + advisor instantiation. |
 | `engine-manifest` | No changes — already reads `package` from guild.json. |
 
+## Resolved Questions
+
+1. **Migrations in the bundle?** Yes — `migrations` is a top-level bundle category. Migrations are always inline (`path` only, no `package`). The bundle installer renumbers them to follow the guild's current highest sequence, and records provenance (`bundle`, `original_name`) in the `_migrations` table so bundle upgrades can identify which migrations are already installed.
+
+2. **`bundle` provenance field.** Added — `bundle` field on guild.json entries for tools/training, and `bundle` + `original_name` columns on the `_migrations` table for migrations.
+
 ## Open Questions
 
-1. **Migrations in the bundle?** The sketch shows `001-initial-schema.sql` delivered by the starter kit. Should migrations be a formal bundle category, or just a file copy into `migrations/`?
-
-2. **Bundle idempotency.** Overwrite same-slot on reinstall. Skip if a newer slot is active?
-
-3. **`bundle` provenance field.** Enables `nsg tool remove-bundle <name>` and upgrade tracking. Low cost, high future value. Recommend adding.
+1. **Bundle idempotency.** Overwrite same-slot on reinstall. Skip if a newer slot is active?

@@ -41,8 +41,6 @@ export interface AnimaRecord {
 export interface ResolvedImplement {
   /** Tool name — how the anima sees it. */
   name: string;
-  /** Source: 'nexus' or 'guild'. */
-  source: 'nexus' | 'guild';
   /** Version slot. */
   slot: string;
   /** Absolute path to the implement's slot directory on disk. */
@@ -141,8 +139,7 @@ export function resolveImplements(
     if (!hasAccess) continue;
 
     // Resolve on-disk path
-    const parentDir = toolEntry.source === 'nexus' ? 'nexus/implements' : 'implements';
-    const implPath = path.join(home, parentDir, name, toolEntry.slot);
+    const implPath = path.join(home, 'implements', name, toolEntry.slot);
 
     // Read instructions if they exist
     let instructions: string | null = null;
@@ -163,7 +160,6 @@ export function resolveImplements(
 
     resolved.push({
       name,
-      source: toolEntry.source,
       slot: toolEntry.slot,
       path: implPath,
       instructions,

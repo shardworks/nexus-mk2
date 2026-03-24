@@ -61,12 +61,6 @@ export interface InstallToolOptions {
   slot?: string;
   /** Roles for implements (comma-separated or array). */
   roles?: string[];
-  /**
-   * Install as a framework tool (`source: 'nexus'`).
-   * Installs to `nexus/implements/` or `nexus/engines/` instead of
-   * guild-managed directories. Framework tools cannot be removed via remove-tool.
-   */
-  framework?: boolean;
   /** Whether to create a git commit after installing. Defaults to true. */
   commit?: boolean;
   /**
@@ -76,6 +70,8 @@ export interface InstallToolOptions {
    * **Not durable** — will not survive a fresh clone.
    */
   link?: boolean;
+  /** Bundle provenance — which bundle delivered this artifact. */
+  bundle?: string;
 }
 
 export interface InstallResult {
@@ -250,12 +246,19 @@ function installViaNpmSave(
 ): { packageName: string; packageDir: string; descriptorFile: DescriptorFile; descriptor: Record<string, unknown>; pkg: Record<string, unknown> } {
   npm(['install', '--save', source], guildRoot);
 
-  // For registry specifiers (e.g. "foo@1.0"), parse the name directly.
-  // For local paths and git-url sources, read from package.json after install.
+  // Determine the installed package name:
+  // - Registry specifiers (e.g. "foo@1.0"): parse name from specifier
+  // - Local paths: read name from source's package.json (reliable for batch installs)
+  // - Git URLs: detect as new dependency in guild's package.json
   const isLocalPath = source.startsWith('/') || source.startsWith('./') || source.startsWith('../');
-  const packageName = (sourceKind === 'registry' && !isLocalPath)
-    ? parsePackageName(source)
-    : findNewDependency(guildRoot);
+  let packageName: string;
+  if (isLocalPath) {
+    packageName = readPackageName(path.resolve(source));
+  } else if (sourceKind === 'registry') {
+    packageName = parsePackageName(source);
+  } else {
+    packageName = findNewDependency(guildRoot);
+  }
 
   const packageDir = resolveInstalledPackage(guildRoot, packageName);
   const descriptorFile = findDescriptor(packageDir);
@@ -355,7 +358,7 @@ function installViaLink(
  * The `package` field in guild.json tells the manifest engine to resolve by package name.
  */
 export function installTool(opts: InstallToolOptions): InstallResult {
-  const { home, source, roles, framework = false, commit = true, link = false } = opts;
+  const { home, source, roles, commit = true, link = false, bundle } = opts;
   const sourceKind = classifySource(source, link);
 
   let descriptorFile: DescriptorFile;
@@ -366,18 +369,7 @@ export function installTool(opts: InstallToolOptions): InstallResult {
   let copyFullSource = false;
   let upstream: string | null = null;
 
-  if (framework) {
-    // ── Framework: copy files directly from workspace packages ────────
-    const sourceDir = path.resolve(source);
-    if (!fs.existsSync(sourceDir) || !fs.statSync(sourceDir).isDirectory()) {
-      throw new Error(`Source is not a directory: ${sourceDir}`);
-    }
-
-    descriptorFile = findDescriptor(sourceDir);
-    descriptor = readJson(path.join(sourceDir, descriptorFile));
-    const pkgJsonPath = path.join(sourceDir, 'package.json');
-    pkg = fs.existsSync(pkgJsonPath) ? readJson(pkgJsonPath) : {};
-  } else if (sourceKind === 'link') {
+  if (sourceKind === 'link') {
     // ── Link mode: symlink local dir ──────────────────────────────────
     const result = installViaLink(home, source);
     descriptorFile = result.descriptorFile;
@@ -446,30 +438,10 @@ export function installTool(opts: InstallToolOptions): InstallResult {
   }
 
   // Determine target directory for metadata/files in the guild.
-  // Framework tools go under nexus/{implements,engines}/.
-  // Guild tools go under {implements,engines}/ (or training/ for curricula/temperaments).
   const parentDir = DIR_MAP[category]!;
-  const prefix = framework && (category === 'implements' || category === 'engines')
-    ? path.join('nexus', parentDir)
-    : parentDir;
-  const targetDir = path.join(home, prefix, name, slot);
+  const targetDir = path.join(home, parentDir, name, slot);
 
-  if (framework) {
-    // Framework: copy entire source directory
-    if (fs.existsSync(targetDir)) {
-      fs.rmSync(targetDir, { recursive: true });
-    }
-    copyDir(path.resolve(source), targetDir);
-
-    // Read the package name from source if available (stored in guild.json, not descriptor)
-    if (!packageName) {
-      const sourcePkgPath = path.join(path.resolve(source), 'package.json');
-      if (fs.existsSync(sourcePkgPath)) {
-        const sourcePkg = readJson(sourcePkgPath);
-        packageName = (sourcePkg['name'] as string | undefined) ?? null;
-      }
-    }
-  } else if (isNpmInstalled && copyFullSource) {
+  if (isNpmInstalled && copyFullSource) {
     // Workshop/tarball: copy full source to slot for durability
     const pkgSourceDir = resolveInstalledPackage(home, packageName!);
 
@@ -495,7 +467,6 @@ export function installTool(opts: InstallToolOptions): InstallResult {
 
   if (category === 'implements' || category === 'engines') {
     const entry: ToolEntry = {
-      source: framework ? 'nexus' : 'guild',
       slot,
       upstream,
       installedAt: now,
@@ -506,6 +477,9 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     if (packageName) {
       entry.package = packageName;
     }
+    if (bundle) {
+      entry.bundle = bundle;
+    }
     config[category][name] = entry;
   } else {
     const entry: TrainingEntry = {
@@ -513,6 +487,9 @@ export function installTool(opts: InstallToolOptions): InstallResult {
       upstream,
       installedAt: now,
     };
+    if (bundle) {
+      entry.bundle = bundle;
+    }
     config[category][name] = entry;
   }
 

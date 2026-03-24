@@ -292,24 +292,6 @@ describe('removeTool', () => {
     );
   });
 
-  it('prevents removal of framework tools', () => {
-    // Manually register a nexus-source tool in guild.json
-    const configPath = path.join(home, 'guild.json');
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    config.implements['dispatch'] = {
-      source: 'nexus',
-      slot: '1.0.0',
-      upstream: null,
-      installedAt: new Date().toISOString(),
-    };
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-
-    assert.throws(
-      () => removeTool({ home, name: 'dispatch' }),
-      /framework tool.*nexus repair/,
-    );
-  });
-
   it('creates a git commit', () => {
     const toolDir = makeNpmTool('bye-tool');
     installTool({ home, source: toolDir, roles: ['*'], link: true });

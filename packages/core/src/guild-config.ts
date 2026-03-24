@@ -3,8 +3,6 @@ import path from 'node:path';
 
 /** A reference to an implement or engine registered in guild.json. */
 export interface ToolEntry {
-  /** Whether the tool is provided by the Nexus framework or authored by the guild. */
-  source: 'nexus' | 'guild';
   /** Guild-local version slot — the directory name under {implements|engines}/{name}/. */
   slot: string;
   /** Upstream package identifier, e.g. "@shardworks/implement-dispatch@1.11.3". Null for locally-built tools. */
@@ -15,6 +13,8 @@ export interface ToolEntry {
   roles?: string[];
   /** npm package name for runtime resolution via node_modules. Omitted for script-only tools. */
   package?: string;
+  /** Bundle that delivered this artifact, e.g. "@shardworks/guild-starter-kit@0.1.0". */
+  bundle?: string;
 }
 
 /** A reference to a curriculum or temperament registered in guild.json. */
@@ -25,6 +25,8 @@ export interface TrainingEntry {
   upstream: string | null;
   /** ISO-8601 timestamp of when the content was installed into this slot. */
   installedAt: string;
+  /** Bundle that delivered this artifact, e.g. "@shardworks/guild-starter-kit@0.1.0". */
+  bundle?: string;
 }
 
 /** The guild's central configuration file shape (`guild.json`). */
