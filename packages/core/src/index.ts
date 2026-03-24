@@ -14,6 +14,7 @@ export {
 export { createLedger } from './ledger.ts';
 export {
   type GuildConfig,
+  type RoleDefinition,
   type ToolEntry,
   type TrainingEntry,
   createInitialGuildConfig,

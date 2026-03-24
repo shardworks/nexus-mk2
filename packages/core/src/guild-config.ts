@@ -1,6 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+/** Definition of a guild role — a structural position in the guild. */
+export interface RoleDefinition {
+  /**
+   * Maximum number of animas that can hold this role simultaneously.
+   * `null` means unbounded.
+   */
+  seats: number | null;
+  /** Implements available to animas in this role (additive with baseImplements). */
+  implements: string[];
+  /**
+   * Path to role-specific instructions markdown, relative to guild root.
+   * Read fresh at manifest time and delivered to animas holding this role.
+   */
+  instructions?: string;
+}
+
 /** A reference to an implement or engine registered in guild.json. */
 export interface ToolEntry {
   /** Guild-local version slot — the directory name under {implements|engines}/{name}/. */
@@ -9,8 +25,6 @@ export interface ToolEntry {
   upstream: string | null;
   /** ISO-8601 timestamp of when the tool was installed into this slot. */
   installedAt: string;
-  /** Which roles have access (implements only). ["*"] means all roles. */
-  roles?: string[];
   /** npm package name for runtime resolution via node_modules. Omitted for script-only tools. */
   package?: string;
   /** Bundle that delivered this artifact, e.g. "@shardworks/guild-starter-kit@0.1.0". */
@@ -39,6 +53,10 @@ export interface GuildConfig {
   model: string;
   /** Registered workshop names. */
   workshops: string[];
+  /** Guild roles — structural positions that animas fill. */
+  roles: Record<string, RoleDefinition>;
+  /** Implements available to all animas regardless of role. */
+  baseImplements: string[];
   /** Active implements indexed by name. */
   implements: Record<string, ToolEntry>;
   /** Active engines indexed by name. */
@@ -51,7 +69,7 @@ export interface GuildConfig {
 
 /**
  * Create the default guild.json content for a new guild.
- * All registries (implements, engines, curricula, temperaments) start empty.
+ * All registries start empty. Roles and baseImplements populated by the init sequence.
  */
 export function createInitialGuildConfig(name: string, nexusVersion: string, model: string): GuildConfig {
   return {
@@ -59,6 +77,8 @@ export function createInitialGuildConfig(name: string, nexusVersion: string, mod
     nexus: nexusVersion,
     model,
     workshops: [],
+    roles: {},
+    baseImplements: [],
     implements: {},
     engines: {},
     curricula: {},
@@ -82,3 +102,4 @@ export function writeGuildConfig(home: string, config: GuildConfig): void {
   const configFile = guildConfigPath(home);
   fs.writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
 }
+

@@ -9,7 +9,7 @@ import { resolveHome } from '../resolve-home.ts';
 
 export function makeStatusCommand() {
   return createCommand('status')
-    .description('Show guild system status — implements, engines, and health checks')
+    .description('Show guild system status — roles, implements, engines, and health checks')
     .action((_, cmd) => {
       let home: string;
       try {
@@ -45,7 +45,28 @@ export function makeStatusCommand() {
         console.log('╚══════════════════════════════════════════════════════════════╝\n');
       }
 
+      // Roles
+      const roleNames = Object.keys(config.roles);
+      if (roleNames.length > 0) {
+        console.log('Roles:');
+        for (const [name, def] of Object.entries(config.roles)) {
+          const seatsLabel = def.seats === null ? 'unbounded' : `${def.seats} seat${def.seats === 1 ? '' : 's'}`;
+          const implCount = def.implements.length;
+          const instrLabel = def.instructions ? `instructions: ${def.instructions}` : 'no instructions';
+          console.log(`  ${name} (${seatsLabel}) — ${implCount} role implements, ${instrLabel}`);
+        }
+      } else {
+        console.log('Roles: (none defined)');
+      }
+
+      // Base implements
+      const baseImpls = config.baseImplements ?? [];
+      if (baseImpls.length > 0) {
+        console.log(`\nBase implements (all animas): ${baseImpls.join(', ')}`);
+      }
+
       // Engines
+      console.log('');
       printSection('Engines', engines);
 
       // Implements
