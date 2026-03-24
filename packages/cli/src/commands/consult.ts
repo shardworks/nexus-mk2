@@ -16,10 +16,10 @@
  */
 import { createCommand } from 'commander';
 import { spawnSync } from 'node:child_process';
-import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { manifest } from '@shardworks/engine-manifest';
 import type { McpServerConfig } from '@shardworks/engine-manifest';
@@ -57,17 +57,29 @@ function resolveAnimaByRole(home: string, role: string): string {
  * Build the Claude MCP config JSON (mcpServers format) that launches the
  * engine-mcp-server as a stdio process serving the anima's implements.
  *
- * Resolves the engine-mcp-server entry point via require.resolve — handles
- * both the dev (TypeScript source) and prod (compiled dist) cases.
+ * The engine module exports main() but doesn't self-invoke, so we write a
+ * tiny wrapper script that imports it and calls main(). This also sidesteps
+ * the CJS/ESM resolution mismatch — we resolve the engine via
+ * import.meta.resolve (ESM-aware) and import it by URL in the wrapper.
  */
 function buildClaudeMcpConfig(
+  tmpDir: string,
   mcpServerConfigPath: string,
   serverConfig: McpServerConfig,
 ): object {
-  const require = createRequire(import.meta.url);
-  const enginePath = require.resolve('@shardworks/engine-mcp-server');
+  // Resolve engine-mcp-server via ESM resolution (handles both dev .ts and prod .js).
+  const engineUrl = import.meta.resolve('@shardworks/engine-mcp-server');
+  const enginePath = fileURLToPath(engineUrl);
 
-  // In dev the resolved path is the .ts source; add the transform flag.
+  // Write a wrapper script that imports and invokes main().
+  // The wrapper passes the config path via argv so main() picks it up.
+  const wrapperPath = path.join(tmpDir, 'mcp-entry.mjs');
+  fs.writeFileSync(
+    wrapperPath,
+    `import { main } from ${JSON.stringify(engineUrl)};\nawait main();\n`,
+  );
+
+  // In dev the resolved path is .ts source; add the transform flag.
   const nodeArgs: string[] = [];
   if (enginePath.endsWith('.ts')) {
     nodeArgs.push(
@@ -80,7 +92,7 @@ function buildClaudeMcpConfig(
     mcpServers: {
       'nexus-guild': {
         command: 'node',
-        args: [...nodeArgs, enginePath, mcpServerConfigPath],
+        args: [...nodeArgs, wrapperPath, mcpServerConfigPath],
         env: serverConfig.env ?? {},
       },
     },
@@ -140,7 +152,7 @@ export function makeConsultCommand() {
         fs.writeFileSync(mcpServerConfigPath, JSON.stringify(result.mcpConfig, null, 2));
         fs.writeFileSync(
           claudeMcpConfigPath,
-          JSON.stringify(buildClaudeMcpConfig(mcpServerConfigPath, result.mcpConfig), null, 2),
+          JSON.stringify(buildClaudeMcpConfig(tmpDir, mcpServerConfigPath, result.mcpConfig), null, 2),
         );
 
         console.log(`Consulting ${result.anima.name} (${result.anima.roles.join(', ')})...\n`);
