@@ -103,6 +103,6 @@ export function makeInitCommand() {
 
       console.log(`Guild "${guildName}" created at ${home}`);
       console.log(`\n  cd ${guildPath}`);
-      console.log(`  nsg consult Advisor    # ask your guild advisor for help\n`);
+      console.log(`  nsg consult advisor    # ask your guild advisor for help\n`);
     });
 }
