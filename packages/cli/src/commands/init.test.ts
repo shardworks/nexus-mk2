@@ -125,7 +125,7 @@ describe('initGuild (skeleton only)', () => {
     const home = path.join(tmpDir, 'guild');
     fs.mkdirSync(home);
     fs.writeFileSync(path.join(home, 'existing-file'), 'data');
-    assert.throws(() => initGuild(home, 'test-model'), /not empty/);
+    assert.throws(() => initGuild(home, 'test-guild', 'test-model'), /not empty/);
   });
 
   it('succeeds on existing empty directory', () => {
