@@ -339,7 +339,79 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
     if (entry.package) packageSpecs.push(entry.package);
   }
 
-  // Batch npm install all package dependencies at once
+  // ── Install inline content BEFORE npm install ──────────────────────
+  // The bundle may have been fetched with --no-save. The batch npm install
+  // below can prune unsaved packages from node_modules, destroying the
+  // bundle directory. Extract all inline content while it still exists.
+
+  // Install inline curricula
+  for (const entry of manifest.curricula ?? []) {
+    if (!entry.package) {
+      const name = installInlineContent(home, bundleDir, 'curricula', entry, bundleSource);
+      result.artifacts.curricula.push(name);
+      result.installed++;
+    }
+  }
+
+  // Install inline temperaments
+  for (const entry of manifest.temperaments ?? []) {
+    if (!entry.package) {
+      const name = installInlineContent(home, bundleDir, 'temperaments', entry, bundleSource);
+      result.artifacts.temperaments.push(name);
+      result.installed++;
+    }
+  }
+
+  // Install migrations (inline only, renumbered into guild sequence)
+  if (manifest.migrations && manifest.migrations.length > 0) {
+    const migrationsDir = path.join(home, 'nexus', 'migrations');
+    fs.mkdirSync(migrationsDir, { recursive: true });
+
+    // Find current highest sequence in guild
+    const existing = fs.readdirSync(migrationsDir);
+    const MIGRATION_PATTERN = /^(\d{3})-(.+)\.sql$/;
+    let maxSeq = 0;
+    for (const file of existing) {
+      const match = file.match(MIGRATION_PATTERN);
+      if (match) {
+        maxSeq = Math.max(maxSeq, parseInt(match[1]!, 10));
+      }
+    }
+
+    const provenance: Record<string, { bundle: string; originalName: string }> = {};
+
+    for (const entry of manifest.migrations) {
+      const srcPath = path.resolve(bundleDir, entry.path);
+      if (!fs.existsSync(srcPath)) {
+        throw new Error(`Migration file not found: ${srcPath}`);
+      }
+
+      const originalName = path.basename(srcPath);
+      maxSeq++;
+      const seq = String(maxSeq).padStart(3, '0');
+
+      // Derive description from original filename (strip sequence prefix if present)
+      const descMatch = originalName.match(/^\d{3}-(.+)$/);
+      const description = descMatch ? descMatch[1] : originalName;
+      const guildFilename = `${seq}-${description}`;
+
+      fs.copyFileSync(srcPath, path.join(migrationsDir, guildFilename));
+
+      if (bundleSource) {
+        provenance[guildFilename] = { bundle: bundleSource, originalName };
+      }
+
+      result.artifacts.migrations.push(guildFilename);
+      result.installed++;
+    }
+
+    if (Object.keys(provenance).length > 0) {
+      result.migrationProvenance = provenance;
+    }
+  }
+
+  // ── Batch npm install all package dependencies ────────────────────────
+  // Safe to run now — all inline content has been extracted from bundleDir.
   if (packageSpecs.length > 0) {
     npm(['install', '--save', ...packageSpecs], home);
   }
@@ -463,75 +535,21 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
     result.installed++;
   }
 
-  // Install curricula (package or inline)
+  // Install package-based curricula
   for (const entry of manifest.curricula ?? []) {
     if (entry.package) {
       const name = installPackageArtifact(entry, 'curricula');
       result.artifacts.curricula.push(name);
-    } else {
-      const name = installInlineContent(home, bundleDir, 'curricula', entry, bundleSource);
-      result.artifacts.curricula.push(name);
+      result.installed++;
     }
-    result.installed++;
   }
 
-  // Install temperaments (package or inline)
+  // Install package-based temperaments
   for (const entry of manifest.temperaments ?? []) {
     if (entry.package) {
       const name = installPackageArtifact(entry, 'temperaments');
       result.artifacts.temperaments.push(name);
-    } else {
-      const name = installInlineContent(home, bundleDir, 'temperaments', entry, bundleSource);
-      result.artifacts.temperaments.push(name);
-    }
-    result.installed++;
-  }
-
-  // Install migrations (inline only, renumbered into guild sequence)
-  if (manifest.migrations && manifest.migrations.length > 0) {
-    const migrationsDir = path.join(home, 'nexus', 'migrations');
-    fs.mkdirSync(migrationsDir, { recursive: true });
-
-    // Find current highest sequence in guild
-    const existing = fs.readdirSync(migrationsDir);
-    const MIGRATION_PATTERN = /^(\d{3})-(.+)\.sql$/;
-    let maxSeq = 0;
-    for (const file of existing) {
-      const match = file.match(MIGRATION_PATTERN);
-      if (match) {
-        maxSeq = Math.max(maxSeq, parseInt(match[1]!, 10));
-      }
-    }
-
-    const provenance: Record<string, { bundle: string; originalName: string }> = {};
-
-    for (const entry of manifest.migrations) {
-      const srcPath = path.resolve(bundleDir, entry.path);
-      if (!fs.existsSync(srcPath)) {
-        throw new Error(`Migration file not found: ${srcPath}`);
-      }
-
-      const originalName = path.basename(srcPath);
-      maxSeq++;
-      const seq = String(maxSeq).padStart(3, '0');
-
-      // Derive description from original filename (strip sequence prefix if present)
-      const descMatch = originalName.match(/^\d{3}-(.+)$/);
-      const description = descMatch ? descMatch[1] : originalName;
-      const guildFilename = `${seq}-${description}`;
-
-      fs.copyFileSync(srcPath, path.join(migrationsDir, guildFilename));
-
-      if (bundleSource) {
-        provenance[guildFilename] = { bundle: bundleSource, originalName };
-      }
-
-      result.artifacts.migrations.push(guildFilename);
       result.installed++;
-    }
-
-    if (Object.keys(provenance).length > 0) {
-      result.migrationProvenance = provenance;
     }
   }
 
