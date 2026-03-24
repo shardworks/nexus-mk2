@@ -39,9 +39,10 @@ export function dispatch(opts: DispatchOptions): DispatchResult {
 
   // Validate workshop exists in guild.json
   const config = readGuildConfig(home);
-  if (!config.workshops.includes(workshop)) {
+  if (!(workshop in config.workshops)) {
+    const available = Object.keys(config.workshops).join(', ') || '(none)';
     throw new Error(
-      `Workshop "${workshop}" not found in guild.json. Available workshops: ${config.workshops.join(', ') || '(none)'}`,
+      `Workshop "${workshop}" not found in guild.json. Available workshops: ${available}`,
     );
   }
 

@@ -227,7 +227,7 @@ describe('full init sequence', () => {
 
     assert.equal(typeof config.nexus, 'string');
     assert.equal(config.model, 'test-model');
-    assert.deepEqual(config.workshops, []);
+    assert.deepEqual(config.workshops, {});
 
     // Tools registered
     assert.ok(config.tools['dispatch'], 'dispatch not registered');

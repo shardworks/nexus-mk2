@@ -4,13 +4,22 @@ import { resolveHome } from '../resolve-home.ts';
 
 export function makeRehydrateCommand() {
   return createCommand('rehydrate')
-    .description('Restore node_modules from git-tracked guild state (after fresh clone)')
+    .description('Restore runtime state from git-tracked guild state (after fresh clone)')
     .action((_options: Record<string, unknown>, cmd) => {
       const home = resolveHome(cmd);
 
       try {
         const result = rehydrate(home);
 
+        // Workshop results
+        for (const name of result.workshopsCloned) {
+          console.log(`Cloned workshop "${name}" from remote`);
+        }
+        for (const { name, error } of result.workshopsFailed) {
+          console.log(`✗ Failed to clone workshop "${name}": ${error}`);
+        }
+
+        // Tool results
         if (result.fromPackageJson > 0) {
           console.log(`Restored ${result.fromPackageJson} package(s) from package.json`);
         }
@@ -23,7 +32,10 @@ export function makeRehydrateCommand() {
             console.log(`  - ${name}`);
           }
         }
-        if (result.fromPackageJson === 0 && result.fromSlotSource.length === 0 && result.needsRelink.length === 0) {
+
+        const totalWork = result.workshopsCloned.length + result.workshopsFailed.length +
+          result.fromPackageJson + result.fromSlotSource.length + result.needsRelink.length;
+        if (totalWork === 0) {
           console.log('Nothing to rehydrate.');
         }
       } catch (err) {
