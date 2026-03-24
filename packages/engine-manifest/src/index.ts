@@ -22,6 +22,8 @@ import Database from 'better-sqlite3';
 import {
   ledgerPath,
   readGuildConfig,
+  readPreconditions,
+  checkPreconditions,
 } from '@shardworks/nexus-core';
 import type { GuildConfig, ToolEntry } from '@shardworks/nexus-core';
 
@@ -51,6 +53,14 @@ export interface ResolvedImplement {
   package: string | null;
 }
 
+/** An implement that was resolved by role but failed precondition checks. */
+export interface UnavailableImplement {
+  /** Tool name. */
+  name: string;
+  /** Human-readable reasons why the implement is unavailable. */
+  reasons: string[];
+}
+
 /** The fully-resolved session configuration. */
 export interface ManifestResult {
   /** The anima record from the Ledger. */
@@ -59,6 +69,8 @@ export interface ManifestResult {
   systemPrompt: string;
   /** MCP server config — implements the anima has access to. */
   mcpConfig: McpServerConfig;
+  /** Implements that matched the anima's roles but failed precondition checks. */
+  unavailable: UnavailableImplement[];
 }
 
 /** Configuration passed to the MCP server engine. */
@@ -115,18 +127,24 @@ export function readAnima(home: string, animaName: string): AnimaRecord {
 }
 
 /**
- * Resolve the set of implements an anima has access to, based on role gating.
+ * Resolve the set of implements an anima has access to, based on role gating
+ * and precondition checks.
  *
  * For each implement in guild.json, checks if any of the anima's roles match
  * the implement's `roles` array (or if the implement uses `["*"]` wildcard).
- * Returns the union across all roles.
+ * Then runs precondition checks on each role-matched implement.
+ *
+ * Returns both the available implements (passed preconditions) and the
+ * unavailable implements (failed preconditions) so the manifest can include
+ * unavailability notices in the system prompt.
  */
 export function resolveImplements(
   home: string,
   config: GuildConfig,
   animaRoles: string[],
-): ResolvedImplement[] {
-  const resolved: ResolvedImplement[] = [];
+): { available: ResolvedImplement[]; unavailable: UnavailableImplement[] } {
+  const available: ResolvedImplement[] = [];
+  const unavailable: UnavailableImplement[] = [];
 
   for (const [name, entry] of Object.entries(config.implements)) {
     const toolEntry = entry as ToolEntry;
@@ -140,10 +158,21 @@ export function resolveImplements(
 
     // Resolve on-disk path
     const implPath = path.join(home, 'implements', name, toolEntry.slot);
+    const descriptorPath = path.join(implPath, 'nexus-implement.json');
+
+    // Check preconditions before including in the available set
+    const preconditions = readPreconditions(descriptorPath);
+    if (preconditions.length > 0) {
+      const results = checkPreconditions(preconditions);
+      const failures = results.filter(r => !r.passed).map(r => r.message!);
+      if (failures.length > 0) {
+        unavailable.push({ name, reasons: failures });
+        continue;
+      }
+    }
 
     // Read instructions if they exist
     let instructions: string | null = null;
-    const descriptorPath = path.join(implPath, 'nexus-implement.json');
     if (fs.existsSync(descriptorPath)) {
       try {
         const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf-8'));
@@ -158,7 +187,7 @@ export function resolveImplements(
       }
     }
 
-    resolved.push({
+    available.push({
       name,
       slot: toolEntry.slot,
       path: implPath,
@@ -167,7 +196,7 @@ export function resolveImplements(
     });
   }
 
-  return resolved;
+  return { available, unavailable };
 }
 
 /**
@@ -216,13 +245,15 @@ export function readCodex(home: string, animaRoles: string[]): string {
 /**
  * Assemble the composed system prompt for an anima session.
  *
- * Sections are included in order: codex → curricula → temperament → implement instructions.
+ * Sections are included in order: codex → curricula → temperament →
+ * implement instructions → unavailable implements notice.
  * Empty sections are omitted.
  */
 export function assembleSystemPrompt(
   codex: string,
   anima: AnimaRecord,
   implements_: ResolvedImplement[],
+  unavailable: UnavailableImplement[] = [],
 ): string {
   const sections: string[] = [];
 
@@ -248,6 +279,22 @@ export function assembleSystemPrompt(
 
   if (toolInstructions.length > 0) {
     sections.push(`# Tool Instructions\n\n${toolInstructions.join('\n\n---\n\n')}`);
+  }
+
+  // Unavailable implements notice — tell the anima what's broken and why
+  if (unavailable.length > 0) {
+    const notices = unavailable.map(u => {
+      const reasons = u.reasons.map(r => `  - ${r}`).join('\n');
+      return `**${u.name}** — unavailable:\n${reasons}`;
+    });
+    sections.push(
+      `# Unavailable Implements\n\n` +
+      `The following implements are registered for your roles but are currently ` +
+      `unavailable due to unmet environment requirements. Do not attempt to use them. ` +
+      `If a patron or operator asks you to perform work that requires these tools, ` +
+      `explain what is needed to make them available.\n\n` +
+      notices.join('\n\n'),
+    );
   }
 
   return sections.join('\n\n---\n\n');
@@ -306,17 +353,17 @@ export async function manifest(home: string, animaName: string): Promise<Manifes
     );
   }
 
-  // Resolve implements based on role gating
-  const implements_ = resolveImplements(home, config, anima.roles);
+  // Resolve implements based on role gating + precondition checks
+  const { available, unavailable } = resolveImplements(home, config, anima.roles);
 
   // Read codex (filtered by anima's roles)
   const codex = readCodex(home, anima.roles);
 
-  // Assemble system prompt
-  const systemPrompt = assembleSystemPrompt(codex, anima, implements_);
+  // Assemble system prompt (includes unavailability notices)
+  const systemPrompt = assembleSystemPrompt(codex, anima, available, unavailable);
 
-  // Generate MCP config
-  const mcpConfig = generateMcpConfig(home, implements_);
+  // Generate MCP config (only available implements)
+  const mcpConfig = generateMcpConfig(home, available);
 
-  return { anima, systemPrompt, mcpConfig };
+  return { anima, systemPrompt, mcpConfig, unavailable };
 }

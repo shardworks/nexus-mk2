@@ -67,3 +67,16 @@ export {
   type RehydrateResult,
   rehydrate,
 } from './rehydrate.ts';
+export {
+  type Precondition,
+  type CommandPrecondition,
+  type CommandOutputPrecondition,
+  type EnvPrecondition,
+  type PreconditionCheckResult,
+  type ToolPreconditionResult,
+  readPreconditions,
+  checkOne,
+  checkPreconditions,
+  checkAllPreconditions,
+  checkToolPreconditions,
+} from './preconditions.ts';

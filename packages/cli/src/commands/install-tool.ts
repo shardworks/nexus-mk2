@@ -66,6 +66,12 @@ export function makeInstallToolCommand() {
         });
 
         console.log(`Installed ${result.category.slice(0, -1)} "${result.name}" at slot ${result.slot}`);
+        if (result.warnings.length > 0) {
+          console.log(`\n  ⚠ Precondition warnings (tool installed but may not be operational):`);
+          for (const w of result.warnings) {
+            console.log(`    → ${w}`);
+          }
+        }
       } catch (err) {
         console.error(`Error: ${(err as Error).message}`);
         process.exitCode = 1;
