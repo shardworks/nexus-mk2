@@ -4,8 +4,6 @@
 
 - **Worktree engine: which repo?** Commission worktrees are currently created from the guildhall bare repo, but commissions target a *workshop* repo (the actual codebase). The worktree engine needs a project/workshop repo path, not just NEXUS_HOME. The guildhall bare repo is for guild infrastructure; workshop repos are where animas do real work.
 
-- **Ledger migration bootstrapping.** The initial schema (001) is applied by `createLedger()` directly, not through the migration engine. First run of `applyMigrations()` would re-apply 001 and fail. Fix: either mark 001 as applied when creating the ledger, or make 001 use `CREATE TABLE IF NOT EXISTS`.
-
 ## Design
 
 - **Dispatch: workshop auto-selection.** Currently `--workshop` is required. For single-workshop guilds this is clunky. Consider auto-selecting when there's only one workshop, or defaulting based on context.
@@ -13,7 +11,3 @@
 - Commission CLI: consider an `amend` command (`nexus commission amend <id> <amendment-file>`) — append amendments to a posted commission without recreating it. Carries forward the amendment pattern.
 - Commission dispatch: capture session logs (session.jsonl) somewhere durable — currently lost when tmpdir is cleaned up. Needed for cost tracking, debugging, and experiment data.
 - Generic ability to plugin "agents" (spirits?) into commissions (basically hooks)
-- Data durability: the register and roster live as plain JSON files that any rogue `rm` can wipe. Need a strategy for backup, recovery, or at minimum making destruction harder. Valdris was already nuked once by an overzealous test cleanup.
-- Test isolation: commission agents running end-to-end tests create real animas/roster entries in the shared `~/.nexus/` store, then clean up with wildcard deletes that nuke production data. Need isolated test environments — a `NEXUS_HOME` env var, or a `--test` flag that uses a temp directory, or similar. This is the root cause of the Valdris incident.
-- Sage isolation: the sage runs in the same clone as the artificer. If the sage accidentally modifies files, the artificer inherits a dirty working tree. The "do not commit" instruction should prevent this, but there's no mechanical enforcement. Consider giving the sage a separate clone, or resetting the working tree between phases.
-- Consult command needs automatic clean-rooming: `nexus consult` should set up a proper workshop context for the anima session (clone the CLI repo or equivalent), not run in whatever directory the patron happens to be in. When run from the sanctum, Valdris thought the sanctum was the guild and gave a status report based on the wrong repo. Note: `send` already does this correctly (clones the target repo into a tmpdir) — use that as a reference. With `send` being retired in favor of `post` triggering dispatch, make sure the clean-room behavior carries over.

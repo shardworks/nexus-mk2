@@ -2,25 +2,27 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { VERSION } from './index.ts';
-import { guildhallBarePath, guildhallWorktreePath, ledgerPath } from './nexus-home.ts';
+import { guildhallBarePath, guildhallWorktreePath } from './nexus-home.ts';
 import { createInitialGuildConfig } from './guild-config.ts';
-import type { ToolEntry } from './guild-config.ts';
-import { createLedger, INITIAL_SCHEMA } from './ledger.ts';
-import {
-  BASE_IMPLEMENTS, BASE_ENGINES,
-  renderImplementDescriptor, renderEngineDescriptor,
-} from './base-tools.ts';
+import { INITIAL_SCHEMA } from './ledger.ts';
 
 function git(args: string[], cwd?: string): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
 }
 
 /**
- * Create a new guild at the given path.
+ * Create a new guild skeleton at the given path.
  *
- * Sets up the full NEXUS_HOME directory structure: bare guildhall repo,
- * standing worktree with scaffolded directories, guild.json, Ledger,
- * and an initial git commit.
+ * Sets up the NEXUS_HOME directory structure: bare guildhall repo,
+ * standing worktree with scaffolded directories, empty guild.json,
+ * the initial migration file, and an initial git commit.
+ *
+ * This is the first step of guild creation. After this, the caller
+ * should bootstrap base tools and apply migrations:
+ *
+ *   initGuild(home, model)        // skeleton
+ *   bootstrapBaseTools(home, ...)  // install framework tools via installTool
+ *   applyMigrations(home)          // create ledger via migration engine
  *
  * @param home - Absolute path for the new NEXUS_HOME directory.
  * @param model - Default model identifier for anima sessions.
@@ -78,53 +80,12 @@ export function initGuild(home: string, model: string): void {
   // Write codex placeholder
   fs.writeFileSync(path.join(ghWorktree, 'codex/all.md'), '');
 
-  // Write guild.json (with base tools pre-registered)
+  // Write guild.json — empty registries, tools will be installed via bootstrapBaseTools
   const config = createInitialGuildConfig(VERSION, model);
-  const now = new Date().toISOString();
-
-  // Write base implements — descriptor + instructions for each framework implement
-  for (const tmpl of BASE_IMPLEMENTS) {
-    const implDir = path.join(ghWorktree, 'nexus', 'implements', tmpl.name, VERSION);
-    fs.mkdirSync(implDir, { recursive: true });
-    fs.writeFileSync(path.join(implDir, 'nexus-implement.json'), renderImplementDescriptor(tmpl));
-    fs.writeFileSync(path.join(implDir, 'instructions.md'), tmpl.instructions);
-
-    config.implements[tmpl.name] = {
-      source: 'nexus',
-      slot: VERSION,
-      upstream: null,
-      installedAt: now,
-      roles: ['*'],
-    } satisfies ToolEntry;
-  }
-
-  // Write base engine descriptors
-  for (const tmpl of BASE_ENGINES) {
-    const engDir = path.join(ghWorktree, 'nexus', 'engines', tmpl.name, VERSION);
-    fs.mkdirSync(engDir, { recursive: true });
-    fs.writeFileSync(path.join(engDir, 'nexus-engine.json'), renderEngineDescriptor(tmpl));
-
-    config.engines[tmpl.name] = {
-      source: 'nexus',
-      slot: VERSION,
-      upstream: null,
-      installedAt: now,
-    } satisfies ToolEntry;
-  }
-
-  // Remove .gitkeep from nexus/implements and nexus/engines since they now have real files
-  for (const sub of ['nexus/implements', 'nexus/engines']) {
-    const gk = path.join(ghWorktree, sub, '.gitkeep');
-    if (fs.existsSync(gk)) fs.unlinkSync(gk);
-  }
-
   fs.writeFileSync(
     path.join(ghWorktree, 'guild.json'),
     JSON.stringify(config, null, 2) + '\n',
   );
-
-  // Create Ledger
-  createLedger(ledgerPath(home));
 
   // Initial commit
   git(['add', '-A'], ghWorktree);

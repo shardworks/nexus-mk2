@@ -1,9 +1,27 @@
 import { createCommand } from 'commander';
+import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import readline from 'node:readline/promises';
-import { initGuild } from '@shardworks/nexus-core';
+import { initGuild, bootstrapBaseTools } from '@shardworks/nexus-core';
+import { applyMigrations } from '@shardworks/engine-ledger-migrate';
 
 const DEFAULT_MODEL = 'sonnet';
+
+/** Resolve a package name to its root directory on disk. */
+function makePackageResolver(): (packageName: string) => string {
+  const require = createRequire(import.meta.url);
+  return (packageName: string) => {
+    // Resolve the package's main entry, then walk up to find package.json
+    const entry = require.resolve(packageName);
+    let dir = path.dirname(entry);
+    while (dir !== path.dirname(dir)) {
+      if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+      dir = path.dirname(dir);
+    }
+    throw new Error(`Could not find package root for ${packageName}`);
+  };
+}
 
 async function prompt(question: string, defaultValue?: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -40,7 +58,15 @@ export function makeInitCommand() {
       const home = path.resolve(guildPath);
 
       try {
+        // 1. Create guild skeleton (bare repo, worktree, dirs, guild.json, migration file)
         initGuild(home, model);
+
+        // 2. Install all framework tools via installTool
+        const resolvePackage = makePackageResolver();
+        bootstrapBaseTools(home, resolvePackage);
+
+        // 3. Create ledger via migration engine
+        applyMigrations(home);
       } catch (err) {
         console.error(`Error: ${(err as Error).message}`);
         process.exitCode = 1;

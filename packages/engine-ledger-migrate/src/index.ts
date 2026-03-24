@@ -140,11 +140,19 @@ export function applyMigrations(home: string): MigrateResult {
         continue;
       }
 
-      // Read and apply the migration
+      // Read and apply the migration.
+      // PRAGMAs can't run inside transactions, so extract them and run separately.
       const sql = fs.readFileSync(migration.path, 'utf-8');
+      const pragmaPattern = /^\s*PRAGMA\s+[^;]+;\s*$/gmi;
+      const pragmas = sql.match(pragmaPattern) || [];
+      const body = sql.replace(pragmaPattern, '').trim();
+
+      for (const pragma of pragmas) {
+        db.exec(pragma);
+      }
 
       db.transaction(() => {
-        db.exec(sql);
+        if (body) db.exec(body);
         db.prepare(
           `INSERT INTO _migrations (sequence, filename) VALUES (?, ?)`,
         ).run(migration.sequence, migration.filename);

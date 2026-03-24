@@ -51,11 +51,10 @@ export {
   instantiate,
 } from './instantiate.ts';
 export {
-  type ImplementTemplate,
-  type EngineTemplate,
+  type BaseToolRef,
   BASE_IMPLEMENTS,
   BASE_ENGINES,
-  renderImplementDescriptor,
-  renderEngineDescriptor,
+  BASE_TOOLS,
 } from './base-tools.ts';
 export { initGuild } from './init-guild.ts';
+export { bootstrapBaseTools } from './bootstrap.ts';

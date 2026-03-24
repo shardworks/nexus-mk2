@@ -42,6 +42,14 @@ export interface InstallToolOptions {
   slot?: string;
   /** Roles for implements (comma-separated or array). */
   roles?: string[];
+  /**
+   * Install as a framework tool (`source: 'nexus'`).
+   * Installs to `nexus/implements/` or `nexus/engines/` instead of
+   * guild-managed directories. Framework tools cannot be removed via remove-tool.
+   */
+  framework?: boolean;
+  /** Whether to create a git commit after installing. Defaults to true. */
+  commit?: boolean;
 }
 
 export interface InstallResult {
@@ -70,14 +78,29 @@ function readJson(filePath: string): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 }
 
-/** Recursively copy a directory. */
+/** Directories to skip when copying tool sources. */
+const SKIP_DIRS = new Set(['node_modules', '.git']);
+
+/** Recursively copy a directory, skipping node_modules and .git. */
 function copyDir(src: string, dest: string): void {
   fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
     if (entry.isDirectory()) {
-      copyDir(srcPath, destPath);
+      if (!SKIP_DIRS.has(entry.name)) {
+        copyDir(srcPath, destPath);
+      }
+    } else if (entry.isSymbolicLink()) {
+      // Resolve symlink and copy the target
+      const realPath = fs.realpathSync(srcPath);
+      if (fs.statSync(realPath).isDirectory()) {
+        if (!SKIP_DIRS.has(entry.name)) {
+          copyDir(realPath, destPath);
+        }
+      } else {
+        fs.copyFileSync(realPath, destPath);
+      }
     } else {
       fs.copyFileSync(srcPath, destPath);
     }
@@ -91,7 +114,7 @@ function copyDir(src: string, dest: string): void {
  * copies the directory to the correct slot, and registers in guild.json.
  */
 export function installTool(opts: InstallToolOptions): InstallResult {
-  const { home, source, roles } = opts;
+  const { home, source, roles, framework = false, commit = true } = opts;
   const worktree = guildhallWorktreePath(home);
 
   // Resolve source to absolute path
@@ -125,9 +148,14 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     );
   }
 
-  // Determine target directory
-  const parentDir = DIR_MAP[category];
-  const targetDir = path.join(worktree, parentDir, name, slot);
+  // Determine target directory.
+  // Framework tools go under nexus/{implements,engines}/.
+  // Guild tools go under {implements,engines}/ (or training/ for curricula/temperaments).
+  const parentDir = DIR_MAP[category]!;
+  const prefix = framework && (category === 'implements' || category === 'engines')
+    ? path.join('nexus', parentDir)
+    : parentDir;
+  const targetDir = path.join(worktree, prefix, name, slot);
 
   // Copy source to target
   if (fs.existsSync(targetDir)) {
@@ -141,7 +169,7 @@ export function installTool(opts: InstallToolOptions): InstallResult {
 
   if (category === 'implements' || category === 'engines') {
     const entry: ToolEntry = {
-      source: 'guild',
+      source: framework ? 'nexus' : 'guild',
       slot,
       upstream: null,
       installedAt: now,
@@ -161,9 +189,11 @@ export function installTool(opts: InstallToolOptions): InstallResult {
 
   writeGuildConfig(home, config);
 
-  // Commit
-  git(['add', '-A'], worktree);
-  git(['commit', '-m', `Install ${category.slice(0, -1)} ${name}@${slot}`], worktree);
+  // Commit (unless suppressed — e.g. during bootstrap)
+  if (commit) {
+    git(['add', '-A'], worktree);
+    git(['commit', '-m', `Install ${category.slice(0, -1)} ${name}@${slot}`], worktree);
+  }
 
   return { category, name, slot, installedTo: targetDir };
 }
