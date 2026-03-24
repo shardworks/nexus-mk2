@@ -60,9 +60,9 @@ The wrap-up skill nudges Sean to run an ethnographer session if more than a day 
 
 This is a **case study**, not a controlled experiment. There is no control-Sean operating the system without the metaphor. The closest baseline is Sean's experience with Mk 2.0 (pre-metaphor). The ethnographer probes both directions — what clicks and what creates friction.
 
-### H3 — A/B Commission Dispatch (future)
+### H3 — Metaphor as Implicit Instruction
 
-When the guild system is operational, we'll run controlled comparisons: same commission dispatched with guild-framed instructions vs. plain instructions. This is the one hypothesis where a real control group is feasible — at the individual commission level, not the system level. Not yet active; requires the commission dispatch infrastructure to be built first.
+H3 is tested by experiment X009. See [`experiments/X009-metaphor-as-instruction/spec.md`](../X009-metaphor-as-instruction/spec.md) for the full experimental design — controlled commission comparisons across guild-framed, plain-equivalent, and minimal instruction variants.
 
 ## Depends On
 
