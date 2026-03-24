@@ -57,3 +57,4 @@ For each notable moment:
 - Write the summary to `.scratch/recent-sessions/<timestamp>.md`, where `<timestamp>` is a date and timestamp such as `YYYY-MM-DDTHHmmss.md`. Each session gets its own file — never overwrite a previous one.
 - After writing, check the directory: if there are more than 4 files, delete the oldest ones to keep only the 4 most recent.
 - Commit all `recent-sessions` changes to git and push those changes.
+- In addition to writing the summary, share it in the chat for review and inclusion in session transcripts
