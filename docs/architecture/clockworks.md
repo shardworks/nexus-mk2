@@ -1,8 +1,8 @@
-# Clockworks Architecture
+# The Clockworks
 
 The Clockworks is the guild's nervous system — the event-driven layer that connects things that happen to things that should happen in response. It turns the guild from an imperative system (things happen when someone calls something) into a reactive one (things happen because other things happened).
 
-This is the infrastructure that enables **The Pulse** (Pillar 5 of the guild architecture). The Pulse is the behavior — the guild acting on itself autonomously. The Clockworks is the mechanism it runs on.
+The Clockworks is Pillar 5 of the guild architecture. The first four pillars make the guild *capable*. The Clockworks makes it *alive* — able to act on itself without waiting for the patron to push.
 
 ---
 
@@ -37,9 +37,6 @@ Signaled automatically by `nexus-core` operations. Always available; no guild co
 | `commission.state.changed` | A commission transitions state |
 | `commission.sealed` | A commission completes successfully |
 | `commission.failed` | A commission fails |
-| `task.created` | A task is created (by Clockworks, by a sage, or by an anima) |
-| `task.assigned` | A task is assigned to an anima |
-| `task.sealed` | A task is completed |
 | `tool.installed` | A tool (implement, engine, curriculum, or temperament) is installed |
 | `tool.removed` | A tool is removed |
 | `migration.applied` | A Ledger migration is applied |
@@ -68,7 +65,7 @@ Guilds declare their own events in `guild.json` under the `clockworks` key:
 }
 ```
 
-Custom events use any name not in a reserved framework namespace (`anima.*`, `commission.*`, `task.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`). Bundles may also declare events they introduce; these are merged into `guild.json` on installation.
+Custom events use any name not in a reserved framework namespace (`anima.*`, `commission.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`). Bundles may also declare events they introduce; these are merged into `guild.json` on installation.
 
 Animas signal custom events using the `signal` tool. The tool validates the event name against declared events in `guild.json` before persisting.
 
@@ -99,7 +96,7 @@ Two types:
 { "on": "commission.sealed", "run": "cleanup-worktree" }
 ```
 
-Invokes a mechanical engine. The engine receives the event as its input and runs deterministically. No AI involved; no judgment exercised. The Clockworks fires it and moves on.
+Invokes a clockwork engine. The engine receives the event as its input and runs deterministically. No AI involved; no judgment exercised. The Clockworks fires it and moves on.
 
 See [Engine Contract](#engine-contract) below for how event delivery works.
 
@@ -112,43 +109,16 @@ See [Engine Contract](#engine-contract) below for how event delivery works.
 
 Manifests an anima and delivers the event as their context. The anima exercises judgment and may take action, dispatch further work, or do nothing.
 
+The target is a **role**, not a named anima. The Clockworks runner resolves which active anima currently fills that role at the time the event fires. This makes standing orders durable — they don't break when a specific anima retires and is replaced; they target the institutional position, not the individual.
+
 Two notice types, same underlying machinery:
 
-- **`summon`** — the anima is expected to act. The task framing conveys urgency and intent: *you are summoned to attend to this*.
-- **`brief`** — the anima receives information and decides whether to act. The task framing is informational: *you are being briefed on this*.
+- **`summon`** — the anima is expected to act. The framing conveys urgency and intent: *you are summoned to attend to this*.
+- **`brief`** — the anima receives information and decides whether to act. The framing is informational: *you are being briefed on this*.
 
-The distinction is in the framing delivered to the anima, not in the execution path. Role instructions for anima-holding roles should document how to interpret each notice type. Both create a task in the Ledger (see Tasks below).
+The distinction is in the framing delivered to the anima, not in the execution path. Role instructions should document how to interpret each notice type. The dispatch is recorded in `event_dispatches` (see Ledger Schema).
 
-The named anima must exist in the register. If the anima does not exist, the standing order fails and signals `standing-order.failed`.
-
----
-
-### Tasks
-
-A **task** is a granular, internal work item. Tasks are distinct from commissions:
-
-| | Commission | Task |
-|---|---|---|
-| Origin | External — from the patron | Internal — from a sage, an engine, or the Clockworks |
-| Scope | Broad, potentially sweeping | Specific, bounded |
-| Lifecycle | Full — planning, sage consultation, dispatch, delivery | Lighter — created, assigned, worked, sealed |
-| Parent | None (top-level) | May belong to a commission, or be freestanding |
-
-Commissions are strictly patron territory. The Clockworks never creates commissions — it creates tasks.
-
-Tasks may be **assigned** or **unassigned**. Unassigned tasks live on the **board** — the guild's backlog of open work. Assignment is a property on the task, not a type distinction; the same word covers both states.
-
-A task record in the Ledger:
-
-```
-id
-notice_type:       "summon" | "brief" | null    ← null for non-Clockworks tasks
-triggered_by:      event id, if Clockworks-generated
-assigned_to:       anima name, if assigned
-parent_commission: commission id, if decomposed from a commission
-status:            open | in-progress | sealed | failed
-created_at
-```
+**Role resolution:** If no active anima fills the named role, the standing order fails and signals `standing-order.failed`. If multiple animas fill the role (roles can have multiple seats), each is notified — one dispatch per anima.
 
 ---
 
@@ -156,17 +126,23 @@ created_at
 
 A framework engine that processes the event queue. It reads unprocessed events from the Ledger, resolves which standing orders apply, and executes them in registration order.
 
-#### Phase 1 — deferred processing (current design)
+#### Phase 1 — manual operation via `nsg clock`
 
-Events are written to the Ledger immediately when signaled. The Clockworks runner executes at the end of each `nsg` CLI invocation, processing any new events before the process exits. No daemon required; no persistent process.
+Events are written to the Ledger immediately when signaled. Processing is explicitly operator-driven — not automatic. This allows the system to be monitored and stepped through until it has earned enough trust to run unattended.
 
-This covers the core use case: "when a commission seals, do X." Events from a CLI invocation are processed within that same invocation.
+| Command | Behavior |
+|---|---|
+| `nsg clock list` | Show all pending (unprocessed) events |
+| `nsg clock tick [id]` | Process the next pending event, or the specific event with the given id |
+| `nsg clock run` | Continuously process all pending events until the queue is empty |
 
-#### Phase 2 — daemon (future, enables The Pulse)
+No daemon required. The operator decides when and how much the Clockworks runs.
 
-A long-running `nsg clockworks start` process watches the event queue continuously. Processes events as they arrive. Enables external event injection — webhooks, file watchers, scheduled jobs. This is when the Clockworks fully becomes The Pulse: the guild acting on itself without a human CLI invocation.
+#### Phase 2 — daemon
 
-Phase 2 requires no architectural changes to events, standing orders, or tasks — only a new runner invocation mode. The infrastructure is identical; the trigger changes.
+A long-running `nsg clock start` process watches the event queue continuously. Processes events as they arrive. Enables external event injection — webhooks, file watchers, scheduled jobs. The guild acts on itself without a human CLI invocation.
+
+Phase 2 requires no architectural changes to events, standing orders, or the Ledger schema — only a new runner invocation mode. The infrastructure is identical; the trigger changes.
 
 ---
 
@@ -180,7 +156,7 @@ Standing order failures signal a `standing-order.failed` event:
   payload: {
     standingOrder: { on: "commission.failed", summon: "advisor" },
     triggeringEvent: { id: 42, name: "commission.failed", ... },
-    error: "Anima 'advisor' not found in register"
+    error: "No active anima fills role 'advisor'"
   }
 }
 ```
@@ -193,22 +169,24 @@ Guilds can respond to this event with their own standing orders — summon an an
 
 ## The `signal` Tool
 
-A new base tool. Animas use it to signal custom events.
+A base tool available to all animas. Used to signal custom guild events.
 
 ```typescript
 tool({
   description: "Signal a custom guild event",
   params: {
-    name: z.string().describe("Event name (must be declared in guild.json)"),
+    name: z.string().describe("Event name (must be declared in guild.json clockworks.events)"),
     payload: z.record(z.unknown()).optional().describe("Event payload")
   },
   handler: async ({ name, payload }, { home }) => {
     // validate name against guild.json clockworks.events
     // reject framework-reserved namespaces
-    // persist to Ledger event log
+    // persist to Ledger events table
   }
 })
 ```
+
+Also exposed as `nsg signal <name> [--payload <json>]` for operator use.
 
 Animas cannot signal framework events (`anima.*`, `commission.*`, `tool.*`, etc.). Only guild-declared custom events. This keeps the event record trustworthy — framework events come from authoritative code paths.
 
@@ -257,24 +235,13 @@ CREATE TABLE event_dispatches (
   id           INTEGER PRIMARY KEY,
   event_id     INTEGER NOT NULL REFERENCES events(id),
   handler_type TEXT NOT NULL,          -- 'engine' or 'anima'
-  handler_name TEXT NOT NULL,          -- engine name or anima name
+  handler_name TEXT NOT NULL,          -- engine name or resolved anima name
+  target_role  TEXT,                   -- role name (anima orders only; handler_name is the resolved anima)
   notice_type  TEXT,                   -- 'summon' | 'brief' | null (anima orders only)
   started_at   DATETIME,
   ended_at     DATETIME,
   status       TEXT,                   -- 'success' | 'error'
   error        TEXT
-);
-
--- Tasks: internal work items
-CREATE TABLE tasks (
-  id                 INTEGER PRIMARY KEY,
-  notice_type        TEXT,             -- 'summon' | 'brief' | null
-  triggered_by       INTEGER REFERENCES events(id),
-  assigned_to        TEXT,             -- anima name, nullable
-  parent_commission  INTEGER,          -- commission id, nullable
-  status             TEXT NOT NULL DEFAULT 'open',
-  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
@@ -282,17 +249,17 @@ CREATE TABLE tasks (
 
 ## Engine Contract
 
-Today, engines are plain TypeScript modules with bespoke exported functions — no SDK wrapper, no standard invocation contract. Each framework engine has its own specific signature (`manifest(home, animaName)`, `applyMigrations(home, provenance?)`, etc.) and is called directly by the CLI or other framework code that knows the API. The `nexus-engine.json` descriptor is used only at install time; nothing reads it at runtime.
+Today, engines are plain TypeScript modules with bespoke exported functions — no SDK wrapper, no standard invocation contract. Each static engine has its own specific signature (`manifest(home, animaName)`, `applyMigrations(home, provenance?)`, etc.) and is called directly by the CLI or other framework code that knows the API. The `nexus-engine.json` descriptor is used only at install time; nothing reads it at runtime.
 
-This works for infrastructure engines but is incompatible with Clockworks — a generic runner cannot call an engine if every engine has a different signature.
+This works for static engines but is incompatible with the Clockworks — a generic runner cannot call an engine if every engine has a different signature.
 
 ### Two kinds of engines
 
 The Clockworks introduces a meaningful distinction that wasn't needed before:
 
-**Infrastructure engines** — bespoke APIs, called by specific framework code. The manifest engine, mcp-server, and ledger-migrate fall here. They have no standard invocation contract and are not directly triggerable by standing orders. Nothing about them changes.
+**Static engines** — bespoke APIs, called by specific framework code. The manifest engine, mcp-server, and ledger-migrate fall here. They have no standard invocation contract and are not directly triggerable by standing orders. Nothing about them changes.
 
-**Event-handler engines** — purpose-built to respond to Clockworks events. These export a default using a new `engine()` SDK factory, giving the Clockworks runner a standard contract to call.
+**Clockwork engines** — purpose-built to respond to Clockworks events. These export a default using a new `engine()` SDK factory, giving the Clockworks runner a standard contract to call.
 
 ### The `engine()` factory
 
@@ -311,23 +278,23 @@ export default engine({
 
 The Clockworks runner calls `module.default.handler(event, { home })`. This is the only contract the runner needs to know.
 
-Engines that export a default `engine()` definition can be named in `run:` standing orders. Engines that don't (infrastructure engines) cannot — attempting to do so is a configuration error caught at validation time.
+Clockwork engines can be named in `run:` standing orders. Static engines cannot — attempting to do so is a configuration error caught at validation time.
 
 ### `nexus-engine.json` is unchanged
 
-No new fields needed. The descriptor's `entry` field already points to the module. Whether that module exports an `engine()` default is discovered at load time, not in the descriptor. The distinction between infrastructure and event-handler engines is in the module shape, not the configuration.
+No new fields needed. The descriptor's `entry` field already points to the module. Whether that module exports an `engine()` default is discovered at load time, not in the descriptor. The distinction between static and clockwork engines is in the module shape, not the configuration.
 
 ---
 
 ## Relationship to Existing Concepts
 
-**Engines** — gain a new activation path (event-driven, via standing orders) alongside existing explicit invocation. Split into two kinds: infrastructure engines (unchanged, bespoke APIs) and event-handler engines (use the new `engine()` factory). No changes to `nexus-engine.json`.
+**Engines** — gain a new activation path (event-driven, via standing orders) alongside existing explicit invocation. Split into two kinds: static engines (unchanged, bespoke APIs) and clockwork engines (use the new `engine()` factory). No changes to `nexus-engine.json`.
 
 **Tools** — `signal` is a new base tool. All other tools unchanged.
 
-**The Ledger** — three new tables: `events`, `event_dispatches`, `tasks`.
+**The Ledger** — two new tables: `events`, `event_dispatches`.
 
-**The Manifest Engine** — invoked by anima standing orders (summon/brief). Receives task context rather than a patron-posted commission brief. Minor extension to handle event-triggered manifestation.
+**The Manifest Engine** — invoked by anima standing orders (summon/brief). Receives event context rather than a patron-posted commission brief. Minor extension to handle event-triggered manifestation.
 
 **Bundles** — may ship default standing orders and custom event declarations, merged into `guild.json` on installation. Same delivery mechanism as other bundle-provided config.
 
@@ -339,4 +306,4 @@ No new fields needed. The descriptor's `entry` field already points to the modul
 - **Pre-event hooks** — cancellable `before.*` events. Powerful but complex. Start with observation-only (post-facto) events.
 - **Payload schema enforcement** — schema field in custom event declarations is documented but not validated. Enforcement deferred.
 - **Phase 2 daemon** — continuous event processing. Deferred until Phase 1 is proven.
-- **Scheduled standing orders** — time-triggered rather than event-triggered. Part of The Pulse proper; deferred.
+- **Scheduled standing orders** — time-triggered rather than event-triggered. Deferred.

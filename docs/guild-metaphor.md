@@ -119,6 +119,20 @@ An automated mechanical process with no AI — scripts, cron jobs, queue readers
 
 The distinction is essential: **animas are animated** (backed by AI, capable of judgment and creativity, expensive), **engines are inanimate** (no AI, purely mechanical, perfectly repeatable, cheap). Engines are the infrastructure that lets animas focus on the work that requires intelligence.
 
+Two kinds of engines exist. **Static engines** have bespoke APIs and are invoked by specific framework code — the manifest engine, mcp-server, and ledger-migrate are examples. **Clockwork engines** are purpose-built to respond to Clockworks events; they export a standard handler contract and can be named in standing orders.
+
+### Clockworks
+
+The guild's nervous system — an event-driven layer that connects things that happen to things that should respond. The Clockworks persists events to the Ledger as they are signaled and processes them according to the guild's standing orders. It turns the guild from a tool the patron operates into a system that operates itself.
+
+### Standing Order
+
+A registered response to an event, defined in `guild.json`. A standing order says: *whenever this event is signaled, do this*. Two types: engine orders (`run`) invoke a clockwork engine; anima orders (`summon` or `brief`) manifest an anima in the named role and deliver the event as their context. Standing orders are guild policy — they live in configuration, not in engine code.
+
+### Task
+
+A granular, internal work item. Tasks are distinct from commissions: a commission comes from the patron and may have sweeping scope; a task is guild-internal and specific. Tasks may be assigned to an anima or sit unassigned on the board (the guild's backlog of open work). They may be decomposed from a commission or arise from an anima's own judgment during a session.
+
 ### Tool
 
 A tool an anima actively wields during work. Tools are the guild's toolkit — instruments that animas use to interact with guild systems, query information, record notes, and perform operations. Each tool ships with instructions that are delivered to the anima when manifested for a session, so the anima knows how to use its tools.

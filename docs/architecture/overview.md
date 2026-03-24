@@ -24,9 +24,11 @@ When an anima is manifested for a session, the guild assembles a complete instru
 
 The guild does not run anonymous agents. Every anima is a named entity with a tracked composition, a persistent history, and an accountable record. The register and roster — held in the Ledger — know who exists, what they're made of, what role they fill, and what they've done. Identity is what makes the guild a learning organization rather than a stateless script.
 
-### 5. The Pulse *(not yet built)*
+### 5. The Clockworks
 
-The four pillars above make the guild capable. This one makes it alive. Daemons, scheduled jobs, watchers, and other long-running engines that give the guild its own heartbeat — initiating work without waiting for the patron to push. The pulse is what turns the guild from a tool the patron operates into a system that operates itself. Design deferred — the guild earns autonomy by proving the first four pillars work.
+The four pillars above make the guild capable. This one makes it alive. The Clockworks is the guild's event-driven nervous system — an extensible hook system where events are signaled as things happen and standing orders define how the guild responds. Guilds define custom events and register standing orders that invoke engines or manifest animas in response. The Clockworks starts operator-driven (manual `nsg clock` commands) and grows toward a continuous daemon as trust is established.
+
+See [The Clockworks](clockworks.md) for full architecture and design details.
 
 ---
 
@@ -66,6 +68,10 @@ The CLI is both the operator interface and the engine behind all base tools. Eve
 | `nexus install <version>` | Install or upgrade the framework to a specific version. Replaces base tools, runs new migrations. |
 | `nexus repair` | Reinstall the current framework version. Restores base tools without touching guild content. |
 | `nexus status` | Show framework version, check for issues |
+| `nsg signal <event>` | Signal a custom guild event |
+| `nsg clock list` | Show pending Clockworks events |
+| `nsg clock tick [id]` | Process the next pending event (or a specific one) |
+| `nsg clock run` | Process all pending events until the queue is empty |
 
 Subcommands that correspond to tools share the same core logic — the CLI command and the tool wrapper are two interfaces to the same operation.
 
@@ -315,7 +321,7 @@ The Ledger is guild infrastructure — owned by the institution, maintained by f
 
 ## Vocabulary
 
-This document uses the guild vocabulary defined in [`guild-metaphor.md`](../guild-metaphor.md) and the project philosophy in [`philosophy.md`](../philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, works, workshop, threshold, codex, curriculum, temperament, oath *(v2)*, edict *(v2)*, engine, tool, relic, guildhall, ledger.
+This document uses the guild vocabulary defined in [`guild-metaphor.md`](../guild-metaphor.md) and the project philosophy in [`philosophy.md`](../philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, works, workshop, threshold, codex, curriculum, temperament, oath *(v2)*, edict *(v2)*, engine, tool, relic, guildhall, ledger, clockworks, standing order, task.
 
 One term is specific to this architecture and not defined in the metaphor:
 

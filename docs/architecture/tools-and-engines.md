@@ -12,6 +12,8 @@ Tools are accessible through multiple paths: animas invoke them as MCP tools dur
 
 **Engines** are automated mechanical processes with no AI involvement — scripts, queue readers, and other deterministic processes built into the guild's infrastructure. Engines handle the repeatable, mechanical work: manifesting animas, setting up worktrees, running migrations. They do not have instruction documents because no anima wields them.
 
+Two kinds of engines exist: **static engines** have bespoke APIs and are invoked by specific framework code; **clockwork engines** export a standard `engine()` handler and can be triggered by the Clockworks via standing orders. See [The Clockworks](clockworks.md) for the engine contract and factory details.
+
 Both follow the same packaging model. Curricula and temperaments also follow this model — see [below](#curricula--temperaments).
 
 ---
