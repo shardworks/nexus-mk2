@@ -1,11 +1,11 @@
 /**
  * MCP Server Engine
  *
- * Serves guild implements as typed MCP tools during anima sessions.
+ * Serves guild tools as typed MCP tools during anima sessions.
  * The manifest engine launches this as a stdio process, configured with
- * the set of implements the anima has access to (based on role gating).
+ * the set of tools the anima has access to (based on role gating).
  *
- * For each implement:
+ * For each tool:
  *   - kind: "module" → imports the handler and registers it as an MCP tool
  *   - kind: "script" → registers an MCP tool that shells out to the script
  *
@@ -21,8 +21,8 @@
  * Config shape:
  *   {
  *     "home": "/absolute/path/to/guild-root",
- *     "implements": [
- *       { "name": "install-tool", "modulePath": "@shardworks/implement-install-tool" },
+ *     "tools": [
+ *       { "name": "install-tool", "modulePath": "@shardworks/tool-install" },
  *       { "name": "my-tool", "modulePath": "/absolute/path/to/handler.ts" }
  *     ]
  *   }
@@ -31,13 +31,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { VERSION } from '@shardworks/nexus-core';
-import type { ImplementDefinition, ImplementContext } from '@shardworks/nexus-core';
+import type { ToolDefinition, ToolContext } from '@shardworks/nexus-core';
 
-/** A single implement to load into the MCP server. */
-export interface ImplementSpec {
+/** A single tool to load into the MCP server. */
+export interface ToolSpec {
   /** Tool name — how the anima sees it. */
   name: string;
-  /** Module path — package name (for framework implements) or absolute file path (for guild implements). */
+  /** Module path — package name (for framework tools) or absolute file path (for guild tools). */
   modulePath: string;
 }
 
@@ -45,22 +45,22 @@ export interface ImplementSpec {
 export interface ServerConfig {
   /** Absolute path to the guild root. */
   home: string;
-  /** Implements to register as MCP tools. */
-  implements: ImplementSpec[];
+  /** Tools to register as MCP tools. */
+  tools: ToolSpec[];
 }
 
 /**
- * Load an implement definition from a module path.
- * Expects the module's default export to be an ImplementDefinition (from the implement() SDK).
+ * Load a tool definition from a module path.
+ * Expects the module's default export to be a ToolDefinition (from the tool() SDK).
  */
-async function loadImplement(spec: ImplementSpec): Promise<ImplementDefinition | null> {
+async function loadTool(spec: ToolSpec): Promise<ToolDefinition | null> {
   try {
     const mod = await import(spec.modulePath);
-    const def: ImplementDefinition = mod.default;
+    const def: ToolDefinition = mod.default;
 
     if (!def || !def.params || !def.handler || !def.description) {
       console.error(
-        `[mcp-server] ${spec.name}: module does not export a valid implement definition (missing params, handler, or description). Skipping.`,
+        `[mcp-server] ${spec.name}: module does not export a valid tool definition (missing params, handler, or description). Skipping.`,
       );
       return null;
     }
@@ -73,9 +73,9 @@ async function loadImplement(spec: ImplementSpec): Promise<ImplementDefinition |
 }
 
 /**
- * Create and configure an MCP server with the given implements.
+ * Create and configure an MCP server with the given tools.
  *
- * Each implement's Zod param schema is registered directly with the MCP SDK
+ * Each tool's Zod param schema is registered directly with the MCP SDK
  * (which handles JSON Schema conversion). The handler is wrapped to inject
  * the framework context and format the result as MCP tool output.
  */
@@ -85,13 +85,13 @@ export async function createMcpServer(config: ServerConfig): Promise<McpServer> 
     version: VERSION,
   });
 
-  const context: ImplementContext = { home: config.home };
+  const context: ToolContext = { home: config.home };
 
-  for (const spec of config.implements) {
-    const def = await loadImplement(spec);
+  for (const spec of config.tools) {
+    const def = await loadTool(spec);
     if (!def) continue;
 
-    // Register the implement as an MCP tool.
+    // Register the tool as an MCP tool.
     // The MCP SDK accepts Zod shapes directly — it handles JSON Schema conversion.
     server.tool(
       spec.name,

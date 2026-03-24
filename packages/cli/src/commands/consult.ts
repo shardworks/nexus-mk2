@@ -56,7 +56,7 @@ function resolveAnimaByRole(home: string, role: string): string {
 
 /**
  * Build the Claude MCP config JSON (mcpServers format) that launches the
- * engine-mcp-server as a stdio process serving the anima's implements.
+ * engine-mcp-server as a stdio process serving the anima's tools.
  *
  * The engine module exports main() but doesn't self-invoke, so we write a
  * tiny wrapper script that imports it and calls main(). This also sidesteps

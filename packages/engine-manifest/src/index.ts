@@ -5,13 +5,13 @@
  * presence for a session, the manifest engine:
  *
  * 1. Reads the anima's composition from the Ledger (roles, curricula, temperament)
- * 2. Resolves implements — starts with baseImplements, then unions in each
- *    role's implements (validated against guild.json role definitions)
- * 3. Runs precondition checks on each resolved implement
+ * 2. Resolves tools — starts with baseTools, then unions in each
+ *    role's tools (validated against guild.json role definitions)
+ * 3. Runs precondition checks on each resolved tool
  * 4. Reads codex content, role instructions, curricula content, temperament
- *    content, and implement instructions from disk
+ *    content, and tool instructions from disk
  * 5. Assembles the composed system prompt
- * 6. Generates an MCP server config with the available implement set
+ * 6. Generates an MCP server config with the available tool set
  *
  * The manifest engine is deterministic infrastructure — no AI involvement.
  * It reconstitutes a working identity from institutional records.
@@ -40,11 +40,11 @@ export interface AnimaRecord {
   temperamentSnapshot: string;
 }
 
-/** A resolved implement that the anima has access to. */
-export interface ResolvedImplement {
+/** A resolved tool that the anima has access to. */
+export interface ResolvedTool {
   /** Tool name — how the anima sees it. */
   name: string;
-  /** Absolute path to the implement's directory on disk. */
+  /** Absolute path to the tool's directory on disk. */
   path: string;
   /** Instructions content (if instructions.md exists). */
   instructions: string | null;
@@ -52,11 +52,11 @@ export interface ResolvedImplement {
   package: string | null;
 }
 
-/** An implement that was resolved by role but failed precondition checks. */
-export interface UnavailableImplement {
+/** A tool that was resolved by role but failed precondition checks. */
+export interface UnavailableTool {
   /** Tool name. */
   name: string;
-  /** Human-readable reasons why the implement is unavailable. */
+  /** Human-readable reasons why the tool is unavailable. */
   reasons: string[];
 }
 
@@ -66,10 +66,10 @@ export interface ManifestResult {
   anima: AnimaRecord;
   /** The composed system prompt for the anima. */
   systemPrompt: string;
-  /** MCP server config — implements the anima has access to. */
+  /** MCP server config — tools the anima has access to. */
   mcpConfig: McpServerConfig;
-  /** Implements that matched the anima's roles but failed precondition checks. */
-  unavailable: UnavailableImplement[];
+  /** Tools that matched the anima's roles but failed precondition checks. */
+  unavailable: UnavailableTool[];
   /** Warnings generated during manifest (e.g. undefined roles). */
   warnings: string[];
 }
@@ -78,8 +78,8 @@ export interface ManifestResult {
 export interface McpServerConfig {
   /** Absolute path to the guild root. */
   home: string;
-  /** Implements to register as MCP tools. */
-  implements: Array<{ name: string; modulePath: string }>;
+  /** Tools to register as MCP tools. */
+  tools: Array<{ name: string; modulePath: string }>;
   /** Environment variables for the MCP server process. */
   env?: Record<string, string>;
 }
@@ -128,28 +128,28 @@ export function readAnima(home: string, animaName: string): AnimaRecord {
 }
 
 /**
- * Resolve the set of implements an anima has access to, based on role
+ * Resolve the set of tools an anima has access to, based on role
  * definitions and precondition checks.
  *
- * 1. Start with baseImplements (available to all animas)
+ * 1. Start with baseTools (available to all animas)
  * 2. For each anima role, look up the role in guild.json.roles
- *    - If defined: union in that role's implements
+ *    - If defined: union in that role's tools
  *    - If undefined: warn and skip (no tools, no instructions from that role)
- * 3. Deduplicate implement names
- * 4. Resolve each implement from guild.json.implements catalog
+ * 3. Deduplicate tool names
+ * 4. Resolve each tool from guild.json.tools catalog
  * 5. Run precondition checks — split into available and unavailable
  *
- * Returns available implements, unavailable implements, and any warnings.
+ * Returns available tools, unavailable tools, and any warnings.
  */
-export function resolveImplements(
+export function resolveTools(
   home: string,
   config: GuildConfig,
   animaRoles: string[],
-): { available: ResolvedImplement[]; unavailable: UnavailableImplement[]; warnings: string[] } {
+): { available: ResolvedTool[]; unavailable: UnavailableTool[]; warnings: string[] } {
   const warnings: string[] = [];
 
-  // Collect implement names: start with base, union in role-specific
-  const implementNames = new Set<string>(config.baseImplements ?? []);
+  // Collect tool names: start with base, union in role-specific
+  const toolNames = new Set<string>(config.baseTools ?? []);
 
   for (const role of animaRoles) {
     const roleDef = config.roles[role];
@@ -160,27 +160,27 @@ export function resolveImplements(
       );
       continue;
     }
-    for (const implName of roleDef.implements) {
-      implementNames.add(implName);
+    for (const toolName of roleDef.tools) {
+      toolNames.add(toolName);
     }
   }
 
-  // Resolve each implement from the catalog
-  const available: ResolvedImplement[] = [];
-  const unavailable: UnavailableImplement[] = [];
+  // Resolve each tool from the catalog
+  const available: ResolvedTool[] = [];
+  const unavailable: UnavailableTool[] = [];
 
-  for (const name of implementNames) {
-    const entry = config.implements[name] as ToolEntry | undefined;
+  for (const name of toolNames) {
+    const entry = config.tools[name] as ToolEntry | undefined;
     if (!entry) {
       warnings.push(
-        `Implement "${name}" is referenced by a role or baseImplements but not found in guild.json.implements. Skipping.`,
+        `Tool "${name}" is referenced by a role or baseTools but not found in guild.json.tools. Skipping.`,
       );
       continue;
     }
 
     // Resolve on-disk path
-    const implPath = path.join(home, 'implements', name);
-    const descriptorPath = path.join(implPath, 'nexus-implement.json');
+    const toolPath = path.join(home, 'tools', name);
+    const descriptorPath = path.join(toolPath, 'nexus-tool.json');
 
     // Check preconditions before including in the available set
     const preconditions = readPreconditions(descriptorPath);
@@ -199,7 +199,7 @@ export function resolveImplements(
       try {
         const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf-8'));
         if (descriptor.instructions) {
-          const instructionsPath = path.join(implPath, descriptor.instructions);
+          const instructionsPath = path.join(toolPath, descriptor.instructions);
           if (fs.existsSync(instructionsPath)) {
             instructions = fs.readFileSync(instructionsPath, 'utf-8');
           }
@@ -211,7 +211,7 @@ export function resolveImplements(
 
     available.push({
       name,
-      path: implPath,
+      path: toolPath,
       instructions,
       package: entry.package ?? null,
     });
@@ -250,7 +250,7 @@ export function readCodex(home: string): string {
  *
  * For each role the anima holds, reads the instructions file pointed to by
  * the role definition in guild.json. Skips undefined roles (warning already
- * emitted by resolveImplements). Skips roles without instructions.
+ * emitted by resolveTools). Skips roles without instructions.
  *
  * Returns the composed text of all role instructions, or empty string.
  */
@@ -285,15 +285,15 @@ export function readRoleInstructions(
  * Assemble the composed system prompt for an anima session.
  *
  * Sections are included in order: codex → role instructions → curricula →
- * temperament → implement instructions → unavailable implements notice.
+ * temperament → tool instructions → unavailable tools notice.
  * Empty sections are omitted.
  */
 export function assembleSystemPrompt(
   codex: string,
   roleInstructions: string,
   anima: AnimaRecord,
-  implements_: ResolvedImplement[],
-  unavailable: UnavailableImplement[] = [],
+  tools: ResolvedTool[],
+  unavailable: UnavailableTool[] = [],
 ): string {
   const sections: string[] = [];
 
@@ -317,24 +317,24 @@ export function assembleSystemPrompt(
     sections.push(`# Temperament\n\n${anima.temperamentSnapshot}`);
   }
 
-  // Implement instructions — guidance for each tool the anima has access to
-  const toolInstructions = implements_
-    .filter(impl => impl.instructions)
-    .map(impl => impl.instructions!);
+  // Tool instructions — guidance for each tool the anima has access to
+  const toolInstructions = tools
+    .filter(t => t.instructions)
+    .map(t => t.instructions!);
 
   if (toolInstructions.length > 0) {
     sections.push(`# Tool Instructions\n\n${toolInstructions.join('\n\n---\n\n')}`);
   }
 
-  // Unavailable implements notice — tell the anima what's broken and why
+  // Unavailable tools notice — tell the anima what's broken and why
   if (unavailable.length > 0) {
     const notices = unavailable.map(u => {
       const reasons = u.reasons.map(r => `  - ${r}`).join('\n');
       return `**${u.name}** — unavailable:\n${reasons}`;
     });
     sections.push(
-      `# Unavailable Implements\n\n` +
-      `The following implements are registered for your roles but are currently ` +
+      `# Unavailable Tools\n\n` +
+      `The following tools are registered for your roles but are currently ` +
       `unavailable due to unmet environment requirements. Do not attempt to use them. ` +
       `If a patron or operator asks you to perform work that requires these tools, ` +
       `explain what is needed to make them available.\n\n` +
@@ -346,31 +346,31 @@ export function assembleSystemPrompt(
 }
 
 /**
- * Generate the MCP server config for the resolved implement set.
+ * Generate the MCP server config for the resolved tool set.
  *
- * For implements with a `package` field in guild.json, the modulePath is the
- * npm package name (resolved via NODE_PATH at runtime). For implements without
+ * For tools with a `package` field in guild.json, the modulePath is the
+ * npm package name (resolved via NODE_PATH at runtime). For tools without
  * a package field, the modulePath is an absolute path to the entry point.
  */
 export function generateMcpConfig(
   home: string,
-  implements_: ResolvedImplement[],
+  tools: ResolvedTool[],
 ): McpServerConfig {
-  const mcpImplements: Array<{ name: string; modulePath: string }> = [];
+  const mcpTools: Array<{ name: string; modulePath: string }> = [];
 
-  for (const impl of implements_) {
+  for (const t of tools) {
     // If guild.json has a `package` field, resolve by npm package name
     // (the MCP server process uses NODE_PATH to find it in node_modules).
     // Otherwise, read the entry point from the descriptor and use the absolute file path.
-    if (impl.package) {
-      mcpImplements.push({ name: impl.name, modulePath: impl.package });
+    if (t.package) {
+      mcpTools.push({ name: t.name, modulePath: t.package });
     } else {
-      const descriptorPath = path.join(impl.path, 'nexus-implement.json');
+      const descriptorPath = path.join(t.path, 'nexus-tool.json');
       if (!fs.existsSync(descriptorPath)) continue;
 
       const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf-8'));
       const entry = descriptor.entry as string;
-      mcpImplements.push({ name: impl.name, modulePath: path.join(impl.path, entry) });
+      mcpTools.push({ name: t.name, modulePath: path.join(t.path, entry) });
     }
   }
 
@@ -378,14 +378,14 @@ export function generateMcpConfig(
   // tools from the guildhall's node_modules, regardless of where the MCP
   // engine code itself lives on disk.
   const nodePath = path.join(home, 'node_modules');
-  return { home, implements: mcpImplements, env: { NODE_PATH: nodePath } };
+  return { home, tools: mcpTools, env: { NODE_PATH: nodePath } };
 }
 
 /**
  * Manifest an anima for a session.
  *
  * This is the main entry point. Reads the anima's composition, resolves
- * implements by role, assembles the system prompt, and returns the full
+ * tools by role, assembles the system prompt, and returns the full
  * session configuration.
  */
 export async function manifest(home: string, animaName: string): Promise<ManifestResult> {
@@ -398,8 +398,8 @@ export async function manifest(home: string, animaName: string): Promise<Manifes
     );
   }
 
-  // Resolve implements based on role definitions + precondition checks
-  const { available, unavailable, warnings } = resolveImplements(home, config, anima.roles);
+  // Resolve tools based on role definitions + precondition checks
+  const { available, unavailable, warnings } = resolveTools(home, config, anima.roles);
 
   // Read codex (guild-wide, no role filtering)
   const codex = readCodex(home);
@@ -410,7 +410,7 @@ export async function manifest(home: string, animaName: string): Promise<Manifes
   // Assemble system prompt (includes role instructions and unavailability notices)
   const systemPrompt = assembleSystemPrompt(codex, roleInstructions, anima, available, unavailable);
 
-  // Generate MCP config (only available implements)
+  // Generate MCP config (only available tools)
   const mcpConfig = generateMcpConfig(home, available);
 
   return { anima, systemPrompt, mcpConfig, unavailable, warnings };

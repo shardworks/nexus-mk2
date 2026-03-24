@@ -108,7 +108,7 @@ describe('readBundleManifest', () => {
   it('reads a valid manifest', () => {
     const bundleDir = makeBundle(tmpDir, 'test-bundle', {
       description: 'Test bundle',
-      implements: [{ package: 'test-impl@1.0' }],
+      tools: [{ package: 'test-impl@1.0' }],
       engines: [{ package: 'test-engine@1.0' }],
       curricula: [{ path: 'curricula/basics' }],
       temperaments: [{ package: 'test-temperament@1.0' }],
@@ -116,7 +116,7 @@ describe('readBundleManifest', () => {
 
     const manifest = readBundleManifest(bundleDir);
     assert.equal(manifest.description, 'Test bundle');
-    assert.equal(manifest.implements!.length, 1);
+    assert.equal(manifest.tools!.length, 1);
     assert.equal(manifest.engines!.length, 1);
     assert.equal(manifest.curricula!.length, 1);
     assert.equal(manifest.temperaments!.length, 1);
@@ -130,23 +130,23 @@ describe('readBundleManifest', () => {
     );
   });
 
-  it('errors when implements has path', () => {
+  it('errors when tools has path', () => {
     const bundleDir = makeBundle(tmpDir, 'bad-bundle', {
-      implements: [{ path: 'some/path', package: 'x' }],
+      tools: [{ path: 'some/path', package: 'x' }],
     });
     assert.throws(
       () => readBundleManifest(bundleDir),
-      /Implements must be npm packages or git URLs/,
+      /Tools must be npm packages or git URLs/,
     );
   });
 
-  it('errors when implements missing package', () => {
+  it('errors when tools missing package', () => {
     const bundleDir = makeBundle(tmpDir, 'bad-bundle', {
-      implements: [{ name: 'no-pkg' }],
+      tools: [{ name: 'no-pkg' }],
     });
     assert.throws(
       () => readBundleManifest(bundleDir),
-      /Implements must have a "package" specifier/,
+      /Tools must have a "package" specifier/,
     );
   });
 
@@ -185,7 +185,7 @@ describe('readBundleManifest', () => {
       description: 'Minimal',
     });
     const manifest = readBundleManifest(bundleDir);
-    assert.equal(manifest.implements, undefined);
+    assert.equal(manifest.tools, undefined);
     assert.equal(manifest.engines, undefined);
   });
 });
@@ -206,10 +206,10 @@ describe('installBundle', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('installs package-based implements and engines', () => {
+  it('installs package-based tools and engines', () => {
     // Create tool packages
     makePackage(tmpDir, 'test-impl', {
-      type: 'implement',
+      type: 'tool',
       data: { entry: 'handler.js', description: 'Test impl', instructions: 'instructions.md' },
     });
     makePackage(tmpDir, 'test-engine', {
@@ -219,7 +219,7 @@ describe('installBundle', () => {
 
     // Create bundle referencing local paths (npm resolves them)
     const bundleDir = makeBundle(tmpDir, 'test-bundle', {
-      implements: [
+      tools: [
         { package: path.join(tmpDir, 'test-impl') },
       ],
       engines: [
@@ -234,12 +234,12 @@ describe('installBundle', () => {
     });
 
     assert.equal(result.installed, 2);
-    assert.deepEqual(result.artifacts.implements, ['test-impl']);
+    assert.deepEqual(result.artifacts.tools, ['test-impl']);
     assert.deepEqual(result.artifacts.engines, ['test-engine']);
 
     // Metadata in guild directories
-    assert.ok(fs.existsSync(path.join(home, 'implements', 'test-impl', 'nexus-implement.json')));
-    assert.ok(fs.existsSync(path.join(home, 'implements', 'test-impl', 'instructions.md')));
+    assert.ok(fs.existsSync(path.join(home, 'tools', 'test-impl', 'nexus-tool.json')));
+    assert.ok(fs.existsSync(path.join(home, 'tools', 'test-impl', 'instructions.md')));
     assert.ok(fs.existsSync(path.join(home, 'engines', 'test-engine', 'nexus-engine.json')));
 
     // Packages in node_modules
@@ -248,10 +248,10 @@ describe('installBundle', () => {
 
     // guild.json entries
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.equal(config.implements['test-impl'].package, 'test-impl');
-    assert.equal(config.implements['test-impl'].bundle, 'test-bundle@1.0.0');
-    // Bundle-installed implements go to baseImplements
-    assert.ok(config.baseImplements.includes('test-impl'));
+    assert.equal(config.tools['test-impl'].package, 'test-impl');
+    assert.equal(config.tools['test-impl'].bundle, 'test-bundle@1.0.0');
+    // Bundle-installed tools go to baseTools
+    assert.ok(config.baseTools.includes('test-impl'));
     assert.equal(config.engines['test-engine'].bundle, 'test-bundle@1.0.0');
   });
 
@@ -309,7 +309,7 @@ describe('installBundle', () => {
 
   it('installs mixed bundle (packages + inline)', () => {
     makePackage(tmpDir, 'mixed-impl', {
-      type: 'implement',
+      type: 'tool',
       data: { entry: 'handler.js', description: 'Mixed impl', instructions: 'instructions.md' },
     });
 
@@ -317,7 +317,7 @@ describe('installBundle', () => {
       tmpDir,
       'mixed-bundle',
       {
-        implements: [{ package: path.join(tmpDir, 'mixed-impl') }],
+        tools: [{ package: path.join(tmpDir, 'mixed-impl') }],
         temperaments: [{ path: 'temperaments/calm' }],
       },
       {
@@ -331,18 +331,18 @@ describe('installBundle', () => {
     const result = installBundle({ home, bundleDir });
 
     assert.equal(result.installed, 2);
-    assert.deepEqual(result.artifacts.implements, ['mixed-impl']);
+    assert.deepEqual(result.artifacts.tools, ['mixed-impl']);
     assert.deepEqual(result.artifacts.temperaments, ['calm']);
   });
 
   it('creates a single git commit', () => {
     makePackage(tmpDir, 'commit-impl', {
-      type: 'implement',
+      type: 'tool',
       data: { entry: 'handler.js', description: 'Test' },
     });
 
     const bundleDir = makeBundle(tmpDir, 'commit-bundle', {
-      implements: [{ package: path.join(tmpDir, 'commit-impl') }],
+      tools: [{ package: path.join(tmpDir, 'commit-impl') }],
     });
 
     installBundle({
@@ -379,12 +379,12 @@ describe('installBundle', () => {
 
   it('records bundle provenance in guild.json', () => {
     makePackage(tmpDir, 'prov-impl', {
-      type: 'implement',
+      type: 'tool',
       data: { entry: 'handler.js', description: 'Test' },
     });
 
     const bundleDir = makeBundle(tmpDir, 'prov-bundle', {
-      implements: [{ package: path.join(tmpDir, 'prov-impl') }],
+      tools: [{ package: path.join(tmpDir, 'prov-impl') }],
     });
 
     installBundle({
@@ -394,7 +394,7 @@ describe('installBundle', () => {
     });
 
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.equal(config.implements['prov-impl'].bundle, '@shardworks/guild-starter-kit@0.1.0');
+    assert.equal(config.tools['prov-impl'].bundle, '@shardworks/guild-starter-kit@0.1.0');
   });
 
   it('handles empty bundle', () => {
@@ -548,7 +548,7 @@ describe('installBundle', () => {
   it('installs transitive bundles', () => {
     // Create a tool that the inner bundle references
     makePackage(tmpDir, 'inner-impl', {
-      type: 'implement',
+      type: 'tool',
       data: { entry: 'handler.js', description: 'Inner tool' },
     });
 
@@ -560,18 +560,18 @@ describe('installBundle', () => {
       version: '1.0.0',
     }));
     fs.writeFileSync(path.join(innerBundleDir, 'nexus-bundle.json'), JSON.stringify({
-      implements: [{ package: path.join(tmpDir, 'inner-impl') }],
+      tools: [{ package: path.join(tmpDir, 'inner-impl') }],
     }));
 
     // Create outer bundle that references the inner bundle as a package
     const outerBundleDir = makeBundle(tmpDir, 'outer-bundle', {
-      implements: [{ package: innerBundleDir }],
+      tools: [{ package: innerBundleDir }],
     });
 
     const result = installBundle({ home, bundleDir: outerBundleDir, commit: false });
 
     // The inner bundle's implement should be installed
-    assert.ok(result.artifacts.implements.includes('inner-impl'));
-    assert.ok(fs.existsSync(path.join(home, 'implements', 'inner-impl', 'nexus-implement.json')));
+    assert.ok(result.artifacts.tools.includes('inner-impl'));
+    assert.ok(fs.existsSync(path.join(home, 'tools', 'inner-impl', 'nexus-tool.json')));
   });
 });

@@ -4,24 +4,24 @@ import { execFileSync } from 'node:child_process';
 import { readGuildConfig, writeGuildConfig } from './guild-config.ts';
 
 const DIR_MAP: Record<string, string> = {
-  implements: 'implements',
+  tools: 'tools',
   engines: 'engines',
   curricula: 'training/curricula',
   temperaments: 'training/temperaments',
 };
 
 /** The registries in guild.json that can contain tools, in search order. */
-const REGISTRIES = ['implements', 'engines', 'curricula', 'temperaments'] as const;
+const REGISTRIES = ['tools', 'engines', 'curricula', 'temperaments'] as const;
 
 export interface RemoveToolOptions {
   home: string;
   name: string;
   /** Restrict to a specific category. If omitted, searches all registries. */
-  category?: 'implements' | 'engines' | 'curricula' | 'temperaments';
+  category?: 'tools' | 'engines' | 'curricula' | 'temperaments';
 }
 
 export interface RemoveResult {
-  category: 'implements' | 'engines' | 'curricula' | 'temperaments';
+  category: 'tools' | 'engines' | 'curricula' | 'temperaments';
   name: string;
   removedFrom: string;
 }
@@ -106,18 +106,18 @@ export function removeTool(opts: RemoveToolOptions): RemoveResult {
   // Deregister from guild.json
   delete config[foundCategory][name];
 
-  // Clean up role references for implements
-  if (foundCategory === 'implements') {
-    // Remove from baseImplements
-    const baseIdx = config.baseImplements.indexOf(name);
+  // Clean up role references for tools
+  if (foundCategory === 'tools') {
+    // Remove from baseTools
+    const baseIdx = config.baseTools.indexOf(name);
     if (baseIdx !== -1) {
-      config.baseImplements.splice(baseIdx, 1);
+      config.baseTools.splice(baseIdx, 1);
     }
-    // Remove from all role implement lists
+    // Remove from all role tool lists
     for (const role of Object.values(config.roles)) {
-      const roleIdx = role.implements.indexOf(name);
+      const roleIdx = role.tools.indexOf(name);
       if (roleIdx !== -1) {
-        role.implements.splice(roleIdx, 1);
+        role.tools.splice(roleIdx, 1);
       }
     }
   }

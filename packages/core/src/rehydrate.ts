@@ -15,7 +15,7 @@ import type { ToolEntry } from './guild-config.ts';
 
 /** Map category -> on-disk parent directory (relative to guild root). */
 const DIR_MAP: Record<string, string> = {
-  implements: 'implements',
+  tools: 'tools',
   engines: 'engines',
   curricula: 'training/curricula',
   temperaments: 'training/temperaments',
@@ -57,7 +57,7 @@ export function rehydrate(home: string): RehydrateResult {
   const config = readGuildConfig(home);
 
   for (const [category, registry] of Object.entries({
-    implements: config.implements,
+    tools: config.tools,
     engines: config.engines,
   })) {
     for (const [name, entry] of Object.entries(registry)) {

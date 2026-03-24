@@ -8,7 +8,7 @@ Report version information about the guild's Nexus installation.
 nexus-version
 ```
 
-No arguments required. Returns the framework version and a list of all base implements and engines.
+No arguments required. Returns the framework version and a list of all base tools and engines.
 
 ## When to use
 
@@ -21,5 +21,5 @@ No arguments required. Returns the framework version and a list of all base impl
 
 Returns a JSON object with:
 - `nexus` — the framework version
-- `implements` — base implement names
+- `implements` — base tool names
 - `engines` — base engine names

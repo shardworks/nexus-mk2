@@ -61,7 +61,7 @@ describe('installTool (registry via npm-local)', () => {
       version: '1.0.0',
       type: 'module',
     }));
-    fs.writeFileSync(path.join(dir, 'nexus-implement.json'), JSON.stringify({
+    fs.writeFileSync(path.join(dir, 'nexus-tool.json'), JSON.stringify({
       entry: 'handler.js',
       version: '1.0.0',
       description: 'Test tool',
@@ -85,12 +85,12 @@ describe('installTool (registry via npm-local)', () => {
     assert.ok(fs.existsSync(path.join(home, 'node_modules', 'test-npm-tool', 'handler.js')));
 
     // Metadata copied to guild directory
-    const implDir = path.join(home, 'implements', 'test-npm-tool');
-    assert.ok(fs.existsSync(path.join(implDir, 'nexus-implement.json')));
+    const implDir = path.join(home, 'tools', 'test-npm-tool');
+    assert.ok(fs.existsSync(path.join(implDir, 'nexus-tool.json')));
     assert.ok(fs.existsSync(path.join(implDir, 'instructions.md')));
 
     // Descriptor is pristine (no package field injected)
-    const descriptor = JSON.parse(fs.readFileSync(path.join(implDir, 'nexus-implement.json'), 'utf-8'));
+    const descriptor = JSON.parse(fs.readFileSync(path.join(implDir, 'nexus-tool.json'), 'utf-8'));
     assert.equal(descriptor.package, undefined);
 
     // Handler source NOT in tool dir (only metadata)
@@ -98,8 +98,8 @@ describe('installTool (registry via npm-local)', () => {
 
     // guild.json has upstream and package
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.equal(config.implements['test-npm-tool'].upstream, 'test-npm-tool@1.0.0');
-    assert.equal(config.implements['test-npm-tool'].package, 'test-npm-tool');
+    assert.equal(config.tools['test-npm-tool'].upstream, 'test-npm-tool@1.0.0');
+    assert.equal(config.tools['test-npm-tool'].package, 'test-npm-tool');
   });
 
   it('installs with --link creates symlink', () => {
@@ -118,12 +118,12 @@ describe('installTool (registry via npm-local)', () => {
     assert.equal(target, toolDir);
 
     // Metadata in tool dir
-    const implDir = path.join(home, 'implements', 'linked-tool');
-    assert.ok(fs.existsSync(path.join(implDir, 'nexus-implement.json')));
+    const implDir = path.join(home, 'tools', 'linked-tool');
+    assert.ok(fs.existsSync(path.join(implDir, 'nexus-tool.json')));
 
     // guild.json upstream is null for linked tools
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.equal(config.implements['linked-tool'].upstream, null);
+    assert.equal(config.tools['linked-tool'].upstream, null);
   });
 
   it('errors on --link for non-directory', () => {
@@ -136,7 +136,7 @@ describe('installTool (registry via npm-local)', () => {
   it('errors on --link for directory without package.json', () => {
     const dir = path.join(tmpDir, 'bare-tool');
     fs.mkdirSync(dir);
-    fs.writeFileSync(path.join(dir, 'nexus-implement.json'), JSON.stringify({
+    fs.writeFileSync(path.join(dir, 'nexus-tool.json'), JSON.stringify({
       entry: 'run.sh', version: '1.0.0',
     }));
     fs.writeFileSync(path.join(dir, 'run.sh'), '#!/bin/sh\n:');
@@ -147,21 +147,21 @@ describe('installTool (registry via npm-local)', () => {
     );
   });
 
-  it('assigns to baseImplements by default', () => {
+  it('assigns to baseTools by default', () => {
     const toolDir = makeNpmTool('base-tool');
     installTool({ home, source: toolDir, link: true });
 
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.ok(config.baseImplements.includes('base-tool'));
+    assert.ok(config.baseTools.includes('base-tool'));
     // ToolEntry should NOT have a roles field
-    assert.equal(config.implements['base-tool'].roles, undefined);
+    assert.equal(config.tools['base-tool'].roles, undefined);
   });
 
   it('assigns to specific roles when --roles is provided', () => {
     // Create roles in guild.json first
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    config.roles['artificer'] = { seats: null, implements: [], instructions: 'roles/artificer.md' };
-    config.roles['sage'] = { seats: null, implements: [], instructions: 'roles/sage.md' };
+    config.roles['artificer'] = { seats: null, tools: [], instructions: 'roles/artificer.md' };
+    config.roles['sage'] = { seats: null, tools: [], instructions: 'roles/sage.md' };
     fs.writeFileSync(path.join(home, 'guild.json'), JSON.stringify(config, null, 2) + '\n');
     execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
     execFileSync('git', ['commit', '-m', 'add roles'], { cwd: home, stdio: 'pipe' });
@@ -170,10 +170,10 @@ describe('installTool (registry via npm-local)', () => {
     installTool({ home, source: toolDir, roles: ['artificer', 'sage'], link: true });
 
     const updated = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.ok(updated.roles['artificer'].implements.includes('gated-tool'));
-    assert.ok(updated.roles['sage'].implements.includes('gated-tool'));
-    // Should NOT be in baseImplements
-    assert.ok(!updated.baseImplements.includes('gated-tool'));
+    assert.ok(updated.roles['artificer'].tools.includes('gated-tool'));
+    assert.ok(updated.roles['sage'].tools.includes('gated-tool'));
+    // Should NOT be in baseTools
+    assert.ok(!updated.baseTools.includes('gated-tool'));
   });
 
   it('creates a git commit', () => {
@@ -181,7 +181,7 @@ describe('installTool (registry via npm-local)', () => {
     installTool({ home, source: toolDir, link: true });
 
     const log = execFileSync('git', ['log', '--oneline', '-1'], { cwd: home, encoding: 'utf-8' });
-    assert.ok(log.includes('Install implement committed-tool'));
+    assert.ok(log.includes('Install tool committed-tool'));
   });
 });
 
@@ -208,7 +208,7 @@ describe('installTool tarball', () => {
       version: '1.0.0',
       type: 'module',
     }));
-    fs.writeFileSync(path.join(srcDir, 'nexus-implement.json'), JSON.stringify({
+    fs.writeFileSync(path.join(srcDir, 'nexus-tool.json'), JSON.stringify({
       entry: 'handler.js',
       version: '1.0.0',
       description: 'Tarball test',
@@ -231,13 +231,13 @@ describe('installTool tarball', () => {
     assert.equal(result.name, 'tarball-tool');
 
     // Full source is in the tool dir (not just metadata)
-    const implDir = path.join(home, 'implements', 'tarball-tool');
+    const implDir = path.join(home, 'tools', 'tarball-tool');
     assert.ok(fs.existsSync(path.join(implDir, 'handler.js')), 'handler should be in tool dir');
     assert.ok(fs.existsSync(path.join(implDir, 'package.json')), 'package.json should be in tool dir');
 
     // guild.json upstream is null for tarballs
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.equal(config.implements['tarball-tool'].upstream, null);
+    assert.equal(config.tools['tarball-tool'].upstream, null);
 
     // Package is NOT in guild's package.json dependencies
     const guildPkg = JSON.parse(fs.readFileSync(path.join(home, 'package.json'), 'utf-8'));
@@ -265,7 +265,7 @@ describe('removeTool', () => {
     fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
       name, version: '1.0.0', type: 'module',
     }));
-    fs.writeFileSync(path.join(dir, 'nexus-implement.json'), JSON.stringify({
+    fs.writeFileSync(path.join(dir, 'nexus-tool.json'), JSON.stringify({
       entry: 'handler.js', version: '1.0.0', description: 'Test',
     }));
     fs.writeFileSync(path.join(dir, 'handler.js'), 'export default {};');
@@ -280,15 +280,15 @@ describe('removeTool', () => {
     assert.ok(fs.existsSync(path.join(home, 'node_modules', 'removable-npm')));
 
     const result = removeTool({ home, name: 'removable-npm' });
-    assert.equal(result.category, 'implements');
+    assert.equal(result.category, 'tools');
 
     // Slot gone
-    assert.ok(!fs.existsSync(path.join(home, 'implements', 'removable-npm')));
+    assert.ok(!fs.existsSync(path.join(home, 'tools', 'removable-npm')));
     // node_modules cleaned
     assert.ok(!fs.existsSync(path.join(home, 'node_modules', 'removable-npm')));
     // guild.json cleaned
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.equal(config.implements['removable-npm'], undefined);
+    assert.equal(config.tools['removable-npm'], undefined);
   });
 
   it('removes linked tool by removing symlink', () => {
@@ -303,7 +303,7 @@ describe('removeTool', () => {
     // Symlink gone
     assert.ok(!fs.existsSync(path.join(home, 'node_modules', 'removable-link')));
     // Slot gone
-    assert.ok(!fs.existsSync(path.join(home, 'implements', 'removable-link')));
+    assert.ok(!fs.existsSync(path.join(home, 'tools', 'removable-link')));
   });
 
   it('errors on unknown tool', () => {
@@ -319,7 +319,7 @@ describe('removeTool', () => {
     removeTool({ home, name: 'bye-tool' });
 
     const log = execFileSync('git', ['log', '--oneline', '-1'], { cwd: home, encoding: 'utf-8' });
-    assert.ok(log.includes('Remove implement bye-tool'));
+    assert.ok(log.includes('Remove tool bye-tool'));
   });
 });
 

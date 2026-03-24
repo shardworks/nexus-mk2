@@ -29,8 +29,8 @@ function makeLocalBundle(tmpDir: string): string {
   // Rewrite the manifest to point at local workspace packages
   const manifest = JSON.parse(fs.readFileSync(path.join(bundleDir, 'nexus-bundle.json'), 'utf-8'));
 
-  for (const entry of manifest.implements ?? []) {
-    // "@shardworks/implement-dispatch@0.x" → local path
+  for (const entry of manifest.tools ?? []) {
+    // "@shardworks/tool-dispatch@0.x" → local path
     const name = entry.package.replace(/@0\.x$/, '').replace('@shardworks/', '');
     entry.package = path.join(PACKAGES_DIR, name);
   }
@@ -79,7 +79,7 @@ describe('initGuild (skeleton only)', () => {
     assert.ok(fs.existsSync(path.join(home, 'nexus', 'migrations')), 'nexus/migrations/ missing');
 
     // Artifact directories
-    assert.ok(fs.existsSync(path.join(home, 'implements')), 'implements/ missing');
+    assert.ok(fs.existsSync(path.join(home, 'tools')), 'tools/ missing');
     assert.ok(fs.existsSync(path.join(home, 'engines')), 'engines/ missing');
 
     // Training directories
@@ -92,7 +92,7 @@ describe('initGuild (skeleton only)', () => {
 
     // No tools, training, or migration content yet
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.deepEqual(config.implements, {});
+    assert.deepEqual(config.tools, {});
     assert.deepEqual(config.engines, {});
     assert.deepEqual(config.curricula, {});
     assert.deepEqual(config.temperaments, {});
@@ -157,10 +157,10 @@ describe('installBundle with starter kit', () => {
     // Implements registered
     const expectedImplements = ['install-tool', 'remove-tool', 'dispatch', 'instantiate', 'nexus-version'];
     for (const name of expectedImplements) {
-      assert.ok(config.implements[name], `${name} not registered`);
-      assert.ok(config.implements[name].package, `${name} missing package field`);
-      const implDir = path.join(home, 'implements', name);
-      assert.ok(fs.existsSync(path.join(implDir, 'nexus-implement.json')), `${name} descriptor missing`);
+      assert.ok(config.tools[name], `${name} not registered`);
+      assert.ok(config.tools[name].package, `${name} missing package field`);
+      const implDir = path.join(home, 'tools', name);
+      assert.ok(fs.existsSync(path.join(implDir, 'nexus-tool.json')), `${name} descriptor missing`);
     }
 
     // Engines registered
@@ -191,7 +191,7 @@ describe('installBundle with starter kit', () => {
     );
 
     // Bundle provenance recorded
-    assert.ok(config.implements['dispatch'].bundle, 'bundle provenance missing');
+    assert.ok(config.tools['dispatch'].bundle, 'bundle provenance missing');
   });
 
   it('creates a single commit when commit=true', () => {
@@ -230,7 +230,7 @@ describe('full init sequence', () => {
     assert.deepEqual(config.workshops, []);
 
     // Tools registered
-    assert.ok(config.implements['dispatch'], 'dispatch not registered');
+    assert.ok(config.tools['dispatch'], 'dispatch not registered');
     assert.ok(config.engines['manifest'], 'manifest not registered');
 
     // Training registered

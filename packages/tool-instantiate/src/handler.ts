@@ -1,14 +1,14 @@
 /**
- * instantiate implement.
+ * instantiate tool.
  *
  * This is the canonical implementation — called by the MCP engine (for animas),
  * the CLI (for humans), and importable by engines. All access paths execute
  * the same logic.
  */
-import { implement, instantiate } from '@shardworks/nexus-core';
+import { tool, instantiate } from '@shardworks/nexus-core';
 import { z } from 'zod';
 
-export default implement({
+export default tool({
   description: 'Instantiate a new anima in the guild with assigned curriculum, temperament, and roles',
   params: {
     name: z.string().describe('Name for the new anima'),

@@ -8,7 +8,7 @@
  * ## Manifest: `nexus-bundle.json`
  *
  * The manifest has explicit top-level arrays for each artifact category:
- * - `implements` and `engines` require a `package` specifier (runtime code)
+ * - `tools` and `engines` require a `package` specifier (runtime code)
  * - `curricula` and `temperaments` support `package` OR `path` (content-only)
  *
  * ## Transitive bundles
@@ -25,7 +25,7 @@ import { readGuildConfig, writeGuildConfig } from './guild-config.ts';
 
 // ── Manifest types ──────────────────────────────────────────────────────
 
-/** A package-based artifact entry (implements and engines). */
+/** A package-based artifact entry (tools and engines). */
 export interface BundlePackageEntry {
   /** npm package specifier or git URL. */
   package: string;
@@ -53,8 +53,8 @@ export interface BundleMigrationEntry {
 export interface BundleManifest {
   /** Human-readable description of the bundle. */
   description?: string;
-  /** Implements to install (require `package`). */
-  implements?: BundlePackageEntry[];
+  /** Tools to install (require `package`). */
+  tools?: BundlePackageEntry[];
   /** Engines to install (require `package`). */
   engines?: BundlePackageEntry[];
   /** Curricula to install (`package` or `path`). */
@@ -83,7 +83,7 @@ export interface InstallBundleResult {
   installed: number;
   /** Names of installed artifacts, grouped by category. */
   artifacts: {
-    implements: string[];
+    tools: string[];
     engines: string[];
     curricula: string[];
     temperaments: string[];
@@ -112,14 +112,14 @@ function readJson(filePath: string): Record<string, unknown> {
 // ── Descriptor types for each category ──────────────────────────────────
 
 const DESCRIPTOR_MAP: Record<string, string> = {
-  implements: 'nexus-implement.json',
+  tools: 'nexus-tool.json',
   engines: 'nexus-engine.json',
   curricula: 'nexus-curriculum.json',
   temperaments: 'nexus-temperament.json',
 };
 
 const DIR_MAP: Record<string, string> = {
-  implements: 'implements',
+  tools: 'tools',
   engines: 'engines',
   curricula: 'training/curricula',
   temperaments: 'training/temperaments',
@@ -138,7 +138,7 @@ export function isBundleDir(dir: string): boolean {
  * Read and validate a nexus-bundle.json manifest.
  *
  * Enforces schema rules:
- * - implements/engines must use `package`, not `path`
+ * - tools/engines must use `package`, not `path`
  * - curricula/temperaments must have either `package` or `path`
  */
 export function readBundleManifest(bundleDir: string): BundleManifest {
@@ -149,17 +149,17 @@ export function readBundleManifest(bundleDir: string): BundleManifest {
 
   const manifest = readJson(manifestPath) as BundleManifest;
 
-  // Validate implements: must have package, no path allowed
-  for (const entry of manifest.implements ?? []) {
+  // Validate tools: must have package, no path allowed
+  for (const entry of manifest.tools ?? []) {
     if (!entry.package) {
       throw new Error(
-        'Implements must have a "package" specifier. ' +
-        'Implements have runtime code and potential npm dependencies — they cannot be inline.',
+        'Tools must have a "package" specifier. ' +
+        'Tools have runtime code and potential npm dependencies — they cannot be inline.',
       );
     }
     if ('path' in entry) {
       throw new Error(
-        'Implements must be npm packages or git URLs. Use a "package" specifier instead of "path".',
+        'Tools must be npm packages or git URLs. Use a "package" specifier instead of "path".',
       );
     }
   }
@@ -284,7 +284,7 @@ function copyDir(src: string, dest: string): void {
  * and optionally commits the result. The bundle itself is NOT retained as
  * a guild dependency — each artifact is installed independently.
  *
- * Package artifacts (implements, engines, and packaged content) are installed
+ * Package artifacts (tools, engines, and packaged content) are installed
  * via npm. Inline content artifacts (curricula/temperaments with `path`) are
  * copied directly from the bundle directory.
  *
@@ -312,14 +312,14 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
 
   const result: InstallBundleResult = {
     installed: 0,
-    artifacts: { implements: [], engines: [], curricula: [], temperaments: [], migrations: [] },
+    artifacts: { tools: [], engines: [], curricula: [], temperaments: [], migrations: [] },
   };
 
   // ── Collect all package specifiers for batch npm install ──────────────
 
   const packageSpecs: string[] = [];
 
-  for (const entry of manifest.implements ?? []) {
+  for (const entry of manifest.tools ?? []) {
     packageSpecs.push(entry.package);
   }
   for (const entry of manifest.engines ?? []) {
@@ -414,7 +414,7 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
   // Helper to install a single package artifact via installTool
   const installPackageArtifact = (
     entry: BundlePackageEntry | BundleContentEntry,
-    category: 'implements' | 'engines' | 'curricula' | 'temperaments',
+    category: 'tools' | 'engines' | 'curricula' | 'temperaments',
   ): string => {
     const spec = (entry as BundlePackageEntry).package;
 
@@ -433,7 +433,7 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
       });
       // Merge nested results
       result.installed += nestedResult.installed;
-      for (const cat of ['implements', 'engines', 'curricula', 'temperaments'] as const) {
+      for (const cat of ['tools', 'engines', 'curricula', 'temperaments'] as const) {
         result.artifacts[cat].push(...nestedResult.artifacts[cat]);
       }
       return packageName;
@@ -486,7 +486,7 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
     const config = readGuildConfig(home);
     const now = new Date().toISOString();
 
-    if (category === 'implements' || category === 'engines') {
+    if (category === 'tools' || category === 'engines') {
       config[category][name] = {
         upstream: `${packageName}@${descriptor['version'] as string}`,
         installedAt: now,
@@ -494,10 +494,10 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
         ...(bundleSource ? { bundle: bundleSource } : {}),
       };
 
-      // Bundle-installed implements go to baseImplements by default
-      if (category === 'implements') {
-        if (!config.baseImplements.includes(name)) {
-          config.baseImplements.push(name);
+      // Bundle-installed tools go to baseTools by default
+      if (category === 'tools') {
+        if (!config.baseTools.includes(name)) {
+          config.baseTools.push(name);
         }
       }
     } else {
@@ -512,10 +512,10 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
     return name;
   };
 
-  // Install implements
-  for (const entry of manifest.implements ?? []) {
-    const name = installPackageArtifact(entry, 'implements');
-    result.artifacts.implements.push(name);
+  // Install tools
+  for (const entry of manifest.tools ?? []) {
+    const name = installPackageArtifact(entry, 'tools');
+    result.artifacts.tools.push(name);
     result.installed++;
   }
 

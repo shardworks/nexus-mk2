@@ -8,8 +8,8 @@ export interface RoleDefinition {
    * `null` means unbounded.
    */
   seats: number | null;
-  /** Implements available to animas in this role (additive with baseImplements). */
-  implements: string[];
+  /** Tools available to animas in this role (additive with baseTools). */
+  tools: string[];
   /**
    * Path to role-specific instructions markdown, relative to guild root.
    * Read fresh at manifest time and delivered to animas holding this role.
@@ -17,9 +17,9 @@ export interface RoleDefinition {
   instructions?: string;
 }
 
-/** A reference to an implement or engine registered in guild.json. */
+/** A reference to a tool or engine registered in guild.json. */
 export interface ToolEntry {
-  /** Upstream package identifier, e.g. "@shardworks/implement-dispatch@1.11.3". Null for locally-built tools. */
+  /** Upstream package identifier, e.g. "@shardworks/tool-dispatch@1.11.3". Null for locally-built tools. */
   upstream: string | null;
   /** ISO-8601 timestamp of when the tool was installed. */
   installedAt: string;
@@ -51,10 +51,10 @@ export interface GuildConfig {
   workshops: string[];
   /** Guild roles — structural positions that animas fill. */
   roles: Record<string, RoleDefinition>;
-  /** Implements available to all animas regardless of role. */
-  baseImplements: string[];
-  /** Active implements indexed by name. */
-  implements: Record<string, ToolEntry>;
+  /** Tools available to all animas regardless of role. */
+  baseTools: string[];
+  /** Active tools indexed by name. */
+  tools: Record<string, ToolEntry>;
   /** Active engines indexed by name. */
   engines: Record<string, ToolEntry>;
   /** Available curricula indexed by name. */
@@ -65,7 +65,7 @@ export interface GuildConfig {
 
 /**
  * Create the default guild.json content for a new guild.
- * All registries start empty. Roles and baseImplements populated by the init sequence.
+ * All registries start empty. Roles and baseTools populated by the init sequence.
  */
 export function createInitialGuildConfig(name: string, nexusVersion: string, model: string): GuildConfig {
   return {
@@ -74,8 +74,8 @@ export function createInitialGuildConfig(name: string, nexusVersion: string, mod
     model,
     workshops: [],
     roles: {},
-    baseImplements: [],
-    implements: {},
+    baseTools: [],
+    tools: {},
     engines: {},
     curricula: {},
     temperaments: {},

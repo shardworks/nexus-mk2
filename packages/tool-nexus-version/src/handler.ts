@@ -1,15 +1,15 @@
 /**
- * nexus-version implement.
+ * nexus-version tool.
  *
  * Reports the guild's Nexus framework version and the registered versions
- * of all base implements and engines. Reads from guild.json to reflect
+ * of all base tools and engines. Reads from guild.json to reflect
  * what's actually installed, not just what the framework ships with.
  */
-import { implement, VERSION, readGuildConfig } from '@shardworks/nexus-core';
+import { tool, VERSION, readGuildConfig } from '@shardworks/nexus-core';
 import { z } from 'zod';
 
-export default implement({
-  description: 'Report version information for the guild\'s Nexus installation and base implements',
+export default tool({
+  description: "Report version information for the guild's Nexus installation and base tools",
   params: {
     verbose: z.boolean().optional().describe('Include full guild.json tool entries with timestamps'),
   },
@@ -21,8 +21,8 @@ export default implement({
       entry.bundle != null && entry.bundle.startsWith('@shardworks/');
 
     // Collect base (framework) implement names
-    const baseImplements = Object.keys(config.implements).filter(
-      name => isBase(config.implements[name]),
+    const baseTools = Object.keys(config.tools).filter(
+      name => isBase(config.tools[name]),
     );
 
     // Collect base (framework) engine names
@@ -34,8 +34,8 @@ export default implement({
       return {
         nexus: VERSION,
         model: config.model,
-        implements: Object.fromEntries(
-          Object.entries(config.implements)
+        tools: Object.fromEntries(
+          Object.entries(config.tools)
             .filter(([, e]) => isBase(e))
         ),
         engines: Object.fromEntries(
@@ -47,7 +47,7 @@ export default implement({
 
     return {
       nexus: VERSION,
-      implements: baseImplements,
+      tools: baseTools,
       engines: baseEngines,
     };
   },

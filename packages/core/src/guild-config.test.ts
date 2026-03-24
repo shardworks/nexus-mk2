@@ -15,8 +15,8 @@ describe('createInitialGuildConfig', () => {
     const config = createInitialGuildConfig('test-guild', '0.1.0', 'test-model');
     assert.deepEqual(config.workshops, []);
     assert.deepEqual(config.roles, {});
-    assert.deepEqual(config.baseImplements, []);
-    assert.deepEqual(config.implements, {});
+    assert.deepEqual(config.baseTools, []);
+    assert.deepEqual(config.tools, {});
     assert.deepEqual(config.engines, {});
     assert.deepEqual(config.curricula, {});
     assert.deepEqual(config.temperaments, {});

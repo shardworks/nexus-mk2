@@ -1,18 +1,18 @@
 /**
- * remove-tool implement.
+ * remove-tool tool.
  *
  * This is the canonical implementation — called by the MCP engine (for animas),
  * the CLI (for humans), and importable by engines. All access paths execute
  * the same logic.
  */
-import { implement, removeTool } from '@shardworks/nexus-core';
+import { tool, removeTool } from '@shardworks/nexus-core';
 import { z } from 'zod';
 
-export default implement({
-  description: 'Remove a guild-managed implement, engine, curriculum, or temperament',
+export default tool({
+  description: 'Remove a guild-managed tool, engine, curriculum, or temperament',
   params: {
     name: z.string().describe('Name of the tool to remove'),
-    category: z.enum(['implements', 'engines', 'curricula', 'temperaments']).optional()
+    category: z.enum(['tools', 'engines', 'curricula', 'temperaments']).optional()
       .describe('Restrict to a specific category (searches all if omitted)'),
   },
   handler: (params, { home }) => {

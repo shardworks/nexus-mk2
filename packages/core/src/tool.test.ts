@@ -1,11 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { implement } from './implement.ts';
+import { tool } from './tool.ts';
 
-describe('implement SDK', () => {
+describe('tool SDK', () => {
   it('creates a definition with description, params schema, and handler', () => {
-    const def = implement({
+    const def = tool({
       description: 'Test tool',
       params: {
         name: z.string().describe('A name'),
@@ -19,7 +19,7 @@ describe('implement SDK', () => {
   });
 
   it('params schema validates input', () => {
-    const def = implement({
+    const def = tool({
       description: 'Typed tool',
       params: {
         count: z.number().describe('How many'),
@@ -43,7 +43,7 @@ describe('implement SDK', () => {
   });
 
   it('handler receives validated params and context', async () => {
-    const def = implement({
+    const def = tool({
       description: 'Context test',
       params: {
         source: z.string(),
@@ -56,7 +56,7 @@ describe('implement SDK', () => {
   });
 
   it('supports async handlers', async () => {
-    const def = implement({
+    const def = tool({
       description: 'Async tool',
       params: {
         ms: z.number(),
@@ -72,7 +72,7 @@ describe('implement SDK', () => {
   });
 
   it('exposes param shape for MCP registration', () => {
-    const def = implement({
+    const def = tool({
       description: 'Shape test',
       params: {
         name: z.string().describe('Tool name'),

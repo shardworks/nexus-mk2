@@ -4,7 +4,7 @@ This curriculum teaches how a Nexus guild operates — its structure, workflows,
 
 ## What Is a Guild
 
-A guild is a self-contained multi-agent AI system. It has members (animas), tools (implements and engines), workshops (repositories where work happens), and a body of institutional knowledge (the codex). The guild is managed by a human patron who commissions work and judges results.
+A guild is a self-contained multi-agent AI system. It has members (animas), tools (tools and engines), workshops (repositories where work happens), and a body of institutional knowledge (the codex). The guild is managed by a human patron who commissions work and judges results.
 
 The guildhall is the guild's institutional center — a repository that holds configuration, tools, training content, and the Ledger. Work does not happen in the guildhall; it happens in workshops.
 
@@ -62,11 +62,11 @@ Use `nsg dispatch` to post and dispatch commissions.
 
 ## Tools
 
-### Implements
+### Tools
 
-Tools that animas wield during work. Each implement ships with instructions delivered to the anima at manifest time. Available implements:
+Tools that animas wield during work. Each tool ships with instructions delivered to the anima at manifest time. Available tools:
 
-- **install-tool** — install new implements, engines, or bundles into the guild
+- **install-tool** — install new tools, engines, or bundles into the guild
 - **remove-tool** — remove installed tools
 - **dispatch** — post and dispatch commissions
 - **instantiate** — create new animas with assigned training and roles
@@ -77,7 +77,7 @@ Tools that animas wield during work. Each implement ships with instructions deli
 Automated mechanical processes with no AI involvement. Engines handle repeatable infrastructure work:
 
 - **manifest** — composes anima instructions from codex, training, and tool instructions at session start
-- **mcp-server** — runs the MCP server that exposes implements to animas during sessions
+- **mcp-server** — runs the MCP server that exposes tools to animas during sessions
 - **worktree-setup** — creates and manages git worktrees for commissions
 - **ledger-migrate** — applies database migrations to the Ledger
 

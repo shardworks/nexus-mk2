@@ -1,12 +1,12 @@
 /**
- * Precondition checking for implements and engines.
+ * Precondition checking for tools and engines.
  *
- * Implements and engines can declare preconditions in their descriptor files —
+ * Tools and engines can declare preconditions in their descriptor files —
  * requirements that the environment must satisfy for the tool to be operational.
- * For example, a GitHub implement might require `gh` to be installed and authenticated.
+ * For example, a GitHub tool might require `gh` to be installed and authenticated.
  *
  * Preconditions are checked at three points:
- * 1. **Manifest time** — unavailable implements are excluded from the MCP config
+ * 1. **Manifest time** — unavailable tools are excluded from the MCP config
  *    and a note is added to the anima's system prompt.
  * 2. **Status command** — `nsg status` shows operational state of all tools.
  * 3. **Install time** — warnings are emitted for unmet preconditions (tool is
@@ -70,12 +70,12 @@ export interface PreconditionCheckResult {
   message?: string;
 }
 
-/** The result of checking all preconditions for a single implement or engine. */
+/** The result of checking all preconditions for a single tool or engine. */
 export interface ToolPreconditionResult {
   /** Tool name (from guild.json key). */
   name: string;
-  /** Whether this is an implement or engine. */
-  category: 'implements' | 'engines';
+  /** Whether this is a tool or engine. */
+  category: 'tools' | 'engines';
   /** Whether all preconditions passed (true if there are no preconditions). */
   available: boolean;
   /** Individual check results. Empty if no preconditions declared. */
@@ -87,7 +87,7 @@ export interface ToolPreconditionResult {
 // ── Descriptor reading ─────────────────────────────────────────────────
 
 /**
- * Read preconditions from a descriptor file (nexus-implement.json or nexus-engine.json).
+ * Read preconditions from a descriptor file (nexus-tool.json or nexus-engine.json).
  * Returns an empty array if the descriptor doesn't exist or has no preconditions field.
  */
 export function readPreconditions(descriptorPath: string): Precondition[] {
@@ -203,33 +203,33 @@ export function checkPreconditions(preconditions: Precondition[]): PreconditionC
 function resolveDescriptorPath(
   home: string,
   name: string,
-  category: 'implements' | 'engines',
+  category: 'tools' | 'engines',
 ): string {
-  const categoryDir = category === 'implements' ? 'implements' : 'engines';
-  const descriptorFile = category === 'implements' ? 'nexus-implement.json' : 'nexus-engine.json';
+  const categoryDir = category === 'tools' ? 'tools' : 'engines';
+  const descriptorFile = category === 'tools' ? 'nexus-tool.json' : 'nexus-engine.json';
   return path.join(home, categoryDir, name, descriptorFile);
 }
 
 /**
- * Check preconditions for all implements and engines in a guild.
+ * Check preconditions for all tools and engines in a guild.
  *
  * Returns a result for every registered tool, including those with no preconditions
  * (which are always marked available: true).
  */
 export function checkAllPreconditions(
   home: string,
-  config: { implements: Record<string, unknown>; engines: Record<string, unknown> },
+  config: { tools: Record<string, unknown>; engines: Record<string, unknown> },
 ): ToolPreconditionResult[] {
   const results: ToolPreconditionResult[] = [];
 
-  for (const name of Object.keys(config.implements)) {
-    const descriptorPath = resolveDescriptorPath(home, name, 'implements');
+  for (const name of Object.keys(config.tools)) {
+    const descriptorPath = resolveDescriptorPath(home, name, 'tools');
     const preconditions = readPreconditions(descriptorPath);
     const checks = checkPreconditions(preconditions);
     const failures = checks.filter(c => !c.passed).map(c => c.message!);
     results.push({
       name,
-      category: 'implements',
+      category: 'tools',
       available: failures.length === 0,
       checks,
       failures,

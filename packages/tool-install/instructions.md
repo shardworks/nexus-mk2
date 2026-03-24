@@ -12,7 +12,7 @@ install-tool <source> [--name <name>] [--roles <roles>] [--link]
 
 - `<source>` — Local directory path, npm package specifier (e.g. `foo@1.0`, `@scope/tool`), or tarball path (`.tgz`)
 - `--name <name>` — Override the tool name (defaults to package name or directory basename)
-- `--roles <roles>` — Comma-separated roles for implement access gating
+- `--roles <roles>` — Comma-separated roles for tool access gating
 - `--link` — Symlink a local directory instead of copying (for active development)
 
 ## Source types

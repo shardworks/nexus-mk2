@@ -50,7 +50,7 @@ export function initGuild(home: string, name: string, model: string): void {
   // Scaffold guild directory structure
   const dirs = [
     'nexus/migrations',
-    'implements',
+    'tools',
     'engines',
     'roles',
     'codex',
@@ -77,7 +77,7 @@ export function initGuild(home: string, name: string, model: string): void {
   config.roles = {
     advisor: {
       seats: 1,
-      implements: [],
+      tools: [],
       instructions: 'roles/advisor.md',
     },
   };

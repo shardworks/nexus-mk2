@@ -10,15 +10,15 @@ The guild is an autonomous workforce. The patron gives it work; it delivers resu
 
 The guild receives work as commissions and routes them through a structured lifecycle of phases — planning, building, reviewing, integrating, and whatever else the work demands. Each phase is handled by a named anima in a defined role, working in an isolated environment. The pipeline is not a fixed sequence; it's a framework for composing phases as the guild's sophistication grows. Today it's simple. Tomorrow it decomposes large commissions, runs parallel workstreams, and has dedicated reviewers and integrators. The infrastructure supports both.
 
-### 2. Implements & Engines
+### 2. Tools & Engines
 
-The guild equips its members with **implements** — versioned tools described by a `nexus-implement.json` descriptor and (for implements) an instruction document. The guildhall also houses **engines** — mechanical processes that handle the guild's automated operations (manifesting animas for sessions, setting up worktrees, running migrations), each described by a `nexus-engine.json` descriptor. **Curricula** and **temperaments** follow the same packaging model with their own descriptors. Together, these form the guild's installable, shareable artifact system.
+The guild equips its members with **tools** — versioned instruments described by a `nexus-tool.json` descriptor and (for tools) an instruction document. The guildhall also houses **engines** — mechanical processes that handle the guild's automated operations (manifesting animas for sessions, setting up worktrees, running migrations), each described by a `nexus-engine.json` descriptor. **Curricula** and **temperaments** follow the same packaging model with their own descriptors. Together, these form the guild's installable, shareable artifact system.
 
-See [Implements, Engines, Curricula & Temperaments](implements-and-engines.md) for the full artifact model, packaging, and installation details.
+See [Tools, Engines, Curricula & Temperaments](tools-and-engines.md) for the full artifact model, packaging, and installation details.
 
 ### 3. The Manifest Engine
 
-When an anima is manifested for a session, the guild assembles a complete instruction set from multiple sources: the codex (institutional policy), the anima's curriculum (skills and training), its temperament (personality and disposition), and the instruction documents for every implement available to the anima's role. This assembled identity is delivered as a system prompt; the commission context arrives as the task prompt. The anima arrives at the workbench fully equipped — knowing who it is, how the guild operates, what tools it has, and what it's been asked to build.
+When an anima is manifested for a session, the guild assembles a complete instruction set from multiple sources: the codex (institutional policy), the anima's curriculum (skills and training), its temperament (personality and disposition), and the instruction documents for every tool available to the anima's role. This assembled identity is delivered as a system prompt; the commission context arrives as the task prompt. The anima arrives at the workbench fully equipped — knowing who it is, how the guild operates, what tools it has, and what it's been asked to build.
 
 ### 4. The Register
 
@@ -32,7 +32,7 @@ The four pillars above make the guild capable. This one makes it alive. Daemons,
 
 ## Nexus — The Framework
 
-Nexus is the runtime that makes the guild system operational. It provides the base implements and engines needed for the five pillars to function, manages the Ledger schema, and offers a CLI for guild lifecycle management.
+Nexus is the runtime that makes the guild system operational. It provides the base tools and engines needed for the five pillars to function, manages the Ledger schema, and offers a CLI for guild lifecycle management.
 
 ### What Nexus provides
 
@@ -43,10 +43,10 @@ Nexus is the runtime that makes the guild system operational. It provides the ba
 - `worktree-setup` — prepare isolated work environments for commissions
 - `ledger-migrate` — manage Ledger schema
 
-**Base implements** — thin wrapper scripts that delegate to CLI subcommands. Each implement is a shell script (e.g. `nexus install-tool "$@"`) paired with an `instructions.md` that teaches animas how to use it. The CLI has the logic; the wrapper is just the anima-facing interface.
+**Base tools** — thin wrapper scripts that delegate to CLI subcommands. Each tool is a shell script (e.g. `nexus install-tool "$@"`) paired with an `instructions.md` that teaches animas how to use it. The CLI has the logic; the wrapper is just the anima-facing interface.
 - `dispatch` — post commissions targeting a workshop, trigger the manifest engine
-- `install-tool` — install an implement or engine into the guild (from registry, git URL, workshop, tarball, or local link)
-- `remove-tool` — remove an implement or engine from the guild
+- `install-tool` — install a tool or engine into the guild (from registry, git URL, workshop, tarball, or local link)
+- `remove-tool` — remove a tool or engine from the guild
 - `promote` *(v2)* — change artifact status tiers
 - `instantiate` — create animas from curriculum + temperament
 
@@ -54,12 +54,12 @@ Nexus is the runtime that makes the guild system operational. It provides the ba
 
 ### The Nexus CLI
 
-The CLI is both the operator interface and the engine behind all base implements. Every base implement is a wrapper script that calls back into the CLI. This means one `npm install` gives the guild all its core capabilities, and version coherence is guaranteed — wrapper scripts always call the co-installed CLI.
+The CLI is both the operator interface and the engine behind all base tools. Every base tool is a wrapper script that calls back into the CLI. This means one `npm install` gives the guild all its core capabilities, and version coherence is guaranteed — wrapper scripts always call the co-installed CLI.
 
 | Command | What it does |
 |---------|-------------|
 | `nexus init` | Create a new guild — git repo, directory structure, `guild.json`, Ledger, base tools installed |
-| `nexus install-tool <source>` | Install an implement, engine, curriculum, or temperament (from registry, git URL, workshop, tarball, or local link) |
+| `nexus install-tool <source>` | Install a tool, engine, curriculum, or temperament (from registry, git URL, workshop, tarball, or local link) |
 | `nexus remove-tool <name>` | Remove an installed tool and deregister from `guild.json` |
 | `nexus dispatch` | Post a commission and trigger the manifest engine |
 | `nexus instantiate` | Create a new anima from curriculum + temperament |
@@ -67,7 +67,7 @@ The CLI is both the operator interface and the engine behind all base implements
 | `nexus repair` | Reinstall the current framework version. Restores base tools without touching guild content. |
 | `nexus status` | Show framework version, check for issues |
 
-Subcommands that correspond to implements share the same core logic — the CLI command and the implement wrapper are two interfaces to the same operation.
+Subcommands that correspond to tools share the same core logic — the CLI command and the tool wrapper are two interfaces to the same operation.
 
 The framework version is tracked in `guild.json`.
 
@@ -78,7 +78,7 @@ Base tools provided by Nexus and tools authored by the guild live in separate lo
 ```
 GUILD_ROOT/
   nexus/                    ← framework-managed, Nexus CLI owns this
-    implements/
+    tools/
       dispatch/1.0.0/
       install-tool/1.0.0/
       remove-tool/1.0.0/
@@ -89,7 +89,7 @@ GUILD_ROOT/
       ledger-migrate/1.0.0/
     migrations/
       001-initial-schema.sql
-  implements/               ← guild-managed, leadership owns this
+  tools/                    ← guild-managed, leadership owns this
   engines/                  ← guild-managed, leadership owns this
   codex/
   training/
@@ -97,18 +97,18 @@ GUILD_ROOT/
   package.json
 ```
 
-**`nexus/`** is framework territory. The Nexus CLI writes it; the guild doesn't touch it. `nexus repair` wipes and restores this directory without affecting anything else. Base implements in `nexus/implements/` are wrapper scripts generated by `nexus init` — each one delegates to a `nexus` CLI subcommand and ships with an `instructions.md` that teaches animas how the tool works.
+**`nexus/`** is framework territory. The Nexus CLI writes it; the guild doesn't touch it. `nexus repair` wipes and restores this directory without affecting anything else. Base tools in `nexus/tools/` are wrapper scripts generated by `nexus init` — each one delegates to a `nexus` CLI subcommand and ships with an `instructions.md` that teaches animas how the tool works.
 
-**Guild implements and engines** live at the guild root level. They are installed via `install-tool` from external sources (registry, workshop, tarball, etc.); the framework doesn't touch them.
+**Guild tools and engines** live at the guild root level. They are installed via `install-tool` from external sources (registry, workshop, tarball, etc.); the framework doesn't touch them.
 
-Both framework and guild tools follow the same artifact pattern — see [Implements, Engines, Curricula & Temperaments](implements-and-engines.md). `guild.json` indexes tools from both locations, tracking their source, installation provenance, and role access.
+Both framework and guild tools follow the same artifact pattern — see [Tools, Engines, Curricula & Temperaments](tools-and-engines.md). `guild.json` indexes tools from both locations, tracking their source, installation provenance, and role access.
 
-The manifest engine resolves tool paths based on `source` — `nexus` means look in `nexus/implements/` or `nexus/engines/`, `guild` means look in the root-level `implements/` or `engines/`. Animas don't know or care where their tools came from.
+The manifest engine resolves tool paths based on `source` — `nexus` means look in `nexus/tools/` or `nexus/engines/`, `guild` means look in the root-level `tools/` or `engines/`. Animas don't know or care where their tools came from.
 
 ### What this protects against
 
-- **Bad guild publish** — a custom implement breaks things. `nexus repair` restores base tools. Guild content untouched.
-- **Corrupted guildhall** — someone mangles framework files. `nexus repair` restores the framework layer. Guild content (codex, training, guild-authored implements and engines) is the guild's problem, but the machinery works.
+- **Bad guild publish** — a custom tool breaks things. `nexus repair` restores base tools. Guild content untouched.
+- **Corrupted guildhall** — someone mangles framework files. `nexus repair` restores the framework layer. Guild content (codex, training, guild-authored tools and engines) is the guild's problem, but the machinery works.
 - **Framework upgrade** — `nexus install 2.4` brings new base tools and migrations. Guild tools untouched. Rollback with `nexus install 2.3`.
 
 ---
@@ -121,7 +121,7 @@ The guild root is discovered by walking up from the current directory looking fo
 
 Workshops are registered in `guild.json` and cloned into `.nexus/workshops/` when they are added.
 
-Sessions run in **bare mode** (no CLAUDE.md). Animas do not receive instructions from the workshop repository itself — all instruction content is assembled by the manifest engine and delivered directly. If a workshop needs to communicate conventions to animas, those conventions belong in the codex or as implement instructions, not in repo-level config files. The cwd is always a worktree directory; path references within assembled instructions are resolved by the manifest engine.
+Sessions run in **bare mode** (no CLAUDE.md). Animas do not receive instructions from the workshop repository itself — all instruction content is assembled by the manifest engine and delivered directly. If a workshop needs to communicate conventions to animas, those conventions belong in the codex or as tool instructions, not in repo-level config files. The cwd is always a worktree directory; path references within assembled instructions are resolved by the manifest engine.
 
 ### Directory Structure
 
@@ -144,10 +144,10 @@ GUILD_ROOT/                           ← regular git clone (IS the guildhall)
   package-lock.json
   node_modules/                       ← gitignored
   nexus/
-    implements/                       ← framework tools (metadata + source)
+    tools/                            ← framework tools (metadata + source)
     engines/
     migrations/
-  implements/                         ← guild tools
+  tools/                              ← guild tools
   engines/
   codex/
   training/
@@ -160,7 +160,7 @@ The guild's central configuration file. Contains:
 - **Nexus version** — the installed framework version
 - **Default model** — the model used for anima sessions unless overridden. Model resolution is designed to be flexible — future layers (per-role, per-curriculum, per-anima, per-commission) can be added as the system matures. For now, only the guild-wide default exists.
 - **Workshop registry** — list of registered workshops with their repo URLs.
-- **Active implements** — which implements are available, their installation provenance, and package info.
+- **Active tools** — which tools are available, their installation provenance, and package info.
 - **Active engines** — which engines are available, their provenance, and package info.
 - **Curricula** — which curricula are available, with installation provenance.
 - **Temperaments** — which temperaments are available, with installation provenance.
@@ -180,8 +180,8 @@ Authored artifacts, git-managed, meaningful as text:
 - **Codex, per-role** — `codex/roles/artificer.md` etc — included only for animas that hold the matching role
 - **Curricula** — `training/curricula/artificer-craft/` — contains `nexus-curriculum.json` and content markdown. Committed to git.
 - **Temperaments** — `training/temperaments/stoic/` — same pattern as curricula, with `nexus-temperament.json`.
-- **Implements** — `implements/foo/` — contains `nexus-implement.json`, entry point, `instructions.md`, and any other files from the source package. Committed to git.
-- **Engines** — `engines/` — same pattern as implements but with `nexus-engine.json` and no `instructions.md`
+- **Tools** — `tools/foo/` — contains `nexus-tool.json`, entry point, `instructions.md`, and any other files from the source package. Committed to git.
+- **Engines** — `engines/` — same pattern as tools but with `nexus-engine.json` and no `instructions.md`
 - **Framework migrations** — `nexus/migrations/*.sql` — managed by Nexus CLI
 
 ### Ledger (SQLite at `.nexus/nexus.db`)
@@ -192,7 +192,7 @@ Operational state — queryable, relational, runtime data:
 - **Anima composition** — references to curriculum (name + version), temperament (name + version); full content snapshots at instantiation, immutable after creation. *(v2 adds oaths.)*
 - **Roster state** — role assignments, standing vs commissioned status
 - **Commission metadata** — content, timestamps, assigned animas, status, state transitions
-- **Anima self-recorded memory and notes** — written via implement, not direct Ledger access
+- **Anima self-recorded memory and notes** — written via tool, not direct Ledger access
 - **Edict history** *(v2)* — active edicts and lifecycle
 - **Audit log** — who did what, when
 
@@ -218,7 +218,7 @@ An anima is not a monolithic instruction file. It is composed from discrete, reu
 
 ### Assembly
 
-At instantiation, the Ledger records which curriculum (name + version) and temperament (name + version) were assigned. *(v2 adds oaths as a third composition component.)* The **manifest engine** assembles these components — along with guild-level content from the codex and available implement instructions — into the full instruction set delivered to the AI model.
+At instantiation, the Ledger records which curriculum (name + version) and temperament (name + version) were assigned. *(v2 adds oaths as a third composition component.)* The **manifest engine** assembles these components — along with guild-level content from the codex and available tool instructions — into the full instruction set delivered to the AI model.
 
 The composition template is part of the manifest engine and versioned with it. When the template changes, a new framework version is published.
 
@@ -229,7 +229,7 @@ template(
   temperament = training/temperaments/<name>/<version>.md,
   oaths       = [from Ledger],              ← v2
   edicts      = [active edicts from Ledger], ← v2
-  implements  = [instructions.md for each implement available to this role],
+  tools       = [instructions.md for each tool available to this role],
   commission  = [spec + sage advice + clarification thread, if commissioned]
 )
 → assembled instructions delivered to model
@@ -241,11 +241,11 @@ No per-anima markdown files on the filesystem. The anima's identity is the *comb
 
 ## Commissions and Workshops
 
-All commission infrastructure lives in the guildhall — the pipeline, the engines, the dispatch logic. When leadership posts a commission, they specify a **target workshop**: the repo where the anima will do the work. The anima is manifested and launched into a worktree of that target workshop, but the commission lifecycle (posting, tracking, status transitions) is managed centrally through the guildhall's implements and engines.
+All commission infrastructure lives in the guildhall — the pipeline, the engines, the dispatch logic. When leadership posts a commission, they specify a **target workshop**: the repo where the anima will do the work. The anima is manifested and launched into a worktree of that target workshop, but the commission lifecycle (posting, tracking, status transitions) is managed centrally through the guildhall's tools and engines.
 
-Some workshops produce works for the patron (applications, services, tools). Others produce artifacts destined for the guildhall — new implements, engines, curricula, or temperaments. The guild system doesn't distinguish between these at the commission level.
+Some workshops produce works for the patron (applications, services, tools). Others produce artifacts destined for the guildhall — new tools, engines, curricula, or temperaments. The guild system doesn't distinguish between these at the commission level.
 
-When a commission produces artifacts for the guildhall (new implements, curricula, etc.), `install-tool` handles the boundary crossing. The anima commits its work to the workshop repo, and the artifact is installed into the guild via `install-tool workshop:<name>#<ref>`. This resolves the git ref from the workshop's bare clone, installs the package into `node_modules/` for dependency resolution, and copies the full source to the tool directory for durability. The guildhall itself is never a workspace — artifacts flow in through deliberate install operations.
+When a commission produces artifacts for the guildhall (new tools, curricula, etc.), `install-tool` handles the boundary crossing. The anima commits its work to the workshop repo, and the artifact is installed into the guild via `install-tool workshop:<name>#<ref>`. This resolves the git ref from the workshop's bare clone, installs the package into `node_modules/` for dependency resolution, and copies the full source to the tool directory for durability. The guildhall itself is never a workspace — artifacts flow in through deliberate install operations.
 
 ---
 
@@ -255,7 +255,7 @@ When an anima is manifested for a session, its instructions are assembled by the
 
 ### Delivery
 
-- **System prompt**: Anima-specific instructions — codex, curriculum, temperament, implement instructions. Everything that defines *who this anima is and how they operate*. Frozen at manifest time. *(v2 adds oaths and edicts.)*
+- **System prompt**: Anima-specific instructions — codex, curriculum, temperament, tool instructions. Everything that defines *who this anima is and how they operate*. Frozen at manifest time. *(v2 adds oaths and edicts.)*
 - **Initial prompt**: Commission context — the spec, sage advice, clarification thread, task-specific instructions. Everything about *what to do right now*.
 
 ### What reaches an anima
@@ -279,7 +279,7 @@ SYSTEM PROMPT (identity + environment):
 │  5. Active edicts (v2)              │  Current directives from leadership
 │     (from the Ledger)               │
 ├─────────────────────────────────────┤
-│  6. Implement instructions          │  instructions.md for each implement
+│  6. Tool instructions               │  instructions.md for each tool
 │     (from nexus/ and guild,         │  the anima has access to
 │      gated by role)                 │
 └─────────────────────────────────────┘
@@ -303,32 +303,32 @@ The Ledger is the guild's operational database. It holds runtime state — who e
 
 **Schema** is owned by the Nexus framework and lives in `nexus/migrations/`. The `ledger-migrate` engine (also framework-provided) applies pending migrations. It runs at guild bootstrap, before dispatch, and on demand after framework upgrades.
 
-**Access** is always mediated through implements. Animas never touch the Ledger directly — they use implements that provide a clean interface. This means:
+**Access** is always mediated through tools. Animas never touch the Ledger directly — they use tools that provide a clean interface. This means:
 
-- The Ledger's schema can change without changing anima behavior (implement absorbs the change)
+- The Ledger's schema can change without changing anima behavior (tool absorbs the change)
 - Animas can't accidentally corrupt operational data
-- All writes are auditable through the implement layer
+- All writes are auditable through the tool layer
 
-The Ledger is guild infrastructure — owned by the institution, maintained by framework engines, accessed through implements.
+The Ledger is guild infrastructure — owned by the institution, maintained by framework engines, accessed through tools.
 
 ---
 
 ## Vocabulary
 
-This document uses the guild vocabulary defined in [`guild-metaphor.md`](../guild-metaphor.md) and the project philosophy in [`philosophy.md`](../philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, works, workshop, threshold, codex, curriculum, temperament, oath *(v2)*, edict *(v2)*, engine, implement, relic, guildhall, ledger.
+This document uses the guild vocabulary defined in [`guild-metaphor.md`](../guild-metaphor.md) and the project philosophy in [`philosophy.md`](../philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, works, workshop, threshold, codex, curriculum, temperament, oath *(v2)*, edict *(v2)*, engine, tool, relic, guildhall, ledger.
 
 One term is specific to this architecture and not defined in the metaphor:
 
-**Nexus** — the framework that makes guilds operational. Provides the base implements, engines, and Ledger schema. Managed via the Nexus CLI.
+**Nexus** — the framework that makes guilds operational. Provides the base tools, engines, and Ledger schema. Managed via the Nexus CLI.
 
 ---
 
 ## Dispatch / Manifest Boundary
 
-The dispatch implement and manifest engine have a clean separation of concerns:
+The dispatch tool and manifest engine have a clean separation of concerns:
 
-- **Dispatch** (implement, wielded by leadership) — the *decision*. Posts a commission, assigns an anima, records the assignment in the Ledger, and triggers the manifest engine.
-- **Manifest** (engine, mechanical) — the *preparation*. Reads the assignment from the Ledger, resolves the anima's composition, gathers all instruction sources (codex, curriculum, temperament, implement instructions), assembles the system prompt via template, prepares the commission brief as the initial prompt, configures the session (model, worktree cwd, flags), and launches it.
+- **Dispatch** (tool, wielded by leadership) — the *decision*. Posts a commission, assigns an anima, records the assignment in the Ledger, and triggers the manifest engine.
+- **Manifest** (engine, mechanical) — the *preparation*. Reads the assignment from the Ledger, resolves the anima's composition, gathers all instruction sources (codex, curriculum, temperament, tool instructions), assembles the system prompt via template, prepares the commission brief as the initial prompt, configures the session (model, worktree cwd, flags), and launches it.
 
 The boundary: dispatch writes to the Ledger and triggers; manifest reads from the Ledger and executes. Dispatch decides *who does what*; manifest handles *assembling their identity and sending them to work*.
 

@@ -29,10 +29,10 @@ function detectBundle(home: string, source: string): string | null {
 
 export function makeInstallToolCommand() {
   return createCommand('install')
-    .description('Install an implement, engine, curriculum, temperament, or bundle into the guild')
+    .description('Install a tool, engine, curriculum, temperament, or bundle into the guild')
     .argument('<source>', 'Local directory, npm package specifier, tarball path, or bundle')
     .option('--name <name>', 'Override the tool name (defaults to package name or directory name)')
-    .option('--roles <roles>', 'Assign to specific roles instead of baseImplements (comma-separated)')
+    .option('--roles <roles>', 'Assign to specific roles instead of baseTools (comma-separated)')
     .option('--link', 'Symlink local directory instead of copying (for active development)')
     .action((source: string, options: { name?: string; roles?: string; link?: boolean }, cmd) => {
       const home = resolveHome(cmd);

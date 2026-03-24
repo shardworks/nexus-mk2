@@ -1,31 +1,31 @@
-# Building Implements
+# Building Tools
 
-This guide explains how to build a new implement for Nexus, how to install it into a guild, and how dependency resolution works.
+This guide explains how to build a new tool for Nexus, how to install it into a guild, and how dependency resolution works.
 
 ## Quick start
 
-An implement is a package with these files:
+A tool is a package with these files:
 
 ```
 my-tool/
   package.json              ← npm package metadata
-  nexus-implement.json      ← Nexus descriptor
+  nexus-tool.json           ← Nexus descriptor
   instructions.md           ← guidance for animas (optional)
   src/
-    handler.ts              ← the implement handler (default export)
+    handler.ts              ← the tool handler (default export)
 ```
 
-The handler is the only file that matters for execution. Everything else is metadata. A `tsconfig.json` is only needed for framework implements that live in the Nexus monorepo — guild-built tools don't need one.
+The handler is the only file that matters for execution. Everything else is metadata. A `tsconfig.json` is only needed for framework tools that live in the Nexus monorepo — guild-built tools don't need one.
 
 ## The handler
 
-Use the `implement()` factory from `@shardworks/nexus-core`:
+Use the `tool()` factory from `@shardworks/nexus-core`:
 
 ```typescript
-import { implement } from '@shardworks/nexus-core';
+import { tool } from '@shardworks/nexus-core';
 import { z } from 'zod';
 
-export default implement({
+export default tool({
   description: 'Brief description of what this tool does',
   params: {
     // Zod schemas for each parameter
@@ -52,10 +52,10 @@ export default implement({
 
 ## Reference implementation
 
-See `packages/implement-install-tool/` for the canonical example. Key files:
+See `packages/tool-install/` for the canonical example. Key files:
 
 - `src/handler.ts` — uses the SDK, imports `installTool` from core, returns an `InstallResult`
-- `nexus-implement.json` — descriptor with `entry`, `instructions`, `version`, `description`
+- `nexus-tool.json` — descriptor with `entry`, `instructions`, `version`, `description`
 - `instructions.md` — teaches animas when and how to use the tool
 - `package.json` — depends on `@shardworks/nexus-core` and `zod`
 
@@ -65,9 +65,9 @@ See `packages/implement-install-tool/` for the canonical example. Key files:
 
 ```json
 {
-  "name": "@shardworks/implement-my-tool",
+  "name": "@shardworks/tool-my-tool",
   "version": "0.1.0",
-  "description": "What this implement does",
+  "description": "What this tool does",
   "type": "module",
   "exports": {
     ".": "./src/handler.ts"
@@ -86,14 +86,14 @@ See `packages/implement-install-tool/` for the canonical example. Key files:
 }
 ```
 
-### `nexus-implement.json`
+### `nexus-tool.json`
 
 ```json
 {
   "entry": "src/handler.ts",
   "instructions": "instructions.md",
   "version": "0.1.0",
-  "description": "What this implement does"
+  "description": "What this tool does"
 }
 ```
 
@@ -225,7 +225,7 @@ Rehydrate is idempotent and safe to run at any time.
 
 ## Using `@shardworks/nexus-core`
 
-The core library provides utilities that implement handlers commonly need:
+The core library provides utilities that tool handlers commonly need:
 
 | Export | Purpose |
 |--------|---------|
@@ -234,11 +234,11 @@ The core library provides utilities that implement handlers commonly need:
 | `writeGuildConfig(home, config)` | Write `guild.json` |
 | `findGuildRoot(startDir?)` | Discover the guild root from cwd |
 | `ledgerPath(home)` | Resolve path to the Ledger SQLite database (`.nexus/nexus.db`) |
-| `installTool(opts)` | Core install logic (used by `install-tool` implement) |
-| `removeTool(opts)` | Core remove logic (used by `remove-tool` implement) |
+| `installTool(opts)` | Core install logic (used by `install-tool` tool) |
+| `removeTool(opts)` | Core remove logic (used by `remove-tool` tool) |
 | `rehydrate(home)` | Reconstruct `node_modules` from tracked guild state |
 | `createLedger(path)` | Create a new Ledger database |
-| `implement(def)` | The implement SDK factory |
+| `tool(def)` | The tool SDK factory |
 
 Import from `@shardworks/nexus-core`:
 
@@ -248,11 +248,11 @@ import { readGuildConfig, findGuildRoot } from '@shardworks/nexus-core';
 
 ## How it gets loaded
 
-The MCP engine (`packages/engine-mcp-server/`) loads implements at session start:
+The MCP engine (`packages/engine-mcp-server/`) loads tools at session start:
 
-1. Receives a config listing implement names and module paths
-2. For each implement: `const mod = await import(modulePath)`
-3. Reads `mod.default` — expects an `ImplementDefinition` (what `implement()` returns)
+1. Receives a config listing tool names and module paths
+2. For each tool: `const mod = await import(modulePath)`
+3. Reads `mod.default` — expects a `ToolDefinition` (what `tool()` returns)
 4. Registers it as an MCP tool using the Zod params as the input schema
 5. When called: validates params via Zod, calls `handler(params, { home })`, returns the result as JSON
 
@@ -290,9 +290,9 @@ initGuild(home, 'test-guild', 'test-model');
 
 ## Adding to base tools
 
-If this is a framework implement (ships with Nexus):
+If this is a framework tool (ships with Nexus):
 
-1. Add an entry to `BASE_IMPLEMENTS` in `packages/core/src/base-tools.ts`
+1. Add an entry to `BASE_TOOLS` in `packages/core/src/base-tools.ts`
 2. The entry needs: `name`, `packageName`
 3. Run `pnpm install` so the workspace picks up the new package
 4. Run `pnpm test` to verify nothing breaks

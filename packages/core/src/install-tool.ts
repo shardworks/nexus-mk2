@@ -8,7 +8,7 @@ import { checkToolPreconditions } from './preconditions.ts';
 
 /** Descriptor file names in priority order for detection. */
 const DESCRIPTOR_FILES = [
-  'nexus-implement.json',
+  'nexus-tool.json',
   'nexus-engine.json',
   'nexus-curriculum.json',
   'nexus-temperament.json',
@@ -17,8 +17,8 @@ const DESCRIPTOR_FILES = [
 type DescriptorFile = typeof DESCRIPTOR_FILES[number];
 
 /** Map descriptor file -> artifact category in guild.json */
-const CATEGORY_MAP: Record<DescriptorFile, 'implements' | 'engines' | 'curricula' | 'temperaments'> = {
-  'nexus-implement.json': 'implements',
+const CATEGORY_MAP: Record<DescriptorFile, 'tools' | 'engines' | 'curricula' | 'temperaments'> = {
+  'nexus-tool.json': 'tools',
   'nexus-engine.json': 'engines',
   'nexus-curriculum.json': 'curricula',
   'nexus-temperament.json': 'temperaments',
@@ -26,7 +26,7 @@ const CATEGORY_MAP: Record<DescriptorFile, 'implements' | 'engines' | 'curricula
 
 /** Map category -> on-disk parent directory (relative to guild root). */
 const DIR_MAP: Record<string, string> = {
-  implements: 'implements',
+  tools: 'tools',
   engines: 'engines',
   curricula: 'training/curricula',
   temperaments: 'training/temperaments',
@@ -59,8 +59,8 @@ export interface InstallToolOptions {
   /** Override the tool name (defaults to package name or directory basename). */
   name?: string;
   /**
-   * For implements: which roles should have access. If specified, adds the
-   * implement to these roles' implement lists. If omitted, adds to baseImplements.
+   * For tools: which roles should have access. If specified, adds the
+   * tool to these roles' tool lists. If omitted, adds to baseTools.
    */
   roles?: string[];
   /** Whether to create a git commit after installing. Defaults to true. */
@@ -77,7 +77,7 @@ export interface InstallToolOptions {
 }
 
 export interface InstallResult {
-  category: 'implements' | 'engines' | 'curricula' | 'temperaments';
+  category: 'tools' | 'engines' | 'curricula' | 'temperaments';
   name: string;
   installedTo: string;
   sourceKind: SourceKind;
@@ -458,7 +458,7 @@ export function installTool(opts: InstallToolOptions): InstallResult {
   const config = readGuildConfig(home);
   const now = new Date().toISOString();
 
-  if (category === 'implements' || category === 'engines') {
+  if (category === 'tools' || category === 'engines') {
     const entry: ToolEntry = {
       upstream,
       installedAt: now,
@@ -471,22 +471,22 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     }
     config[category][name] = entry;
 
-    // For implements, assign to roles or baseImplements
-    if (category === 'implements') {
+    // For tools, assign to roles or baseTools
+    if (category === 'tools') {
       if (roles && roles.length > 0) {
-        // Add to specific roles' implement lists
+        // Add to specific roles' tool lists
         for (const role of roles) {
           if (config.roles[role]) {
-            if (!config.roles[role].implements.includes(name)) {
-              config.roles[role].implements.push(name);
+            if (!config.roles[role].tools.includes(name)) {
+              config.roles[role].tools.push(name);
             }
           }
           // If role doesn't exist, silently skip — the user might create it later
         }
       } else {
-        // Default: add to baseImplements (available to all animas)
-        if (!config.baseImplements.includes(name)) {
-          config.baseImplements.push(name);
+        // Default: add to baseTools (available to all animas)
+        if (!config.baseTools.includes(name)) {
+          config.baseTools.push(name);
         }
       }
     }
@@ -509,10 +509,10 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     git(['commit', '-m', `Install ${category.slice(0, -1)} ${name}`], home);
   }
 
-  // Check preconditions for implements and engines — warn but don't fail
+  // Check preconditions for tools and engines — warn but don't fail
   const warnings: string[] = [];
-  if (category === 'implements' || category === 'engines') {
-    const descriptorFile = category === 'implements' ? 'nexus-implement.json' : 'nexus-engine.json';
+  if (category === 'tools' || category === 'engines') {
+    const descriptorFile = category === 'tools' ? 'nexus-tool.json' : 'nexus-engine.json';
     const descriptorPath = path.join(targetDir, descriptorFile);
     const results = checkToolPreconditions(descriptorPath);
     for (const r of results) {

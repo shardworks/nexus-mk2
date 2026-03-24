@@ -19,7 +19,7 @@ function makeTmpDir(): string {
 }
 
 function writeDescriptor(dir: string, descriptor: Record<string, unknown>): string {
-  const p = path.join(dir, 'nexus-implement.json');
+  const p = path.join(dir, 'nexus-tool.json');
   fs.writeFileSync(p, JSON.stringify(descriptor));
   return p;
 }
@@ -226,10 +226,10 @@ describe('checkAllPreconditions', () => {
 
   it('reports all tools, including those with no preconditions', () => {
     // Set up a minimal guild structure
-    const implDir = path.join(tmpDir, 'implements', 'dispatch');
+    const implDir = path.join(tmpDir, 'tools', 'dispatch');
     fs.mkdirSync(implDir, { recursive: true });
     fs.writeFileSync(
-      path.join(implDir, 'nexus-implement.json'),
+      path.join(implDir, 'nexus-tool.json'),
       JSON.stringify({ entry: 'handler.ts' }),
     );
 
@@ -241,7 +241,7 @@ describe('checkAllPreconditions', () => {
     );
 
     const config = {
-      implements: { dispatch: {} },
+      tools: { dispatch: {} },
       engines: { manifest: {} },
     };
 
@@ -255,10 +255,10 @@ describe('checkAllPreconditions', () => {
   });
 
   it('detects failed preconditions', () => {
-    const implDir = path.join(tmpDir, 'implements', 'github-tool');
+    const implDir = path.join(tmpDir, 'tools', 'github-tool');
     fs.mkdirSync(implDir, { recursive: true });
     fs.writeFileSync(
-      path.join(implDir, 'nexus-implement.json'),
+      path.join(implDir, 'nexus-tool.json'),
       JSON.stringify({
         entry: 'handler.ts',
         preconditions: [
@@ -268,7 +268,7 @@ describe('checkAllPreconditions', () => {
     );
 
     const config = {
-      implements: { 'github-tool': {} },
+      tools: { 'github-tool': {} },
       engines: {},
     };
 

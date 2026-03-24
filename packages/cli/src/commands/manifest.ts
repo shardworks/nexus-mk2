@@ -17,7 +17,7 @@ export function makeManifestCommand() {
           console.log(JSON.stringify(result, null, 2));
         } else {
           console.log(`Anima: ${result.anima.name} (${result.anima.roles.join(', ')})`);
-          console.log(`Implements: ${result.mcpConfig.implements.map(i => i.name).join(', ')}`);
+          console.log(`Tools: ${result.mcpConfig.tools.map(i => i.name).join(', ')}`);
           console.log(`System prompt: ${result.systemPrompt.length} chars`);
         }
       } catch (err) {

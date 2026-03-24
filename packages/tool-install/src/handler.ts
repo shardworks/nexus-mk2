@@ -1,5 +1,5 @@
 /**
- * install-tool implement.
+ * install-tool tool.
  *
  * This is the canonical implementation — called by the MCP engine (for animas),
  * the CLI (for humans), and importable by engines. All access paths execute
@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { implement, installTool, installBundle, classifySource, isBundleDir } from '@shardworks/nexus-core';
+import { tool, installTool, installBundle, classifySource, isBundleDir } from '@shardworks/nexus-core';
 import { z } from 'zod';
 
 /**
@@ -35,12 +35,12 @@ function detectBundle(home: string, source: string): string | null {
   return isBundleDir(packageDir) ? packageDir : null;
 }
 
-export default implement({
-  description: 'Install an implement, engine, curriculum, temperament, or bundle into the guild',
+export default tool({
+  description: 'Install a tool, engine, curriculum, temperament, or bundle into the guild',
   params: {
     source: z.string().describe('npm package specifier, git URL, workshop ref, tarball path, or bundle specifier'),
     name: z.string().optional().describe('Override the tool name (defaults to package name or directory name)'),
-    roles: z.array(z.string()).optional().describe('Roles for implement access gating'),
+    roles: z.array(z.string()).optional().describe('Roles for tool access gating'),
     link: z.boolean().optional().describe('Symlink local directory instead of copying (for active development)'),
   },
   handler: (params, { home }) => {

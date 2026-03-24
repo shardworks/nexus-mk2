@@ -6,10 +6,10 @@ const _pkg = _require('../package.json');
 export const VERSION: string = _pkg.version;
 
 export {
-  type ImplementContext,
-  type ImplementDefinition,
-  implement,
-} from './implement.ts';
+  type ToolContext,
+  type ToolDefinition,
+  tool,
+} from './tool.ts';
 
 export { createLedger } from './ledger.ts';
 export {

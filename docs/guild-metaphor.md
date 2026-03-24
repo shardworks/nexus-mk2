@@ -119,11 +119,11 @@ An automated mechanical process with no AI — scripts, cron jobs, queue readers
 
 The distinction is essential: **animas are animated** (backed by AI, capable of judgment and creativity, expensive), **engines are inanimate** (no AI, purely mechanical, perfectly repeatable, cheap). Engines are the infrastructure that lets animas focus on the work that requires intelligence.
 
-### Implement
+### Tool
 
-A tool an anima actively wields during work. Implements are the guild's toolkit — tools that animas use to interact with guild systems, query information, record notes, and perform operations. Each implement ships with instructions that are delivered to the anima when manifested for a session, so the anima knows how to use its tools.
+A tool an anima actively wields during work. Tools are the guild's toolkit — instruments that animas use to interact with guild systems, query information, record notes, and perform operations. Each tool ships with instructions that are delivered to the anima when manifested for a session, so the anima knows how to use its tools.
 
-Distinct from engines: implements are wielded by animas during work; engines run automatically without anima involvement.
+Distinct from engines: tools are wielded by animas during work; engines run automatically without anima involvement.
 
 ### Ledger
 
