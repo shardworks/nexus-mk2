@@ -162,7 +162,7 @@ export function initGuild(home: string, name: string, model: string): void {
         private: true,
         version: '0.0.0',
         scripts: {
-          help: 'nsg consult advisor',
+          help: 'nsg consult Advisor',
         },
         dependencies: {
           '@shardworks/nexus': `^${VERSION}`,

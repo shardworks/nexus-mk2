@@ -51,8 +51,8 @@ function fullInit(home: string, model: string, bundleDir: string): void {
   initGuild(home, 'test-guild', model);
   installBundle({ home, bundleDir, commit: false });
   applyMigrations(home);
-  instantiate({ home, name: 'advisor', roles: ['advisor'], curriculum: 'guild-operations', temperament: 'guide' });
-  instantiate({ home, name: 'artificer', roles: ['artificer'], curriculum: 'guild-operations', temperament: 'artisan' });
+  instantiate({ home, name: 'Advisor', roles: ['advisor'], curriculum: 'guild-operations', temperament: 'guide' });
+  instantiate({ home, name: 'Unnamed Artificer', roles: ['artificer'], curriculum: 'guild-operations', temperament: 'artisan' });
   execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
   execFileSync('git', ['commit', '-m', 'Install starter kit'], { cwd: home, stdio: 'pipe' });
 }
@@ -289,7 +289,7 @@ describe('full init sequence', () => {
     try {
       // Advisor exists and is active
       const anima = db.prepare(
-        "SELECT * FROM animas WHERE name = 'advisor'"
+        "SELECT * FROM animas WHERE name = 'Advisor'"
       ).get() as { id: number; status: string } | undefined;
       assert.ok(anima, 'advisor anima not found in ledger');
       assert.equal(anima.status, 'active');
@@ -325,7 +325,7 @@ describe('full init sequence', () => {
     try {
       // Artificer exists and is active
       const anima = db.prepare(
-        "SELECT * FROM animas WHERE name = 'artificer'"
+        "SELECT * FROM animas WHERE name = 'Unnamed Artificer'"
       ).get() as { id: number; status: string } | undefined;
       assert.ok(anima, 'artificer anima not found in ledger');
       assert.equal(anima.status, 'active');
