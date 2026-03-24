@@ -31,8 +31,6 @@ export interface BundlePackageEntry {
   package: string;
   /** Override the artifact name in the guild. */
   name?: string;
-  /** Roles for implements (which roles can use this tool). */
-  roles?: string[];
 }
 
 /** A content artifact entry (curricula and temperaments). */
@@ -430,12 +428,16 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
         slot,
         upstream: `${packageName}@${descriptor['version'] as string}`,
         installedAt: now,
-        ...(category === 'implements' && (entry as BundlePackageEntry).roles
-          ? { roles: (entry as BundlePackageEntry).roles }
-          : {}),
         package: packageName,
         ...(bundleSource ? { bundle: bundleSource } : {}),
       };
+
+      // Bundle-installed implements go to baseImplements by default
+      if (category === 'implements') {
+        if (!config.baseImplements.includes(name)) {
+          config.baseImplements.push(name);
+        }
+      }
     } else {
       config[category][name] = {
         slot,

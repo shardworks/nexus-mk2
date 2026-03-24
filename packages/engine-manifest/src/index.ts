@@ -5,12 +5,13 @@
  * presence for a session, the manifest engine:
  *
  * 1. Reads the anima's composition from the Ledger (roles, curricula, temperament)
- * 2. Resolves implements — computes the union of implements across all the
- *    anima's roles (via guild.json role gating)
- * 3. Reads codex content, curricula content, temperament content, and
- *    implement instructions from disk
- * 4. Assembles the composed system prompt
- * 5. Generates an MCP server config with the resolved implement set
+ * 2. Resolves implements — starts with baseImplements, then unions in each
+ *    role's implements (validated against guild.json role definitions)
+ * 3. Runs precondition checks on each resolved implement
+ * 4. Reads codex content, role instructions, curricula content, temperament
+ *    content, and implement instructions from disk
+ * 5. Assembles the composed system prompt
+ * 6. Generates an MCP server config with the available implement set
  *
  * The manifest engine is deterministic infrastructure — no AI involvement.
  * It reconstitutes a working identity from institutional records.
@@ -71,6 +72,8 @@ export interface ManifestResult {
   mcpConfig: McpServerConfig;
   /** Implements that matched the anima's roles but failed precondition checks. */
   unavailable: UnavailableImplement[];
+  /** Warnings generated during manifest (e.g. undefined roles). */
+  warnings: string[];
 }
 
 /** Configuration passed to the MCP server engine. */
@@ -127,37 +130,58 @@ export function readAnima(home: string, animaName: string): AnimaRecord {
 }
 
 /**
- * Resolve the set of implements an anima has access to, based on role gating
- * and precondition checks.
+ * Resolve the set of implements an anima has access to, based on role
+ * definitions and precondition checks.
  *
- * For each implement in guild.json, checks if any of the anima's roles match
- * the implement's `roles` array (or if the implement uses `["*"]` wildcard).
- * Then runs precondition checks on each role-matched implement.
+ * 1. Start with baseImplements (available to all animas)
+ * 2. For each anima role, look up the role in guild.json.roles
+ *    - If defined: union in that role's implements
+ *    - If undefined: warn and skip (no tools, no instructions from that role)
+ * 3. Deduplicate implement names
+ * 4. Resolve each implement from guild.json.implements catalog
+ * 5. Run precondition checks — split into available and unavailable
  *
- * Returns both the available implements (passed preconditions) and the
- * unavailable implements (failed preconditions) so the manifest can include
- * unavailability notices in the system prompt.
+ * Returns available implements, unavailable implements, and any warnings.
  */
 export function resolveImplements(
   home: string,
   config: GuildConfig,
   animaRoles: string[],
-): { available: ResolvedImplement[]; unavailable: UnavailableImplement[] } {
+): { available: ResolvedImplement[]; unavailable: UnavailableImplement[]; warnings: string[] } {
+  const warnings: string[] = [];
+
+  // Collect implement names: start with base, union in role-specific
+  const implementNames = new Set<string>(config.baseImplements ?? []);
+
+  for (const role of animaRoles) {
+    const roleDef = config.roles[role];
+    if (!roleDef) {
+      warnings.push(
+        `Role "${role}" is assigned to this anima but not defined in guild.json. ` +
+        `No tools or instructions from this role will be available.`,
+      );
+      continue;
+    }
+    for (const implName of roleDef.implements) {
+      implementNames.add(implName);
+    }
+  }
+
+  // Resolve each implement from the catalog
   const available: ResolvedImplement[] = [];
   const unavailable: UnavailableImplement[] = [];
 
-  for (const [name, entry] of Object.entries(config.implements)) {
-    const toolEntry = entry as ToolEntry;
-    const entryRoles = toolEntry.roles ?? [];
-
-    // Check role match: wildcard or intersection
-    const hasAccess = entryRoles.includes('*') ||
-      animaRoles.some(role => entryRoles.includes(role));
-
-    if (!hasAccess) continue;
+  for (const name of implementNames) {
+    const entry = config.implements[name] as ToolEntry | undefined;
+    if (!entry) {
+      warnings.push(
+        `Implement "${name}" is referenced by a role or baseImplements but not found in guild.json.implements. Skipping.`,
+      );
+      continue;
+    }
 
     // Resolve on-disk path
-    const implPath = path.join(home, 'implements', name, toolEntry.slot);
+    const implPath = path.join(home, 'implements', name, entry.slot);
     const descriptorPath = path.join(implPath, 'nexus-implement.json');
 
     // Check preconditions before including in the available set
@@ -189,29 +213,24 @@ export function resolveImplements(
 
     available.push({
       name,
-      slot: toolEntry.slot,
+      slot: entry.slot,
       path: implPath,
       instructions,
-      package: toolEntry.package ?? null,
+      package: entry.package ?? null,
     });
   }
 
-  return { available, unavailable };
+  return { available, unavailable, warnings };
 }
 
 /**
- * Read codex documents from the guildhall, filtered by anima roles.
+ * Read codex documents from the guildhall — guild-wide policy for all animas.
  *
- * Codex layout:
- *   codex/all.md              → included for all animas
- *   codex/roles/artificer.md  → included only for animas with the 'artificer' role
- *   codex/roles/sage.md       → included only for animas with the 'sage' role
- *   codex/*.md                → any other top-level .md files included for all animas
- *
- * Role-specific codex files in codex/roles/ are only included if the anima
- * holds the matching role. The filename (minus .md) is the role name.
+ * Reads all .md files in the codex/ directory (non-recursive top level).
+ * Role-specific content is no longer in codex/roles/ — it's owned by
+ * role definitions in guild.json.
  */
-export function readCodex(home: string, animaRoles: string[]): string {
+export function readCodex(home: string): string {
   const codexDir = path.join(home, 'codex');
 
   if (!fs.existsSync(codexDir)) return '';
@@ -226,16 +245,39 @@ export function readCodex(home: string, animaRoles: string[]): string {
     }
   }
 
-  // Read role-specific files — only for roles the anima holds
-  const rolesDir = path.join(codexDir, 'roles');
-  if (fs.existsSync(rolesDir)) {
-    for (const entry of fs.readdirSync(rolesDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-      const roleName = entry.name.replace(/\.md$/, '');
-      if (!animaRoles.includes(roleName)) continue;
+  return sections.join('\n\n---\n\n');
+}
 
-      const content = fs.readFileSync(path.join(rolesDir, entry.name), 'utf-8').trim();
-      if (content) sections.push(content);
+/**
+ * Read role-specific instructions for an anima's roles.
+ *
+ * For each role the anima holds, reads the instructions file pointed to by
+ * the role definition in guild.json. Skips undefined roles (warning already
+ * emitted by resolveImplements). Skips roles without instructions.
+ *
+ * Returns the composed text of all role instructions, or empty string.
+ */
+export function readRoleInstructions(
+  home: string,
+  config: GuildConfig,
+  animaRoles: string[],
+): string {
+  const sections: string[] = [];
+
+  for (const role of animaRoles) {
+    const roleDef = config.roles[role];
+    if (!roleDef || !roleDef.instructions) continue;
+
+    const instructionsPath = path.join(home, roleDef.instructions);
+    if (!fs.existsSync(instructionsPath)) continue;
+
+    try {
+      const content = fs.readFileSync(instructionsPath, 'utf-8').trim();
+      if (content) {
+        sections.push(content);
+      }
+    } catch {
+      // If unreadable, skip
     }
   }
 
@@ -245,12 +287,13 @@ export function readCodex(home: string, animaRoles: string[]): string {
 /**
  * Assemble the composed system prompt for an anima session.
  *
- * Sections are included in order: codex → curricula → temperament →
- * implement instructions → unavailable implements notice.
+ * Sections are included in order: codex → role instructions → curricula →
+ * temperament → implement instructions → unavailable implements notice.
  * Empty sections are omitted.
  */
 export function assembleSystemPrompt(
   codex: string,
+  roleInstructions: string,
   anima: AnimaRecord,
   implements_: ResolvedImplement[],
   unavailable: UnavailableImplement[] = [],
@@ -260,6 +303,11 @@ export function assembleSystemPrompt(
   // Codex — guild-wide policies and procedures
   if (codex.trim()) {
     sections.push(`# Codex\n\n${codex}`);
+  }
+
+  // Role instructions — role-specific operational guidance
+  if (roleInstructions.trim()) {
+    sections.push(`# Role Instructions\n\n${roleInstructions}`);
   }
 
   // Curricula — the anima's training content
@@ -353,17 +401,20 @@ export async function manifest(home: string, animaName: string): Promise<Manifes
     );
   }
 
-  // Resolve implements based on role gating + precondition checks
-  const { available, unavailable } = resolveImplements(home, config, anima.roles);
+  // Resolve implements based on role definitions + precondition checks
+  const { available, unavailable, warnings } = resolveImplements(home, config, anima.roles);
 
-  // Read codex (filtered by anima's roles)
-  const codex = readCodex(home, anima.roles);
+  // Read codex (guild-wide, no role filtering)
+  const codex = readCodex(home);
 
-  // Assemble system prompt (includes unavailability notices)
-  const systemPrompt = assembleSystemPrompt(codex, anima, available, unavailable);
+  // Read role-specific instructions
+  const roleInstructions = readRoleInstructions(home, config, anima.roles);
+
+  // Assemble system prompt (includes role instructions and unavailability notices)
+  const systemPrompt = assembleSystemPrompt(codex, roleInstructions, anima, available, unavailable);
 
   // Generate MCP config (only available implements)
   const mcpConfig = generateMcpConfig(home, available);
 
-  return { anima, systemPrompt, mcpConfig, unavailable };
+  return { anima, systemPrompt, mcpConfig, unavailable, warnings };
 }

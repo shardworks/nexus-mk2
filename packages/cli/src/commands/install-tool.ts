@@ -33,7 +33,7 @@ export function makeInstallToolCommand() {
     .argument('<source>', 'Local directory, npm package specifier, tarball path, or bundle')
     .option('--name <name>', 'Override the tool name (defaults to package name or directory name)')
     .option('--slot <slot>', 'Override the version slot (defaults to version from descriptor)')
-    .option('--roles <roles>', 'Comma-separated roles for implement access gating')
+    .option('--roles <roles>', 'Assign to specific roles instead of baseImplements (comma-separated)')
     .option('--link', 'Symlink local directory instead of copying (for active development)')
     .action((source: string, options: { name?: string; slot?: string; roles?: string; link?: boolean }, cmd) => {
       const home = resolveHome(cmd);

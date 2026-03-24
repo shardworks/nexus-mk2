@@ -76,7 +76,7 @@ describe('installTool (registry via npm-local)', () => {
     // Local dirs are still handled by npm when used as source specifiers
     // (npm treats absolute paths as local package installs)
     const toolDir = makeNpmTool('test-npm-tool');
-    const result = installTool({ home, source: toolDir, roles: ['*'] });
+    const result = installTool({ home, source: toolDir });
 
     assert.equal(result.sourceKind, 'registry');
     assert.equal(result.name, 'test-npm-tool');
@@ -104,7 +104,7 @@ describe('installTool (registry via npm-local)', () => {
 
   it('installs with --link creates symlink', () => {
     const toolDir = makeNpmTool('linked-tool');
-    const result = installTool({ home, source: toolDir, roles: ['*'], link: true });
+    const result = installTool({ home, source: toolDir, link: true });
 
     assert.equal(result.sourceKind, 'link');
 
@@ -147,17 +147,38 @@ describe('installTool (registry via npm-local)', () => {
     );
   });
 
-  it('stores roles on implements', () => {
+  it('assigns to baseImplements by default', () => {
+    const toolDir = makeNpmTool('base-tool');
+    installTool({ home, source: toolDir, link: true });
+
+    const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
+    assert.ok(config.baseImplements.includes('base-tool'));
+    // ToolEntry should NOT have a roles field
+    assert.equal(config.implements['base-tool'].roles, undefined);
+  });
+
+  it('assigns to specific roles when --roles is provided', () => {
+    // Create roles in guild.json first
+    const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
+    config.roles['artificer'] = { seats: null, implements: [], instructions: 'roles/artificer.md' };
+    config.roles['sage'] = { seats: null, implements: [], instructions: 'roles/sage.md' };
+    fs.writeFileSync(path.join(home, 'guild.json'), JSON.stringify(config, null, 2) + '\n');
+    execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'add roles'], { cwd: home, stdio: 'pipe' });
+
     const toolDir = makeNpmTool('gated-tool');
     installTool({ home, source: toolDir, roles: ['artificer', 'sage'], link: true });
 
-    const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.deepEqual(config.implements['gated-tool'].roles, ['artificer', 'sage']);
+    const updated = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
+    assert.ok(updated.roles['artificer'].implements.includes('gated-tool'));
+    assert.ok(updated.roles['sage'].implements.includes('gated-tool'));
+    // Should NOT be in baseImplements
+    assert.ok(!updated.baseImplements.includes('gated-tool'));
   });
 
   it('creates a git commit', () => {
     const toolDir = makeNpmTool('committed-tool');
-    installTool({ home, source: toolDir, roles: ['*'], link: true });
+    installTool({ home, source: toolDir, link: true });
 
     const log = execFileSync('git', ['log', '--oneline', '-1'], { cwd: home, encoding: 'utf-8' });
     assert.ok(log.includes('Install implement committed-tool@1.0.0'));
@@ -204,7 +225,7 @@ describe('installTool tarball', () => {
     }).trim();
     const tarballPath = path.join(toolDir, packOutput);
 
-    const result = installTool({ home, source: tarballPath, roles: ['*'] });
+    const result = installTool({ home, source: tarballPath });
 
     assert.equal(result.sourceKind, 'tarball');
     assert.equal(result.name, 'tarball-tool');
@@ -253,7 +274,7 @@ describe('removeTool', () => {
 
   it('removes npm-installed tool and cleans node_modules', () => {
     const toolDir = makeNpmTool('removable-npm');
-    installTool({ home, source: toolDir, roles: ['*'] });
+    installTool({ home, source: toolDir });
 
     // Verify it's installed
     assert.ok(fs.existsSync(path.join(home, 'node_modules', 'removable-npm')));
@@ -272,7 +293,7 @@ describe('removeTool', () => {
 
   it('removes linked tool by removing symlink', () => {
     const toolDir = makeNpmTool('removable-link');
-    installTool({ home, source: toolDir, roles: ['*'], link: true });
+    installTool({ home, source: toolDir, link: true });
 
     // Verify symlink exists
     assert.ok(fs.lstatSync(path.join(home, 'node_modules', 'removable-link')).isSymbolicLink());
@@ -294,7 +315,7 @@ describe('removeTool', () => {
 
   it('creates a git commit', () => {
     const toolDir = makeNpmTool('bye-tool');
-    installTool({ home, source: toolDir, roles: ['*'], link: true });
+    installTool({ home, source: toolDir, link: true });
     removeTool({ home, name: 'bye-tool' });
 
     const log = execFileSync('git', ['log', '--oneline', '-1'], { cwd: home, encoding: 'utf-8' });

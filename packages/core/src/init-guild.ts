@@ -52,7 +52,8 @@ export function initGuild(home: string, name: string, model: string): void {
     'nexus/migrations',
     'implements',
     'engines',
-    'codex/roles',
+    'roles',
+    'codex',
     'training/curricula',
     'training/temperaments',
   ];
@@ -66,8 +67,20 @@ export function initGuild(home: string, name: string, model: string): void {
   // Write codex placeholder
   fs.writeFileSync(path.join(home, 'codex/all.md'), '');
 
-  // Write guild.json — empty registries, tools installed via bundle
+  // Write default role instruction files
+  fs.writeFileSync(path.join(home, 'roles/advisor.md'),
+    '# Advisor\n\nYou are a guild advisor — a standing member who helps the patron understand and operate the guild.\n',
+  );
+
+  // Write guild.json — with default advisor role, empty registries
   const config = createInitialGuildConfig(name, VERSION, model);
+  config.roles = {
+    advisor: {
+      seats: 1,
+      implements: [],
+      instructions: 'roles/advisor.md',
+    },
+  };
   fs.writeFileSync(
     path.join(home, 'guild.json'),
     JSON.stringify(config, null, 2) + '\n',

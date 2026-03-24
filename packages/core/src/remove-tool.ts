@@ -112,6 +112,23 @@ export function removeTool(opts: RemoveToolOptions): RemoveResult {
 
   // Deregister from guild.json
   delete config[foundCategory][name];
+
+  // Clean up role references for implements
+  if (foundCategory === 'implements') {
+    // Remove from baseImplements
+    const baseIdx = config.baseImplements.indexOf(name);
+    if (baseIdx !== -1) {
+      config.baseImplements.splice(baseIdx, 1);
+    }
+    // Remove from all role implement lists
+    for (const role of Object.values(config.roles)) {
+      const roleIdx = role.implements.indexOf(name);
+      if (roleIdx !== -1) {
+        role.implements.splice(roleIdx, 1);
+      }
+    }
+  }
+
   writeGuildConfig(home, config);
 
   // Commit

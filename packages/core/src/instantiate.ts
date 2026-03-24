@@ -4,6 +4,10 @@
  * Creates an anima record in the Ledger with its full composition: roles,
  * curriculum, and temperament. Reads and snapshots the training content at
  * instantiation time so the anima's composition is frozen to specific versions.
+ *
+ * Role validation:
+ * - Each role must be defined in guild.json — hard error if not.
+ * - Each role's seat capacity is checked — hard error if exceeded.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -81,6 +85,11 @@ function readTrainingContent(
  * Creates the anima record, assigns roles in the roster, and snapshots the
  * composition (curriculum + temperament content at current versions). All
  * operations happen in a single transaction.
+ *
+ * Role validation:
+ * - Every role must be defined in guild.json.roles — throws if undefined.
+ * - Seat capacity is checked — throws if assigning this anima would exceed
+ *   the role's seat limit.
  */
 export function instantiate(opts: InstantiateOptions): InstantiateResult {
   const { home, name, roles, curriculum, temperament } = opts;
@@ -90,6 +99,16 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
 
   // Validate curriculum and temperament exist in guild.json
   const config = readGuildConfig(home);
+
+  // Validate all roles exist in guild.json
+  for (const role of roles) {
+    if (!config.roles[role]) {
+      throw new Error(
+        `Role "${role}" is not defined in guild.json. ` +
+        `Available roles: ${Object.keys(config.roles).join(', ') || '(none)'}`,
+      );
+    }
+  }
 
   if (curriculum && !config.curricula[curriculum]) {
     throw new Error(
@@ -130,6 +149,23 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
 
       if (existing) {
         throw new Error(`Anima "${name}" already exists in the Ledger.`);
+      }
+
+      // Validate seat capacity for each role
+      for (const role of roles) {
+        const roleDef = config.roles[role]!;
+        if (roleDef.seats !== null) {
+          const currentCount = (db.prepare(
+            `SELECT COUNT(*) as count FROM roster r JOIN animas a ON r.anima_id = a.id WHERE r.role = ? AND a.status = 'active'`,
+          ).get(role) as { count: number }).count;
+
+          if (currentCount >= roleDef.seats) {
+            throw new Error(
+              `Role "${role}" is full — ${roleDef.seats} seat${roleDef.seats === 1 ? '' : 's'}, ` +
+              `${currentCount} occupied. Cannot assign another anima.`,
+            );
+          }
+        }
       }
 
       // Create anima

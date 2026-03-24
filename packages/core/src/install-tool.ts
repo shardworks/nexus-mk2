@@ -60,7 +60,10 @@ export interface InstallToolOptions {
   name?: string;
   /** Override the version slot. */
   slot?: string;
-  /** Roles for implements (comma-separated or array). */
+  /**
+   * For implements: which roles should have access. If specified, adds the
+   * implement to these roles' implement lists. If omitted, adds to baseImplements.
+   */
   roles?: string[];
   /** Whether to create a git commit after installing. Defaults to true. */
   commit?: boolean;
@@ -474,9 +477,6 @@ export function installTool(opts: InstallToolOptions): InstallResult {
       upstream,
       installedAt: now,
     };
-    if (category === 'implements' && roles && roles.length > 0) {
-      entry.roles = roles;
-    }
     if (packageName) {
       entry.package = packageName;
     }
@@ -484,6 +484,26 @@ export function installTool(opts: InstallToolOptions): InstallResult {
       entry.bundle = bundle;
     }
     config[category][name] = entry;
+
+    // For implements, assign to roles or baseImplements
+    if (category === 'implements') {
+      if (roles && roles.length > 0) {
+        // Add to specific roles' implement lists
+        for (const role of roles) {
+          if (config.roles[role]) {
+            if (!config.roles[role].implements.includes(name)) {
+              config.roles[role].implements.push(name);
+            }
+          }
+          // If role doesn't exist, silently skip — the user might create it later
+        }
+      } else {
+        // Default: add to baseImplements (available to all animas)
+        if (!config.baseImplements.includes(name)) {
+          config.baseImplements.push(name);
+        }
+      }
+    }
   } else {
     const entry: TrainingEntry = {
       slot,

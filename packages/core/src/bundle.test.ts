@@ -220,7 +220,7 @@ describe('installBundle', () => {
     // Create bundle referencing local paths (npm resolves them)
     const bundleDir = makeBundle(tmpDir, 'test-bundle', {
       implements: [
-        { package: path.join(tmpDir, 'test-impl'), roles: ['*'] },
+        { package: path.join(tmpDir, 'test-impl') },
       ],
       engines: [
         { package: path.join(tmpDir, 'test-engine') },
@@ -251,7 +251,8 @@ describe('installBundle', () => {
     assert.equal(config.implements['test-impl'].slot, '1.0.0');
     assert.equal(config.implements['test-impl'].package, 'test-impl');
     assert.equal(config.implements['test-impl'].bundle, 'test-bundle@1.0.0');
-    assert.deepEqual(config.implements['test-impl'].roles, ['*']);
+    // Bundle-installed implements go to baseImplements
+    assert.ok(config.baseImplements.includes('test-impl'));
     assert.equal(config.engines['test-engine'].slot, '1.0.0');
     assert.equal(config.engines['test-engine'].bundle, 'test-bundle@1.0.0');
   });
@@ -320,7 +321,7 @@ describe('installBundle', () => {
       tmpDir,
       'mixed-bundle',
       {
-        implements: [{ package: path.join(tmpDir, 'mixed-impl'), roles: ['*'] }],
+        implements: [{ package: path.join(tmpDir, 'mixed-impl') }],
         temperaments: [{ path: 'temperaments/calm' }],
       },
       {
