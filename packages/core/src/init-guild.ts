@@ -25,10 +25,11 @@ function git(args: string[], cwd?: string): void {
  *   applyMigrations(home)          // create ledger via migration engine
  *
  * @param home - Absolute path for the new NEXUS_HOME directory.
+ * @param name - Guild name (used in guild.json and as the guildhall npm package name).
  * @param model - Default model identifier for anima sessions.
  * @throws If `home` exists and is not empty.
  */
-export function initGuild(home: string, model: string): void {
+export function initGuild(home: string, name: string, model: string): void {
   // Validate target
   if (fs.existsSync(home)) {
     const entries = fs.readdirSync(home);
@@ -81,11 +82,19 @@ export function initGuild(home: string, model: string): void {
   fs.writeFileSync(path.join(ghWorktree, 'codex/all.md'), '');
 
   // Write guild.json — empty registries, tools will be installed via bootstrapBaseTools
-  const config = createInitialGuildConfig(VERSION, model);
+  const config = createInitialGuildConfig(name, VERSION, model);
   fs.writeFileSync(
     path.join(ghWorktree, 'guild.json'),
     JSON.stringify(config, null, 2) + '\n',
   );
+
+  // Make the guildhall an npm package so guild tools can be installed as
+  // npm dependencies with proper dependency resolution.
+  fs.writeFileSync(
+    path.join(ghWorktree, 'package.json'),
+    JSON.stringify({ name: `guild-${name}`, private: true, version: '0.0.0' }, null, 2) + '\n',
+  );
+  fs.writeFileSync(path.join(ghWorktree, '.gitignore'), 'node_modules/\n');
 
   // Initial commit
   git(['add', '-A'], ghWorktree);

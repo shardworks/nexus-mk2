@@ -22,7 +22,7 @@ function resolvePackage(name: string): string {
 
 /** Run the full init sequence: skeleton → bootstrap → migrate. */
 function fullInit(home: string, model: string): void {
-  initGuild(home, model);
+  initGuild(home, 'test-guild', model);
   bootstrapBaseTools(home, resolvePackage);
   applyMigrations(home);
 }
@@ -37,7 +37,7 @@ describe('initGuild (skeleton only)', () => {
   it('creates the expected directory structure without tools or ledger', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
     const home = path.join(tmpDir, 'guild');
-    initGuild(home, 'test-model');
+    initGuild(home, 'test-guild', 'test-model');
 
     // Bare repo
     assert.ok(fs.existsSync(path.join(home, 'guildhall', 'HEAD')), 'guildhall bare repo missing');
@@ -68,7 +68,7 @@ describe('initGuild (skeleton only)', () => {
   it('has an initial commit', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
     const home = path.join(tmpDir, 'guild');
-    initGuild(home, 'test-model');
+    initGuild(home, 'test-guild', 'test-model');
 
     const wt = path.join(home, 'worktrees', 'guildhall', 'main');
     const log = execFileSync('git', ['log', '--oneline'], { cwd: wt, encoding: 'utf-8' });
@@ -87,7 +87,7 @@ describe('initGuild (skeleton only)', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
     const home = path.join(tmpDir, 'guild');
     fs.mkdirSync(home);
-    initGuild(home, 'test-model');
+    initGuild(home, 'test-guild', 'test-model');
     assert.ok(fs.existsSync(path.join(home, 'guildhall', 'HEAD')));
   });
 });
@@ -102,44 +102,38 @@ describe('bootstrapBaseTools', () => {
   it('installs all base implements and engines via installTool', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
     const home = path.join(tmpDir, 'guild');
-    initGuild(home, 'test-model');
+    initGuild(home, 'test-guild', 'test-model');
     bootstrapBaseTools(home, resolvePackage);
 
     const wt = path.join(home, 'worktrees', 'guildhall', 'main');
 
+    // All registered in guild.json with source: 'nexus'
+    const config = JSON.parse(fs.readFileSync(path.join(wt, 'guild.json'), 'utf-8'));
+
     // Base implements installed to nexus/implements/
     for (const ref of BASE_IMPLEMENTS) {
-      const implDir = path.join(wt, 'nexus', 'implements', ref.name, VERSION);
+      const entry = config.implements[ref.name];
+      assert.ok(entry, `${ref.name} not registered`);
+      assert.equal(entry.source, 'nexus');
+      const implDir = path.join(wt, 'nexus', 'implements', ref.name, entry.slot);
       assert.ok(fs.existsSync(path.join(implDir, 'nexus-implement.json')), `${ref.name} descriptor missing`);
       assert.ok(fs.existsSync(path.join(implDir, 'instructions.md')), `${ref.name} instructions missing`);
     }
 
     // Base engines installed to nexus/engines/
     for (const ref of BASE_ENGINES) {
-      const engDir = path.join(wt, 'nexus', 'engines', ref.name, VERSION);
-      assert.ok(fs.existsSync(path.join(engDir, 'nexus-engine.json')), `${ref.name} descriptor missing`);
-    }
-
-    // All registered in guild.json with source: 'nexus'
-    const config = JSON.parse(fs.readFileSync(path.join(wt, 'guild.json'), 'utf-8'));
-    for (const ref of BASE_IMPLEMENTS) {
-      const entry = config.implements[ref.name];
-      assert.ok(entry, `${ref.name} not registered`);
-      assert.equal(entry.source, 'nexus');
-      assert.equal(entry.slot, VERSION);
-    }
-    for (const ref of BASE_ENGINES) {
       const entry = config.engines[ref.name];
       assert.ok(entry, `${ref.name} not registered`);
       assert.equal(entry.source, 'nexus');
-      assert.equal(entry.slot, VERSION);
+      const engDir = path.join(wt, 'nexus', 'engines', ref.name, entry.slot);
+      assert.ok(fs.existsSync(path.join(engDir, 'nexus-engine.json')), `${ref.name} descriptor missing`);
     }
   });
 
   it('creates a single "Bootstrap base tools" commit', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
     const home = path.join(tmpDir, 'guild');
-    initGuild(home, 'test-model');
+    initGuild(home, 'test-guild', 'test-model');
     bootstrapBaseTools(home, resolvePackage);
 
     const wt = path.join(home, 'worktrees', 'guildhall', 'main');

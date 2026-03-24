@@ -33,7 +33,37 @@ function git(args: string[], cwd: string): void {
 }
 
 /**
+ * Read a JSON file.
+ */
+function readJson(filePath: string): Record<string, unknown> {
+  return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+}
+
+/**
+ * Determine the npm package name for a tool from its slot descriptor's `package` field.
+ * Returns null if the tool was not npm-installed.
+ */
+function getPackageName(worktree: string, category: string, name: string, slot: string): string | null {
+  const parentDir = DIR_MAP[category];
+  const slotDir = path.join(worktree, parentDir, name, slot);
+
+  // Check all possible descriptor files
+  const descriptorFiles = ['nexus-implement.json', 'nexus-engine.json', 'nexus-curriculum.json', 'nexus-temperament.json'];
+  for (const descriptorFile of descriptorFiles) {
+    const descriptorPath = path.join(slotDir, descriptorFile);
+    if (fs.existsSync(descriptorPath)) {
+      const descriptor = readJson(descriptorPath);
+      return (descriptor['package'] as string) ?? null;
+    }
+  }
+  return null;
+}
+
+/**
  * Remove a tool from the guild — deregister from guild.json and delete from disk.
+ *
+ * For npm-installed tools, also runs `npm uninstall` to clean up node_modules.
+ * For linked tools, removes the symlink from node_modules.
  *
  * Only guild-managed tools can be removed. Framework (nexus) tools are managed
  * by `nexus repair` / `nexus install`.
@@ -66,6 +96,29 @@ export function removeTool(opts: RemoveToolOptions): RemoveResult {
     throw new Error(
       `"${name}" is a framework tool (source: nexus). Use "nexus repair" to manage framework tools.`,
     );
+  }
+
+  // Clean up npm-installed packages from node_modules
+  const packageName = getPackageName(worktree, foundCategory, name, slot);
+  if (packageName) {
+    const linkPath = path.join(worktree, 'node_modules', packageName);
+    if (fs.existsSync(linkPath) && fs.lstatSync(linkPath).isSymbolicLink()) {
+      // Linked tool: just remove the symlink
+      fs.unlinkSync(linkPath);
+      // Clean up empty scoped directory if needed
+      const scopeDir = path.dirname(linkPath);
+      if (scopeDir !== path.join(worktree, 'node_modules') &&
+          fs.existsSync(scopeDir) && fs.readdirSync(scopeDir).length === 0) {
+        fs.rmdirSync(scopeDir);
+      }
+    } else {
+      // npm-installed tool: use npm uninstall
+      try {
+        execFileSync('npm', ['uninstall', packageName], { cwd: worktree, stdio: 'pipe' });
+      } catch {
+        // If npm uninstall fails (e.g. package already gone), continue with cleanup
+      }
+    }
   }
 
   // Remove on-disk directory (the specific slot)

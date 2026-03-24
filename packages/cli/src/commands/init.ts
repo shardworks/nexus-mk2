@@ -41,9 +41,11 @@ export function makeInitCommand() {
     .option('--model <model>', 'Default model for anima sessions', DEFAULT_MODEL)
     .action(async (pathArg: string | undefined, options: { model: string }) => {
       let guildPath: string;
+      let guildName: string;
 
       if (pathArg) {
         guildPath = pathArg;
+        guildName = path.basename(path.resolve(pathArg));
       } else {
         const name = await prompt('Guild name');
         if (!name) {
@@ -52,6 +54,7 @@ export function makeInitCommand() {
           return;
         }
         guildPath = name;
+        guildName = name;
       }
 
       const model = options.model;
@@ -59,7 +62,7 @@ export function makeInitCommand() {
 
       try {
         // 1. Create guild skeleton (bare repo, worktree, dirs, guild.json, migration file)
-        initGuild(home, model);
+        initGuild(home, guildName, model);
 
         // 2. Install all framework tools via installTool
         const resolvePackage = makePackageResolver();

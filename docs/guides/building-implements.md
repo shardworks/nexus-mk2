@@ -1,22 +1,21 @@
 # Building Implements
 
-This guide explains how to build a new implement for Nexus. It covers the SDK, the file structure, and the conventions that the MCP engine expects.
+This guide explains how to build a new implement for Nexus, how to install it into a guild, and how dependency resolution works.
 
 ## Quick start
 
-An implement is a package with four files:
+An implement is a package with these files:
 
 ```
-packages/implement-my-tool/
+my-tool/
   package.json              ← npm package metadata
-  tsconfig.json             ← extends root tsconfig
   nexus-implement.json      ← Nexus descriptor
   instructions.md           ← guidance for animas (optional)
   src/
     handler.ts              ← the implement handler (default export)
 ```
 
-The handler is the only file that matters for execution. Everything else is metadata.
+The handler is the only file that matters for execution. Everything else is metadata. A `tsconfig.json` is only needed for framework implements that live in the Nexus monorepo — guild-built tools don't need one.
 
 ## The handler
 
@@ -87,19 +86,6 @@ See `packages/implement-install-tool/` for the canonical example. Key files:
 }
 ```
 
-### `tsconfig.json`
-
-```json
-{
-  "extends": "../../tsconfig.json",
-  "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src"
-  },
-  "include": ["src"]
-}
-```
-
 ### `nexus-implement.json`
 
 ```json
@@ -111,7 +97,13 @@ See `packages/implement-install-tool/` for the canonical example. Key files:
 }
 ```
 
-Only `entry` is required. `instructions` is optional but recommended for any tool that requires judgment.
+Fields:
+- `entry` — (required) path to the handler module, relative to the package root
+- `instructions` — (optional) path to instructions file for animas
+- `version` — version slot for the guildhall directory
+- `description` — human-readable description
+
+Note: `installTool` automatically adds a `package` field to the guildhall copy of this descriptor (read from your `package.json` name). This tells the manifest engine to resolve by package name at runtime. You don't need to set it yourself.
 
 ### `instructions.md`
 
@@ -122,6 +114,70 @@ Written for animas, not humans. Explain:
 - **Interaction with other tools** — what to do before/after
 
 MCP already provides the parameter schema and description. Instructions teach *craft*, not API reference.
+
+## Installing tools
+
+### From a local directory (with `package.json`)
+
+```
+nexus install-tool ./path/to/my-tool --roles artificer
+```
+
+The tool is installed via `npm install` into the guildhall's `node_modules`. Its dependencies are resolved automatically. The descriptor and instructions are copied to the guildhall slot for git tracking, but the runtime code and dependencies live in `node_modules`.
+
+This is the path used by forge agents installing tools they've built in a commission worktree. The worktree can be cleaned up afterward — npm copied the package.
+
+### From a local directory (dev mode with `--link`)
+
+```
+nexus install-tool ~/projects/my-tool --link --roles artificer
+```
+
+Creates a symlink in the guildhall's `node_modules` pointing to the source directory. Changes to the handler are reflected immediately at runtime — no reinstall needed. The tool's own `node_modules` (from the developer's project) resolves dependencies.
+
+Use this while actively developing a tool. When done iterating, reinstall without `--link` for a proper copy.
+
+### From the npm registry
+
+```
+nexus install-tool some-guild-tool@1.0 --roles herald
+```
+
+Installs the package from npm into the guildhall's `node_modules`, resolving all dependencies. The descriptor and instructions are copied from the installed package to the guildhall slot.
+
+### From a tarball
+
+```
+nexus install-tool ./my-tool-1.0.0.tgz --roles artificer
+```
+
+Installs from a local `.tgz` file (e.g. a CI artifact). Same behavior as a registry install — npm extracts the tarball, resolves dependencies, and installs to `node_modules`.
+
+### Bare files (no `package.json`)
+
+```
+nexus install-tool ./my-script-tool --roles artificer
+```
+
+For non-Node tools (shell scripts, etc.) or simple handlers with no third-party dependencies. The source files are copied directly to the guildhall slot. No npm involvement, no dependency resolution.
+
+## How dependencies resolve at runtime
+
+The guildhall is an npm package (it has a `package.json` at its root). When a guild tool is installed via npm, it becomes a dependency in `guildhall/node_modules/`.
+
+At runtime, the manifest engine sets `NODE_PATH` to the guildhall's `node_modules` when launching the MCP server process. This ensures that `import("some-guild-tool")` resolves correctly regardless of where the MCP engine's own code lives.
+
+For tools with a `package` field in their descriptor, the manifest engine passes the package name (not a file path) to the MCP engine, which imports it by name. Node's module resolution + `NODE_PATH` handles the rest.
+
+For bare-local tools (no `package` field), the manifest engine passes an absolute file path. These tools can only import Node builtins and `@shardworks/nexus-core` — no third-party dependencies.
+
+## Removing tools
+
+```
+nexus remove-tool my-tool
+```
+
+For npm-installed tools, this runs `npm uninstall` to clean up `node_modules`, removes the guildhall slot, and deregisters from `guild.json`. For linked tools, the symlink is removed. For bare-local tools, the slot directory is deleted.
 
 ## Using `@shardworks/nexus-core`
 
@@ -183,7 +239,7 @@ For tests that need a real guild, use `initGuild()` to set up a temporary one:
 import { initGuild } from '@shardworks/nexus-core';
 
 const home = '/tmp/test-guild';
-initGuild(home, 'test-model');
+initGuild(home, 'test-guild', 'test-model');
 // Now home has a real guildhall, guild.json, and ledger
 ```
 
@@ -192,6 +248,6 @@ initGuild(home, 'test-model');
 If this is a framework implement (ships with Nexus):
 
 1. Add an entry to `BASE_IMPLEMENTS` in `packages/core/src/base-tools.ts`
-2. The entry needs: `name`, `packageName`, `description`, `instructions`
+2. The entry needs: `name`, `packageName`
 3. Run `pnpm install` so the workspace picks up the new package
 4. Run `pnpm test` to verify nothing breaks

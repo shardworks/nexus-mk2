@@ -68,6 +68,8 @@ export interface McpServerConfig {
   home: string;
   /** Implements to register as MCP tools. */
   implements: Array<{ name: string; modulePath: string }>;
+  /** Environment variables for the MCP server process. */
+  env?: Record<string, string>;
 }
 
 // ── Core Functions ─────────────────────────────────────────────────────
@@ -286,7 +288,11 @@ export function generateMcpConfig(
     mcpImplements.push({ name: impl.name, modulePath });
   }
 
-  return { home, implements: mcpImplements };
+  // Set NODE_PATH so the MCP server process can resolve npm-installed guild
+  // tools from the guildhall's node_modules, regardless of where the MCP
+  // engine code itself lives on disk.
+  const nodePath = path.join(guildhallWorktreePath(home), 'node_modules');
+  return { home, implements: mcpImplements, env: { NODE_PATH: nodePath } };
 }
 
 /**

@@ -28,6 +28,8 @@ export interface TrainingEntry {
 
 /** The guild's central configuration file shape (`guild.json`). */
 export interface GuildConfig {
+  /** Guild name — used as the guildhall npm package name. */
+  name: string;
   /** Installed Nexus framework version. */
   nexus: string;
   /** Default model for anima sessions. */
@@ -48,8 +50,9 @@ export interface GuildConfig {
  * Create the default guild.json content for a new guild.
  * All registries (implements, engines, curricula, temperaments) start empty.
  */
-export function createInitialGuildConfig(nexusVersion: string, model: string): GuildConfig {
+export function createInitialGuildConfig(name: string, nexusVersion: string, model: string): GuildConfig {
   return {
+    name,
     nexus: nexusVersion,
     model,
     workshops: [],

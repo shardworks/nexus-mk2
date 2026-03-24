@@ -6,6 +6,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { initGuild } from './init-guild.ts';
 import { installTool } from './install-tool.ts';
+import { classifySource } from './install-tool.ts';
 import { removeTool } from './remove-tool.ts';
 
 describe('installTool', () => {
@@ -16,7 +17,7 @@ describe('installTool', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-tool-'));
     home = path.join(tmpDir, 'guild');
-    initGuild(home, 'test-model');
+    initGuild(home, 'test-guild', 'test-model');
     wt = path.join(home, 'worktrees', 'guildhall', 'main');
   });
 
@@ -211,7 +212,7 @@ describe('removeTool', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-tool-'));
     home = path.join(tmpDir, 'guild');
-    initGuild(home, 'test-model');
+    initGuild(home, 'test-guild', 'test-model');
     wt = path.join(home, 'worktrees', 'guildhall', 'main');
   });
 
@@ -286,5 +287,243 @@ describe('removeTool', () => {
 
     const log = execFileSync('git', ['log', '--oneline', '-1'], { cwd: wt, encoding: 'utf-8' });
     assert.ok(log.includes('Remove implement bye-tool'));
+  });
+});
+
+describe('classifySource', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-classify-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('classifies local dir with package.json as npm-local', () => {
+    const dir = path.join(tmpDir, 'my-tool');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+    assert.equal(classifySource(dir), 'npm-local');
+  });
+
+  it('classifies local dir without package.json as bare-local', () => {
+    const dir = path.join(tmpDir, 'my-script');
+    fs.mkdirSync(dir);
+    assert.equal(classifySource(dir), 'bare-local');
+  });
+
+  it('classifies .tgz as npm-tarball', () => {
+    assert.equal(classifySource('./my-tool-1.0.0.tgz'), 'npm-tarball');
+    assert.equal(classifySource('/tmp/my-tool.tar.gz'), 'npm-tarball');
+  });
+
+  it('classifies bare names as npm-registry', () => {
+    assert.equal(classifySource('some-tool'), 'npm-registry');
+    assert.equal(classifySource('some-tool@1.0.0'), 'npm-registry');
+    assert.equal(classifySource('@scope/tool'), 'npm-registry');
+    assert.equal(classifySource('@scope/tool@2.0'), 'npm-registry');
+  });
+});
+
+describe('installTool npm-local', () => {
+  let tmpDir: string;
+  let home: string;
+  let wt: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-npm-'));
+    home = path.join(tmpDir, 'guild');
+    initGuild(home, 'test-guild', 'test-model');
+    wt = path.join(home, 'worktrees', 'guildhall', 'main');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  /** Create a minimal npm package with a nexus descriptor. */
+  function makeNpmTool(name: string): string {
+    const dir = path.join(tmpDir, name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+      name,
+      version: '1.0.0',
+      type: 'module',
+    }));
+    fs.writeFileSync(path.join(dir, 'nexus-implement.json'), JSON.stringify({
+      entry: 'handler.js',
+      version: '1.0.0',
+      description: 'Test tool',
+      instructions: 'instructions.md',
+    }));
+    fs.writeFileSync(path.join(dir, 'handler.js'), 'export default {};');
+    fs.writeFileSync(path.join(dir, 'instructions.md'), '# Test\nUse it.');
+    return dir;
+  }
+
+  it('installs local npm package into node_modules', () => {
+    const toolDir = makeNpmTool('test-npm-tool');
+    const result = installTool({ home, source: toolDir, roles: ['*'] });
+
+    assert.equal(result.sourceKind, 'npm-local');
+    assert.equal(result.name, 'test-npm-tool');
+
+    // Package exists in guildhall node_modules
+    assert.ok(fs.existsSync(path.join(wt, 'node_modules', 'test-npm-tool', 'handler.js')));
+
+    // Metadata copied to guildhall slot
+    const slotDir = path.join(wt, 'implements', 'test-npm-tool', '1.0.0');
+    assert.ok(fs.existsSync(path.join(slotDir, 'nexus-implement.json')));
+    assert.ok(fs.existsSync(path.join(slotDir, 'instructions.md')));
+
+    // Descriptor has package field
+    const descriptor = JSON.parse(fs.readFileSync(path.join(slotDir, 'nexus-implement.json'), 'utf-8'));
+    assert.equal(descriptor.package, 'test-npm-tool');
+
+    // Handler source NOT in slot (only metadata)
+    assert.ok(!fs.existsSync(path.join(slotDir, 'handler.js')));
+
+    // guild.json has upstream
+    const config = JSON.parse(fs.readFileSync(path.join(wt, 'guild.json'), 'utf-8'));
+    assert.equal(config.implements['test-npm-tool'].upstream, 'test-npm-tool@1.0.0');
+  });
+
+  it('installs with --link creates symlink', () => {
+    const toolDir = makeNpmTool('linked-tool');
+    const result = installTool({ home, source: toolDir, roles: ['*'], link: true });
+
+    assert.equal(result.sourceKind, 'npm-local');
+
+    // Symlink exists in node_modules
+    const linkPath = path.join(wt, 'node_modules', 'linked-tool');
+    assert.ok(fs.existsSync(linkPath));
+    assert.ok(fs.lstatSync(linkPath).isSymbolicLink());
+
+    // Symlink points to source
+    const target = fs.readlinkSync(linkPath);
+    assert.equal(target, toolDir);
+
+    // Metadata in slot
+    const slotDir = path.join(wt, 'implements', 'linked-tool', '1.0.0');
+    assert.ok(fs.existsSync(path.join(slotDir, 'nexus-implement.json')));
+  });
+
+  it('errors on --link for bare-local source', () => {
+    const dir = path.join(tmpDir, 'bare-tool');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'nexus-implement.json'), JSON.stringify({
+      entry: 'run.sh', version: '1.0.0',
+    }));
+    fs.writeFileSync(path.join(dir, 'run.sh'), '#!/bin/sh\n:');
+
+    assert.throws(
+      () => installTool({ home, source: dir, name: 'bare', link: true }),
+      /--link.*package\.json/,
+    );
+  });
+});
+
+describe('removeTool npm-installed', () => {
+  let tmpDir: string;
+  let home: string;
+  let wt: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-npm-rm-'));
+    home = path.join(tmpDir, 'guild');
+    initGuild(home, 'test-guild', 'test-model');
+    wt = path.join(home, 'worktrees', 'guildhall', 'main');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeNpmTool(name: string): string {
+    const dir = path.join(tmpDir, name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+      name, version: '1.0.0', type: 'module',
+    }));
+    fs.writeFileSync(path.join(dir, 'nexus-implement.json'), JSON.stringify({
+      entry: 'handler.js', version: '1.0.0', description: 'Test',
+    }));
+    fs.writeFileSync(path.join(dir, 'handler.js'), 'export default {};');
+    return dir;
+  }
+
+  it('removes npm-installed tool and cleans node_modules', () => {
+    const toolDir = makeNpmTool('removable-npm');
+    installTool({ home, source: toolDir, roles: ['*'] });
+
+    // Verify it's installed
+    assert.ok(fs.existsSync(path.join(wt, 'node_modules', 'removable-npm')));
+
+    const result = removeTool({ home, name: 'removable-npm' });
+    assert.equal(result.category, 'implements');
+
+    // Slot gone
+    assert.ok(!fs.existsSync(path.join(wt, 'implements', 'removable-npm')));
+    // node_modules cleaned
+    assert.ok(!fs.existsSync(path.join(wt, 'node_modules', 'removable-npm')));
+    // guild.json cleaned
+    const config = JSON.parse(fs.readFileSync(path.join(wt, 'guild.json'), 'utf-8'));
+    assert.equal(config.implements['removable-npm'], undefined);
+  });
+
+  it('removes linked tool by removing symlink', () => {
+    const toolDir = makeNpmTool('removable-link');
+    installTool({ home, source: toolDir, roles: ['*'], link: true });
+
+    // Verify symlink exists
+    assert.ok(fs.lstatSync(path.join(wt, 'node_modules', 'removable-link')).isSymbolicLink());
+
+    removeTool({ home, name: 'removable-link' });
+
+    // Symlink gone
+    assert.ok(!fs.existsSync(path.join(wt, 'node_modules', 'removable-link')));
+    // Slot gone
+    assert.ok(!fs.existsSync(path.join(wt, 'implements', 'removable-link')));
+  });
+});
+
+describe('initGuild npm support', () => {
+  let tmpDir: string;
+
+  afterEach(() => {
+    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('creates package.json in guildhall worktree', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-npm-'));
+    const home = path.join(tmpDir, 'guild');
+    initGuild(home, 'my-guild', 'test-model');
+
+    const wt = path.join(home, 'worktrees', 'guildhall', 'main');
+    const pkg = JSON.parse(fs.readFileSync(path.join(wt, 'package.json'), 'utf-8'));
+    assert.equal(pkg.name, 'guild-my-guild');
+    assert.equal(pkg.private, true);
+  });
+
+  it('creates .gitignore with node_modules', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-npm-'));
+    const home = path.join(tmpDir, 'guild');
+    initGuild(home, 'my-guild', 'test-model');
+
+    const wt = path.join(home, 'worktrees', 'guildhall', 'main');
+    const gitignore = fs.readFileSync(path.join(wt, '.gitignore'), 'utf-8');
+    assert.ok(gitignore.includes('node_modules/'));
+  });
+
+  it('stores guild name in guild.json', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-npm-'));
+    const home = path.join(tmpDir, 'guild');
+    initGuild(home, 'my-guild', 'test-model');
+
+    const wt = path.join(home, 'worktrees', 'guildhall', 'main');
+    const config = JSON.parse(fs.readFileSync(path.join(wt, 'guild.json'), 'utf-8'));
+    assert.equal(config.name, 'my-guild');
   });
 });
