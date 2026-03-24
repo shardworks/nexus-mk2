@@ -46,12 +46,13 @@ function makeLocalBundle(tmpDir: string): string {
   return bundleDir;
 }
 
-/** Run the full init sequence: skeleton → bundle install → migrate → advisor. */
+/** Run the full init sequence: skeleton → bundle install → migrate → animas. */
 function fullInit(home: string, model: string, bundleDir: string): void {
   initGuild(home, 'test-guild', model);
   installBundle({ home, bundleDir, commit: false });
   applyMigrations(home);
   instantiate({ home, name: 'advisor', roles: ['advisor'], curriculum: 'guild-operations', temperament: 'guide' });
+  instantiate({ home, name: 'artificer', roles: ['artificer'], curriculum: 'guild-operations', temperament: 'artisan' });
   execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
   execFileSync('git', ['commit', '-m', 'Install starter kit'], { cwd: home, stdio: 'pipe' });
 }
@@ -312,5 +313,56 @@ describe('full init sequence', () => {
     } finally {
       db.close();
     }
+  });
+
+  it('artificer anima is instantiated with correct composition', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
+    const home = path.join(tmpDir, 'guild');
+    const bundleDir = makeLocalBundle(tmpDir);
+    fullInit(home, 'test-model', bundleDir);
+
+    const db = new Database(path.join(home, '.nexus', 'nexus.db'));
+    try {
+      // Artificer exists and is active
+      const anima = db.prepare(
+        "SELECT * FROM animas WHERE name = 'artificer'"
+      ).get() as { id: number; status: string } | undefined;
+      assert.ok(anima, 'artificer anima not found in ledger');
+      assert.equal(anima.status, 'active');
+
+      // Has artificer role
+      const role = db.prepare(
+        'SELECT role FROM roster WHERE anima_id = ?'
+      ).get(anima.id) as { role: string } | undefined;
+      assert.ok(role, 'artificer role not found in roster');
+      assert.equal(role.role, 'artificer');
+
+      // Composition has curriculum and artisan temperament
+      const comp = db.prepare(
+        'SELECT * FROM anima_compositions WHERE anima_id = ?'
+      ).get(anima.id) as { curriculum_name: string; temperament_name: string; curriculum_snapshot: string; temperament_snapshot: string } | undefined;
+      assert.ok(comp, 'artificer composition not found');
+      assert.equal(comp.curriculum_name, 'guild-operations');
+      assert.equal(comp.temperament_name, 'artisan');
+      assert.ok(comp.curriculum_snapshot.includes('Guild Operations Curriculum'), 'curriculum snapshot missing content');
+      assert.ok(comp.temperament_snapshot.includes('Artisan Temperament'), 'temperament snapshot missing content');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('guild.json has clockworks events for craft.question and craft.debt', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
+    const home = path.join(tmpDir, 'guild');
+    const bundleDir = makeLocalBundle(tmpDir);
+    fullInit(home, 'test-model', bundleDir);
+
+    const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
+    assert.ok(config.clockworks, 'clockworks config missing');
+    assert.ok(config.clockworks.events['craft.question'], 'craft.question event missing');
+    assert.ok(config.clockworks.events['craft.debt'], 'craft.debt event missing');
+    assert.ok(config.clockworks.events['craft.question'].schema.workshop, 'craft.question missing workshop in schema');
+    assert.ok(config.clockworks.events['craft.debt'].schema.workshop, 'craft.debt missing workshop in schema');
+    assert.deepEqual(config.clockworks.standingOrders, [], 'standing orders should be empty');
   });
 });

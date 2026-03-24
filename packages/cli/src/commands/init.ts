@@ -76,7 +76,7 @@ export function makeInitCommand() {
         // 3. Create ledger via migration engine
         applyMigrations(home);
 
-        // 4. Instantiate the advisor anima
+        // 4. Instantiate the starting animas
         instantiate({
           home,
           name: 'advisor',
@@ -84,8 +84,15 @@ export function makeInitCommand() {
           curriculum: 'guild-operations',
           temperament: 'guide',
         });
+        instantiate({
+          home,
+          name: 'artificer',
+          roles: ['artificer'],
+          curriculum: 'guild-operations',
+          temperament: 'artisan',
+        });
 
-        // 5. Commit everything from the bundle install + advisor
+        // 5. Commit everything from the bundle install + animas
         execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
         execFileSync('git', ['commit', '-m', 'Install starter kit'], { cwd: home, stdio: 'pipe' });
       } catch (err) {
