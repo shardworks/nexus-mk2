@@ -19,16 +19,25 @@ async function prompt(question: string, defaultValue?: string): Promise<string> 
 export function makeInitCommand() {
   return createCommand('init')
     .description('Create a new guild — guildhall, directory structure, guild.json, and Ledger')
-    .action(async () => {
-      const name = await prompt('Guild name');
-      if (!name) {
-        console.error('Error: guild name is required.');
-        process.exitCode = 1;
-        return;
+    .argument('[path]', 'Path for the new guild (interactive prompt if omitted)')
+    .option('--model <model>', 'Default model for anima sessions', DEFAULT_MODEL)
+    .action(async (pathArg: string | undefined, options: { model: string }) => {
+      let guildPath: string;
+
+      if (pathArg) {
+        guildPath = pathArg;
+      } else {
+        const name = await prompt('Guild name');
+        if (!name) {
+          console.error('Error: guild name is required.');
+          process.exitCode = 1;
+          return;
+        }
+        guildPath = name;
       }
 
-      const model = await prompt('Model', DEFAULT_MODEL);
-      const home = path.resolve(name);
+      const model = options.model;
+      const home = path.resolve(guildPath);
 
       try {
         initGuild(home, model);
@@ -38,7 +47,7 @@ export function makeInitCommand() {
         return;
       }
 
-      console.log(`\nGuild created at ${home}`);
+      console.log(`Guild created at ${home}`);
       console.log(`\n  export NEXUS_HOME=${home}\n`);
     });
 }

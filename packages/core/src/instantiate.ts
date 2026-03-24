@@ -2,7 +2,7 @@
  * instantiate — core logic for creating new animas.
  *
  * Creates an anima record in the Ledger with its full composition: roles,
- * curricula, and temperament. Reads and snapshots the training content at
+ * curriculum, and temperament. Reads and snapshots the training content at
  * instantiation time so the anima's composition is frozen to specific versions.
  */
 import fs from 'node:fs';
@@ -18,8 +18,8 @@ export interface InstantiateOptions {
   name: string;
   /** Roles the anima will hold (determines implement access via role gating). */
   roles: string[];
-  /** Curricula to assign (by name, must be registered in guild.json). */
-  curricula?: string[];
+  /** Curriculum to assign (by name, must be registered in guild.json). */
+  curriculum?: string;
   /** Temperament to assign (by name, must be registered in guild.json). */
   temperament?: string;
 }
@@ -28,7 +28,7 @@ export interface InstantiateResult {
   animaId: number;
   name: string;
   roles: string[];
-  curricula: string[];
+  curriculum: string | null;
   temperament: string | null;
 }
 
@@ -39,7 +39,7 @@ export interface InstantiateResult {
  * @param category - 'curricula' or 'temperaments'.
  * @param name - The training content name.
  * @param slot - The version slot.
- * @returns Object with version, content path, and the actual content text.
+ * @returns Object with version and the actual content text.
  */
 function readTrainingContent(
   worktree: string,
@@ -79,26 +79,24 @@ function readTrainingContent(
  * Instantiate a new anima in the guild.
  *
  * Creates the anima record, assigns roles in the roster, and snapshots the
- * composition (curricula + temperament content at current versions). All
+ * composition (curriculum + temperament content at current versions). All
  * operations happen in a single transaction.
  */
 export function instantiate(opts: InstantiateOptions): InstantiateResult {
-  const { home, name, roles, curricula = [], temperament } = opts;
+  const { home, name, roles, curriculum, temperament } = opts;
   const worktree = guildhallWorktreePath(home);
 
   if (roles.length === 0) {
     throw new Error('At least one role is required.');
   }
 
-  // Validate curricula and temperament exist in guild.json
+  // Validate curriculum and temperament exist in guild.json
   const config = readGuildConfig(home);
 
-  for (const c of curricula) {
-    if (!config.curricula[c]) {
-      throw new Error(
-        `Curriculum "${c}" not found in guild.json. Available: ${Object.keys(config.curricula).join(', ') || '(none)'}`,
-      );
-    }
+  if (curriculum && !config.curricula[curriculum]) {
+    throw new Error(
+      `Curriculum "${curriculum}" not found in guild.json. Available: ${Object.keys(config.curricula).join(', ') || '(none)'}`,
+    );
   }
 
   if (temperament && !config.temperaments[temperament]) {
@@ -108,11 +106,12 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
   }
 
   // Read and snapshot training content
-  const curriculaSnapshots = curricula.map(c => {
-    const entry = config.curricula[c]!;
-    const { version, content } = readTrainingContent(worktree, 'curricula', c, entry.slot);
-    return { name: c, version, content };
-  });
+  let curriculumSnapshot: { name: string; version: string; content: string } | null = null;
+  if (curriculum) {
+    const entry = config.curricula[curriculum]!;
+    const { version, content } = readTrainingContent(worktree, 'curricula', curriculum, entry.slot);
+    curriculumSnapshot = { name: curriculum, version, content };
+  }
 
   let temperamentSnapshot: { name: string; version: string; content: string } | null = null;
   if (temperament) {
@@ -151,20 +150,14 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
       }
 
       // Record composition snapshot
-      // The schema has single curriculum/temperament fields — for multiple curricula,
-      // we concatenate names and content. This is a design ambiguity; see .scratch doc.
-      const curriculumName = curriculaSnapshots.map(c => c.name).join(', ') || '';
-      const curriculumVersion = curriculaSnapshots.map(c => c.version).join(', ') || '';
-      const curriculumSnapshot = curriculaSnapshots.map(c => c.content).join('\n\n---\n\n') || '';
-
       db.prepare(
         `INSERT INTO anima_compositions (anima_id, curriculum_name, curriculum_version, curriculum_snapshot, temperament_name, temperament_version, temperament_snapshot)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         animaId,
-        curriculumName,
-        curriculumVersion,
-        curriculumSnapshot,
+        curriculumSnapshot?.name ?? '',
+        curriculumSnapshot?.version ?? '',
+        curriculumSnapshot?.content ?? '',
         temperamentSnapshot?.name ?? '',
         temperamentSnapshot?.version ?? '',
         temperamentSnapshot?.content ?? '',
@@ -178,7 +171,7 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
         'anima_instantiated',
         'anima',
         animaId,
-        JSON.stringify({ roles, curricula, temperament: temperament ?? null }),
+        JSON.stringify({ roles, curriculum: curriculum ?? null, temperament: temperament ?? null }),
       );
 
       return animaId;
@@ -188,7 +181,7 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
       animaId: result as number,
       name,
       roles,
-      curricula,
+      curriculum: curriculum ?? null,
       temperament: temperament ?? null,
     };
   } finally {

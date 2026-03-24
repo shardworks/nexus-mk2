@@ -535,7 +535,7 @@ Curricula and temperaments have simpler registry entries than implements — no 
 }
 ```
 
-The registry answers "what training content is available in this guild." It does *not* assign curricula to roles — that's the wrong layer. Curricula and temperaments are assigned to individual **animas** at instantiation time (recorded in the Ledger). The `instantiate` implement picks from the available set.
+The registry answers "what training content is available in this guild." It does *not* assign training content to roles — that's the wrong layer. A curriculum and temperament are assigned to an individual **anima** at instantiation time (recorded in the Ledger). The `instantiate` implement picks from the available set.
 
 ### How they differ from tools
 

@@ -163,8 +163,8 @@ The guild's central configuration file. Contains:
 Authored artifacts, git-managed, meaningful as text:
 
 - **Guild configuration** — `guild.json`
-- **Codex, all-members** — `codex/all.md`
-- **Codex, per-role** — `codex/roles/artificer.md` etc
+- **Codex, all-members** — `codex/all.md` — included in every anima's instructions
+- **Codex, per-role** — `codex/roles/artificer.md` etc — included only for animas that hold the matching role
 - **Curricula** — `training/curricula/artificer-craft/2.0.0/` — contains `nexus-curriculum.json` and content markdown. Immutable per version slot, committed to git.
 - **Temperaments** — `training/temperaments/stoic/1.0.0/` — same pattern as curricula, with `nexus-temperament.json`.
 - **Guild implements** — `implements/foo/1.0.0/` — contains `nexus-implement.json`, entry point, `instructions.md`, and any other files from the source package. Immutable per version slot, committed to git.
@@ -261,7 +261,8 @@ When an anima is manifested for a session, its instructions are assembled by the
 SYSTEM PROMPT (identity + environment):
 ┌─────────────────────────────────────┐
 │  1. The Codex                       │  codex/all.md — guild-wide policy
-│     (always present, from the guildhall)       │  codex/roles/<role>.md — role-specific
+│     (from the guildhall, filtered   │  codex/roles/<role>.md — only for
+│      by the anima's roles)          │  roles the anima holds
 ├─────────────────────────────────────┤
 │  2. Curriculum                      │  Training content — skills,
 │     (from composition)              │  craft knowledge, approach to work

@@ -172,12 +172,18 @@ export function resolveImplements(
 }
 
 /**
- * Read all codex documents from the guildhall.
+ * Read codex documents from the guildhall, filtered by anima roles.
  *
- * Reads all .md files in the codex/ directory and its subdirectories,
- * concatenating them into a single string.
+ * Codex layout:
+ *   codex/all.md              → included for all animas
+ *   codex/roles/artificer.md  → included only for animas with the 'artificer' role
+ *   codex/roles/sage.md       → included only for animas with the 'sage' role
+ *   codex/*.md                → any other top-level .md files included for all animas
+ *
+ * Role-specific codex files in codex/roles/ are only included if the anima
+ * holds the matching role. The filename (minus .md) is the role name.
  */
-export function readCodex(home: string): string {
+export function readCodex(home: string, animaRoles: string[]): string {
   const worktree = guildhallWorktreePath(home);
   const codexDir = path.join(worktree, 'codex');
 
@@ -185,19 +191,27 @@ export function readCodex(home: string): string {
 
   const sections: string[] = [];
 
-  function readDir(dir: string): void {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        readDir(fullPath);
-      } else if (entry.name.endsWith('.md')) {
-        const content = fs.readFileSync(fullPath, 'utf-8').trim();
-        if (content) sections.push(content);
-      }
+  // Read top-level .md files (included for all animas)
+  for (const entry of fs.readdirSync(codexDir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.md')) {
+      const content = fs.readFileSync(path.join(codexDir, entry.name), 'utf-8').trim();
+      if (content) sections.push(content);
     }
   }
 
-  readDir(codexDir);
+  // Read role-specific files — only for roles the anima holds
+  const rolesDir = path.join(codexDir, 'roles');
+  if (fs.existsSync(rolesDir)) {
+    for (const entry of fs.readdirSync(rolesDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+      const roleName = entry.name.replace(/\.md$/, '');
+      if (!animaRoles.includes(roleName)) continue;
+
+      const content = fs.readFileSync(path.join(rolesDir, entry.name), 'utf-8').trim();
+      if (content) sections.push(content);
+    }
+  }
+
   return sections.join('\n\n---\n\n');
 }
 
@@ -295,8 +309,8 @@ export async function manifest(home: string, animaName: string): Promise<Manifes
   // Resolve implements based on role gating
   const implements_ = resolveImplements(home, config, anima.roles);
 
-  // Read codex
-  const codex = readCodex(home);
+  // Read codex (filtered by anima's roles)
+  const codex = readCodex(home, anima.roles);
 
   // Assemble system prompt
   const systemPrompt = assembleSystemPrompt(codex, anima, implements_);

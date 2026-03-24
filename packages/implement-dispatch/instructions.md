@@ -5,14 +5,14 @@ Post a commission to the guild, triggering the manifest engine to start an anima
 ## Usage
 
 ```
-dispatch <spec> [--anima <name>] [--priority <level>]
+dispatch <spec> --workshop <workshop> [--anima <name>]
 ```
 
 ## Arguments
 
 - `<spec>` — Commission specification describing what needs to be done
-- `--anima <name>` — Target a specific anima (otherwise dispatch selects based on roles)
-- `--priority <level>` — `normal` (default) or `urgent`. Use urgent sparingly — it preempts other work. Include justification in the spec.
+- `--workshop <workshop>` — Target workshop where the work will be done
+- `--anima <name>` — Target a specific anima (otherwise the commission is posted but unassigned)
 
 ## Guidance
 

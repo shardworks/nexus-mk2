@@ -17,8 +17,6 @@ export interface DispatchOptions {
   workshop: string;
   /** Target anima name. If provided, the commission is assigned immediately. */
   anima?: string;
-  /** Commission priority. Defaults to 'normal'. */
-  priority?: 'normal' | 'urgent';
 }
 
 export interface DispatchResult {
@@ -37,7 +35,7 @@ export interface DispatchResult {
  * the anima exists and is active, then creates an assignment record.
  */
 export function dispatch(opts: DispatchOptions): DispatchResult {
-  const { home, spec, workshop, anima, priority = 'normal' } = opts;
+  const { home, spec, workshop, anima } = opts;
 
   // Validate workshop exists in guild.json
   const config = readGuildConfig(home);
@@ -55,9 +53,9 @@ export function dispatch(opts: DispatchOptions): DispatchResult {
 
     // Create commission
     const insertCommission = db.prepare(
-      `INSERT INTO commissions (content, status, workshop, priority) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO commissions (content, status, workshop) VALUES (?, ?, ?)`,
     );
-    const commissionResult = insertCommission.run(spec, initialStatus, workshop, priority);
+    const commissionResult = insertCommission.run(spec, initialStatus, workshop);
     const commissionId = Number(commissionResult.lastInsertRowid);
 
     let assigned = false;
@@ -93,7 +91,7 @@ export function dispatch(opts: DispatchOptions): DispatchResult {
       assigned ? 'commission_dispatched_and_assigned' : 'commission_dispatched',
       'commission',
       commissionId,
-      JSON.stringify({ workshop, anima: assignedTo, priority }),
+      JSON.stringify({ workshop, anima: assignedTo }),
     );
 
     return { commissionId, assigned, assignedTo };

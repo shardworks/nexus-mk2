@@ -117,15 +117,20 @@ dispatch <spec> --workshop <workshop> --anima <anima>
     description: 'Create a new anima from curriculum and temperament',
     instructions: `# instantiate
 
-Create a new anima by composing a curriculum and temperament.
+Create a new anima in the guild — recording its composition (curriculum, temperament, roles) in the Ledger.
 
 ## Usage
 
 \`\`\`
-instantiate <name> --curriculum <curriculum> --temperament <temperament> --role <role>
+instantiate <name> --roles <roles> [--curriculum <curriculum>] [--temperament <temperament>]
 \`\`\`
 
-*(Not yet implemented — this is a placeholder for anima creation.)*
+## Arguments
+
+- \`<name>\` — Name for the new anima
+- \`--roles <roles>\` — Comma-separated roles (e.g. artificer, sage)
+- \`--curriculum <curriculum>\` — Curriculum to assign (must be registered in guild.json)
+- \`--temperament <temperament>\` — Temperament to assign (must be registered in guild.json)
 `,
   },
   {

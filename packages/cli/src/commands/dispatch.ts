@@ -7,16 +7,8 @@ export function makeDispatchCommand() {
     .argument('<spec>', 'Commission specification — what needs to be done')
     .requiredOption('--workshop <workshop>', 'Target workshop')
     .option('--anima <anima>', 'Target anima name')
-    .option('--priority <priority>', 'Priority level (normal, urgent)', 'normal')
-    .action((spec: string, options: { workshop: string; anima?: string; priority?: string }) => {
+    .action((spec: string, options: { workshop: string; anima?: string }) => {
       const home = resolveNexusHome();
-
-      const priority = options.priority as 'normal' | 'urgent';
-      if (!['normal', 'urgent'].includes(priority)) {
-        console.error('Error: --priority must be "normal" or "urgent"');
-        process.exitCode = 1;
-        return;
-      }
 
       try {
         const result = dispatch({
@@ -24,7 +16,6 @@ export function makeDispatchCommand() {
           spec,
           workshop: options.workshop,
           anima: options.anima,
-          priority,
         });
 
         console.log(`Commission #${result.commissionId} posted to workshop "${options.workshop}"`);

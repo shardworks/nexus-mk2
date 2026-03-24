@@ -38,7 +38,6 @@ CREATE TABLE commissions (
     content     TEXT    NOT NULL,
     status      TEXT    NOT NULL CHECK(status IN ('posted', 'assigned', 'in_progress', 'completed', 'failed')),
     workshop    TEXT    NOT NULL,
-    priority    TEXT    NOT NULL DEFAULT 'normal' CHECK(priority IN ('normal', 'urgent')),
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );

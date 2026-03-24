@@ -14,7 +14,6 @@ export default implement({
     spec: z.string().describe('Commission specification — what needs to be done'),
     workshop: z.string().describe('Target workshop for the commission'),
     anima: z.string().optional().describe('Target anima name (if unspecified, commission is posted but unassigned)'),
-    priority: z.enum(['normal', 'urgent']).optional().describe('Commission priority level (default: normal)'),
   },
   handler: (params, { home }) => {
     return dispatch({ home, ...params });
