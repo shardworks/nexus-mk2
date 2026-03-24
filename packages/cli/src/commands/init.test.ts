@@ -30,7 +30,7 @@ function makeLocalBundle(tmpDir: string): string {
   const manifest = JSON.parse(fs.readFileSync(path.join(bundleDir, 'nexus-bundle.json'), 'utf-8'));
 
   for (const entry of manifest.tools ?? []) {
-    // "@shardworks/tool-dispatch@0.x" → local path
+    // "@shardworks/tool-commission@0.x" → local path
     const name = entry.package.replace(/@0\.x$/, '').replace('@shardworks/', '');
     entry.package = path.join(PACKAGES_DIR, name);
   }
@@ -156,7 +156,7 @@ describe('installBundle with starter kit', () => {
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
 
     // Implements registered
-    const expectedImplements = ['install-tool', 'remove-tool', 'dispatch', 'instantiate', 'nexus-version'];
+    const expectedImplements = ['install-tool', 'remove-tool', 'commission', 'instantiate', 'nexus-version'];
     for (const name of expectedImplements) {
       assert.ok(config.tools[name], `${name} not registered`);
       assert.ok(config.tools[name].package, `${name} missing package field`);
@@ -165,7 +165,7 @@ describe('installBundle with starter kit', () => {
     }
 
     // Engines registered
-    const expectedEngines = ['manifest', 'mcp-server', 'worktree-setup', 'ledger-migrate'];
+    const expectedEngines = ['manifest', 'mcp-server', 'worktree-setup', 'workshop-prepare', 'workshop-merge', 'ledger-migrate'];
     for (const name of expectedEngines) {
       assert.ok(config.engines[name], `${name} not registered`);
       const engDir = path.join(home, 'engines', name);
@@ -192,7 +192,7 @@ describe('installBundle with starter kit', () => {
     );
 
     // Bundle provenance recorded
-    assert.ok(config.tools['dispatch'].bundle, 'bundle provenance missing');
+    assert.ok(config.tools['commission'].bundle, 'bundle provenance missing');
   });
 
   it('creates a single commit when commit=true', () => {
@@ -231,7 +231,7 @@ describe('full init sequence', () => {
     assert.deepEqual(config.workshops, {});
 
     // Tools registered
-    assert.ok(config.tools['dispatch'], 'dispatch not registered');
+    assert.ok(config.tools['commission'], 'commission not registered');
     assert.ok(config.engines['manifest'], 'manifest not registered');
 
     // Training registered
@@ -257,6 +257,8 @@ describe('full init sequence', () => {
       assert.ok(names.includes('commissions'), 'commissions table missing');
       assert.ok(names.includes('roster'), 'roster table missing');
       assert.ok(names.includes('audit_log'), 'audit_log table missing');
+      assert.ok(names.includes('events'), 'events table missing');
+      assert.ok(names.includes('event_dispatches'), 'event_dispatches table missing');
     } finally {
       db.close();
     }
@@ -270,10 +272,14 @@ describe('full init sequence', () => {
 
     const db = new Database(path.join(home, '.nexus', 'nexus.db'));
     try {
-      const rows = db.prepare('SELECT * FROM _migrations').all() as { sequence: number; filename: string }[];
-      assert.equal(rows.length, 1);
+      const rows = db.prepare('SELECT * FROM _migrations ORDER BY sequence').all() as { sequence: number; filename: string }[];
+      assert.equal(rows.length, 3);
       assert.equal(rows[0]!.sequence, 1);
       assert.equal(rows[0]!.filename, '001-initial-schema.sql');
+      assert.equal(rows[1]!.sequence, 2);
+      assert.equal(rows[1]!.filename, '002-clockworks.sql');
+      assert.equal(rows[2]!.sequence, 3);
+      assert.equal(rows[2]!.filename, '003-commission-status-reason.sql');
     } finally {
       db.close();
     }
@@ -363,6 +369,9 @@ describe('full init sequence', () => {
     assert.ok(config.clockworks.events['craft.debt'], 'craft.debt event missing');
     assert.ok(config.clockworks.events['craft.question'].schema.workshop, 'craft.question missing workshop in schema');
     assert.ok(config.clockworks.events['craft.debt'].schema.workshop, 'craft.debt missing workshop in schema');
-    assert.deepEqual(config.clockworks.standingOrders, [], 'standing orders should be empty');
+    assert.equal(config.clockworks.standingOrders.length, 3, 'should have 3 commission lifecycle standing orders');
+    assert.deepEqual(config.clockworks.standingOrders[0], { on: 'commission.posted', run: 'workshop-prepare' });
+    assert.deepEqual(config.clockworks.standingOrders[1], { on: 'commission.ready', summon: 'artificer' });
+    assert.deepEqual(config.clockworks.standingOrders[2], { on: 'commission.session.ended', run: 'workshop-merge' });
   });
 });

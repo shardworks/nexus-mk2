@@ -8,6 +8,7 @@
  * standing orders have been dispatched.
  */
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { readGuildConfig } from './guild-config.ts';
 import type { GuildConfig, StandingOrder } from './guild-config.ts';
 import {
@@ -19,6 +20,35 @@ import {
 } from './events.ts';
 import { isClockworkEngine } from './engine.ts';
 import type { GuildEvent } from './engine.ts';
+import { ledgerPath } from './nexus-home.ts';
+import { updateCommissionStatus } from './commission.ts';
+
+/**
+ * Callback for launching anima sessions. Provided by the CLI layer since
+ * the core package cannot depend on the CLI or engine-manifest directly.
+ *
+ * The Clockworks runner calls this when processing a `summon` standing order.
+ * The callback should: resolve the role to an anima, manifest it, launch
+ * a claude session, wait for exit, and return the result.
+ *
+ * If no handler is registered, summon orders are recorded but skipped.
+ */
+export type SummonHandler = (
+  home: string,
+  event: GuildEvent,
+  roleName: string,
+  noticeType: 'summon' | 'brief',
+) => Promise<{ animaName: string; exitCode: number }>;
+
+let _summonHandler: SummonHandler | null = null;
+
+/**
+ * Register a summon handler. Called once at CLI startup to wire in the
+ * session launcher without creating a circular dependency.
+ */
+export function registerSummonHandler(handler: SummonHandler): void {
+  _summonHandler = handler;
+}
 
 /** Result of processing a single event. */
 export interface TickResult {
@@ -170,10 +200,11 @@ async function executeEngineOrder(
 /**
  * Execute a `summon:` or `brief:` standing order.
  *
- * Phase 1: records the dispatch but does NOT actually manifest the anima.
- * Anima manifestation requires the manifest engine, which needs extension
- * to accept event context. For now, we record the intent and mark it as
- * skipped so the system is auditable.
+ * If a summon handler is registered (by the CLI layer), delegates to it
+ * for full session lifecycle: resolve anima, manifest, launch claude,
+ * wait for exit, signal session ended.
+ *
+ * If no handler is registered, records the dispatch as skipped.
  */
 async function executeAnimaOrder(
   home: string,
@@ -183,27 +214,72 @@ async function executeAnimaOrder(
 ): Promise<DispatchSummary> {
   const startedAt = new Date().toISOString();
 
-  // Phase 1: record the dispatch intent but don't actually manifest.
-  // The manifest engine needs extension to accept event context.
-  const endedAt = new Date().toISOString();
+  if (!_summonHandler) {
+    // No handler registered — record intent but skip execution.
+    const endedAt = new Date().toISOString();
 
-  recordDispatch(home, {
-    eventId: event.id,
-    handlerType: 'anima',
-    handlerName: `(role: ${roleName})`,
-    targetRole: roleName,
-    noticeType,
-    startedAt,
-    endedAt,
-    status: 'success',
-  });
+    recordDispatch(home, {
+      eventId: event.id,
+      handlerType: 'anima',
+      handlerName: `(role: ${roleName})`,
+      targetRole: roleName,
+      noticeType,
+      startedAt,
+      endedAt,
+      status: 'success',
+    });
 
-  return {
-    handlerType: 'anima',
-    handlerName: `(role: ${roleName})`,
-    status: 'skipped',
-    error: 'Anima manifestation via standing orders not yet implemented (Phase 1)',
-  };
+    return {
+      handlerType: 'anima',
+      handlerName: `(role: ${roleName})`,
+      status: 'skipped',
+      error: 'No summon handler registered — anima session not launched.',
+    };
+  }
+
+  try {
+    const result = await _summonHandler(home, event, roleName, noticeType);
+    const endedAt = new Date().toISOString();
+
+    recordDispatch(home, {
+      eventId: event.id,
+      handlerType: 'anima',
+      handlerName: result.animaName,
+      targetRole: roleName,
+      noticeType,
+      startedAt,
+      endedAt,
+      status: 'success',
+    });
+
+    return {
+      handlerType: 'anima',
+      handlerName: result.animaName,
+      status: 'success',
+    };
+  } catch (err) {
+    const endedAt = new Date().toISOString();
+    const errorMsg = err instanceof Error ? err.message : String(err);
+
+    recordDispatch(home, {
+      eventId: event.id,
+      handlerType: 'anima',
+      handlerName: `(role: ${roleName})`,
+      targetRole: roleName,
+      noticeType,
+      startedAt,
+      endedAt,
+      status: 'error',
+      error: errorMsg,
+    });
+
+    return {
+      handlerType: 'anima',
+      handlerName: `(role: ${roleName})`,
+      status: 'error',
+      error: errorMsg,
+    };
+  }
 }
 
 /**

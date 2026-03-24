@@ -1,10 +1,10 @@
 import { createCommand } from 'commander';
-import { VERSION } from '@shardworks/nexus-core';
+import { VERSION, registerSummonHandler } from '@shardworks/nexus-core';
 import { makeInitCommand } from './commands/init.ts';
 import { makeInstallToolCommand } from './commands/install-tool.ts';
 import { makeRemoveToolCommand } from './commands/remove-tool.ts';
 import { makeRestoreCommand } from './commands/rehydrate.ts';
-import { makeDispatchCommand } from './commands/dispatch.ts';
+import { makeCommissionCommand } from './commands/commission.ts';
 import { makeInstantiateCommand } from './commands/instantiate.ts';
 import { makeManifestCommand } from './commands/manifest.ts';
 import { makeStatusCommand } from './commands/status.ts';
@@ -12,6 +12,12 @@ import { makeConsultCommand } from './commands/consult.ts';
 import { makeSignalCommand } from './commands/signal.ts';
 import { makeClockCommand } from './commands/clock.ts';
 import { makeWorkshopCommand } from './commands/workshop.ts';
+import { createSummonHandler } from './summon.ts';
+
+// Register the summon handler so Clockworks can launch anima sessions.
+// This wires the CLI's session launcher into the core's event processing
+// without creating a circular dependency.
+registerSummonHandler(createSummonHandler());
 
 export const program = createCommand('nsg')
   .description('Nexus Mk 2.1 — experimental multi-agent AI system')
@@ -21,7 +27,7 @@ export const program = createCommand('nsg')
 // ── Top-level commands ──────────────────────────────────────────────────
 program.addCommand(makeInitCommand());
 program.addCommand(makeConsultCommand());
-program.addCommand(makeDispatchCommand());
+program.addCommand(makeCommissionCommand());
 program.addCommand(makeStatusCommand());
 program.addCommand(makeSignalCommand());
 program.addCommand(makeClockCommand());

@@ -19,7 +19,7 @@ export interface RoleDefinition {
 
 /** A reference to a tool or engine registered in guild.json. */
 export interface ToolEntry {
-  /** Upstream package identifier, e.g. "@shardworks/tool-dispatch@1.11.3". Null for locally-built tools. */
+  /** Upstream package identifier, e.g. "@shardworks/tool-commission@1.11.3". Null for locally-built tools. */
   upstream: string | null;
   /** ISO-8601 timestamp of when the tool was installed. */
   installedAt: string;

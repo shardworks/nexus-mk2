@@ -143,7 +143,11 @@ export function initGuild(home: string, name: string, model: string): void {
         schema: { summary: 'string', workshop: 'string', commission: 'string?', location: 'string?' },
       },
     },
-    standingOrders: [],
+    standingOrders: [
+      { on: 'commission.posted', run: 'workshop-prepare' },
+      { on: 'commission.ready', summon: 'artificer' },
+      { on: 'commission.session.ended', run: 'workshop-merge' },
+    ],
   };
   fs.writeFileSync(
     path.join(home, 'guild.json'),

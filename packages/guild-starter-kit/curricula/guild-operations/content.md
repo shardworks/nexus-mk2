@@ -149,7 +149,7 @@ A commission is a unit of work posted by the patron and undertaken by the guild.
 3. **In progress** — the artificer works in a workshop worktree
 4. **Completed** or **Failed** — work is delivered or the commission is marked as failed
 
-Use `nsg dispatch` to post and dispatch commissions.
+Use `nsg commission` to post commissions. The Clockworks handles the rest via standing orders.
 
 ## Tools
 
@@ -159,7 +159,7 @@ Tools that animas wield during work. Each tool ships with instructions delivered
 
 - **install-tool** — install new tools, engines, or bundles into the guild
 - **remove-tool** — remove installed tools
-- **dispatch** — post and dispatch commissions
+- **commission** — post commissions to the guild
 - **instantiate** — create new animas with assigned training and roles
 - **nexus-version** — report the installed Nexus framework version
 - **signal** — signal a custom guild event for the Clockworks
@@ -176,6 +176,9 @@ Automated mechanical processes with no AI involvement. Two kinds:
 - **ledger-migrate** — applies database migrations to the Ledger
 
 **Clockwork engines** — purpose-built to respond to events via standing orders. Use the `engine()` SDK factory from `@shardworks/nexus-core`. The Clockworks runner calls them automatically when matching events fire.
+
+- **workshop-prepare** — creates a worktree when a commission is posted (`commission.posted` → `commission.ready`)
+- **workshop-merge** — merges a commission branch after the session ends (`commission.session.ended` → `commission.completed` or `commission.failed`)
 
 ## The Codex
 
@@ -368,7 +371,7 @@ The primary interface is the `nsg` command:
 | Command | Purpose |
 |---------|---------|
 | `nsg init` | Create a new guild |
-| `nsg dispatch <content>` | Post and dispatch a commission |
+| `nsg commission <spec> --workshop <name>` | Post a commission |
 | `nsg tool install <source>` | Install a tool or bundle |
 | `nsg tool remove <name>` | Remove an installed tool |
 | `nsg workshop add <url>` | Clone a remote repo and register it as a workshop |

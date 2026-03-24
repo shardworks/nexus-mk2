@@ -33,8 +33,10 @@ export {
   type TickResult,
   type DispatchSummary,
   type ClockRunResult,
+  type SummonHandler,
   clockTick,
   clockRun,
+  registerSummonHandler,
 } from './clockworks.ts';
 
 export { createLedger } from './ledger.ts';
@@ -73,10 +75,12 @@ export {
   removeTool,
 } from './remove-tool.ts';
 export {
-  type DispatchOptions,
-  type DispatchResult,
-  dispatch,
-} from './dispatch.ts';
+  type CommissionOptions,
+  type CommissionResult,
+  commission,
+  updateCommissionStatus,
+  readCommission,
+} from './commission.ts';
 export {
   type InstantiateOptions,
   type InstantiateResult,

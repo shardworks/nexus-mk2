@@ -34,12 +34,13 @@ CREATE TABLE roster (
 );
 
 CREATE TABLE commissions (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    content     TEXT    NOT NULL,
-    status      TEXT    NOT NULL CHECK(status IN ('posted', 'assigned', 'in_progress', 'completed', 'failed')),
-    workshop    TEXT    NOT NULL,
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    content        TEXT    NOT NULL,
+    status         TEXT    NOT NULL CHECK(status IN ('posted', 'assigned', 'in_progress', 'completed', 'failed')),
+    status_reason  TEXT,
+    workshop       TEXT    NOT NULL,
+    created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE commission_assignments (

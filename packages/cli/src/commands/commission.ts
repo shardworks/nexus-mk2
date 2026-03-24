@@ -1,28 +1,24 @@
 import { createCommand } from 'commander';
-import { dispatch } from '@shardworks/nexus-core';
+import { commission } from '@shardworks/nexus-core';
 import { resolveHome } from '../resolve-home.ts';
 
-export function makeDispatchCommand() {
-  return createCommand('dispatch')
+export function makeCommissionCommand() {
+  return createCommand('commission')
     .description('Post a commission to the guild')
     .argument('<spec>', 'Commission specification — what needs to be done')
     .requiredOption('--workshop <workshop>', 'Target workshop')
-    .option('--anima <anima>', 'Target anima name')
-    .action((spec: string, options: { workshop: string; anima?: string }, cmd) => {
+    .action((spec: string, options: { workshop: string }, cmd) => {
       const home = resolveHome(cmd);
 
       try {
-        const result = dispatch({
+        const result = commission({
           home,
           spec,
           workshop: options.workshop,
-          anima: options.anima,
         });
 
         console.log(`Commission #${result.commissionId} posted to workshop "${options.workshop}"`);
-        if (result.assigned) {
-          console.log(`  Assigned to: ${result.assignedTo}`);
-        }
+        console.log(`  Run \`nsg clock run\` to process through Clockworks.`);
       } catch (err) {
         console.error(`Error: ${(err as Error).message}`);
         process.exitCode = 1;
