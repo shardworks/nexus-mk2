@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { workshopBarePath } from './nexus-home.ts';
 import { readGuildConfig, writeGuildConfig } from './guild-config.ts';
 import type { ToolEntry, TrainingEntry } from './guild-config.ts';
+import { checkToolPreconditions } from './preconditions.ts';
 
 /** Descriptor file names in priority order for detection. */
 const DESCRIPTOR_FILES = [
@@ -80,6 +81,8 @@ export interface InstallResult {
   slot: string;
   installedTo: string;
   sourceKind: SourceKind;
+  /** Precondition warnings — unmet environment requirements. Tool is still installed. */
+  warnings: string[];
 }
 
 function git(args: string[], cwd: string): void {
@@ -501,7 +504,20 @@ export function installTool(opts: InstallToolOptions): InstallResult {
     git(['commit', '-m', `Install ${category.slice(0, -1)} ${name}@${slot}`], home);
   }
 
-  return { category, name, slot, installedTo: targetDir, sourceKind };
+  // Check preconditions for implements and engines — warn but don't fail
+  const warnings: string[] = [];
+  if (category === 'implements' || category === 'engines') {
+    const descriptorFile = category === 'implements' ? 'nexus-implement.json' : 'nexus-engine.json';
+    const descriptorPath = path.join(targetDir, descriptorFile);
+    const results = checkToolPreconditions(descriptorPath);
+    for (const r of results) {
+      if (!r.passed && r.message) {
+        warnings.push(r.message);
+      }
+    }
+  }
+
+  return { category, name, slot, installedTo: targetDir, sourceKind, warnings };
 }
 
 // ── Workshop source parsing ─────────────────────────────────────────────
