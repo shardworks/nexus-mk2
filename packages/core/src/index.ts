@@ -1,6 +1,9 @@
 // @shardworks/nexus-core — shared infrastructure for the guild system
 
-export const VERSION = '0.1.0';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+const _pkg = _require('../package.json');
+export const VERSION: string = _pkg.version;
 
 export {
   type ImplementContext,
@@ -28,6 +31,8 @@ export {
 export {
   type InstallToolOptions,
   type InstallResult,
+  type SourceKind,
+  classifySource,
   installTool,
 } from './install-tool.ts';
 export {
