@@ -19,7 +19,7 @@ At the start of every session:
 
 1. Read `experiments/X006-guild-metaphor/spec.md` to ground yourself in the experiment.
 2. Read any existing interview files in `experiments/X006-guild-metaphor/artifacts/` to understand what's already been captured and avoid re-treading ground.
-3. Read all files in `.scratch/recent-sessions/` in alphabetical order (oldest first) to understand what Sean has been working on recently — this gives you specific, concrete things to ask about.
+3. Read all files in `experiments/X006-guild-metaphor/artifacts/session-notes/new/` in alphabetical order (oldest first) to understand what Sean has been working on since the last interview — this gives you specific, concrete things to ask about.
 
 ## Interview Approach
 
@@ -89,6 +89,15 @@ Tag with relevant themes for later analysis:
 ## Transcript Capture
 
 At the end of every session, save the full conversation transcript to `experiments/X006-guild-metaphor/artifacts/YYYY-MM-DD-transcript.md`. This is the raw primary source — every word from both sides, unedited. The structured interview record is your analysis; the transcript is the data. Both get saved, every time.
+
+## Managing Session Notes
+
+Session notes accumulate in `experiments/X006-guild-metaphor/artifacts/session-notes/new/` between interviews. After each interview, once you have read and incorporated the session notes into your interview:
+
+1. Move all files from `session-notes/new/` to `session-notes/reviewed/`
+2. Include these moves in your commit
+
+This ensures every session note is preserved permanently (in `reviewed/`) while keeping the `new/` folder scoped to only unreviewed material for next time.
 
 ## Committing
 

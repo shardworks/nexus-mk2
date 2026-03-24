@@ -55,6 +55,7 @@ For each notable moment:
 - Do not editorialize beyond the "why it's notable" flags.
 - Present the summary directly as part of the conversation
 - Write the summary to `.scratch/recent-sessions/<timestamp>.md`, where `<timestamp>` is a date and timestamp such as `YYYY-MM-DDTHHmmss.md`. Each session gets its own file — never overwrite a previous one.
-- After writing, check the directory: if there are more than 4 files, delete the oldest ones to keep only the 4 most recent.
-- Commit all `recent-sessions` changes to git and push those changes.
+- **Also write a copy** to `experiments/X006-guild-metaphor/artifacts/session-notes/new/<timestamp>.md`. This copy is for the ethnographer and must NOT be auto-deleted — it accumulates until the ethnographer reviews it.
+- After writing, check `.scratch/recent-sessions/`: if there are more than 4 files, delete the oldest ones to keep only the 4 most recent. Do NOT trim the `session-notes/new/` copy.
+- Commit all `recent-sessions` and `session-notes` changes to git and push those changes.
 - In addition to writing the summary, share it in the chat for review and inclusion in session transcripts
