@@ -78,7 +78,7 @@ export function makeWorkshopCommand() {
             console.log(`  ${statusIcon} ${ws.name}${wtLabel}`);
             console.log(`    ${ws.remoteUrl}`);
             if (!ws.cloned) {
-              console.log(`    ⚠ bare clone missing — run: nsg tool rehydrate`);
+              console.log(`    ⚠ bare clone missing — run: nsg guild restore`);
             }
           }
         } catch (err) {

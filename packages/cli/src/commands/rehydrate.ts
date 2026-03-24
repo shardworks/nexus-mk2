@@ -2,8 +2,8 @@ import { createCommand } from 'commander';
 import { rehydrate } from '@shardworks/nexus-core';
 import { resolveHome } from '../resolve-home.ts';
 
-export function makeRehydrateCommand() {
-  return createCommand('rehydrate')
+export function makeRestoreCommand() {
+  return createCommand('restore')
     .description('Restore runtime state from git-tracked guild state (after fresh clone)')
     .action((_options: Record<string, unknown>, cmd) => {
       const home = resolveHome(cmd);
@@ -36,7 +36,7 @@ export function makeRehydrateCommand() {
         const totalWork = result.workshopsCloned.length + result.workshopsFailed.length +
           result.fromPackageJson + result.fromSlotSource.length + result.needsRelink.length;
         if (totalWork === 0) {
-          console.log('Nothing to rehydrate.');
+          console.log('Nothing to restore.');
         }
       } catch (err) {
         console.error(`Error: ${(err as Error).message}`);

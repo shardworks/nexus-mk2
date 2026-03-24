@@ -3,7 +3,7 @@ import { VERSION } from '@shardworks/nexus-core';
 import { makeInitCommand } from './commands/init.ts';
 import { makeInstallToolCommand } from './commands/install-tool.ts';
 import { makeRemoveToolCommand } from './commands/remove-tool.ts';
-import { makeRehydrateCommand } from './commands/rehydrate.ts';
+import { makeRestoreCommand } from './commands/rehydrate.ts';
 import { makeDispatchCommand } from './commands/dispatch.ts';
 import { makeInstantiateCommand } from './commands/instantiate.ts';
 import { makeManifestCommand } from './commands/manifest.ts';
@@ -28,12 +28,17 @@ program.addCommand(makeClockCommand());
 
 program.addCommand(makeWorkshopCommand());
 
-// ── nsg tool [install|remove|rehydrate] ─────────────────────────────────
+// ── nsg guild [restore] ─────────────────────────────────────────────────
+const guildGroup = createCommand('guild')
+  .description('Guild-wide operations');
+guildGroup.addCommand(makeRestoreCommand());
+program.addCommand(guildGroup);
+
+// ── nsg tool [install|remove] ───────────────────────────────────────────
 const toolGroup = createCommand('tool')
   .description('Manage guild tools (implements, engines, curricula, temperaments)');
 toolGroup.addCommand(makeInstallToolCommand());
 toolGroup.addCommand(makeRemoveToolCommand());
-toolGroup.addCommand(makeRehydrateCommand());
 program.addCommand(toolGroup);
 
 // ── nsg anima [create|manifest] ─────────────────────────────────────────
