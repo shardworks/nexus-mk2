@@ -71,15 +71,20 @@ Tools that animas wield during work. Each tool ships with instructions delivered
 - **dispatch** — post and dispatch commissions
 - **instantiate** — create new animas with assigned training and roles
 - **nexus-version** — report the installed Nexus framework version
+- **signal** — signal a custom guild event for the Clockworks
 
 ### Engines
 
-Automated mechanical processes with no AI involvement. Engines handle repeatable infrastructure work:
+Automated mechanical processes with no AI involvement. Two kinds:
+
+**Static engines** — bespoke APIs called by framework code. Not triggerable by standing orders.
 
 - **manifest** — composes anima instructions from codex, training, and tool instructions at session start
 - **mcp-server** — runs the MCP server that exposes tools to animas during sessions
 - **worktree-setup** — creates and manages git worktrees for commissions
 - **ledger-migrate** — applies database migrations to the Ledger
+
+**Clockwork engines** — purpose-built to respond to events via standing orders. Use the `engine()` SDK factory from `@shardworks/nexus-core`. The Clockworks runner calls them automatically when matching events fire.
 
 ## The Codex
 
@@ -89,7 +94,139 @@ Role-specific codex entries live in `codex/roles/` and are delivered only to ani
 
 ## The Ledger
 
-The guild's operational database (SQLite). Holds anima records, roster, commission history, compositions, and the audit trail. Lives at `.nexus/nexus.db` in the guildhall. Managed by the ledger-migrate engine.
+The guild's operational database (SQLite). Holds anima records, roster, commission history, compositions, events, and the audit trail. Lives at `.nexus/nexus.db` in the guildhall. Managed by the ledger-migrate engine.
+
+## The Clockworks
+
+The Clockworks is the guild's event-driven nervous system — it connects things that happen to things that should happen in response. It turns the guild from a purely imperative system into a reactive one.
+
+### Events
+
+An event is an immutable fact: *this happened*. Events are recorded in the Ledger and processed by the Clockworks runner.
+
+Two kinds:
+
+- **Framework events** — signaled automatically by the system (`commission.sealed`, `tool.installed`, `anima.instantiated`, etc.). Animas cannot signal these.
+- **Custom events** — declared by the guild in `guild.json` under `clockworks.events`. Animas signal these using the `signal` tool.
+
+### Standing Orders
+
+A standing order is a registered response to an event — guild policy that says "when X happens, do Y." Standing orders live in `guild.json` under `clockworks.standingOrders`.
+
+Three verbs:
+
+| Verb | What it does |
+|------|-------------|
+| **`run`** | Invokes a clockwork engine. No AI involved — deterministic automation. |
+| **`summon`** | Manifests an anima (by role) and delivers the event as urgent context. The anima is expected to act. |
+| **`brief`** | Manifests an anima (by role) and delivers the event as informational context. The anima decides whether to act. |
+
+Standing orders target **roles**, not named animas — durable across anima turnover.
+
+Example `guild.json` configuration:
+
+```json
+{
+  "clockworks": {
+    "events": {
+      "code.reviewed": {
+        "description": "Signaled when an artificer completes a code review"
+      }
+    },
+    "standingOrders": [
+      { "on": "commission.sealed", "run": "cleanup-worktree" },
+      { "on": "commission.failed", "summon": "advisor" },
+      { "on": "code.reviewed",     "brief": "guildmaster" }
+    ]
+  }
+}
+```
+
+### Signaling Events
+
+Use the **signal** tool to signal custom events:
+
+```
+signal({ name: "code.reviewed", payload: { pr: 42, issues_found: 0 } })
+```
+
+The event name must be declared in `guild.json clockworks.events`. Framework namespaces (`anima.*`, `commission.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`) are reserved.
+
+### Processing Events
+
+Events are not processed automatically. The operator controls when the Clockworks runs:
+
+| Command | What it does |
+|---------|-------------|
+| `nsg clock list` | Show all pending (unprocessed) events |
+| `nsg clock tick [id]` | Process the next pending event, or a specific one by id |
+| `nsg clock run` | Process all pending events until the queue is empty |
+
+### Error Handling
+
+When a standing order fails, the system signals a `standing-order.failed` event. Guilds can respond to this with their own standing orders. A loop guard prevents cascading failures.
+
+### Hello World Walkthrough
+
+To test the Clockworks from scratch:
+
+**1. Declare a custom event** in `guild.json`:
+
+```json
+{
+  "clockworks": {
+    "events": {
+      "hello.world": {
+        "description": "A test event for verifying the Clockworks"
+      }
+    },
+    "standingOrders": []
+  }
+}
+```
+
+**2. Signal the event:**
+
+```
+nsg signal hello.world --payload '{"message": "greetings from the Clockworks"}'
+```
+
+**3. Check the queue:**
+
+```
+nsg clock list
+```
+
+You should see the pending event with its id, name, payload, and timestamp.
+
+**4. Process it:**
+
+```
+nsg clock tick
+```
+
+Since there are no standing orders, the event is marked as processed with no dispatches.
+
+**5. Add a standing order** to `guild.json`:
+
+```json
+{
+  "clockworks": {
+    "standingOrders": [
+      { "on": "hello.world", "brief": "advisor" }
+    ]
+  }
+}
+```
+
+**6. Signal again and process:**
+
+```
+nsg signal hello.world
+nsg clock tick
+```
+
+The Clockworks matches the event to the standing order and dispatches it — the advisor is briefed.
 
 ## Training
 
@@ -117,3 +254,7 @@ The primary interface is the `nsg` command:
 | `nsg anima manifest <name>` | Generate an anima's full instructions |
 | `nsg status` | Show guild status |
 | `nsg consult <name>` | Consult a standing anima (e.g., the advisor) |
+| `nsg signal <name>` | Signal a custom guild event |
+| `nsg clock list` | Show pending events |
+| `nsg clock tick [id]` | Process next pending event (or specific id) |
+| `nsg clock run` | Process all pending events |
