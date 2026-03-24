@@ -40,14 +40,105 @@ Other roles may emerge as the guild evolves.
 
 ## Workshops
 
-A workshop is a repository where animas do their work. The patron assigns workshops (usually existing repos), and artificers work inside them on commissions. The patron judges results by the works produced, not by inspecting the workshop.
+A workshop is a repository where animas do their work. Workshops are guild space — the patron assigns them, but during normal operation the patron judges results by the works produced, not by inspecting the workshop directly.
 
-### Workshop Lifecycle
+Each workshop is registered in `guild.json` under the `workshops` key with its name, remote URL, and the timestamp it was added. On disk, the guild maintains a bare clone of each workshop at `.nexus/workshops/{name}.git`. Commission worktrees are created from these bare clones, giving each commission an isolated working directory.
 
-1. A workshop is registered with the guild (`nsg workshop add <url>`)
-2. The guild clones it and manages worktrees for concurrent commissions
-3. Artificers work in isolated worktrees — one per commission
-4. Completed work is delivered as branches or pull requests
+### Managing Workshops
+
+Four commands manage the workshop lifecycle:
+
+| Command | What it does |
+|---------|-------------|
+| `nsg workshop add <url>` | Clone a remote repo and register it as a workshop |
+| `nsg workshop remove <name>` | Remove a workshop — deletes bare clone, worktrees, and guild.json entry |
+| `nsg workshop list` | List all workshops with clone status and active worktree count |
+| `nsg workshop create <org/name>` | Create a new GitHub repo and register it as a workshop |
+
+### Adding an Existing Repository
+
+When the patron has an existing repository they want the guild to work on:
+
+```
+nsg workshop add https://github.com/org/my-app.git
+```
+
+This clones the repo as a bare clone into `.nexus/workshops/my-app.git` and adds it to `guild.json`. The workshop name is derived from the URL (the last path segment, minus `.git`). To use a custom name:
+
+```
+nsg workshop add https://github.com/org/my-app.git --name frontend
+```
+
+The repository must already exist and be accessible. SSH URLs work too:
+
+```
+nsg workshop add git@github.com:org/my-app.git
+```
+
+### Creating a New Repository
+
+For greenfield work where no repository exists yet:
+
+```
+nsg workshop create myorg/new-project
+```
+
+This requires the GitHub CLI (`gh`) to be installed and authenticated. The command:
+
+1. Creates the repository on GitHub (private by default)
+2. Clones it as a bare clone into `.nexus/workshops/`
+3. Registers it in `guild.json`
+
+For a public repository:
+
+```
+nsg workshop create myorg/new-project --public
+```
+
+If `gh` is not installed or not authenticated, the command fails with a clear message explaining what's needed.
+
+### Workshop Status
+
+`nsg workshop list` shows each workshop with:
+
+- **✓ / ✗** — whether the bare clone exists on disk (it may be missing after a fresh guild clone before running `nsg guild restore`)
+- **Active worktrees** — how many commissions currently have worktrees checked out
+- **Remote URL** — where the repo lives
+
+If a bare clone is missing, the output includes a hint to run `nsg guild restore`.
+
+### Removing a Workshop
+
+```
+nsg workshop remove my-app
+```
+
+This deletes the bare clone, any commission worktrees for that workshop, and removes the entry from `guild.json`. This is a destructive operation — the workshop's local state is gone. The remote repository is not affected.
+
+### How Workshops Are Used in Commissions
+
+When a commission is dispatched to a workshop, the worktree-setup engine:
+
+1. Creates a commission-specific branch from `main` in the workshop's bare clone
+2. Checks out a git worktree at `.nexus/worktrees/{workshop}/commission-{id}/`
+3. The anima works in this isolated directory
+
+This means multiple commissions can run concurrently in the same workshop without interfering with each other — each gets its own branch and working directory.
+
+### guild.json Shape
+
+```json
+{
+  "workshops": {
+    "my-app": {
+      "remoteUrl": "https://github.com/org/my-app.git",
+      "addedAt": "2026-03-24T12:00:00.000Z"
+    }
+  }
+}
+```
+
+The `remoteUrl` is the source of truth. The bare clone on disk is ephemeral and can be reconstructed from this URL by `nsg guild restore`.
 
 ## Commissions
 
@@ -240,6 +331,36 @@ Named, versioned, immutable personality templates. A temperament defines who an 
 
 Training content lives in `training/curricula/` and `training/temperaments/` in the guildhall, organized as `{name}/{version}/`.
 
+## Guild Restore
+
+When the guildhall repository is cloned fresh onto a new machine (or by a new developer), the `.nexus/` directory does not exist — it is gitignored. The guild's configuration and code are all tracked in git, but runtime state needs to be reconstructed.
+
+```
+nsg guild restore
+```
+
+This command reconstructs all ephemeral runtime state from the tracked guild configuration:
+
+1. **Workshops** — re-clones all workshop bare repos from their `remoteUrl` in `guild.json`. Skips any that are already present.
+2. **npm dependencies** — runs `npm install` to restore packages from `package.json`.
+3. **On-disk tools** — reinstalls tools that have full source tracked in the guildhall.
+4. **Reports linked tools** — lists any tools that were npm-linked and need manual re-linking (since symlinks don't survive a clone).
+
+The command is idempotent — safe to run at any time. If everything is already in place, it reports "Nothing to restore."
+
+### When to Run Restore
+
+- After cloning the guildhall repo for the first time
+- After pulling changes that added new workshops
+- If a bare clone is corrupted or accidentally deleted
+- When `nsg workshop list` shows ✗ (missing bare clone) for any workshop
+
+### What Restore Does NOT Do
+
+- It does not create the Ledger (that's done by `nsg init` and the ledger-migrate engine)
+- It does not re-create animas or commissions — those live in the Ledger
+- It does not push or pull workshop repos — it only clones them fresh if missing
+
 ## CLI Reference
 
 The primary interface is the `nsg` command:
@@ -250,6 +371,11 @@ The primary interface is the `nsg` command:
 | `nsg dispatch <content>` | Post and dispatch a commission |
 | `nsg tool install <source>` | Install a tool or bundle |
 | `nsg tool remove <name>` | Remove an installed tool |
+| `nsg workshop add <url>` | Clone a remote repo and register it as a workshop |
+| `nsg workshop remove <name>` | Remove a workshop |
+| `nsg workshop list` | List workshops with status |
+| `nsg workshop create <org/name>` | Create a new GitHub repo and register as a workshop |
+| `nsg guild restore` | Restore runtime state after a fresh clone |
 | `nsg anima create` | Instantiate a new anima |
 | `nsg anima manifest <name>` | Generate an anima's full instructions |
 | `nsg status` | Show guild status |
