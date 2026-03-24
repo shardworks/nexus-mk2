@@ -9,6 +9,21 @@ import { installTool } from './install-tool.ts';
 import { classifySource } from './install-tool.ts';
 import { removeTool } from './remove-tool.ts';
 
+/**
+ * Strip the @shardworks/nexus dependency from a guild's package.json.
+ * In tests, initGuild() writes this dep but it may not be published yet,
+ * causing `npm install` to fail with ETARGET. Tests don't need it.
+ */
+function stripCliDep(home: string): void {
+  const pkgPath = path.join(home, 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  delete pkg.dependencies?.['@shardworks/nexus'];
+  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+  // Amend the initial commit so the guild repo is clean
+  execFileSync('git', ['add', 'package.json'], { cwd: home, stdio: 'pipe' });
+  execFileSync('git', ['commit', '--amend', '--no-edit'], { cwd: home, stdio: 'pipe' });
+}
+
 describe('classifySource', () => {
   it('classifies registry specifiers', () => {
     assert.equal(classifySource('some-tool'), 'registry');
@@ -46,6 +61,7 @@ describe('installTool (registry via npm-local)', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-npm-'));
     home = path.join(tmpDir, 'guild');
     initGuild(home, 'test-guild', 'test-model');
+    stripCliDep(home);
   });
 
   afterEach(() => {
@@ -193,6 +209,7 @@ describe('installTool tarball', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-tarball-'));
     home = path.join(tmpDir, 'guild');
     initGuild(home, 'test-guild', 'test-model');
+    stripCliDep(home);
   });
 
   afterEach(() => {
@@ -253,6 +270,7 @@ describe('removeTool', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-tool-'));
     home = path.join(tmpDir, 'guild');
     initGuild(home, 'test-guild', 'test-model');
+    stripCliDep(home);
   });
 
   afterEach(() => {

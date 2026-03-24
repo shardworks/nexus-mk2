@@ -7,6 +7,20 @@ import { execFileSync } from 'node:child_process';
 import { initGuild } from './init-guild.ts';
 import { readBundleManifest, installBundle } from './bundle.ts';
 
+/**
+ * Strip the @shardworks/nexus dependency from a guild's package.json.
+ * In tests, initGuild() writes this dep but it may not be published yet,
+ * causing `npm install` to fail with ETARGET. Tests don't need it.
+ */
+function stripCliDep(home: string): void {
+  const pkgPath = path.join(home, 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  delete pkg.dependencies?.['@shardworks/nexus'];
+  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+  execFileSync('git', ['add', 'package.json'], { cwd: home, stdio: 'pipe' });
+  execFileSync('git', ['commit', '--amend', '--no-edit'], { cwd: home, stdio: 'pipe' });
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /** Create a minimal npm package with a nexus descriptor at the given path. */
@@ -200,6 +214,7 @@ describe('installBundle', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-bundle-inst-'));
     home = path.join(tmpDir, 'guild');
     initGuild(home, 'test-guild', 'test-model');
+    stripCliDep(home);
   });
 
   afterEach(() => {
