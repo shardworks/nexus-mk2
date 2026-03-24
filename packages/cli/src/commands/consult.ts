@@ -11,8 +11,9 @@
  *   4. Launch `claude --bare --dangerously-skip-permissions` in the guild root
  *   5. Clean up temp files after the session exits
  *
- * --bare prevents Claude from auto-discovering CLAUDE.md files in the guild,
- * which could bleed unintended instructions into the anima's context.
+ * --setting-sources user limits Claude to user-level settings only, skipping
+ * project-level CLAUDE.md auto-discovery that could bleed unintended
+ * instructions into the anima's carefully composed context.
  */
 import { createCommand } from 'commander';
 import { spawnSync } from 'node:child_process';
@@ -160,7 +161,7 @@ export function makeConsultCommand() {
         spawnSync(
           'claude',
           [
-            '--bare',
+            '--setting-sources', 'user',
             '--dangerously-skip-permissions',
             '--system-prompt-file', systemPromptPath,
             '--mcp-config', claudeMcpConfigPath,
