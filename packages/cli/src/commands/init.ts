@@ -2,7 +2,7 @@ import { createCommand } from 'commander';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import readline from 'node:readline/promises';
-import { initGuild, installBundle } from '@shardworks/nexus-core';
+import { initGuild, installBundle, instantiate } from '@shardworks/nexus-core';
 import { applyMigrations } from '@shardworks/engine-ledger-migrate';
 
 const DEFAULT_MODEL = 'sonnet';
@@ -76,7 +76,16 @@ export function makeInitCommand() {
         // 3. Create ledger via migration engine
         applyMigrations(home);
 
-        // 4. Commit everything from the bundle install + migration
+        // 4. Instantiate the advisor anima
+        instantiate({
+          home,
+          name: 'advisor',
+          roles: ['advisor'],
+          curriculum: 'guild-operations',
+          temperament: 'guide',
+        });
+
+        // 5. Commit everything from the bundle install + advisor
         execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
         execFileSync('git', ['commit', '-m', 'Install starter kit'], { cwd: home, stdio: 'pipe' });
       } catch (err) {

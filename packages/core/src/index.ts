@@ -61,6 +61,7 @@ export {
   type InstallBundleResult,
   readBundleManifest,
   installBundle,
+  isBundleDir,
 } from './bundle.ts';
 export {
   type RehydrateResult,

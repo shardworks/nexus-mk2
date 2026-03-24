@@ -6,6 +6,8 @@
 
 ## Design
 
+- **Bundle idempotency.** What happens when a bundle is reinstalled? Current behavior: overwrites same-slot artifacts. Open questions: should it skip if a newer slot is active? Should it warn? Relevant for bundle upgrades — e.g., starter kit v0.2.0 ships updated tools but the guild has customized some. Need a policy for conflict resolution.
+
 - **npm workspaces for the guild.** See detailed analysis below.
 
 - **Dispatch: workshop auto-selection.** Currently `--workshop` is required. For single-workshop guilds this is clunky. Consider auto-selecting when there's only one workshop, or defaulting based on context.

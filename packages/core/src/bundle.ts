@@ -127,6 +127,13 @@ const DIR_MAP: Record<string, string> = {
   temperaments: 'training/temperaments',
 };
 
+/**
+ * Check if a directory contains a nexus-bundle.json manifest.
+ */
+export function isBundleDir(dir: string): boolean {
+  return fs.existsSync(path.join(dir, BUNDLE_MANIFEST));
+}
+
 // ── Validation ──────────────────────────────────────────────────────────
 
 /**

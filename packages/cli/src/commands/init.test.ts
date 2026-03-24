@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { initGuild, installBundle, VERSION } from '@shardworks/nexus-core';
+import { initGuild, installBundle, instantiate, VERSION } from '@shardworks/nexus-core';
 import { applyMigrations } from '@shardworks/engine-ledger-migrate';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -46,11 +46,12 @@ function makeLocalBundle(tmpDir: string): string {
   return bundleDir;
 }
 
-/** Run the full init sequence: skeleton → bundle install → migrate. */
+/** Run the full init sequence: skeleton → bundle install → migrate → advisor. */
 function fullInit(home: string, model: string, bundleDir: string): void {
   initGuild(home, 'test-guild', model);
   installBundle({ home, bundleDir, commit: false });
   applyMigrations(home);
+  instantiate({ home, name: 'advisor', roles: ['advisor'], curriculum: 'guild-operations', temperament: 'guide' });
   execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
   execFileSync('git', ['commit', '-m', 'Install starter kit'], { cwd: home, stdio: 'pipe' });
 }
@@ -272,6 +273,42 @@ describe('full init sequence', () => {
       assert.equal(rows.length, 1);
       assert.equal(rows[0]!.sequence, 1);
       assert.equal(rows[0]!.filename, '001-initial-schema.sql');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('advisor anima is instantiated with correct composition', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
+    const home = path.join(tmpDir, 'guild');
+    const bundleDir = makeLocalBundle(tmpDir);
+    fullInit(home, 'test-model', bundleDir);
+
+    const db = new Database(path.join(home, '.nexus', 'nexus.db'));
+    try {
+      // Advisor exists and is active
+      const anima = db.prepare(
+        "SELECT * FROM animas WHERE name = 'advisor'"
+      ).get() as { id: number; status: string } | undefined;
+      assert.ok(anima, 'advisor anima not found in ledger');
+      assert.equal(anima.status, 'active');
+
+      // Has advisor role
+      const role = db.prepare(
+        'SELECT role FROM roster WHERE anima_id = ?'
+      ).get(anima.id) as { role: string } | undefined;
+      assert.ok(role, 'advisor role not found in roster');
+      assert.equal(role.role, 'advisor');
+
+      // Composition has curriculum and temperament snapshots
+      const comp = db.prepare(
+        'SELECT * FROM anima_compositions WHERE anima_id = ?'
+      ).get(anima.id) as { curriculum_name: string; temperament_name: string; curriculum_snapshot: string; temperament_snapshot: string } | undefined;
+      assert.ok(comp, 'advisor composition not found');
+      assert.equal(comp.curriculum_name, 'guild-operations');
+      assert.equal(comp.temperament_name, 'guide');
+      assert.ok(comp.curriculum_snapshot.includes('Guild Operations Curriculum'), 'curriculum snapshot missing content');
+      assert.ok(comp.temperament_snapshot.includes('Guide Temperament'), 'temperament snapshot missing content');
     } finally {
       db.close();
     }
