@@ -14,7 +14,7 @@ disable-model-invocation: true
 
 Check for things Sean should be nudged about:
 
-- **Ethnographer interview:** Check the most recent interview file in `experiments/X006-guild-metaphor/artifacts/` (files named `YYYY-MM-DD-interview.md`). If the most recent one is more than a day old — or if none exist yet — remind Sean to run an ethnographer session. Keep it light: *"It's been a couple days since your last X006 interview — might be a good time to check in with the ethnographer."*
+- **Ethnographer interview:** Check the most recent interview file in `experiments/ethnography/interviews/` (files named `YYYY-MM-DD.md`). If the most recent one is more than a day old — or if none exist yet — remind Sean to run an ethnographer session. Keep it light: *"It's been a couple days since your last ethnographer interview — might be a good time to check in."*
 
 ## Generate Summary
 
@@ -47,6 +47,13 @@ For each notable moment:
 - Include **direct quotes from Sean** when available
 - Flag **why it's notable** (e.g., "shifted the project's core abstraction", "surfaced a tension between X and Y", "revealed an assumption about how agents should work")
 - Prioritize moments where the human changed direction, challenged an assumption, or articulated something new about the project's purpose
+
+### Experiment observations
+
+Flag anything relevant to active experiments. Omit this section if nothing applies.
+
+- **X008 (Patron's Hands):** If Coco did implementation work this session, note: what task, how it was directed (Sean asked vs. Coco offered), scope (files/lines), and whether a commission was considered as an alternative.
+- **X007 (First Contact):** If an autonomous commission was dispatched or discussed, note the context.
 <expected-format>
 
 ## Guidelines
@@ -54,8 +61,8 @@ For each notable moment:
 - Keep the whole summary under ~500 words. Brevity is a feature.
 - Do not editorialize beyond the "why it's notable" flags.
 - Present the summary directly as part of the conversation
-- Write the summary to `.scratch/recent-sessions/<timestamp>.md`, where `<timestamp>` is a date and timestamp such as `YYYY-MM-DDTHHmmss.md`. Each session gets its own file — never overwrite a previous one.
-- **Also write a copy** to `experiments/X006-guild-metaphor/artifacts/session-notes/new/<timestamp>.md`. This copy is for the ethnographer and must NOT be auto-deleted — it accumulates until the ethnographer reviews it.
+- Write the summary to `.scratch/recent-sessions/<timestamp>.md`, where `<timestamp>` is the current date and time formatted as `YYYY-MM-DDTHHMMSS.md` (use the actual current time — don't round to the nearest hour). Each session gets its own file — never overwrite a previous one.
+- **Also write a copy** to `experiments/ethnography/session-notes/new/<timestamp>.md`. This copy is for the ethnographer and must NOT be auto-deleted — it accumulates until the ethnographer reviews it.
 - After writing, check `.scratch/recent-sessions/`: if there are more than 4 files, delete the oldest ones to keep only the 4 most recent. Do NOT trim the `session-notes/new/` copy.
 - Commit all `recent-sessions` and `session-notes` changes to git and push those changes.
 - In addition to writing the summary, share it in the chat for review and inclusion in session transcripts

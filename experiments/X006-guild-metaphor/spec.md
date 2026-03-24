@@ -52,11 +52,9 @@ The guild system as described in [the guild metaphor doc](../../docs/guild-metap
 
 ### H1 — Ethnographer Interviews
 
-An **ethnographer agent** (`.claude/agents/ethnographer.md`) conducts periodic short interviews with Sean — roughly every 1-2 days during active development. The ethnographer reads recent session context, asks specific questions about concrete experiences (not abstract opinions), and records structured interview notes plus full transcripts to `experiments/X006-guild-metaphor/artifacts/`.
+An **ethnographer agent** (`.claude/agents/ethnographer.md`) conducts periodic short interviews with Sean — roughly every 1-2 days during active development. The ethnographer reads recent session context, asks specific questions about concrete experiences (not abstract opinions), and records structured interview notes plus full transcripts.
 
-Each session produces two artifacts:
-- `YYYY-MM-DD-interview.md` — structured record with direct quotes, observations, and theme tags
-- `YYYY-MM-DD-transcript.md` — full raw conversation
+The ethnographer is a project-wide research function, not X006-specific. It collects data across all active experiments, with interview write-ups structured by experiment for easy cross-referencing. All ethnographer artifacts live in `experiments/ethnography/` — interviews, transcripts, and session notes.
 
 The wrap-up skill nudges Sean to run an ethnographer session if more than a day has passed since the last one.
 
