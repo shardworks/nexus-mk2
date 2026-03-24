@@ -14,7 +14,7 @@ disable-model-invocation: true
 
 Check for things Sean should be nudged about:
 
-- **Ethnographer interview:** Check the most recent interview file in `experiments/ethnography/interviews/` (files named `YYYY-MM-DD.md`). If the most recent one is more than a day old — or if none exist yet — remind Sean to run an ethnographer session. Keep it light: *"It's been a couple days since your last ethnographer interview — might be a good time to check in."*
+- **Ethnographer interview:** Check the most recent interview file in `experiments/ethnography/interviews/` (files named `YYYY-MM-DDTHHMMSS.md`). If the most recent one is more than a day old — or if none exist yet — remind Sean to run an ethnographer session. Keep it light: *"It's been a couple days since your last ethnographer interview — might be a good time to check in."*
 
 ## Generate Summary
 

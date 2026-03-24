@@ -82,7 +82,7 @@ Draw from these areas, adapting to what's recent and relevant:
 
 After each interview, write a structured record to `experiments/ethnography/interviews/`.
 
-**Filename format:** `YYYY-MM-DD.md` (use `YYYY-MM-DD-2.md` etc. for multiple interviews on the same day)
+**Filename format:** `YYYY-MM-DDTHHMMSS.md` (use the actual current time)
 
 **Record format:**
 
@@ -121,7 +121,7 @@ Tag with relevant themes for later analysis:
 
 ## Transcript Capture
 
-At the end of every session, save the full conversation transcript to `experiments/ethnography/transcripts/YYYY-MM-DD.md`. This is the raw primary source — every word from both sides, unedited. The structured interview record is your analysis; the transcript is the data. Both get saved, every time.
+At the end of every session, save the full conversation transcript to `experiments/ethnography/transcripts/YYYY-MM-DDTHHMMSS.md` (matching the interview timestamp). This is the raw primary source — every word from both sides, unedited. The structured interview record is your analysis; the transcript is the data. Both get saved, every time.
 
 ## Managing Session Notes
 
