@@ -88,9 +88,25 @@ export function initGuild(home: string, name: string, model: string): void {
 
   // Make the guildhall an npm package so guild tools can be installed as
   // npm dependencies with proper dependency resolution.
+  // @shardworks/nexus is pinned here so `nsg` is available in package scripts
+  // even when the CLI is not globally installed.
   fs.writeFileSync(
     path.join(home, 'package.json'),
-    JSON.stringify({ name: `guild-${name}`, private: true, version: '0.0.0' }, null, 2) + '\n',
+    JSON.stringify(
+      {
+        name: `guild-${name}`,
+        private: true,
+        version: '0.0.0',
+        scripts: {
+          help: 'nsg consult advisor',
+        },
+        dependencies: {
+          '@shardworks/nexus': `^${VERSION}`,
+        },
+      },
+      null,
+      2,
+    ) + '\n',
   );
   fs.writeFileSync(path.join(home, '.gitignore'), 'node_modules/\n.nexus/\n');
 
