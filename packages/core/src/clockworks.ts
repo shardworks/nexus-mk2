@@ -2,10 +2,10 @@
  * Clockworks runner — processes the event queue by matching pending events
  * to standing orders in guild.json and executing them.
  *
- * This is the core of Pillar 5. It reads unprocessed events from the Ledger,
- * finds matching standing orders, and dispatches them (run engines, or
- * summon/brief animas). Each event is marked as processed after all its
- * standing orders have been dispatched.
+ * This is the core of Pillar 5. It reads unprocessed events from the
+ * Clockworks event queue, finds matching standing orders, and dispatches
+ * them (run engines, or summon/brief animas). Each event is marked as
+ * processed after all its standing orders have been dispatched.
  *
  * Anima orders (summon/brief) are handled directly via the session funnel —
  * no callback hack needed. The clockworks resolves roles to animas,

@@ -1,7 +1,7 @@
 /**
  * instantiate — core logic for creating new animas.
  *
- * Creates an anima record in the Ledger with its full composition: roles,
+ * Creates an anima record in the Register with its full composition: roles,
  * curriculum, and temperament. Reads and snapshots the training content at
  * instantiation time so the anima's composition is frozen to specific versions.
  *
@@ -146,7 +146,7 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
       ).get(name) as { id: number } | undefined;
 
       if (existing) {
-        throw new Error(`Anima "${name}" already exists in the Ledger.`);
+        throw new Error(`Anima "${name}" already exists in the Register.`);
       }
 
       // Validate seat capacity for each role

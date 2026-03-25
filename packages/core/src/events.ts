@@ -1,5 +1,5 @@
 /**
- * Event signalling — persists events to the Ledger for Clockworks processing.
+ * Event signalling — persists events to the Clockworks event queue.
  *
  * signalEvent() is the write path. It records an immutable fact in the events
  * table. It does NOT process the event — the Clockworks runner handles that
@@ -52,7 +52,7 @@ export function validateCustomEvent(home: string, name: string): void {
 }
 
 /**
- * Signal an event — persist it to the Ledger's events table.
+ * Signal an event — persist it to the Clockworks events table.
  *
  * Does not process the event. The Clockworks runner processes separately.
  *
@@ -83,7 +83,7 @@ export function signalEvent(
 }
 
 /**
- * Read pending (unprocessed) events from the Ledger, ordered by fired_at.
+ * Read pending (unprocessed) events from the Clockworks event queue, ordered by fired_at.
  */
 export function readPendingEvents(home: string): GuildEvent[] {
   const db = new Database(ledgerPath(home));

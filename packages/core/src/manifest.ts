@@ -1,7 +1,7 @@
 /**
  * Manifest — assembles an anima's identity for a session.
  *
- * Reads the anima's composition from the Ledger (roles, curricula, temperament),
+ * Reads the anima's composition from the Register (roles, curricula, temperament),
  * resolves tools by role gating and precondition checks, reads all prompt
  * ingredients from disk, and assembles the composed system prompt.
  *
@@ -35,7 +35,7 @@ function basePackageName(pkg: string): string {
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-/** An anima's record from the Ledger, including composition metadata. */
+/** An anima's record from the Register, including composition metadata. */
 export interface AnimaRecord {
   id: number;
   name: string;
@@ -71,7 +71,7 @@ export interface UnavailableTool {
 
 /** The fully-resolved manifest for an anima session. */
 export interface ManifestResult {
-  /** The anima record from the Ledger. */
+  /** The anima record from the Register. */
   anima: AnimaRecord;
   /** The composed system prompt for the anima. */
   systemPrompt: string;
@@ -94,7 +94,7 @@ export interface ManifestResult {
 // ── Core Functions ─────────────────────────────────────────────────────
 
 /**
- * Read an anima's full record from the Ledger, including roles and composition.
+ * Read an anima's full record from the Register, including roles and composition.
  */
 export function readAnima(home: string, animaName: string): AnimaRecord {
   const db = new Database(ledgerPath(home));
@@ -107,7 +107,7 @@ export function readAnima(home: string, animaName: string): AnimaRecord {
     ).get(animaName) as { id: number; name: string; status: string } | undefined;
 
     if (!anima) {
-      throw new Error(`Anima "${animaName}" not found in the Ledger.`);
+      throw new Error(`Anima "${animaName}" not found in the Register.`);
     }
 
     // Get roles

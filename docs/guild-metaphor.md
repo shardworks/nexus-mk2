@@ -41,7 +41,7 @@ Concretely, standing and commissioned animas are the same thing: entries in the 
 
 ### Register
 
-The authoritative record of every anima that has ever existed. The register is the guild's institutional memory — it contains aspirants in training, active members, and retired animas. Each register entry records the anima's name, composition, and full state history.
+The authoritative record of every anima that has ever existed — one of the guild's core record Books. The register is the guild's institutional memory — it contains aspirants in training, active members, and retired animas. Each register entry records the anima's name, composition, and full state history. See [The Books](#the-books) for how the Register relates to the Ledger and Daybook.
 
 ### Roster
 
@@ -139,7 +139,7 @@ Not everything mechanical is an engine. Libraries, session providers, migration 
 
 ### Clockworks
 
-The guild's nervous system — an event-driven layer that connects things that happen to things that should respond. The Clockworks persists events to the Ledger as they are signaled and processes them according to the guild's standing orders. It turns the guild from a tool the patron operates into a system that operates itself.
+The guild's nervous system — an event-driven layer that connects things that happen to things that should respond. The Clockworks keeps its own records of what it has seen and how it responded — these are the mechanism's working memory, not part of the guild's Books. The Clockworks processes events according to the guild's standing orders, turning the guild from a tool the patron operates into a system that operates itself.
 
 ### Standing Order
 
@@ -153,7 +153,7 @@ Distinct from engines: tools are wielded by animas during work; engines run auto
 
 ### Ledger
 
-The guild's operational record book — who exists, what they've done, what they were told. The ledger holds runtime state: anima records, roster, commission history, the shape of labor in progress, audit trail. It does not track what's installed or what artifacts exist — that's the guildhall's filesystem and configuration. The ledger answers the questions that matter over time: who was activated, what were they composed of, what did they build, and what happened.
+The guild's book of work — one of the guild's core Books. The Ledger tracks commissions, assignments, and the shape of labor in progress. It answers: what has been asked for, who's doing it, and how far along is it? See [The Books](#the-books) for the full model.
 
 ### Relic
 
@@ -162,3 +162,25 @@ An artifact the guild depends on but does not maintain or fully understand. Load
 ### Threshold
 
 The boundary between the patron's world and the guild's world — where the patron's intent crosses into guild territory. What crosses the threshold outward is works. What crosses inward is commissions. The patron does not cross the threshold into the workshops; the guild does not reach into the patron's space uninvited.
+
+## The Books
+
+The guild keeps its **Books** in the guildhall — the operational records that accumulate as the guild works. The Books record what the guild *has done*; the guildhall's configuration defines what the guild *is*.
+
+### Register
+
+The membership roll. Who exists and what they're made of. The Register records every anima — their name, their composition, their role assignments. It is the guild's institutional memory of its people. Updated when members join or retire; consulted whenever an anima is called to work.
+
+### Ledger
+
+The book of work. What has been commissioned and how labor is organized. The Ledger records commissions, assignments, and the shape of labor in progress — works, pieces, jobs, strokes. It is the guild's transaction record: what was asked for, who is doing it, and how far along it has come.
+
+### Daybook
+
+The chronicle. What happened, when, and what it cost. The Daybook records sessions and the audit trail — the raw chronological account of guild activity. Nothing reads the Daybook to decide what to do next; it exists so the guild can look back and understand what occurred.
+
+The name comes from bookkeeping: a daybook is the chronological journal of transactions before they are posted to the ledger. The Daybook is the raw record of activity; the Ledger is the structured record of work.
+
+### What the Books are not
+
+The Clockworks keeps its own working memory — what it has seen, what it did in response — but this is the mechanism's internal state, not a book the guild consults. The guild's configuration (roles, standing orders, equipment, workshops) lives in the guildhall, not in the Books.

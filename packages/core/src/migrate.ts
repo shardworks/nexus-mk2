@@ -1,5 +1,5 @@
 /**
- * Ledger migration — applies pending SQL migrations to the guild's Ledger.
+ * Database migration — applies pending SQL migrations to the guild's Books.
  *
  * Runs at guild bootstrap, before dispatch, and on demand after framework
  * upgrades. Absorbed from the former `engine-ledger-migrate` package.
@@ -120,7 +120,7 @@ function getAppliedSequences(db: Database.Database): Set<number> {
 }
 
 /**
- * Apply pending migrations to the Ledger.
+ * Apply pending migrations to the guild's Books database.
  *
  * Reads migration files from the guild's nexus/migrations/ directory, compares
  * against the _migrations tracking table, and applies any that haven't been

@@ -302,10 +302,10 @@ function writeSessionRecord(home: string, record: SessionRecord): string {
   return relativePath;
 }
 
-// ── Ledger Helpers ─────────────────────────────────────────────────────
+// ── Daybook Helpers ────────────────────────────────────────────────────
 
 /**
- * Insert a session.started row in the Ledger.
+ * Insert a session.started row in the Daybook.
  * @returns The session row ID.
  */
 function insertSessionRow(
@@ -406,10 +406,10 @@ function updateSessionRow(
  *
  * This is THE code path for all sessions. It:
  * 1. If workspace is workshop-temp: create fresh worktree from main
- * 2. Records session.started in the Ledger → gets sessionId
+ * 2. Records session.started in the Daybook → gets sessionId
  * 3. Signals session.started event
  * 4. Delegates to the provider (passing resolved cwd)
- * 5. Records session.ended in the Ledger (with metrics)
+ * 5. Records session.ended in the Daybook (with metrics)
  * 6. Writes the SessionRecord JSON to .nexus/sessions/{uuid}.json
  * 7. Signals session.ended event (with full metrics + sessionId in payload)
  * 8. If workspace is workshop-temp AND session is autonomous: tear down the worktree
@@ -451,7 +451,7 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
   // Derive workshop name from workspace
   const workshopName = workspace.kind === 'guildhall' ? null : workspace.workshop;
 
-  // Step 2: Record session.started in the Ledger
+  // Step 2: Record session.started in the Daybook
   let sessionId: number;
   try {
     sessionId = insertSessionRow(home, {

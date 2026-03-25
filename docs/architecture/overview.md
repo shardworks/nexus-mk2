@@ -26,7 +26,7 @@ When an anima is manifested for a session, the guild assembles a complete instru
 
 ### 4. The Register
 
-The guild does not run anonymous agents. Every anima is a named entity with a tracked composition, a persistent history, and an accountable record. The register and roster — held in the Ledger — know who exists, what they're made of, what role they fill, and what they've done. Identity is what makes the guild a learning organization rather than a stateless script.
+The guild does not run anonymous agents. Every anima is a named entity with a tracked composition, a persistent history, and an accountable record. The Register — one of the guild's Books — knows who exists, what they're made of, and what role they fill. Identity is what makes the guild a learning organization rather than a stateless script.
 
 ### 5. The Clockworks
 
@@ -38,7 +38,7 @@ See [The Clockworks](clockworks.md) for full architecture and design details.
 
 ## Nexus — The Framework
 
-Nexus is the runtime that makes the guild system operational. It provides the base tools and engines needed for the five pillars to function, manages the Ledger schema, and offers a CLI for guild lifecycle management.
+Nexus is the runtime that makes the guild system operational. It provides the base tools and engines needed for the five pillars to function, manages the database schema, and offers a CLI for guild lifecycle management.
 
 ### What Nexus provides
 
@@ -47,7 +47,7 @@ Nexus is the runtime that makes the guild system operational. It provides the ba
 **Base engines:**
 - `manifest` — prepare animas for sessions (resolve composition, assemble instructions, select model, launch session)
 - `worktree-setup` — prepare isolated work environments for commissions
-- `ledger-migrate` — manage Ledger schema
+- `ledger-migrate` — manage database schema (the Books and Clockworks tables)
 
 **Base tools** — thin wrapper scripts that delegate to CLI subcommands. Each tool is a shell script (e.g. `nexus install-tool "$@"`) paired with an `instructions.md` that teaches animas how to use it. The CLI has the logic; the wrapper is just the anima-facing interface.
 - `dispatch` — post commissions targeting a workshop, trigger the manifest engine
@@ -56,7 +56,7 @@ Nexus is the runtime that makes the guild system operational. It provides the ba
 - `promote` *(v2)* — change artifact status tiers
 - `instantiate` — create animas from curriculum + temperament
 
-**Ledger schema** — the base database migrations that define the Ledger's structure.
+**Database schema** — the base migrations that define the guild's Books and Clockworks tables.
 
 ### The Nexus CLI
 
@@ -64,7 +64,7 @@ The CLI is both the operator interface and the engine behind all base tools. Eve
 
 | Command | What it does |
 |---------|-------------|
-| `nexus init` | Create a new guild — git repo, directory structure, `guild.json`, Ledger, base tools installed |
+| `nexus init` | Create a new guild — git repo, directory structure, `guild.json`, Books database, base tools installed |
 | `nexus install-tool <source>` | Install a tool, engine, curriculum, or temperament (from registry, git URL, workshop, tarball, or local link) |
 | `nexus remove-tool <name>` | Remove an installed tool and deregister from `guild.json` |
 | `nexus dispatch` | Post a commission and trigger the manifest engine |
@@ -125,7 +125,7 @@ The manifest engine resolves tool paths based on `source` — `nexus` means look
 
 ## Topology
 
-The guild root IS the guildhall — a regular git clone with `guild.json` at the root. Workshop bare clones and commission worktrees live inside `.nexus/` (gitignored). The Ledger also lives in `.nexus/`.
+The guild root IS the guildhall — a regular git clone with `guild.json` at the root. Workshop bare clones and commission worktrees live inside `.nexus/` (gitignored). The Books database also lives in `.nexus/`.
 
 The guild root is discovered by walking up from the current directory looking for `guild.json` (like git finds `.git/`). The `--guild-root` CLI flag provides explicit override. No env var is required.
 
@@ -140,7 +140,7 @@ GUILD_ROOT/                           ← regular git clone (IS the guildhall)
   .git/
   .gitignore                          ← ignores: node_modules/, .nexus/
   .nexus/                             ← framework-managed, gitignored
-    nexus.db                          ← Ledger (SQLite)
+    nexus.db                          ← The Books (SQLite — Register, Ledger, Daybook, Clockworks)
     workshops/
       workshop-a.git/                 ← bare clone
       workshop-b.git/                 ← bare clone
@@ -194,19 +194,29 @@ Authored artifacts, git-managed, meaningful as text:
 - **Engines** — `engines/` — same pattern as tools but with `nexus-engine.json` and no `instructions.md`
 - **Framework migrations** — `nexus/migrations/*.sql` — managed by Nexus CLI
 
-### Ledger (SQLite at `.nexus/nexus.db`)
+### The Books & Clockworks (SQLite at `.nexus/nexus.db`)
 
-Operational state — queryable, relational, runtime data:
+Operational state — queryable, relational, runtime data — organized into the guild's Books plus Clockworks internal state:
 
-- **Anima registry** — name, status, state history, timestamps
+**Register** (who exists):
+- **Anima records** — name, status, state history, timestamps
 - **Anima composition** — references to curriculum (name + version), temperament (name + version); full content snapshots at instantiation, immutable after creation. *(v2 adds oaths.)*
-- **Roster state** — role assignments, standing vs commissioned status
+- **Roster** — role assignments, standing vs commissioned status
+
+**Ledger** (what work is happening):
 - **Commission metadata** — content, timestamps, assigned animas, status, state transitions
-- **Anima self-recorded memory and notes** — written via tool, not direct Ledger access
+- **Anima self-recorded memory and notes** — written via tool, not direct database access
 - **Edict history** *(v2)* — active edicts and lifecycle
+
+**Daybook** (what happened):
+- **Session records** — who ran, when, how long, what it cost
 - **Audit log** — who did what, when
 
-The Ledger holds operational state only. "What exists and what version is active" is answered by `guild.json` and the filesystem. The Ledger answers "who is doing what, what happened, and what were they told."
+**Clockworks** (internal operational state):
+- **Event queue** — pending and processed events
+- **Dispatch trace** — execution records of standing order processing
+
+The Books hold operational state only. "What exists and what version is active" is answered by `guild.json` and the filesystem. The Books answer "who is doing what, what happened, and what were they told."
 
 ### Workshop Repositories
 
@@ -222,13 +232,13 @@ An anima is not a monolithic instruction file. It is composed from discrete, reu
 
 | Component | What it provides | Source |
 |-----------|-----------------|--------|
-| **Curriculum** | Training content — skills, approach to work, craft knowledge. "What you know and how you work." | Packaged artifact in the guildhall (`training/curricula/`), referenced by name in Ledger |
-| **Temperament** | Personality, disposition, communication style. "Who you are." | Packaged artifact in the guildhall (`training/temperaments/`), referenced by name in Ledger |
-| **Oaths** *(v2)* | Identity-level binding commitments. "What you will always/never do." | Stored in Ledger, per-anima |
+| **Curriculum** | Training content — skills, approach to work, craft knowledge. "What you know and how you work." | Packaged artifact in the guildhall (`training/curricula/`), referenced by name in Register |
+| **Temperament** | Personality, disposition, communication style. "Who you are." | Packaged artifact in the guildhall (`training/temperaments/`), referenced by name in Register |
+| **Oaths** *(v2)* | Identity-level binding commitments. "What you will always/never do." | Stored in Register, per-anima |
 
 ### Assembly
 
-At instantiation, the Ledger records which curriculum (name + version) and temperament (name + version) were assigned. *(v2 adds oaths as a third composition component.)* The **manifest engine** assembles these components — along with guild-level content from the codex and available tool instructions — into the full instruction set delivered to the AI model.
+At instantiation, the Register records which curriculum (name + version) and temperament (name + version) were assigned. *(v2 adds oaths as a third composition component.)* The **manifest engine** assembles these components — along with guild-level content from the codex and available tool instructions — into the full instruction set delivered to the AI model.
 
 The composition template is part of the manifest engine and versioned with it. When the template changes, a new framework version is published.
 
@@ -237,8 +247,8 @@ template(
   codex       = codex/all.md + codex/roles/<role>.md,
   curriculum  = training/curricula/<name>/<version>.md,
   temperament = training/temperaments/<name>/<version>.md,
-  oaths       = [from Ledger],              ← v2
-  edicts      = [active edicts from Ledger], ← v2
+  oaths       = [from Register],             ← v2
+  edicts      = [active edicts from Ledger], ← v2 (governance)
   tools       = [instructions.md for each tool available to this role],
   commission  = [spec + sage advice + clarification thread, if commissioned]
 )
@@ -259,10 +269,10 @@ The framework provides a four-level hierarchy for organizing labor. Each level h
 
 | Level | Operational Role | Framework Behavior |
 |-------|-----------------|-------------------|
-| **Work** | Decomposition boundary | Tracked in Ledger. Too large to plan directly — must be decomposed into pieces. |
-| **Piece** | Planning boundary | Tracked in Ledger. Independently plannable. Produces concrete jobs. May run in parallel with other pieces. |
-| **Job** | Dispatch boundary | Tracked in Ledger. Assigned to one anima. Dispatched by the clockworks. Owned from start to finish. |
-| **Stroke** | Progress boundary | Tracked in Ledger. Recorded by the executing anima via tool. Provides granular progress, context bridging between sessions, and crash recovery. |
+| **Work** | Decomposition boundary | Tracked in the Ledger. Too large to plan directly — must be decomposed into pieces. |
+| **Piece** | Planning boundary | Tracked in the Ledger. Independently plannable. Produces concrete jobs. May run in parallel with other pieces. |
+| **Job** | Dispatch boundary | Tracked in the Ledger. Assigned to one anima. Dispatched by the clockworks. Owned from start to finish. |
+| **Stroke** | Progress boundary | Tracked in the Ledger. Recorded by the executing anima via tool. Provides granular progress, context bridging between sessions, and crash recovery. |
 
 A **commission** is the patron's request — it describes origin, not scope. The guild receives a commission and determines where it maps in the hierarchy: a large commission becomes a work; a moderate one might be a single piece; a small one might be dispatched directly as a job.
 
@@ -313,7 +323,7 @@ SYSTEM PROMPT (identity + environment):
 │     (from composition)              │
 ├─────────────────────────────────────┤
 │  5. Active edicts (v2)              │  Current directives from leadership
-│     (from the Ledger)               │
+│     (from the Ledger — governance)  │
 ├─────────────────────────────────────┤
 │  6. Tool instructions               │  instructions.md for each tool
 │     (from nexus/ and guild,         │  the anima has access to
@@ -333,29 +343,31 @@ Sessions run in bare mode (no CLAUDE.md), with session persistence disabled, and
 
 ---
 
-## The Ledger
+## The Books
 
-The Ledger is the guild's operational database. It holds runtime state — who exists, what they've done, what they were told. It does not track what's installed (that's `guild.json`) or what artifacts exist (that's the filesystem).
+The guild's operational database is organized into the guild's Books — the Register (who exists), the Ledger (what work is happening), and the Daybook (what happened) — plus the Clockworks' own internal state. See [The Guild Metaphor](../guild-metaphor.md#the-books) for the full conceptual model.
+
+The Books do not track what's installed (that's `guild.json`) or what artifacts exist (that's the filesystem).
 
 **Schema** is owned by the Nexus framework and lives in `nexus/migrations/`. The `ledger-migrate` engine (also framework-provided) applies pending migrations. It runs at guild bootstrap, before dispatch, and on demand after framework upgrades.
 
-**Access** is always mediated through tools. Animas never touch the Ledger directly — they use tools that provide a clean interface. This means:
+**Access** is always mediated through tools. Animas never touch the Books directly — they use tools that provide a clean interface. This means:
 
-- The Ledger's schema can change without changing anima behavior (tool absorbs the change)
+- The schema can change without changing anima behavior (tool absorbs the change)
 - Animas can't accidentally corrupt operational data
 - All writes are auditable through the tool layer
 
-The Ledger is guild infrastructure — owned by the institution, maintained by framework engines, accessed through tools.
+The Books are guild infrastructure — owned by the institution, maintained by framework engines, accessed through tools.
 
 ---
 
 ## Vocabulary
 
-This document uses the guild vocabulary defined in [`guild-metaphor.md`](../guild-metaphor.md), the work decomposition hierarchy in [`work-decomposition.md`](../work-decomposition.md), and the project philosophy in [`philosophy.md`](../philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, work, piece, job, stroke, works, workshop, threshold, codex, curriculum, temperament, oath *(v2)*, edict *(v2)*, engine, tool, relic, guildhall, ledger, clockworks, standing order.
+This document uses the guild vocabulary defined in [`guild-metaphor.md`](../guild-metaphor.md), the work decomposition hierarchy in [`work-decomposition.md`](../work-decomposition.md), and the project philosophy in [`philosophy.md`](../philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, work, piece, job, stroke, works, workshop, threshold, codex, curriculum, temperament, oath *(v2)*, edict *(v2)*, engine, tool, relic, guildhall, the Books (register, ledger, daybook), clockworks, standing order.
 
 One term is specific to this architecture and not defined in the metaphor:
 
-**Nexus** — the framework that makes guilds operational. Provides the base tools, engines, and Ledger schema. Managed via the Nexus CLI.
+**Nexus** — the framework that makes guilds operational. Provides the base tools, engines, and database schema (Books + Clockworks). Managed via the Nexus CLI.
 
 ---
 
@@ -363,10 +375,10 @@ One term is specific to this architecture and not defined in the metaphor:
 
 The dispatch tool and manifest engine have a clean separation of concerns:
 
-- **Dispatch** (tool, wielded by leadership) — the *decision*. Posts a commission, assigns an anima, records the assignment in the Ledger, and triggers the manifest engine.
-- **Manifest** (engine, mechanical) — the *preparation*. Reads the assignment from the Ledger, resolves the anima's composition, gathers all instruction sources (codex, curriculum, temperament, tool instructions), assembles the system prompt via template, prepares the commission brief as the initial prompt, configures the session (model, worktree cwd, flags), and launches it.
+- **Dispatch** (tool, wielded by leadership) — the *decision*. Posts a commission to the Ledger, assigns an anima, records the assignment, and triggers the manifest engine.
+- **Manifest** (engine, mechanical) — the *preparation*. Reads the assignment from the Ledger, resolves the anima's composition from the Register, gathers all instruction sources (codex, curriculum, temperament, tool instructions), assembles the system prompt via template, prepares the commission brief as the initial prompt, configures the session (model, worktree cwd, flags), and launches it.
 
-The boundary: dispatch writes to the Ledger and triggers; manifest reads from the Ledger and executes. Dispatch decides *who does what*; manifest handles *assembling their identity and sending them to work*.
+The boundary: dispatch writes to the Ledger and triggers; manifest reads from the Ledger and Register and executes. Dispatch decides *who does what*; manifest handles *assembling their identity and sending them to work*.
 
 ---
 

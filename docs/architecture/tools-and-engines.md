@@ -365,7 +365,7 @@ The monorepo is structured as a pnpm workspace:
 
 ```
 packages/
-  core/                          ← @shardworks/nexus-core — shared library (ledger, config, paths, install logic)
+  core/                          ← @shardworks/nexus-core — shared library (Books, config, paths, install logic)
   cli/                           ← @shardworks/nexus — the CLI operators run
   tool-install/                  ← base tool: install-tool
   engine-mcp-server/             ← base engine: mcp-server
@@ -373,7 +373,7 @@ packages/
   ...                            ← additional base tools/engines as separate packages
 ```
 
-All handler modules in base tools import from `@shardworks/nexus-core` — the shared library that owns guild configuration, ledger access, path resolution, and core operations like `installTool()`. The CLI is a separate consumer of the same library. This clean separation means:
+All handler modules in base tools import from `@shardworks/nexus-core` — the shared library that owns guild configuration, Books access, path resolution, and core operations like `installTool()`. The CLI is a separate consumer of the same library. This clean separation means:
 
 - **Tool handlers don't depend on the CLI** — they import `@shardworks/nexus-core` directly, same as any guild-authored module tool would.
 - **The CLI doesn't contain tool logic** — it's a thin wrapper that imports handlers from `@shardworks/nexus-core` or from tool packages.
@@ -493,7 +493,7 @@ Curricula and temperaments have simpler registry entries than tools — no roles
 }
 ```
 
-The registry answers "what training content is available in this guild." It does *not* assign training content to roles — that's the wrong layer. A curriculum and temperament are assigned to an individual **anima** at instantiation time (recorded in the Ledger). The `instantiate` tool picks from the available set.
+The registry answers "what training content is available in this guild." It does *not* assign training content to roles — that's the wrong layer. A curriculum and temperament are assigned to an individual **anima** at instantiation time (recorded in the Register). The `instantiate` tool picks from the available set.
 
 ### How they differ from tools
 

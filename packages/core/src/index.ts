@@ -41,7 +41,6 @@ export {
   clockRun,
 } from './clockworks.ts';
 
-export { createLedger } from './ledger.ts';
 export {
   type GuildConfig,
   type RoleDefinition,
@@ -59,6 +58,7 @@ export {
 export {
   findGuildRoot,
   nexusDir,
+  booksPath,
   ledgerPath,
   worktreesPath,
   workshopsPath,

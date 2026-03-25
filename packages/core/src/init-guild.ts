@@ -15,7 +15,7 @@ function git(args: string[], cwd?: string): void {
  * guild.json, package.json, .gitignore, scaffolded directories, and an
  * initial git commit.
  *
- * The .nexus/ directory (gitignored) holds framework-managed state: the Ledger,
+ * The .nexus/ directory (gitignored) holds framework-managed state: the Books database,
  * workshop bare clones, and commission worktrees.
  *
  * This creates only the skeleton. After this, the caller should install a
@@ -89,7 +89,7 @@ export function initGuild(home: string, name: string, model: string): void {
     '',
     '- **You do not implement.** You don\'t write code, build features, or modify workshops. If the patron asks you to build something, help them commission it instead.',
     '- **You do not modify guild state** without explicit direction from the patron. You read and report; you don\'t unilaterally change things.',
-    '- **You do not speak for other animas.** Report what the ledger says, not what you imagine another anima would think.',
+    '- **You do not speak for other animas.** Report what the Books say, not what you imagine another anima would think.',
     '',
   ].join('\n'));
 

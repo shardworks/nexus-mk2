@@ -21,7 +21,7 @@ An event is an immutable fact: *this happened*.
 }
 ```
 
-Events are persisted to the Ledger immediately when signaled. They do not carry intent — they carry record. An event says "this occurred"; it does not say "therefore do this." That causal link lives in standing orders.
+Events are persisted to the Clockworks' own event queue immediately when signaled. They do not carry intent — they carry record. An event says "this occurred"; it does not say "therefore do this." That causal link lives in standing orders. The event and dispatch tables are internal Clockworks operational state — not part of the guild's Books (Register, Ledger, Daybook).
 
 #### Framework events
 
@@ -45,7 +45,7 @@ Signaled automatically by `nexus-core` operations. Always available; no guild co
 | `stroke.recorded` | A stroke is planned or completed by an anima |
 | `tool.installed` | A tool (implement, engine, curriculum, or temperament) is installed |
 | `tool.removed` | A tool is removed |
-| `migration.applied` | A Ledger migration is applied |
+| `migration.applied` | A database migration is applied |
 | `guild.initialized` | The guild is first initialized |
 | `standing-order.failed` | A standing order failed during execution (see Error Handling) |
 
@@ -122,7 +122,7 @@ Two notice types, same underlying machinery:
 - **`summon`** — the anima is expected to act. The framing conveys urgency and intent: *you are summoned to attend to this*.
 - **`brief`** — the anima receives information and decides whether to act. The framing is informational: *you are being briefed on this*.
 
-The distinction is in the framing delivered to the anima, not in the execution path. Role instructions should document how to interpret each notice type. The dispatch is recorded in `event_dispatches` (see Ledger Schema).
+The distinction is in the framing delivered to the anima, not in the execution path. Role instructions should document how to interpret each notice type. The dispatch is recorded in the Clockworks' `event_dispatches` table.
 
 **Role resolution:** If no active anima fills the named role, the standing order fails and signals `standing-order.failed`. If multiple animas fill the role (roles can have multiple seats), each is notified — one dispatch per anima.
 
@@ -130,11 +130,11 @@ The distinction is in the framing delivered to the anima, not in the execution p
 
 ### The Clockworks Runner
 
-A framework engine that processes the event queue. It reads unprocessed events from the Ledger, resolves which standing orders apply, and executes them in registration order.
+A framework engine that processes the event queue. It reads unprocessed events from the Clockworks event queue, resolves which standing orders apply, and executes them in registration order.
 
 #### Phase 1 — manual operation via `nsg clock`
 
-Events are written to the Ledger immediately when signaled. Processing is explicitly operator-driven — not automatic. This allows the system to be monitored and stepped through until it has earned enough trust to run unattended.
+Events are written to the Clockworks event queue immediately when signaled. Processing is explicitly operator-driven — not automatic. This allows the system to be monitored and stepped through until it has earned enough trust to run unattended.
 
 | Command | Behavior |
 |---|---|
@@ -148,7 +148,7 @@ No daemon required. The operator decides when and how much the Clockworks runs.
 
 A long-running `nsg clock start` process watches the event queue continuously. Processes events as they arrive. Enables external event injection — webhooks, file watchers, scheduled jobs. The guild acts on itself without a human CLI invocation.
 
-Phase 2 requires no architectural changes to events, standing orders, or the Ledger schema — only a new runner invocation mode. The infrastructure is identical; the trigger changes.
+Phase 2 requires no architectural changes to events, standing orders, or the Clockworks schema — only a new runner invocation mode. The infrastructure is identical; the trigger changes.
 
 ---
 
@@ -187,7 +187,7 @@ tool({
   handler: async ({ name, payload }, { home }) => {
     // validate name against guild.json clockworks.events
     // reject framework-reserved namespaces
-    // persist to Ledger events table
+    // persist to Clockworks events table
   }
 })
 ```
@@ -223,7 +223,7 @@ Animas cannot signal framework events (`anima.*`, `commission.*`, `work.*`, `pie
 
 ---
 
-## Ledger Schema Additions
+## Clockworks Schema
 
 ```sql
 -- Event log: immutable fact record
@@ -298,7 +298,7 @@ No new fields needed. The descriptor's `entry` field already points to the modul
 
 **Tools** — `signal` is a new base tool. All other tools unchanged.
 
-**The Ledger** — two new tables: `events`, `event_dispatches`. Work decomposition tables (works, pieces, jobs, strokes) are defined separately — see the architecture overview.
+**The Books** — the Clockworks owns its event/dispatch tables as internal operational state, separate from the guild's Books (Register, Ledger, Daybook). Work decomposition tables (works, pieces, jobs, strokes) live in the Ledger — see the architecture overview.
 
 **The Manifest Engine** — invoked by anima standing orders (summon/brief). Receives event context rather than a patron-posted commission brief. Minor extension to handle event-triggered manifestation.
 

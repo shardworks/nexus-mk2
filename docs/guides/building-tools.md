@@ -46,7 +46,7 @@ export default tool({
 
 1. **Default export.** The handler must be the default export. The MCP engine does `import(modulePath)` and reads `.default`.
 2. **Zod params.** Every parameter is a Zod schema. The `.describe()` string becomes the parameter description in MCP — make it clear.
-3. **Context injection.** The framework passes `{ home: string }` as the second argument. Use `home` to find guild files, the ledger, etc. The guild root is auto-detected from cwd (walks up looking for `guild.json`).
+3. **Context injection.** The framework passes `{ home: string }` as the second argument. Use `home` to find guild files, the Books database, etc. The guild root is auto-detected from cwd (walks up looking for `guild.json`).
 4. **Return JSON.** The MCP engine serializes the return value as JSON. Return objects, arrays, strings, or numbers. Throw errors for failures — the engine catches them and returns an MCP error.
 5. **Sync or async.** Handlers can be sync or async. The framework `await`s either way.
 
@@ -233,11 +233,11 @@ The core library provides utilities that tool handlers commonly need:
 | `readGuildConfig(home)` | Read and parse `guild.json` |
 | `writeGuildConfig(home, config)` | Write `guild.json` |
 | `findGuildRoot(startDir?)` | Discover the guild root from cwd |
-| `ledgerPath(home)` | Resolve path to the Ledger SQLite database (`.nexus/nexus.db`) |
+| `booksPath(home)` | Resolve path to the Books SQLite database (`.nexus/nexus.db`) |
 | `installTool(opts)` | Core install logic (used by `install-tool` tool) |
 | `removeTool(opts)` | Core remove logic (used by `remove-tool` tool) |
 | `rehydrate(home)` | Reconstruct `node_modules` from tracked guild state |
-| `createLedger(path)` | Create a new Ledger database |
+| `ledgerPath(home)` | *(Deprecated alias for `booksPath`)* |
 | `tool(def)` | The tool SDK factory |
 
 Import from `@shardworks/nexus-core`:

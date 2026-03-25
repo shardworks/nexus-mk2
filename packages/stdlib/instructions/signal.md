@@ -1,6 +1,6 @@
 # signal
 
-Signal a custom guild event. The event is recorded in the Ledger and will be processed by the Clockworks runner when `nsg clock tick` or `nsg clock run` is invoked.
+Signal a custom guild event. The event is recorded in the Clockworks event queue and will be processed by the Clockworks runner when `nsg clock tick` or `nsg clock run` is invoked.
 
 ## Usage
 

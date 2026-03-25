@@ -1,6 +1,6 @@
 # instantiate
 
-Create a new anima in the guild — recording its composition (curriculum, temperament, roles) in the Ledger so it can be manifested for sessions.
+Create a new anima in the guild — recording its composition (curriculum, temperament, roles) in the Register so it can be manifested for sessions.
 
 ## Usage
 
