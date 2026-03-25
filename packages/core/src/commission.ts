@@ -6,9 +6,10 @@
  * post-session merge) is handled by standing orders.
  */
 import Database from 'better-sqlite3';
-import { ledgerPath } from './nexus-home.ts';
+import { booksPath } from './nexus-home.ts';
 import { readGuildConfig } from './guild-config.ts';
 import { signalEvent } from './events.ts';
+import { generateId } from './id.ts';
 
 export interface CommissionOptions {
   /** Absolute path to the guild root. */
@@ -21,7 +22,7 @@ export interface CommissionOptions {
 
 export interface CommissionResult {
   /** The ID of the created commission. */
-  commissionId: number;
+  commissionId: string;
 }
 
 /**
@@ -29,11 +30,11 @@ export interface CommissionResult {
  */
 export function updateCommissionStatus(
   home: string,
-  commissionId: number,
+  commissionId: string,
   status: string,
   reason: string,
 ): void {
-  const db = new Database(ledgerPath(home));
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
 
   try {
@@ -50,16 +51,16 @@ export function updateCommissionStatus(
  */
 export function readCommission(
   home: string,
-  commissionId: number,
-): { id: number; content: string; status: string; workshop: string; statusReason: string | null } | null {
-  const db = new Database(ledgerPath(home));
+  commissionId: string,
+): { id: string; content: string; status: string; workshop: string; statusReason: string | null } | null {
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
 
   try {
     const row = db.prepare(
       `SELECT id, content, status, workshop, status_reason FROM commissions WHERE id = ?`,
     ).get(commissionId) as {
-      id: number;
+      id: string;
       content: string;
       status: string;
       workshop: string;
@@ -99,23 +100,23 @@ export function commission(opts: CommissionOptions): CommissionResult {
     );
   }
 
-  const db = new Database(ledgerPath(home));
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
 
   try {
     const statusReason = 'posted by patron';
+    const commissionId = generateId('c');
 
     // Create commission
-    const insertCommission = db.prepare(
-      `INSERT INTO commissions (content, status, status_reason, workshop) VALUES (?, ?, ?, ?)`,
-    );
-    const commissionResult = insertCommission.run(spec, 'posted', statusReason, workshop);
-    const commissionId = Number(commissionResult.lastInsertRowid);
+    db.prepare(
+      `INSERT INTO commissions (id, content, status, status_reason, workshop) VALUES (?, ?, ?, ?, ?)`,
+    ).run(commissionId, spec, 'posted', statusReason, workshop);
 
     // Audit log
     db.prepare(
-      `INSERT INTO audit_log (actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(
+      generateId('aud'),
       'patron',
       'commission_posted',
       'commission',

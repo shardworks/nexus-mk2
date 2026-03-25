@@ -6,8 +6,9 @@
  * separately via `nsg clock`.
  */
 import Database from 'better-sqlite3';
-import { ledgerPath } from './nexus-home.ts';
+import { booksPath } from './nexus-home.ts';
 import { readGuildConfig } from './guild-config.ts';
+import { generateId } from './id.ts';
 import type { GuildEvent } from './engine.ts';
 
 /** Reserved framework event namespaces. Animas cannot signal these. */
@@ -67,16 +68,17 @@ export function signalEvent(
   name: string,
   payload: unknown,
   emitter: string,
-): number {
-  const db = new Database(ledgerPath(home));
+): string {
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
 
   try {
-    const result = db.prepare(
-      `INSERT INTO events (name, payload, emitter) VALUES (?, ?, ?)`,
-    ).run(name, payload != null ? JSON.stringify(payload) : null, emitter);
+    const id = generateId('evt');
+    db.prepare(
+      `INSERT INTO events (id, name, payload, emitter) VALUES (?, ?, ?, ?)`,
+    ).run(id, name, payload != null ? JSON.stringify(payload) : null, emitter);
 
-    return Number(result.lastInsertRowid);
+    return id;
   } finally {
     db.close();
   }
@@ -86,13 +88,13 @@ export function signalEvent(
  * Read pending (unprocessed) events from the Clockworks event queue, ordered by fired_at.
  */
 export function readPendingEvents(home: string): GuildEvent[] {
-  const db = new Database(ledgerPath(home));
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
 
   try {
     const rows = db.prepare(
       `SELECT id, name, payload, emitter, fired_at FROM events WHERE processed = 0 ORDER BY fired_at, id`,
-    ).all() as { id: number; name: string; payload: string | null; emitter: string; fired_at: string }[];
+    ).all() as { id: string; name: string; payload: string | null; emitter: string; fired_at: string }[];
 
     return rows.map(row => ({
       id: row.id,
@@ -109,14 +111,14 @@ export function readPendingEvents(home: string): GuildEvent[] {
 /**
  * Read a single event by id.
  */
-export function readEvent(home: string, id: number): GuildEvent | null {
-  const db = new Database(ledgerPath(home));
+export function readEvent(home: string, id: string): GuildEvent | null {
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
 
   try {
     const row = db.prepare(
       `SELECT id, name, payload, emitter, fired_at FROM events WHERE id = ?`,
-    ).get(id) as { id: number; name: string; payload: string | null; emitter: string; fired_at: string } | undefined;
+    ).get(id) as { id: string; name: string; payload: string | null; emitter: string; fired_at: string } | undefined;
 
     if (!row) return null;
 
@@ -135,8 +137,8 @@ export function readEvent(home: string, id: number): GuildEvent | null {
 /**
  * Mark an event as processed.
  */
-export function markEventProcessed(home: string, eventId: number): void {
-  const db = new Database(ledgerPath(home));
+export function markEventProcessed(home: string, eventId: string): void {
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
 
   try {
@@ -152,7 +154,7 @@ export function markEventProcessed(home: string, eventId: number): void {
 export function recordDispatch(
   home: string,
   opts: {
-    eventId: number;
+    eventId: string;
     handlerType: 'engine' | 'anima';
     handlerName: string;
     targetRole?: string;
@@ -163,14 +165,15 @@ export function recordDispatch(
     error?: string;
   },
 ): void {
-  const db = new Database(ledgerPath(home));
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
 
   try {
     db.prepare(
-      `INSERT INTO event_dispatches (event_id, handler_type, handler_name, target_role, notice_type, started_at, ended_at, status, error)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO event_dispatches (id, event_id, handler_type, handler_name, target_role, notice_type, started_at, ended_at, status, error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
+      generateId('ed'),
       opts.eventId,
       opts.handlerType,
       opts.handlerName,

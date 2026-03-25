@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { ledgerPath } from './nexus-home.ts';
+import { booksPath } from './nexus-home.ts';
 import { readGuildConfig } from './guild-config.ts';
 import { readPreconditions, checkPreconditions } from './preconditions.ts';
 import { resolveToolFromExport } from './tool.ts';
@@ -37,7 +37,7 @@ function basePackageName(pkg: string): string {
 
 /** An anima's record from the Register, including composition metadata. */
 export interface AnimaRecord {
-  id: number;
+  id: string;
   name: string;
   status: string;
   roles: string[];
@@ -97,14 +97,14 @@ export interface ManifestResult {
  * Read an anima's full record from the Register, including roles and composition.
  */
 export function readAnima(home: string, animaName: string): AnimaRecord {
-  const db = new Database(ledgerPath(home));
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
 
   try {
     // Get anima
     const anima = db.prepare(
       `SELECT id, name, status FROM animas WHERE name = ?`,
-    ).get(animaName) as { id: number; name: string; status: string } | undefined;
+    ).get(animaName) as { id: string; name: string; status: string } | undefined;
 
     if (!anima) {
       throw new Error(`Anima "${animaName}" not found in the Register.`);

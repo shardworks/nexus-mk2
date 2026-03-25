@@ -12,8 +12,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { ledgerPath } from './nexus-home.ts';
+import { booksPath } from './nexus-home.ts';
 import { readGuildConfig } from './guild-config.ts';
+import { generateId } from './id.ts';
 
 export interface InstantiateOptions {
   /** Absolute path to the guild root. */
@@ -29,7 +30,7 @@ export interface InstantiateOptions {
 }
 
 export interface InstantiateResult {
-  animaId: number;
+  animaId: string;
   name: string;
   roles: string[];
   curriculum: string | null;
@@ -135,7 +136,7 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
     temperamentSnapshot = { name: temperament, version, content };
   }
 
-  const db = new Database(ledgerPath(home));
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
 
   try {
@@ -143,7 +144,7 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
       // Check name uniqueness
       const existing = db.prepare(
         `SELECT id FROM animas WHERE name = ?`,
-      ).get(name) as { id: number } | undefined;
+      ).get(name) as { id: string } | undefined;
 
       if (existing) {
         throw new Error(`Anima "${name}" already exists in the Register.`);
@@ -167,25 +168,25 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
       }
 
       // Create anima
-      const insertAnima = db.prepare(
-        `INSERT INTO animas (name, status) VALUES (?, 'active')`,
-      );
-      const animaResult = insertAnima.run(name);
-      const animaId = Number(animaResult.lastInsertRowid);
+      const animaId = generateId('a');
+      db.prepare(
+        `INSERT INTO animas (id, name, status) VALUES (?, ?, 'active')`,
+      ).run(animaId, name);
 
       // Assign roles in roster
       const insertRole = db.prepare(
-        `INSERT INTO roster (anima_id, role) VALUES (?, ?)`,
+        `INSERT INTO roster (id, anima_id, role) VALUES (?, ?, ?)`,
       );
       for (const role of roles) {
-        insertRole.run(animaId, role);
+        insertRole.run(generateId('r'), animaId, role);
       }
 
       // Record composition snapshot
       db.prepare(
-        `INSERT INTO anima_compositions (anima_id, curriculum_name, curriculum_version, curriculum_snapshot, temperament_name, temperament_version, temperament_snapshot)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO anima_compositions (id, anima_id, curriculum_name, curriculum_version, curriculum_snapshot, temperament_name, temperament_version, temperament_snapshot)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
+        generateId('ac'),
         animaId,
         curriculumSnapshot?.name ?? '',
         curriculumSnapshot?.version ?? '',
@@ -197,8 +198,9 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
 
       // Audit log
       db.prepare(
-        `INSERT INTO audit_log (actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(
+        generateId('aud'),
         'instantiate',
         'anima_instantiated',
         'anima',
@@ -210,7 +212,7 @@ export function instantiate(opts: InstantiateOptions): InstantiateResult {
     })();
 
     return {
-      animaId: result as number,
+      animaId: result as string,
       name,
       roles,
       curriculum: curriculum ?? null,

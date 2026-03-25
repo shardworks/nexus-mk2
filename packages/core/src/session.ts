@@ -14,7 +14,8 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { ledgerPath, nexusDir, workshopBarePath } from './nexus-home.ts';
+import { booksPath, nexusDir, workshopBarePath } from './nexus-home.ts';
+import { generateId } from './id.ts';
 import { signalEvent } from './events.ts';
 import type { ManifestResult } from './manifest.ts';
 
@@ -92,7 +93,7 @@ export interface SessionLaunchOptions {
 /** What the funnel returns to callers. */
 export interface SessionResult {
   /** Ledger row ID — written by the funnel before provider launch. */
-  sessionId: number;
+  sessionId: string;
   exitCode: number;
   /** Provider-reported token usage, if available. */
   tokenUsage?: {
@@ -132,10 +133,10 @@ export type ResolvedWorkspace =
 /** Full session record written to disk as JSON. */
 export interface SessionRecord {
   /** Ledger session row ID (for cross-reference). */
-  sessionId: number;
+  sessionId: string;
   /** The anima that ran this session, with full composition provenance. */
   anima: {
-    id: number;
+    id: string;
     name: string;
     roles: string[];
     codex: string;
@@ -260,7 +261,7 @@ function sessionsDir(home: string): string {
  * Build a SessionRecord from the manifest and provider result.
  */
 function buildSessionRecord(
-  sessionId: number,
+  sessionId: string,
   manifest: ManifestResult,
   prompt: string | null,
   providerResult: SessionProviderResult | null,
@@ -311,7 +312,7 @@ function writeSessionRecord(home: string, record: SessionRecord): string {
 function insertSessionRow(
   home: string,
   opts: {
-    animaId: number;
+    animaId: string;
     provider: string;
     trigger: string;
     workshop: string | null;
@@ -323,16 +324,18 @@ function insertSessionRow(
     roles: string[];
     startedAt: string;
   },
-): number {
-  const db = new Database(ledgerPath(home));
+): string {
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
   try {
-    const result = db.prepare(
-      `INSERT INTO sessions (anima_id, provider, trigger, workshop, workspace_kind,
+    const id = generateId('ses');
+    db.prepare(
+      `INSERT INTO sessions (id, anima_id, provider, trigger, workshop, workspace_kind,
         curriculum_name, curriculum_version, temperament_name, temperament_version,
         roles, started_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
+      id,
       opts.animaId,
       opts.provider,
       opts.trigger,
@@ -345,7 +348,7 @@ function insertSessionRow(
       JSON.stringify(opts.roles),
       opts.startedAt,
     );
-    return Number(result.lastInsertRowid);
+    return id;
   } finally {
     db.close();
   }
@@ -356,7 +359,7 @@ function insertSessionRow(
  */
 function updateSessionRow(
   home: string,
-  sessionId: number,
+  sessionId: string,
   opts: {
     endedAt: string;
     exitCode: number;
@@ -370,7 +373,7 @@ function updateSessionRow(
     recordPath?: string;
   },
 ): void {
-  const db = new Database(ledgerPath(home));
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
   try {
     db.prepare(
@@ -452,7 +455,7 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
   const workshopName = workspace.kind === 'guildhall' ? null : workspace.workshop;
 
   // Step 2: Record session.started in the Daybook
-  let sessionId: number;
+  let sessionId: string;
   try {
     sessionId = insertSessionRow(home, {
       animaId: manifest.anima.id,

@@ -24,14 +24,15 @@ import {
 } from './events.ts';
 import { isClockworkEngine, resolveEngineFromExport } from './engine.ts';
 import type { GuildEvent } from './engine.ts';
-import { ledgerPath } from './nexus-home.ts';
+import { booksPath } from './nexus-home.ts';
+import { generateId } from './id.ts';
 import { updateCommissionStatus, readCommission } from './commission.ts';
 import { manifest } from './manifest.ts';
 import { launchSession, resolveWorkspace, getSessionProvider } from './session.ts';
 
 /** Result of processing a single event. */
 export interface TickResult {
-  eventId: number;
+  eventId: string;
   eventName: string;
   dispatches: DispatchSummary[];
 }
@@ -183,7 +184,7 @@ async function executeEngineOrder(
  * Throws if no active anima holds the role.
  */
 function resolveAnimaByRole(home: string, role: string): string {
-  const db = new Database(ledgerPath(home));
+  const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
   try {
     const row = db.prepare(`
@@ -250,20 +251,20 @@ async function executeAnimaOrder(
     const animaName = resolveAnimaByRole(home, roleName);
 
     // Commission-specific lifecycle: write assignment, update status
-    const commissionId = payload?.commissionId as number | undefined;
+    const commissionId = payload?.commissionId as string | undefined;
     if (commissionId != null && noticeType === 'summon') {
       // Write commission assignment
-      const db = new Database(ledgerPath(home));
+      const db = new Database(booksPath(home));
       db.pragma('foreign_keys = ON');
       try {
         const animaRow = db.prepare(
           `SELECT id FROM animas WHERE name = ?`,
-        ).get(animaName) as { id: number } | undefined;
+        ).get(animaName) as { id: string } | undefined;
 
         if (animaRow) {
           db.prepare(
-            `INSERT OR IGNORE INTO commission_assignments (commission_id, anima_id) VALUES (?, ?)`,
-          ).run(commissionId, animaRow.id);
+            `INSERT OR IGNORE INTO commission_assignments (id, commission_id, anima_id) VALUES (?, ?, ?)`,
+          ).run(generateId('ca'), commissionId, animaRow.id);
         }
       } finally {
         db.close();
@@ -306,7 +307,7 @@ async function executeAnimaOrder(
     // Write commission_sessions join row if applicable
     if (commissionId != null) {
       try {
-        const db = new Database(ledgerPath(home));
+        const db = new Database(booksPath(home));
         db.pragma('foreign_keys = ON');
         try {
           db.prepare(
@@ -398,7 +399,7 @@ function signalStandingOrderFailed(
  * @param eventId - Specific event id to process, or undefined for next pending.
  * @returns Processing result, or null if no events to process.
  */
-export async function clockTick(home: string, eventId?: number): Promise<TickResult | null> {
+export async function clockTick(home: string, eventId?: string): Promise<TickResult | null> {
   if (eventId != null) {
     const event = readEvent(home, eventId);
     if (!event) {

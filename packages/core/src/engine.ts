@@ -33,7 +33,7 @@
 
 /** An immutable fact from the event log — the input to clockwork engines. */
 export interface GuildEvent {
-  id: number;
+  id: string;
   name: string;
   payload: unknown;
   emitter: string;

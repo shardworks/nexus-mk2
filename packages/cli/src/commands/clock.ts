@@ -42,16 +42,9 @@ export function makeClockCommand() {
       .argument('[id]', 'Specific event id to process')
       .action(async (id: string | undefined, _, cmd) => {
         const home = resolveHome(cmd);
-        const eventId = id ? parseInt(id, 10) : undefined;
-
-        if (id && isNaN(eventId!)) {
-          console.error('Error: event id must be a number.');
-          process.exitCode = 1;
-          return;
-        }
 
         try {
-          const result = await clockTick(home, eventId);
+          const result = await clockTick(home, id);
 
           if (!result) {
             console.log('No pending events to process.');
