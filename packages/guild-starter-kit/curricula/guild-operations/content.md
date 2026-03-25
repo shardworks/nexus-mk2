@@ -117,7 +117,7 @@ This deletes the bare clone, any commission worktrees for that workshop, and rem
 
 ### How Workshops Are Used in Commissions
 
-When a commission is dispatched to a workshop, the worktree-setup engine:
+When a commission is dispatched to a workshop, the workshop-prepare engine:
 
 1. Creates a commission-specific branch from `main` in the workshop's bare clone
 2. Checks out a git worktree at `.nexus/worktrees/{workshop}/commission-{id}/`
@@ -142,43 +142,103 @@ The `remoteUrl` is the source of truth. The bare clone on disk is ephemeral and 
 
 ## Commissions
 
-A commission is a unit of work posted by the patron and undertaken by the guild. The lifecycle:
+A commission is a unit of work posted by the patron and undertaken by the guild. Commissions flow through an event-driven pipeline powered by standing orders:
 
-1. **Posted** — the patron describes what needs to be built
-2. **Assigned** — dispatched to an artificer (with sage consultation if a Master Sage is active)
-3. **In progress** — the artificer works in a workshop worktree
-4. **Completed** or **Failed** — work is delivered or the commission is marked as failed
+### Commission Lifecycle
 
-Use `nsg commission` to post commissions. The Clockworks handles the rest via standing orders.
+1. **Posted** — the patron runs `nsg commission <spec> --workshop <name>`. This creates the commission in the Ledger and signals `commission.posted`.
+2. **Worktree prepared** — the `workshop-prepare` engine (triggered by `commission.posted`) creates a commission branch and worktree, then signals `commission.ready`.
+3. **Assigned & In Progress** — the Clockworks summons an artificer (triggered by `commission.ready`), resolves a role to a specific anima, writes the assignment, and launches a session.
+4. **Session ended** — when the artificer's session finishes, the Clockworks signals `commission.session.ended`.
+5. **Merged or Failed** — the `workshop-merge` engine (triggered by `commission.session.ended`) merges the commission branch back to main. On success it signals `commission.completed`; on conflict it signals `commission.failed`.
+
+Each step is driven by a standing order in `guild.json`, making the pipeline configurable and extensible.
+
+### Commission Status Flow
+
+```
+posted → in_progress → completed
+                     → failed
+```
+
+## Sessions
+
+A session is a single manifestation of an anima — the span during which an anima is alive and working. Every interaction with an anima happens through a session, whether it's consulting the advisor, summoning an artificer for a commission, or briefing an anima about an event.
+
+### Session Triggers
+
+| Trigger | Meaning |
+|---------|---------|
+| **consult** | Interactive session with a standing anima (e.g., `nsg consult advisor`) |
+| **summon** | The anima is summoned by a standing order to act on an event — autonomous, directive |
+| **brief** | The anima is briefed by a standing order about an event — autonomous, informational |
+
+### The Session Funnel
+
+All sessions flow through a single code path (`launchSession`) that provides unified lifecycle management:
+
+1. **Workspace setup** — resolves where the anima will work (guildhall, or a worktree in a workshop)
+2. **Ledger recording** — writes a `session.started` row with the anima's identity, composition, and context
+3. **Event signaling** — signals `session.started` for the Clockworks
+4. **Provider launch** — delegates to the session provider (e.g., Claude Code) to run the actual AI session
+5. **Cleanup** — writes `session.ended` to the Ledger with metrics (tokens, cost, duration), writes a full session record to `.nexus/sessions/`, signals `session.ended`, and tears down temporary worktrees (for autonomous sessions only)
+
+### Session Records
+
+Every session produces a JSON record at `.nexus/sessions/{uuid}.json` containing:
+
+- The anima's full composition at session time (curriculum, temperament, roles, codex, tool instructions)
+- The assembled system prompt
+- The user prompt
+- Available and unavailable tools
+- The raw conversation transcript
+
+Session records are the guild's institutional memory of what each anima knew and did.
+
+### Session Tracking in the Ledger
+
+The `sessions` table tracks every session with:
+
+- Which anima ran the session and what composition they had
+- Which provider and model were used
+- What triggered the session (consult, summon, brief)
+- Which workshop (if any) the session worked in
+- Start/end times, exit code, token usage, cost, and duration
+- A link to the full session record JSON on disk
+
+For commissions, the `commission_sessions` join table links commissions to their sessions — a commission may involve multiple sessions (retries, sub-tasks).
 
 ## Tools
 
-### Tools
-
-Tools that animas wield during work. Each tool ships with instructions delivered to the anima at manifest time. Available tools:
+Tools that animas wield during work. Each tool ships with instructions delivered to the anima at manifest time. All tools are packaged in `@shardworks/nexus-stdlib`:
 
 - **install-tool** — install new tools, engines, or bundles into the guild
 - **remove-tool** — remove installed tools
 - **commission** — post commissions to the guild
 - **instantiate** — create new animas with assigned training and roles
 - **nexus-version** — report the installed Nexus framework version
-- **signal** — signal a custom guild event for the Clockworks
+- **signal** — signal a custom guild event for the Clockworks (not included in the default bundle — must be installed separately)
 
 ### Engines
 
-Automated mechanical processes with no AI involvement. Two kinds:
+Engines are automated mechanical processes with no AI involvement. Two kinds:
 
-**Static engines** — bespoke APIs called by framework code. Not triggerable by standing orders.
+**Core engines** — fundamental capabilities absorbed into the Nexus framework itself (`@shardworks/nexus-core`). These are not registered in `guild.json` as engines — they are framework internals that the system calls directly:
 
-- **manifest** — composes anima instructions from codex, training, and tool instructions at session start
-- **mcp-server** — runs the MCP server that exposes tools to animas during sessions
-- **worktree-setup** — creates and manages git worktrees for commissions
-- **ledger-migrate** — applies database migrations to the Ledger
+- **manifest** — assembles an anima's identity for a session (codex, curriculum, temperament, tool instructions → system prompt)
+- **worktree** — creates and manages git worktrees for commissions and temporary sessions
+- **migrate** — applies database migrations to the Ledger
 
-**Clockwork engines** — purpose-built to respond to events via standing orders. Use the `engine()` SDK factory from `@shardworks/nexus-core`. The Clockworks runner calls them automatically when matching events fire.
+**Clockwork engines** — purpose-built to respond to events via standing orders. Use the `engine()` SDK factory from `@shardworks/nexus-core`. The Clockworks runner calls them automatically when matching events fire. Packaged in `@shardworks/nexus-stdlib`:
 
 - **workshop-prepare** — creates a worktree when a commission is posted (`commission.posted` → `commission.ready`)
 - **workshop-merge** — merges a commission branch after the session ends (`commission.session.ended` → `commission.completed` or `commission.failed`)
+
+### Session Providers
+
+Session providers are the bridge between the Nexus session funnel and a specific AI runtime. They are not engines — they implement the `SessionProvider` interface and handle the mechanics of launching an AI session (spawning a process, connecting tools via MCP, collecting transcripts and metrics).
+
+The current session provider is **Claude Code** (`@shardworks/claude-code-session-provider`), which spawns the Claude CLI with an MCP server that exposes the anima's tools.
 
 ## The Codex
 
@@ -188,7 +248,21 @@ Role-specific codex entries live in `codex/roles/` and are delivered only to ani
 
 ## The Ledger
 
-The guild's operational database (SQLite). Holds anima records, roster, commission history, compositions, events, and the audit trail. Lives at `.nexus/nexus.db` in the guildhall. Managed by the ledger-migrate engine.
+The guild's operational database (SQLite). Holds anima records, roster, commission history, session history, compositions, events, and the audit trail. Lives at `.nexus/nexus.db` in the guildhall. Managed by the migrate engine in core.
+
+### Key Tables
+
+| Table | What it holds |
+|-------|--------------|
+| `animas` | Every anima that has ever existed — name, status, composition |
+| `roster` | Active role assignments (filtered view of active animas) |
+| `commissions` | Commission records with status, content, and workshop |
+| `commission_assignments` | Which anima was assigned to which commission |
+| `sessions` | Every session — anima, provider, trigger, metrics, cost |
+| `commission_sessions` | Links commissions to their sessions |
+| `events` | The Clockworks event queue — every event signaled |
+| `dispatches` | Standing order execution records |
+| `audit_log` | Who did what, when |
 
 ## The Clockworks
 
@@ -200,8 +274,21 @@ An event is an immutable fact: *this happened*. Events are recorded in the Ledge
 
 Two kinds:
 
-- **Framework events** — signaled automatically by the system (`commission.sealed`, `tool.installed`, `anima.instantiated`, etc.). Animas cannot signal these.
+- **Framework events** — signaled automatically by the system. Animas cannot signal these. Reserved namespaces: `anima.*`, `commission.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`, `session.*`.
 - **Custom events** — declared by the guild in `guild.json` under `clockworks.events`. Animas signal these using the `signal` tool.
+
+### Key Framework Events
+
+| Event | When it fires | Typical standing order |
+|-------|--------------|----------------------|
+| `commission.posted` | A new commission is created | `run: workshop-prepare` |
+| `commission.ready` | Worktree is set up, commission is ready for work | `summon: artificer` |
+| `commission.session.ended` | An artificer's session finishes | `run: workshop-merge` |
+| `commission.completed` | Commission branch merged to main | (guild-defined) |
+| `commission.failed` | Commission failed (merge conflict, error) | (guild-defined) |
+| `session.started` | Any session begins | (guild-defined) |
+| `session.ended` | Any session ends (with metrics) | (guild-defined) |
+| `standing-order.failed` | A standing order execution failed | (guild-defined) |
 
 ### Standing Orders
 
@@ -228,9 +315,11 @@ Example `guild.json` configuration:
       }
     },
     "standingOrders": [
-      { "on": "commission.sealed", "run": "cleanup-worktree" },
-      { "on": "commission.failed", "summon": "advisor" },
-      { "on": "code.reviewed",     "brief": "guildmaster" }
+      { "on": "commission.posted",         "run": "workshop-prepare" },
+      { "on": "commission.ready",          "summon": "artificer" },
+      { "on": "commission.session.ended",  "run": "workshop-merge" },
+      { "on": "commission.failed",         "brief": "advisor" },
+      { "on": "code.reviewed",             "brief": "advisor" }
     ]
   }
 }
@@ -244,7 +333,7 @@ Use the **signal** tool to signal custom events:
 signal({ name: "code.reviewed", payload: { pr: 42, issues_found: 0 } })
 ```
 
-The event name must be declared in `guild.json clockworks.events`. Framework namespaces (`anima.*`, `commission.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`) are reserved.
+The event name must be declared in `guild.json clockworks.events`. Framework namespaces (`anima.*`, `commission.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`, `session.*`) are reserved.
 
 ### Processing Events
 
@@ -258,7 +347,7 @@ Events are not processed automatically. The operator controls when the Clockwork
 
 ### Error Handling
 
-When a standing order fails, the system signals a `standing-order.failed` event. Guilds can respond to this with their own standing orders. A loop guard prevents cascading failures.
+When a standing order fails, the system signals a `standing-order.failed` event. Guilds can respond to this with their own standing orders. A loop guard prevents cascading failures — `standing-order.failed` events triggered by other `standing-order.failed` events are skipped automatically.
 
 ### Hello World Walkthrough
 
@@ -360,7 +449,7 @@ The command is idempotent — safe to run at any time. If everything is already 
 
 ### What Restore Does NOT Do
 
-- It does not create the Ledger (that's done by `nsg init` and the ledger-migrate engine)
+- It does not create the Ledger (that's done by `nsg init` and the migrate engine)
 - It does not re-create animas or commissions — those live in the Ledger
 - It does not push or pull workshop repos — it only clones them fresh if missing
 
@@ -372,18 +461,18 @@ The primary interface is the `nsg` command:
 |---------|---------|
 | `nsg init` | Create a new guild |
 | `nsg commission <spec> --workshop <name>` | Post a commission |
-| `nsg tool install <source>` | Install a tool or bundle |
-| `nsg tool remove <name>` | Remove an installed tool |
+| `nsg consult <name>` | Consult a standing anima (e.g., the advisor) |
+| `nsg status` | Show guild status |
+| `nsg signal <name>` | Signal a custom guild event |
+| `nsg clock list` | Show pending events |
+| `nsg clock tick [id]` | Process next pending event (or specific id) |
+| `nsg clock run` | Process all pending events |
 | `nsg workshop add <url>` | Clone a remote repo and register it as a workshop |
 | `nsg workshop remove <name>` | Remove a workshop |
 | `nsg workshop list` | List workshops with status |
 | `nsg workshop create <org/name>` | Create a new GitHub repo and register as a workshop |
 | `nsg guild restore` | Restore runtime state after a fresh clone |
+| `nsg tool install <source>` | Install a tool or bundle |
+| `nsg tool remove <name>` | Remove an installed tool |
 | `nsg anima create` | Instantiate a new anima |
 | `nsg anima manifest <name>` | Generate an anima's full instructions |
-| `nsg status` | Show guild status |
-| `nsg consult <name>` | Consult a standing anima (e.g., the advisor) |
-| `nsg signal <name>` | Signal a custom guild event |
-| `nsg clock list` | Show pending events |
-| `nsg clock tick [id]` | Process next pending event (or specific id) |
-| `nsg clock run` | Process all pending events |
