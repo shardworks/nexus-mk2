@@ -13,7 +13,6 @@
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { readGuildConfig, writeGuildConfig } from './guild-config.ts';
 import type { WorkshopEntry } from './guild-config.ts';
@@ -260,21 +259,16 @@ export function createWorkshop(opts: CreateWorkshopOptions): AddWorkshopResult {
   const remoteUrl = `https://github.com/${repoName}.git`;
   const name = deriveWorkshopName(repoName);
 
-  // The new GitHub repo is empty — we need to seed it with an initial
-  // commit so the bare clone has a real 'main' branch that worktrees
-  // can branch from. Clone into a temp dir, commit a README, push, then
-  // discard the temp clone and do the real bare clone via addWorkshop.
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-workshop-'));
-  try {
-    git(['clone', remoteUrl, tmpDir]);
-    git(['checkout', '-b', 'main'], tmpDir);
-    fs.writeFileSync(path.join(tmpDir, 'README.md'), `# ${name}\n`);
-    git(['add', 'README.md'], tmpDir);
-    git(['commit', '-m', 'Initial commit'], tmpDir);
-    git(['push', '-u', 'origin', 'main'], tmpDir);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+  // Bare-clone the empty repo, then seed it with an initial commit
+  // using git plumbing so worktrees have a real 'main' ref to branch from.
+  const result = addWorkshop({ home, name, remoteUrl });
 
-  return addWorkshop({ home, name, remoteUrl });
+  const bare = result.barePath;
+  git(['symbolic-ref', 'HEAD', 'refs/heads/main'], bare);
+  const emptyTree = git(['mktree'], bare);  // reads empty stdin → empty tree
+  const commit = git(['commit-tree', emptyTree, '-m', `Initial commit\n\n# ${name}`], bare);
+  git(['update-ref', 'refs/heads/main', commit], bare);
+  git(['push', 'origin', 'main'], bare);
+
+  return result;
 }

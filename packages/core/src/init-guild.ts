@@ -41,7 +41,7 @@ export function initGuild(home: string, name: string, model: string): void {
 
   // Create guild root and initialize git repo
   fs.mkdirSync(home, { recursive: true });
-  git(['init'], home);
+  git(['init', '-b', 'main'], home);
 
   // Create .nexus infrastructure directory
   fs.mkdirSync(path.join(home, '.nexus', 'workshops'), { recursive: true });
