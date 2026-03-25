@@ -28,8 +28,9 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { VERSION, resolveToolFromExport } from '@shardworks/nexus-core';
+import { VERSION, resolveToolFromExport, registerSessionProvider } from '@shardworks/nexus-core';
 import type { ToolDefinition, ToolContext } from '@shardworks/nexus-core';
+import { claudeCodeProvider } from './index.ts';
 
 /** A single tool to load into the MCP server. */
 export interface ToolSpec {
@@ -140,6 +141,13 @@ export async function main(configPath?: string): Promise<void> {
     console.error('Usage: nexus-mcp-server <config.json>');
     process.exit(1);
   }
+
+  // Register the session provider so tools that trigger session launches
+  // (e.g. clock-run dispatching a summon) have a provider available.
+  // Without this, launchSession() throws because no provider is registered —
+  // the CLI entry point (program.ts) registers it for CLI commands, but the
+  // MCP server is a separate process that needs its own registration.
+  registerSessionProvider(claudeCodeProvider);
 
   const fs = await import('node:fs');
   const configText = fs.readFileSync(resolvedPath, 'utf-8');
