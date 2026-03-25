@@ -31,6 +31,11 @@ export {
   readEvent,
   markEventProcessed,
   recordDispatch,
+  type ListEventsOptions,
+  type DispatchRecord,
+  type ListDispatchesOptions,
+  listEvents,
+  listDispatches,
 } from './events.ts';
 
 export {
@@ -80,11 +85,15 @@ export {
   type CommissionOptions,
   type CommissionResult,
   type CommissionSummary,
+  type CommissionDetail,
   type ListCommissionsOptions,
   commission,
   updateCommissionStatus,
   readCommission,
+  showCommission,
   listCommissions,
+  checkCommissionCompletion,
+  completeCommissionIfReady,
 } from './commission.ts';
 export {
   type InstantiateOptions,
@@ -170,12 +179,17 @@ export {
   type WorkspaceContext,
   type ResolvedWorkspace,
   type SessionRecord,
+  type SessionSummary,
+  type SessionDetail,
+  type ListSessionsOptions,
   registerSessionProvider,
   getSessionProvider,
   resolveWorkspace,
   createTempWorktree,
   removeTempWorktree,
   launchSession,
+  listSessions,
+  showSession,
 } from './session.ts';
 export { generateId } from './id.ts';
 export {
@@ -201,6 +215,8 @@ export {
   listWorks,
   showWork,
   updateWork,
+  checkWorkCompletion,
+  completeWorkIfReady,
 } from './work.ts';
 export {
   type PieceRecord,
@@ -211,6 +227,8 @@ export {
   listPieces,
   showPiece,
   updatePiece,
+  checkPieceCompletion,
+  completePieceIfReady,
 } from './piece.ts';
 export {
   type JobRecord,
@@ -221,7 +239,14 @@ export {
   listJobs,
   showJob,
   updateJob,
+  checkJobCompletion,
+  completeJobIfReady,
 } from './job.ts';
+export {
+  type AuditEntry,
+  type ListAuditLogOptions,
+  listAuditLog,
+} from './audit.ts';
 export {
   type StrokeRecord,
   type CreateStrokeOptions,

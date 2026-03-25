@@ -9,6 +9,19 @@ import { booksPath } from './nexus-home.ts';
 import { generateId } from './id.ts';
 import { signalEvent } from './events.ts';
 
+export interface CompletionCheck {
+  complete: boolean;
+  total: number;
+  done: number;
+  pending: number;
+  failed: number;
+}
+
+export interface CompletionResult {
+  changed: boolean;
+  newStatus: string;
+}
+
 export interface WorkRecord {
   id: string;
   commissionId: string | null;
@@ -142,6 +155,67 @@ export function updateWork(home: string, workId: string, opts: UpdateWorkOptions
     }
 
     return result;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Check work completion — counts child pieces.
+ */
+export function checkWorkCompletion(home: string, workId: string): CompletionCheck {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    const rows = db.prepare(
+      `SELECT status, COUNT(*) as cnt FROM pieces WHERE work_id = ? GROUP BY status`,
+    ).all(workId) as Array<{ status: string; cnt: number }>;
+
+    let total = 0, done = 0, pending = 0, failed = 0;
+    for (const r of rows) {
+      total += r.cnt;
+      if (r.status === 'completed' || r.status === 'cancelled') done += r.cnt;
+      else if (r.status === 'open' || r.status === 'active') pending += r.cnt;
+    }
+
+    return { complete: total > 0 && pending === 0 && failed === 0, total, done, pending, failed };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Complete a work if all pieces are completed/cancelled.
+ * Signals work.completed on transition.
+ */
+export function completeWorkIfReady(home: string, workId: string): CompletionResult {
+  const check = checkWorkCompletion(home, workId);
+  if (!check.complete || check.total === 0) {
+    const current = showWork(home, workId);
+    return { changed: false, newStatus: current?.status ?? 'unknown' };
+  }
+
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    const current = db.prepare(`SELECT status FROM works WHERE id = ?`).get(workId) as { status: string } | undefined;
+    if (!current || current.status === 'completed') {
+      return { changed: false, newStatus: current?.status ?? 'unknown' };
+    }
+
+    db.prepare(
+      `UPDATE works SET status = 'completed', updated_at = datetime('now') WHERE id = ?`,
+    ).run(workId);
+
+    db.prepare(
+      `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(generateId('aud'), 'framework', 'work_completed', 'work', workId, JSON.stringify(check));
+
+    signalEvent(home, 'work.completed', { workId }, 'framework');
+
+    return { changed: true, newStatus: 'completed' };
   } finally {
     db.close();
   }

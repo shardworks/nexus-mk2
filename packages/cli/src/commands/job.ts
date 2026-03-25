@@ -1,5 +1,5 @@
 import { createCommand } from 'commander';
-import { createJob, listJobs, showJob, updateJob } from '@shardworks/nexus-core';
+import { createJob, listJobs, showJob, updateJob, checkJobCompletion } from '@shardworks/nexus-core';
 import { resolveHome } from '../resolve-home.ts';
 
 export function makeJobCommand() {
@@ -82,6 +82,28 @@ export function makeJobCommand() {
         try {
           const result = updateJob(home, id, options);
           console.log(`Job ${result.id} updated [${result.status}]: ${result.title}`);
+        } catch (err) {
+          console.error(`Error: ${(err as Error).message}`);
+          process.exitCode = 1;
+        }
+      }),
+  );
+
+  // nsg job check <id>
+  job.addCommand(
+    createCommand('check')
+      .description('Check stroke completion for a job')
+      .argument('<id>', 'Job ID')
+      .action((id: string, _, cmd) => {
+        const home = resolveHome(cmd);
+        try {
+          const check = checkJobCompletion(home, id);
+          console.log(`Job ${id} — stroke completion:`);
+          console.log(`  Total:   ${check.total}`);
+          console.log(`  Done:    ${check.done}`);
+          console.log(`  Pending: ${check.pending}`);
+          console.log(`  Failed:  ${check.failed}`);
+          console.log(`  Complete: ${check.complete ? 'yes' : 'no'}`);
         } catch (err) {
           console.error(`Error: ${(err as Error).message}`);
           process.exitCode = 1;

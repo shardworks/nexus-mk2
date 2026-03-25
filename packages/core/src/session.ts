@@ -19,6 +19,193 @@ import { generateId } from './id.ts';
 import { signalEvent } from './events.ts';
 import type { ManifestResult } from './manifest.ts';
 
+// ── Dashboard Read Types ────────────────────────────────────────────────
+
+/** Summary view of a session — for list views. */
+export interface SessionSummary {
+  id: string;
+  animaId: string;
+  provider: string;
+  trigger: string;
+  workshop: string | null;
+  workspaceKind: string;
+  startedAt: string;
+  endedAt: string | null;
+  exitCode: number | null;
+  costUsd: number | null;
+  durationMs: number | null;
+}
+
+/** Full session detail — all columns from the sessions table. */
+export interface SessionDetail {
+  id: string;
+  animaId: string;
+  provider: string;
+  trigger: string;
+  workshop: string | null;
+  workspaceKind: string;
+  curriculumName: string | null;
+  curriculumVersion: string | null;
+  temperamentName: string | null;
+  temperamentVersion: string | null;
+  roles: string[];
+  startedAt: string;
+  endedAt: string | null;
+  exitCode: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  costUsd: number | null;
+  durationMs: number | null;
+  providerSessionId: string | null;
+  recordPath: string | null;
+}
+
+export interface ListSessionsOptions {
+  anima?: string;
+  workshop?: string;
+  trigger?: string;
+  /** Filter by active (no ended_at) or completed (has ended_at). */
+  status?: 'active' | 'completed';
+  /** Maximum number of results. */
+  limit?: number;
+}
+
+// ── Dashboard Read Functions ────────────────────────────────────────────
+
+/**
+ * List sessions with optional filters.
+ */
+export function listSessions(home: string, opts: ListSessionsOptions = {}): SessionSummary[] {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    let query = `SELECT s.id, s.anima_id, s.provider, s.trigger, s.workshop, s.workspace_kind,
+                        s.started_at, s.ended_at, s.exit_code, s.cost_usd, s.duration_ms
+                 FROM sessions s`;
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (opts.anima) {
+      query = `SELECT s.id, s.anima_id, s.provider, s.trigger, s.workshop, s.workspace_kind,
+                      s.started_at, s.ended_at, s.exit_code, s.cost_usd, s.duration_ms
+               FROM sessions s JOIN animas a ON a.id = s.anima_id`;
+      conditions.push(`(a.name = ? OR a.id = ?)`);
+      params.push(opts.anima, opts.anima);
+    }
+
+    if (opts.workshop) {
+      conditions.push(`s.workshop = ?`);
+      params.push(opts.workshop);
+    }
+
+    if (opts.trigger) {
+      conditions.push(`s.trigger = ?`);
+      params.push(opts.trigger);
+    }
+
+    if (opts.status === 'active') {
+      conditions.push(`s.ended_at IS NULL`);
+    } else if (opts.status === 'completed') {
+      conditions.push(`s.ended_at IS NOT NULL`);
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+    query += ` ORDER BY s.started_at DESC`;
+
+    if (opts.limit) {
+      query += ` LIMIT ?`;
+      params.push(opts.limit);
+    }
+
+    const rows = db.prepare(query).all(...params) as Array<{
+      id: string; anima_id: string; provider: string; trigger: string;
+      workshop: string | null; workspace_kind: string; started_at: string;
+      ended_at: string | null; exit_code: number | null;
+      cost_usd: number | null; duration_ms: number | null;
+    }>;
+
+    return rows.map(r => ({
+      id: r.id,
+      animaId: r.anima_id,
+      provider: r.provider,
+      trigger: r.trigger,
+      workshop: r.workshop,
+      workspaceKind: r.workspace_kind,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      exitCode: r.exit_code,
+      costUsd: r.cost_usd,
+      durationMs: r.duration_ms,
+    }));
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Show full details for a single session.
+ */
+export function showSession(home: string, sessionId: string): SessionDetail | null {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    const row = db.prepare(
+      `SELECT id, anima_id, provider, trigger, workshop, workspace_kind,
+              curriculum_name, curriculum_version, temperament_name, temperament_version,
+              roles, started_at, ended_at, exit_code,
+              input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+              cost_usd, duration_ms, provider_session_id, record_path
+       FROM sessions WHERE id = ?`,
+    ).get(sessionId) as {
+      id: string; anima_id: string; provider: string; trigger: string;
+      workshop: string | null; workspace_kind: string;
+      curriculum_name: string | null; curriculum_version: string | null;
+      temperament_name: string | null; temperament_version: string | null;
+      roles: string | null; started_at: string; ended_at: string | null;
+      exit_code: number | null; input_tokens: number | null;
+      output_tokens: number | null; cache_read_tokens: number | null;
+      cache_write_tokens: number | null; cost_usd: number | null;
+      duration_ms: number | null; provider_session_id: string | null;
+      record_path: string | null;
+    } | undefined;
+
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      animaId: row.anima_id,
+      provider: row.provider,
+      trigger: row.trigger,
+      workshop: row.workshop,
+      workspaceKind: row.workspace_kind,
+      curriculumName: row.curriculum_name,
+      curriculumVersion: row.curriculum_version,
+      temperamentName: row.temperament_name,
+      temperamentVersion: row.temperament_version,
+      roles: row.roles ? JSON.parse(row.roles) : [],
+      startedAt: row.started_at,
+      endedAt: row.ended_at,
+      exitCode: row.exit_code,
+      inputTokens: row.input_tokens,
+      outputTokens: row.output_tokens,
+      cacheReadTokens: row.cache_read_tokens,
+      cacheWriteTokens: row.cache_write_tokens,
+      costUsd: row.cost_usd,
+      durationMs: row.duration_ms,
+      providerSessionId: row.provider_session_id,
+      recordPath: row.record_path,
+    };
+  } finally {
+    db.close();
+  }
+}
+
 // ── Types ──────────────────────────────────────────────────────────────
 
 /** What a session provider must implement. */

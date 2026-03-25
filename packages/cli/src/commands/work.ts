@@ -1,5 +1,5 @@
 import { createCommand } from 'commander';
-import { createWork, listWorks, showWork, updateWork } from '@shardworks/nexus-core';
+import { createWork, listWorks, showWork, updateWork, checkWorkCompletion } from '@shardworks/nexus-core';
 import { resolveHome } from '../resolve-home.ts';
 
 export function makeWorkCommand() {
@@ -76,6 +76,28 @@ export function makeWorkCommand() {
         try {
           const result = updateWork(home, id, options);
           console.log(`Work ${result.id} updated [${result.status}]: ${result.title}`);
+        } catch (err) {
+          console.error(`Error: ${(err as Error).message}`);
+          process.exitCode = 1;
+        }
+      }),
+  );
+
+  // nsg work check <id>
+  work.addCommand(
+    createCommand('check')
+      .description('Check piece completion for a work item')
+      .argument('<id>', 'Work ID')
+      .action((id: string, _, cmd) => {
+        const home = resolveHome(cmd);
+        try {
+          const check = checkWorkCompletion(home, id);
+          console.log(`Work ${id} — piece completion:`);
+          console.log(`  Total:   ${check.total}`);
+          console.log(`  Done:    ${check.done}`);
+          console.log(`  Pending: ${check.pending}`);
+          console.log(`  Failed:  ${check.failed}`);
+          console.log(`  Complete: ${check.complete ? 'yes' : 'no'}`);
         } catch (err) {
           console.error(`Error: ${(err as Error).message}`);
           process.exitCode = 1;

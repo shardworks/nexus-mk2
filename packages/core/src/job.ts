@@ -8,6 +8,19 @@ import { booksPath } from './nexus-home.ts';
 import { generateId } from './id.ts';
 import { signalEvent } from './events.ts';
 
+export interface CompletionCheck {
+  complete: boolean;
+  total: number;
+  done: number;
+  pending: number;
+  failed: number;
+}
+
+export interface CompletionResult {
+  changed: boolean;
+  newStatus: string;
+}
+
 export interface JobRecord {
   id: string;
   pieceId: string | null;
@@ -151,6 +164,72 @@ export function updateJob(home: string, jobId: string, opts: UpdateJobOptions): 
     }
 
     return result;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Check job completion — counts child strokes.
+ */
+export function checkJobCompletion(home: string, jobId: string): CompletionCheck {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    const rows = db.prepare(
+      `SELECT status, COUNT(*) as cnt FROM strokes WHERE job_id = ? GROUP BY status`,
+    ).all(jobId) as Array<{ status: string; cnt: number }>;
+
+    let total = 0, done = 0, pending = 0, failed = 0;
+    for (const r of rows) {
+      total += r.cnt;
+      if (r.status === 'complete') done += r.cnt;
+      else if (r.status === 'pending') pending += r.cnt;
+      else if (r.status === 'failed') failed += r.cnt;
+    }
+
+    return { complete: total > 0 && pending === 0, total, done, pending, failed };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Complete a job if all strokes are done (complete or failed, none pending).
+ * Sets job to 'completed' if no strokes failed, 'failed' if any failed.
+ * Signals job.completed or job.failed on transition.
+ */
+export function completeJobIfReady(home: string, jobId: string): CompletionResult {
+  const check = checkJobCompletion(home, jobId);
+  if (!check.complete || check.total === 0) {
+    const current = showJob(home, jobId);
+    return { changed: false, newStatus: current?.status ?? 'unknown' };
+  }
+
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    const current = db.prepare(`SELECT status FROM jobs WHERE id = ?`).get(jobId) as { status: string } | undefined;
+    if (!current || current.status === 'completed' || current.status === 'failed') {
+      return { changed: false, newStatus: current?.status ?? 'unknown' };
+    }
+
+    const newStatus = check.failed > 0 ? 'failed' : 'completed';
+
+    db.prepare(
+      `UPDATE jobs SET status = ?, updated_at = datetime('now') WHERE id = ?`,
+    ).run(newStatus, jobId);
+
+    db.prepare(
+      `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(generateId('aud'), 'framework', `job_${newStatus}`, 'job', jobId, JSON.stringify(check));
+
+    const eventName = newStatus === 'completed' ? 'job.completed' : 'job.failed';
+    signalEvent(home, eventName, { jobId }, 'framework');
+
+    return { changed: true, newStatus };
   } finally {
     db.close();
   }

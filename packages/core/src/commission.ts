@@ -81,6 +81,21 @@ export function readCommission(
   }
 }
 
+// ── Completion Check Types ──────────────────────────────────────────────
+
+export interface CompletionCheck {
+  complete: boolean;
+  total: number;
+  done: number;
+  pending: number;
+  failed: number;
+}
+
+export interface CompletionResult {
+  changed: boolean;
+  newStatus: string;
+}
+
 // ── List / Show ────────────────────────────────────────────────────────
 
 export interface CommissionSummary {
@@ -91,6 +106,19 @@ export interface CommissionSummary {
   statusReason: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Extended commission detail with assignments and linked sessions. */
+export interface CommissionDetail {
+  id: string;
+  content: string;
+  status: string;
+  workshop: string;
+  statusReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+  assignments: Array<{ animaId: string; animaName: string; assignedAt: string }>;
+  sessions: Array<{ sessionId: string; animaId: string; startedAt: string; endedAt: string | null }>;
 }
 
 export interface ListCommissionsOptions {
@@ -138,6 +166,121 @@ export function listCommissions(home: string, opts: ListCommissionsOptions = {})
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Show detailed commission information, including assignments and linked sessions.
+ */
+export function showCommission(
+  home: string,
+  commissionId: string,
+): CommissionDetail | null {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    const row = db.prepare(
+      `SELECT id, content, status, workshop, status_reason, created_at, updated_at
+       FROM commissions WHERE id = ?`,
+    ).get(commissionId) as {
+      id: string; content: string; status: string; workshop: string;
+      status_reason: string | null; created_at: string; updated_at: string;
+    } | undefined;
+
+    if (!row) return null;
+
+    const assignments = db.prepare(
+      `SELECT ca.anima_id, a.name, ca.assigned_at
+       FROM commission_assignments ca
+       JOIN animas a ON a.id = ca.anima_id
+       WHERE ca.commission_id = ?
+       ORDER BY ca.assigned_at`,
+    ).all(commissionId) as Array<{ anima_id: string; name: string; assigned_at: string }>;
+
+    const sessions = db.prepare(
+      `SELECT cs.session_id, s.anima_id, s.started_at, s.ended_at
+       FROM commission_sessions cs
+       JOIN sessions s ON s.id = cs.session_id
+       WHERE cs.commission_id = ?
+       ORDER BY s.started_at`,
+    ).all(commissionId) as Array<{ session_id: string; anima_id: string; started_at: string; ended_at: string | null }>;
+
+    return {
+      id: row.id,
+      content: row.content,
+      status: row.status,
+      workshop: row.workshop,
+      statusReason: row.status_reason,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      assignments: assignments.map(a => ({ animaId: a.anima_id, animaName: a.name, assignedAt: a.assigned_at })),
+      sessions: sessions.map(s => ({ sessionId: s.session_id, animaId: s.anima_id, startedAt: s.started_at, endedAt: s.ended_at })),
+    };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Check commission completion — counts child works.
+ */
+export function checkCommissionCompletion(home: string, commissionId: string): CompletionCheck {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    const rows = db.prepare(
+      `SELECT status, COUNT(*) as cnt FROM works WHERE commission_id = ? GROUP BY status`,
+    ).all(commissionId) as Array<{ status: string; cnt: number }>;
+
+    let total = 0, done = 0, pending = 0, failed = 0;
+    for (const r of rows) {
+      total += r.cnt;
+      if (r.status === 'completed' || r.status === 'cancelled') done += r.cnt;
+      else if (r.status === 'open' || r.status === 'active') pending += r.cnt;
+    }
+
+    return { complete: total > 0 && pending === 0 && failed === 0, total, done, pending, failed };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Complete a commission if all works are completed/cancelled.
+ * Signals commission.completed on transition.
+ */
+export function completeCommissionIfReady(home: string, commissionId: string): CompletionResult {
+  const check = checkCommissionCompletion(home, commissionId);
+  if (!check.complete || check.total === 0) {
+    // Read current status for the return value
+    const current = readCommission(home, commissionId);
+    return { changed: false, newStatus: current?.status ?? 'unknown' };
+  }
+
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    const current = db.prepare(`SELECT status FROM commissions WHERE id = ?`).get(commissionId) as { status: string } | undefined;
+    if (!current || current.status === 'completed') {
+      return { changed: false, newStatus: current?.status ?? 'unknown' };
+    }
+
+    db.prepare(
+      `UPDATE commissions SET status = 'completed', status_reason = 'all works completed', updated_at = datetime('now') WHERE id = ?`,
+    ).run(commissionId);
+
+    db.prepare(
+      `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(generateId('aud'), 'framework', 'commission_completed', 'commission', commissionId, JSON.stringify(check));
+
+    signalEvent(home, 'commission.completed', { commissionId }, 'framework');
+
+    return { changed: true, newStatus: 'completed' };
   } finally {
     db.close();
   }

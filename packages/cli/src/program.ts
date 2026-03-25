@@ -15,6 +15,10 @@ import { makeWorkCommand } from './commands/work.ts';
 import { makePieceCommand } from './commands/piece.ts';
 import { makeJobCommand } from './commands/job.ts';
 import { makeStrokeCommand } from './commands/stroke.ts';
+import { makeSessionCommand } from './commands/session.ts';
+import { makeEventCommand } from './commands/event.ts';
+import { makeDispatchCommand } from './commands/dispatch.ts';
+import { makeAuditCommand } from './commands/audit.ts';
 
 // Register the Claude Code session provider so core's session funnel
 // can launch claude sessions.
@@ -65,3 +69,15 @@ program.addCommand(makeJobCommand());
 
 // nsg stroke [create|list|show|update]
 program.addCommand(makeStrokeCommand());
+
+// nsg session [list|show]
+program.addCommand(makeSessionCommand());
+
+// nsg event [list|show]
+program.addCommand(makeEventCommand());
+
+// nsg dispatch [list]
+program.addCommand(makeDispatchCommand());
+
+// nsg audit [list]
+program.addCommand(makeAuditCommand());

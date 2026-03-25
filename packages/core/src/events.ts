@@ -152,6 +152,163 @@ export function markEventProcessed(home: string, eventId: string): void {
   }
 }
 
+// ── Dashboard Read Types ────────────────────────────────────────────────
+
+export interface ListEventsOptions {
+  /** Filter by event name pattern (SQL LIKE — use % for wildcards). */
+  name?: string;
+  /** Filter by emitter. */
+  emitter?: string;
+  /** If true, only unprocessed events. If false, only processed. Omit for all. */
+  pending?: boolean;
+  /** Maximum number of results. */
+  limit?: number;
+}
+
+export interface DispatchRecord {
+  id: string;
+  eventId: string;
+  handlerType: string;
+  handlerName: string;
+  targetRole: string | null;
+  noticeType: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  status: string | null;
+  error: string | null;
+}
+
+export interface ListDispatchesOptions {
+  eventId?: string;
+  handlerType?: string;
+  handlerName?: string;
+  status?: string;
+  /** Maximum number of results. */
+  limit?: number;
+}
+
+// ── Dashboard Read Functions ────────────────────────────────────────────
+
+/**
+ * List events with optional filters. Returns all events (not just pending),
+ * ordered by fired_at descending (newest first).
+ */
+export function listEvents(home: string, opts: ListEventsOptions = {}): GuildEvent[] {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    let query = `SELECT id, name, payload, emitter, fired_at, processed FROM events`;
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (opts.name) {
+      conditions.push(`name LIKE ?`);
+      params.push(opts.name);
+    }
+
+    if (opts.emitter) {
+      conditions.push(`emitter = ?`);
+      params.push(opts.emitter);
+    }
+
+    if (opts.pending === true) {
+      conditions.push(`processed = 0`);
+    } else if (opts.pending === false) {
+      conditions.push(`processed = 1`);
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+    query += ` ORDER BY fired_at DESC, rowid DESC`;
+
+    if (opts.limit) {
+      query += ` LIMIT ?`;
+      params.push(opts.limit);
+    }
+
+    const rows = db.prepare(query).all(...params) as Array<{
+      id: string; name: string; payload: string | null; emitter: string; fired_at: string;
+    }>;
+
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      payload: row.payload ? JSON.parse(row.payload) : null,
+      emitter: row.emitter,
+      firedAt: row.fired_at,
+    }));
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * List event dispatches with optional filters.
+ */
+export function listDispatches(home: string, opts: ListDispatchesOptions = {}): DispatchRecord[] {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    let query = `SELECT id, event_id, handler_type, handler_name, target_role, notice_type,
+                        started_at, ended_at, status, error
+                 FROM event_dispatches`;
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (opts.eventId) {
+      conditions.push(`event_id = ?`);
+      params.push(opts.eventId);
+    }
+    if (opts.handlerType) {
+      conditions.push(`handler_type = ?`);
+      params.push(opts.handlerType);
+    }
+    if (opts.handlerName) {
+      conditions.push(`handler_name = ?`);
+      params.push(opts.handlerName);
+    }
+    if (opts.status) {
+      conditions.push(`status = ?`);
+      params.push(opts.status);
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+    query += ` ORDER BY started_at DESC`;
+
+    if (opts.limit) {
+      query += ` LIMIT ?`;
+      params.push(opts.limit);
+    }
+
+    const rows = db.prepare(query).all(...params) as Array<{
+      id: string; event_id: string; handler_type: string; handler_name: string;
+      target_role: string | null; notice_type: string | null;
+      started_at: string | null; ended_at: string | null;
+      status: string | null; error: string | null;
+    }>;
+
+    return rows.map(r => ({
+      id: r.id,
+      eventId: r.event_id,
+      handlerType: r.handler_type,
+      handlerName: r.handler_name,
+      targetRole: r.target_role,
+      noticeType: r.notice_type,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      status: r.status,
+      error: r.error,
+    }));
+  } finally {
+    db.close();
+  }
+}
+
 /**
  * Record an event dispatch in the event_dispatches table.
  */

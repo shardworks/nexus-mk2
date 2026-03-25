@@ -1,6 +1,7 @@
 import { createCommand } from 'commander';
 import {
-  commission, readCommission, updateCommissionStatus, listCommissions,
+  commission, showCommission, updateCommissionStatus, listCommissions,
+  checkCommissionCompletion,
 } from '@shardworks/nexus-core';
 import { resolveHome } from '../resolve-home.ts';
 
@@ -58,12 +59,12 @@ export function makeCommissionCommand() {
   // nsg commission show <id>
   cmd.addCommand(
     createCommand('show')
-      .description('Show details of a commission')
+      .description('Show details of a commission (including assignments and sessions)')
       .argument('<id>', 'Commission ID')
       .action((id: string, _, cmd) => {
         const home = resolveHome(cmd);
         try {
-          const result = readCommission(home, id);
+          const result = showCommission(home, id);
           if (!result) {
             console.error(`Commission "${id}" not found.`);
             process.exitCode = 1;
@@ -71,10 +72,49 @@ export function makeCommissionCommand() {
           }
 
           console.log(`Commission ${result.id}`);
-          console.log(`  Status: ${result.status}`);
-          if (result.statusReason) console.log(`  Reason: ${result.statusReason}`);
+          console.log(`  Status:   ${result.status}`);
+          if (result.statusReason) console.log(`  Reason:   ${result.statusReason}`);
           console.log(`  Workshop: ${result.workshop}`);
-          console.log(`  Content: ${result.content}`);
+          console.log(`  Created:  ${result.createdAt}`);
+          console.log(`  Updated:  ${result.updatedAt}`);
+          console.log(`  Content:  ${result.content}`);
+
+          if (result.assignments.length > 0) {
+            console.log(`\n  Assignments:`);
+            for (const a of result.assignments) {
+              console.log(`    ${a.animaName} (${a.animaId}) — assigned ${a.assignedAt}`);
+            }
+          }
+
+          if (result.sessions.length > 0) {
+            console.log(`\n  Sessions:`);
+            for (const s of result.sessions) {
+              const status = s.endedAt ? `ended ${s.endedAt}` : 'active';
+              console.log(`    ${s.sessionId}  ${s.animaId}  started ${s.startedAt}  ${status}`);
+            }
+          }
+        } catch (err) {
+          console.error(`Error: ${(err as Error).message}`);
+          process.exitCode = 1;
+        }
+      }),
+  );
+
+  // nsg commission check <id>
+  cmd.addCommand(
+    createCommand('check')
+      .description('Check work completion for a commission')
+      .argument('<id>', 'Commission ID')
+      .action((id: string, _, cmd) => {
+        const home = resolveHome(cmd);
+        try {
+          const check = checkCommissionCompletion(home, id);
+          console.log(`Commission ${id} — work completion:`);
+          console.log(`  Total:   ${check.total}`);
+          console.log(`  Done:    ${check.done}`);
+          console.log(`  Pending: ${check.pending}`);
+          console.log(`  Failed:  ${check.failed}`);
+          console.log(`  Complete: ${check.complete ? 'yes' : 'no'}`);
         } catch (err) {
           console.error(`Error: ${(err as Error).message}`);
           process.exitCode = 1;

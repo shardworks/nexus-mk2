@@ -8,6 +8,19 @@ import { booksPath } from './nexus-home.ts';
 import { generateId } from './id.ts';
 import { signalEvent } from './events.ts';
 
+export interface CompletionCheck {
+  complete: boolean;
+  total: number;
+  done: number;
+  pending: number;
+  failed: number;
+}
+
+export interface CompletionResult {
+  changed: boolean;
+  newStatus: string;
+}
+
 export interface PieceRecord {
   id: string;
   workId: string | null;
@@ -138,9 +151,76 @@ export function updatePiece(home: string, pieceId: string, opts: UpdatePieceOpti
 
     if (opts.status === 'active') {
       signalEvent(home, 'piece.ready', { pieceId }, 'framework');
+    } else if (opts.status === 'completed') {
+      signalEvent(home, 'piece.completed', { pieceId }, 'framework');
     }
 
     return result;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Check piece completion — counts child jobs.
+ * Per policy: a piece with failed jobs stays active (manual resolution needed).
+ */
+export function checkPieceCompletion(home: string, pieceId: string): CompletionCheck {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    const rows = db.prepare(
+      `SELECT status, COUNT(*) as cnt FROM jobs WHERE piece_id = ? GROUP BY status`,
+    ).all(pieceId) as Array<{ status: string; cnt: number }>;
+
+    let total = 0, done = 0, pending = 0, failed = 0;
+    for (const r of rows) {
+      total += r.cnt;
+      if (r.status === 'completed' || r.status === 'cancelled') done += r.cnt;
+      else if (r.status === 'open' || r.status === 'active') pending += r.cnt;
+      else if (r.status === 'failed') failed += r.cnt;
+    }
+
+    // A piece is only auto-completable when all jobs are completed/cancelled and none failed.
+    // If any job failed, the piece stays active until manual resolution.
+    return { complete: total > 0 && pending === 0 && failed === 0, total, done, pending, failed };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Complete a piece if all jobs are completed/cancelled (none failed, none pending).
+ * Signals piece.completed on transition.
+ */
+export function completePieceIfReady(home: string, pieceId: string): CompletionResult {
+  const check = checkPieceCompletion(home, pieceId);
+  if (!check.complete || check.total === 0) {
+    const current = showPiece(home, pieceId);
+    return { changed: false, newStatus: current?.status ?? 'unknown' };
+  }
+
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    const current = db.prepare(`SELECT status FROM pieces WHERE id = ?`).get(pieceId) as { status: string } | undefined;
+    if (!current || current.status === 'completed') {
+      return { changed: false, newStatus: current?.status ?? 'unknown' };
+    }
+
+    db.prepare(
+      `UPDATE pieces SET status = 'completed', updated_at = datetime('now') WHERE id = ?`,
+    ).run(pieceId);
+
+    db.prepare(
+      `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(generateId('aud'), 'framework', 'piece_completed', 'piece', pieceId, JSON.stringify(check));
+
+    signalEvent(home, 'piece.completed', { pieceId }, 'framework');
+
+    return { changed: true, newStatus: 'completed' };
   } finally {
     db.close();
   }
