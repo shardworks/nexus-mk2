@@ -1,4 +1,5 @@
 import { createCommand } from 'commander';
+import { startMonitor } from '@shardworks/guild-monitor';
 import { resolveHome } from '../resolve-home.ts';
 
 export function makeDashboardCommand() {
@@ -20,7 +21,6 @@ export function makeDashboardCommand() {
         process.exit(1);
       }
 
-      const { startMonitor } = await import('@shardworks/guild-monitor');
       await startMonitor({ home, port });
     });
 }
