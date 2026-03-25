@@ -28,7 +28,9 @@ The manifested agent context (role instructions, codex, tool descriptions, commi
 
 The agent will spend the majority of its tokens and turns orienting — reading the codex, understanding its tools, exploring the workshop — before doing any productive work. The ratio of orientation to implementation will be surprisingly high, even with good instructions.
 
-**If true:** Orientation is the primary cost center for autonomous agents. Future investment should focus on reducing orientation time: better tool instructions, more prescriptive commission specs, worked examples, or "orientation engines" that pre-digest the workspace.
+**Measurement instrument:** [`artifacts/orientation-cost-analysis-spec.md`](artifacts/orientation-cost-analysis-spec.md) — defines a heuristic for classifying session turns as orientation vs. productive work, and a tool (`nsg session analyze`) for extracting quantitative cost data from session transcripts. Includes concrete thresholds for confirmed/partial/refuted.
+
+**If true:** Orientation is the primary cost center for autonomous agents. Future investment should focus on reducing orientation time: better tool instructions, more prescriptive commission specs, worked examples, or warm-session forking (see `artifacts/warm-session-spec.md`) that pre-loads codebase context via Claude CLI's `--resume --fork-session` capability.
 
 **If false:** The guild's instruction delivery (codex + role + tools + commission) gives the agent a fast enough on-ramp. Orientation is a small fraction of total work.
 
