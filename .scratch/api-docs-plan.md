@@ -4,111 +4,84 @@
 
 Document the Nexus framework's core API to a sufficient level that animas can build new tools, engines, dashboards, and other software that leverages it. Fill functional gaps discovered during the inventory.
 
-## Phase 1: Fill API Gaps
+---
 
-### 1a. Dashboard Read Functions
+## Phase 1: Fill API Gaps — ✅ COMPLETE
 
-Add read-only query functions to `@shardworks/nexus-core` for data currently only accessible via raw SQL:
+> Implemented in commit `dc7bd24` by Coco. 27 files changed, +1379 lines.
+
+### 1a. Dashboard Read Functions — ✅
+
+Read-only query functions added to `@shardworks/nexus-core`:
 
 | Function | Module | Returns | Notes |
 |----------|--------|---------|-------|
-| `listSessions(home, opts?)` | `session.ts` | `SessionSummary[]` | Filter by anima, workshop, trigger, date range, status (has ended_at or not) |
+| `listSessions(home, opts?)` | `session.ts` | `SessionSummary[]` | Filter by anima, workshop, trigger, status (active/completed), limit |
 | `showSession(home, sessionId)` | `session.ts` | `SessionDetail \| null` | Full session row including token usage, cost, duration |
-| `listEvents(home, opts?)` | `events.ts` | `GuildEvent[]` | All events (not just pending). Filter by name pattern, emitter, processed status, date range |
-| `listDispatches(home, opts?)` | `events.ts` | `DispatchRecord[]` | Filter by event_id, handler_type, handler_name, status |
-| `listAuditLog(home, opts?)` | `audit.ts` (new) | `AuditEntry[]` | Filter by actor, action, target_type, target_id, date range |
+| `listEvents(home, opts?)` | `events.ts` | `GuildEvent[]` | All events (not just pending). Filter by name pattern (LIKE), emitter, processed status, limit |
+| `listDispatches(home, opts?)` | `events.ts` | `DispatchRecord[]` | Filter by event_id, handler_type, handler_name, status, limit |
+| `listAuditLog(home, opts?)` | `audit.ts` (new) | `AuditEntry[]` | Filter by actor, action, target_type, target_id, limit |
 | `showCommission(home, id)` | `commission.ts` | `CommissionDetail \| null` | Extended version of readCommission that includes assignments and linked sessions |
 
-New types needed: `SessionSummary`, `SessionDetail`, `DispatchRecord`, `AuditEntry`, `CommissionDetail`.
+New types: `SessionSummary`, `SessionDetail`, `ListSessionsOptions`, `ListEventsOptions`, `DispatchRecord`, `ListDispatchesOptions`, `AuditEntry`, `ListAuditLogOptions`, `CommissionDetail`.
 
-### 1b. Work Hierarchy Rollup Functions
+**Implementation note:** Date range filters were not implemented on any of the list functions — all use `limit` instead. Date range filtering can be added later if needed.
 
-Add functions at every level of the work decomposition hierarchy for checking child completion and rolling up status. These are what engines need to automate the "is this done?" question.
+### 1b. Work Hierarchy Rollup Functions — ✅
 
 | Function | Module | What it does |
 |----------|--------|-------------|
-| `checkJobCompletion(home, jobId)` | `job.ts` | Returns `{ complete: boolean, total: number, done: number, pending: number, failed: number }` — counts strokes |
-| `completeJobIfReady(home, jobId)` | `job.ts` | If all strokes are complete/failed and none pending, sets job status to `completed` (or `failed` if any stroke failed). Returns `{ changed: boolean, newStatus: string }`. Signals `job.completed` or `job.failed`. |
+| `checkJobCompletion(home, jobId)` | `job.ts` | Returns `{ complete, total, done, pending, failed }` — counts strokes |
+| `completeJobIfReady(home, jobId)` | `job.ts` | If no strokes pending, sets job to `completed` (or `failed` if any stroke failed). Signals `job.completed` or `job.failed`. |
 | `checkPieceCompletion(home, pieceId)` | `piece.ts` | Same shape — counts jobs |
-| `completePieceIfReady(home, pieceId)` | `piece.ts` | If all jobs completed/failed/cancelled → complete the piece. Signals `piece.completed`. |
+| `completePieceIfReady(home, pieceId)` | `piece.ts` | If all jobs completed/cancelled (none failed, none pending) → complete. Signals `piece.completed`. |
 | `checkWorkCompletion(home, workId)` | `work.ts` | Same shape — counts pieces |
-| `completeWorkIfReady(home, workId)` | `work.ts` | If all pieces completed/failed/cancelled → complete the work. Signals `work.completed`. |
+| `completeWorkIfReady(home, workId)` | `work.ts` | If all pieces completed/cancelled → complete. Signals `work.completed`. |
 | `checkCommissionCompletion(home, commissionId)` | `commission.ts` | Same shape — counts works |
-| `completeCommissionIfReady(home, commissionId)` | `commission.ts` | If all works completed → complete the commission. Signals `commission.completed`. |
+| `completeCommissionIfReady(home, commissionId)` | `commission.ts` | If all works completed/cancelled → complete. Signals `commission.completed`. |
 
-**New events needed:**
-- `piece.completed` — `{ pieceId }`
-- `commission.completed` — `{ commissionId }`
+New events added: `piece.completed` (also fires from `updatePiece` on status=completed), `commission.completed`.
 
-**Schema note:** The `pieces` table CHECK constraint currently allows `open|active|completed|cancelled`. No `failed` status on pieces or works — only jobs have `failed`. This seems intentional (pieces don't "fail" — their jobs fail, and the piece status reflects the aggregate). The rollup functions should handle this: a piece with all jobs completed/cancelled (none failed) → `completed`. A piece with any failed jobs → needs a policy decision. We decided:
+**Policy implemented:** A piece with failed jobs stays `active` — auto-completion only fires when all jobs are completed/cancelled, none failed.
 
-* Piece stays `active` until someone manually resolves it
-
-### 1c. CLI Commands
-
-Add CLI commands for the new functions under existing noun groups:
+### 1c. CLI Commands — ✅
 
 ```
-nsg session list [--anima <name>] [--workshop <name>] [--trigger <type>] [--limit <n>]
+nsg session list [--anima <name>] [--workshop <name>] [--trigger <type>] [--status <status>] [--limit <n>]
 nsg session show <id>
 nsg event list [--name <pattern>] [--emitter <name>] [--pending] [--limit <n>]
-nsg event show <id>                    # already works via readEvent, just needs CLI wiring
-nsg dispatch list [--event <id>] [--status <status>] [--limit <n>]
-nsg audit list [--actor <name>] [--action <action>] [--target <type>] [--limit <n>]
-nsg commission show <id>               # enhanced to show assignments + sessions
-```
-
-Work hierarchy rollup commands:
-```
+nsg event show <id>
+nsg dispatch list [--event <id>] [--handler <name>] [--status <status>] [--limit <n>]
+nsg audit list [--actor <name>] [--action <action>] [--target <type>] [--target-id <id>] [--limit <n>]
+nsg commission show <id>               # enhanced: shows assignments + sessions
+nsg commission check <id>              # shows work completion summary
 nsg job check <id>                     # shows stroke completion summary
 nsg piece check <id>                   # shows job completion summary
 nsg work check <id>                    # shows piece completion summary
-nsg commission check <id>              # shows work completion summary
 ```
 
-### 1d. MCP Tools
+### 1d. MCP Tools — ✅
 
-Add tools for functions that animas would use during sessions:
+| Tool | Registered in bundle | Role assignments |
+|------|---------------------|-----------------|
+| `session-list` | ✓ | steward |
+| `session-show` | ✓ | steward |
+| `event-list` | ✓ | steward |
+| `event-show` | ✓ | steward |
+| `job-check` | ✓ | steward, artificer |
+| `piece-check` | ✓ | steward |
+| `work-check` | ✓ | steward |
+| `commission-check` | ✓ | steward |
 
-| Tool | Why an anima needs it |
-|------|----------------------|
-| `session-list` | Anima investigating recent activity (debugging, reporting) |
-| `event-list` | Anima understanding what happened (forensics, monitoring) |
-| `job-check` | Anima checking if a job's strokes are all done |
-| `piece-check` | Anima checking if a piece's jobs are all done |
-| `work-check` | Anima checking if a work's pieces are all done |
-| `commission-check` | Anima checking overall commission progress |
+**Not as tools** (operator-only via CLI): `dispatch-list`, `audit-list`.
 
-**Not as tools** (operator-only via CLI):
-- `dispatch-list` — infrastructure forensics, not anima work
-- `audit-list` — operator inspection, not anima work
+### 1e. Starter Kit Role Assignments — ✅
 
-### 1e. Starter Kit Role Assignments
-
-The guild-starter-kit defines two roles (steward, artificer) with no baseTools. New tools need role assignments in `init-guild.ts` and the bundle manifest (`nexus-bundle.json`).
-
-Current role tool assignments:
-- **Steward:** commission CRUD, anima CRUD, workshop CRUD, tool management, clockworks, work hierarchy reads + updates, signal, nexus-version
-- **Artificer:** commission-show, work/piece/job show, job-update, stroke CRUD, signal
-
-New tool assignments:
-
-| Tool | Steward | Artificer | Rationale |
-|------|---------|-----------|-----------|
-| `session-list` | ✓ | | Operational monitoring — steward's job |
-| `session-show` | ✓ | | Operational monitoring — steward's job |
-| `event-list` | ✓ | | Event forensics — steward's job |
-| `event-show` | ✓ | | Event forensics — steward's job |
-| `job-check` | ✓ | ✓ | Artificers need to check if their job's strokes are done |
-| `piece-check` | ✓ | | Piece-level rollup is planning/oversight, not execution |
-| `work-check` | ✓ | | Work-level rollup is planning/oversight |
-| `commission-check` | ✓ | | Commission-level rollup is steward oversight |
-
-Note: The `*-check` tools are read-only (they report completion status, they don't mutate). The `completeXIfReady` functions are for engines, not direct anima use — engines wire them to events via standing orders. If an anima needs to manually complete a job, they already have `job-update`.
+Updated `init-guild.ts` and `nexus-bundle.json`. Steward gained 8 new tools, artificer gained `job-check`.
 
 ---
 
-## Phase 2: Reference Documentation
+## Phase 2: Reference Documentation — PENDING
 
 ### Location
 
@@ -125,15 +98,17 @@ Organized by domain, not by source file. Each entry has: TypeScript signature, p
 
 Sections:
 1. **Authoring** — `tool()`, `engine()`, types, type guards, module resolution
-2. **Events** — signaling, reading, validation, dispatch recording
+2. **Events** — signaling, reading, listing, validation, dispatch recording
 3. **Register** — anima CRUD, instantiation, manifest
-4. **Ledger** — commission lifecycle, work decomposition CRUD, hierarchy rollup
-5. **Daybook** — sessions, audit log
+4. **Ledger** — commission lifecycle, work decomposition CRUD, hierarchy rollup (check/complete functions)
+5. **Daybook** — sessions (list/show), audit log (list)
 6. **Clockworks** — clock tick/run
 7. **Guild Config** — reading/writing guild.json, types
 8. **Infrastructure** — paths, ID generation, preconditions, workshops, worktrees, bundles, migrations
 
 Each domain section opens with a 2-3 sentence overview of what it covers and when you'd use it.
+
+**Implementation note for the agent:** The Phase 1 work added significant new API surface. The core index.ts exports are the source of truth for what's public. Read `packages/core/src/index.ts` first to get the full export list.
 
 ### 2b. Event Catalog (`docs/reference/event-catalog.md`)
 
@@ -146,6 +121,8 @@ Include a "cookbook" subsection with common engine patterns:
 - "When session ends, check job completion"
 - "When job completes, roll up piece status"
 - "When commission posts, auto-assign to workshop"
+
+**Implementation note for the agent:** The complete list of framework events can be found by grepping for `signalEvent(` across `packages/core/src/`. The new Phase 1 events (`piece.completed`, `commission.completed`) need to be included. The reserved namespace list is in `events.ts` (`FRAMEWORK_NAMESPACES`).
 
 ### 2c. Schema Reference (`docs/reference/schema.md`)
 
@@ -160,13 +137,15 @@ Include a "cookbook" subsection with common engine patterns:
    - Stroke: pending → complete/failed
 4. **ID Conventions** — prefix table, generation strategy
 
+**Implementation note for the agent:** The canonical schema is `packages/guild-starter-kit/migrations/001-schema.sql`. All entity IDs are prefixed hex (e.g. `c-a3f7b2c1`). The prefix table is in `packages/core/src/id.ts` and used across all modules.
+
 ### 2d. Update `building-tools.md`
 
 Update the existing guide's "Using @shardworks/nexus-core" section to point to the new reference docs. Add a companion section or separate guide: "Building Engines" — since that guide doesn't exist yet and engines are a primary use case.
 
 ---
 
-## Phase 3: Building Engines Guide
+## Phase 3: Building Engines Guide — PENDING
 
 `docs/guides/building-engines.md` — practical guide parallel to building-tools.md.
 
@@ -180,22 +159,15 @@ Covers:
 7. Installation and registration
 8. Reference implementation — a concrete rollup engine that does the "session ends → check job → complete piece" chain
 
+**Implementation note for the agent:** The Phase 1 rollup functions (`completeJobIfReady`, `completePieceIfReady`, etc.) are designed to be called from engines. The reference implementation should show an engine that wires `session.ended` → `completeJobIfReady` → `completePieceIfReady` as an event chain using standing orders.
+
 ---
 
-## Commissioning Strategy
+## Phase 4: Delivery Assessment — PENDING
 
-**Phase 1** is implementation work — core functions, CLI, tools. This is commissionable in 2-3 sub-commissions:
-- **1A+1B:** Core functions (dashboard reads + rollup functions + new events). One commission, one agent, touches `packages/core/src/`.
-- **1C+1D:** CLI commands + MCP tools. Depends on 1A+1B. One commission, touches `packages/cli/` and `packages/stdlib/`.
+Now that the docs exist (once Phases 2-3 are done) and we know their size and shape, how do we get them to animas who need them? This phase produces a recommendation, not an implementation.
 
-**Phase 2** is documentation — reference material. This could be one commission but it's heavy. The agent needs to read the full codebase to write accurate docs. Could split:
-- **2A:** Core API reference (the big one)
-- **2B+2C:** Event catalog + schema reference (smaller, more mechanical)
-- **2D:** Building-tools update + building-engines guide
-
-**Phase 3** is a standalone commission that depends on Phase 2 being done (so the guide can reference the docs).
-
-**Phase 4** is a delivery assessment — now that the docs exist and we know their size and shape, how do we get them to animas who need them? This phase produces a recommendation, not an implementation. The implementer reviews the docs produced in Phases 2-3, measures their size, and evaluates delivery options:
+The implementer reviews the docs produced in Phases 2-3, measures their size, and evaluates delivery options:
 
 - **Role instructions** — a "toolsmith" or "framework-developer" role whose instructions include (or reference) the API docs. Manifest engine reads from the guildhall and injects at session time. Works from any workspace.
 - **Curriculum** — package the reference as training content. Delivered at instantiation. Current limitation: one curriculum per anima.
@@ -207,15 +179,30 @@ The right answer depends on doc size (500 lines of tight reference is fine in a 
 
 The deliverable for Phase 4 is a short recommendation doc with the chosen approach, rationale, and implementation steps — which then becomes its own commission if non-trivial.
 
+---
+
+## Commissioning Strategy
+
+### What's Done
+
+Phase 1 (all sub-phases) is complete. The API surface now exists for dashboard reads and hierarchy rollup. CLI and MCP tools are wired and role-gated. 13/13 tests pass.
+
+### What's Left — Commissioning Recommendations
+
+**Phase 2** is documentation — reference material. Could be one commission but it's heavy. Recommended split:
+- **2A:** Core API reference (the big one — requires reading every export in `index.ts` and documenting accurately)
+- **2B+2C:** Event catalog + schema reference (smaller, more mechanical — can run in parallel with 2A)
+- **2D:** Building-tools update (small, depends on 2A existing to link to)
+
+**Phase 3** is a standalone commission that depends on Phase 2 being done (so the guide can reference the docs).
+
+**Phase 4** is a delivery assessment — depends on all docs existing so the assessor can measure their actual size and shape.
+
 ### Execution Order
 
 ```
-Phase 1A+1B  (core functions)
-     ↓
-Phase 1C+1D  (CLI + tools)
-     ↓
-Phase 2A     (core API reference)
-Phase 2B+2C  (event catalog + schema — can parallel with 2A)
+Phase 2A     (core API reference)           ← commissionable now
+Phase 2B+2C  (event catalog + schema)       ← commissionable now, parallel with 2A
      ↓
 Phase 2D + Phase 3  (guides — depend on reference docs existing)
      ↓
@@ -226,8 +213,8 @@ Phase 4      (delivery assessment — depends on all docs existing)
 
 | Phase | Files Changed | Complexity |
 |-------|--------------|------------|
-| 1A+1B | ~6 core modules + tests | Medium — pattern is well-established, mostly following existing CRUD conventions |
-| 1C+1D | ~8-10 CLI/tool files | Medium — mechanical, follows existing CLI noun-verb pattern |
+| ~~1A+1B~~ | ~~6 core modules~~ | ~~✅ DONE~~ |
+| ~~1C+1D+1E~~ | ~~19 CLI/tool/config files~~ | ~~✅ DONE~~ |
 | 2A | 1 large doc | High — requires reading and accurately documenting every export |
 | 2B+2C | 2 docs | Medium — structured reference material, schema is already defined |
 | 2D+3 | 2-3 docs | Medium — guide writing, includes example code |
