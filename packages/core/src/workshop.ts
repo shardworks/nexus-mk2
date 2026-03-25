@@ -262,5 +262,12 @@ export function createWorkshop(opts: CreateWorkshopOptions): AddWorkshopResult {
   // Need to initialize the repo so bare clone works.
   // gh repo create with --confirm creates it but it may be empty.
   // We'll clone it (possibly empty) — git clone --bare handles empty repos.
-  return addWorkshop({ home, name, remoteUrl });
+  const result = addWorkshop({ home, name, remoteUrl });
+
+  // Ensure the bare repo's default branch is 'main', not 'master'.
+  // Empty bare clones inherit git's init.defaultBranch setting, which
+  // may be 'master'. The workshop-merge engine expects 'main'.
+  git(['symbolic-ref', 'HEAD', 'refs/heads/main'], result.barePath);
+
+  return result;
 }
