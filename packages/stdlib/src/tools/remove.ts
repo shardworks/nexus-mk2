@@ -9,9 +9,9 @@ import { tool, removeTool } from '@shardworks/nexus-core';
 import { z } from 'zod';
 
 export default tool({
-  name: 'remove-tool',
+  name: 'tool-remove',
   description: 'Remove a guild-managed tool, engine, curriculum, or temperament',
-  instructionsFile: './instructions/remove.md',
+  instructionsFile: './instructions/tool-remove.md',
   params: {
     name: z.string().describe('Name of the tool to remove'),
     category: z.enum(['tools', 'engines', 'curricula', 'temperaments']).optional()

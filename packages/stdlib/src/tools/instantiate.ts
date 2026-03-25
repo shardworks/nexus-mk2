@@ -9,9 +9,9 @@ import { tool, instantiate } from '@shardworks/nexus-core';
 import { z } from 'zod';
 
 export default tool({
-  name: 'instantiate',
+  name: 'anima-create',
   description: 'Instantiate a new anima in the guild with assigned curriculum, temperament, and roles',
-  instructionsFile: './instructions/instantiate.md',
+  instructionsFile: './instructions/anima-create.md',
   params: {
     name: z.string().describe('Name for the new anima'),
     roles: z.array(z.string()).describe('Roles the anima will hold (e.g. artificer, sage)'),

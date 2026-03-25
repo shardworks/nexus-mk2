@@ -36,9 +36,9 @@ function detectBundle(home: string, source: string): string | null {
 }
 
 export default tool({
-  name: 'install-tool',
+  name: 'tool-install',
   description: 'Install a tool, engine, curriculum, temperament, or bundle into the guild',
-  instructionsFile: './instructions/install.md',
+  instructionsFile: './instructions/tool-install.md',
   params: {
     source: z.string().describe('npm package specifier, git URL, workshop ref, tarball path, or bundle specifier'),
     name: z.string().optional().describe('Override the tool name (defaults to package name or directory name)'),
