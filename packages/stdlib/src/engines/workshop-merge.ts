@@ -59,6 +59,9 @@ export default engine({
         // Fast-forward: main hasn't moved since the branch was created
         git(['update-ref', 'refs/heads/main', branchTip], bareRepo);
 
+        // Push merged main to the remote so changes reach GitHub
+        git(['push', 'origin', 'main'], bareRepo);
+
         teardownWorktree(home, workshop, commissionId);
         updateCommissionStatus(home, commissionId, 'completed', `merged to main (fast-forward to ${branchTip.slice(0, 7)})`);
         signalEvent(home, 'commission.completed', { commissionId, workshop }, 'framework');

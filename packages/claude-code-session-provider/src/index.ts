@@ -160,11 +160,16 @@ export const claudeCodeProvider: SessionProvider = {
         return { exitCode, durationMs };
       } else {
         // Autonomous: commission spec / brief as prompt
-        args.push('--print', prompt ?? '');
-        // TODO Phase 4: add --output-format stream-json and parse transcript + metrics
-        const exitCode = await spawnClaude(args, cwd, 'pipe');
+        // Use stream-json to capture transcript, token usage, and cost.
+        args.push(
+          '--print', prompt ?? '',
+          '--output-format', 'stream-json',
+          '--verbose',
+        );
+        const { exitCode, transcript, costUsd, tokenUsage, providerSessionId } =
+          await spawnClaudeStreamJson(args, cwd);
         const durationMs = Date.now() - startTime;
-        return { exitCode, durationMs };
+        return { exitCode, durationMs, transcript, costUsd, tokenUsage, providerSessionId };
       }
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -173,16 +178,11 @@ export const claudeCodeProvider: SessionProvider = {
 };
 
 /**
- * Spawn the claude CLI process asynchronously.
- *
- * Uses child_process.spawn (not spawnSync) for:
- * - Stream-json transcript parsing (future)
- * - Timeout enforcement (future)
- * - Concurrent session support (future)
+ * Spawn the claude CLI process asynchronously in interactive mode.
  *
  * @param args - CLI arguments for claude
  * @param cwd - Working directory for the process
- * @param stdio - 'inherit' for interactive, 'pipe' for autonomous
+ * @param stdio - 'inherit' for interactive, 'pipe' for autonomous (stdin only)
  * @returns Exit code (0 = success)
  */
 function spawnClaude(
@@ -204,6 +204,123 @@ function spawnClaude(
 
     proc.on('close', (code) => {
       resolve(code ?? 1);
+    });
+  });
+}
+
+/** Parsed result from stream-json output. */
+interface StreamJsonResult {
+  exitCode: number;
+  transcript: Record<string, unknown>[];
+  costUsd?: number;
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+  providerSessionId?: string;
+}
+
+/**
+ * Spawn Claude in autonomous mode with --output-format stream-json.
+ *
+ * Captures stdout (NDJSON lines), parses each line to extract:
+ * - assistant messages → transcript
+ * - result message → cost, token usage, session ID
+ *
+ * Forwards assistant text content to stderr so it's visible during execution.
+ */
+function spawnClaudeStreamJson(args: string[], cwd: string): Promise<StreamJsonResult> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('claude', args, {
+      cwd,
+      // stdin: pipe (close immediately), stdout: pipe (capture NDJSON), stderr: inherit (errors visible)
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+
+    const transcript: Record<string, unknown>[] = [];
+    let costUsd: number | undefined;
+    let tokenUsage: StreamJsonResult['tokenUsage'] | undefined;
+    let providerSessionId: string | undefined;
+
+    let buffer = '';
+
+    proc.stdout!.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString();
+
+      // Process complete lines
+      let newlineIdx: number;
+      while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, newlineIdx).trim();
+        buffer = buffer.slice(newlineIdx + 1);
+
+        if (!line) continue;
+
+        try {
+          const msg = JSON.parse(line) as Record<string, unknown>;
+
+          if (msg.type === 'assistant') {
+            // Capture the full assistant message in the transcript
+            transcript.push(msg as Record<string, unknown>);
+
+            // Forward text content to stderr for visibility
+            const message = msg.message as Record<string, unknown> | undefined;
+            if (message) {
+              const content = message.content as Array<Record<string, unknown>> | undefined;
+              if (content) {
+                for (const block of content) {
+                  if (block.type === 'text' && typeof block.text === 'string') {
+                    process.stderr.write(block.text);
+                  }
+                }
+              }
+            }
+          } else if (msg.type === 'user') {
+            // Capture tool results / user messages in transcript
+            transcript.push(msg as Record<string, unknown>);
+          } else if (msg.type === 'result') {
+            // Extract metrics from the result message
+            costUsd = typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : undefined;
+            providerSessionId = typeof msg.session_id === 'string' ? msg.session_id : undefined;
+
+            // Parse token usage from the result's usage field
+            const usage = msg.usage as Record<string, unknown> | undefined;
+            if (usage) {
+              tokenUsage = {
+                inputTokens: (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0),
+                outputTokens: (typeof usage.output_tokens === 'number' ? usage.output_tokens : 0),
+                cacheReadTokens: typeof usage.cache_read_input_tokens === 'number'
+                  ? usage.cache_read_input_tokens : undefined,
+                cacheWriteTokens: typeof usage.cache_creation_input_tokens === 'number'
+                  ? usage.cache_creation_input_tokens : undefined,
+              };
+            }
+          }
+          // Silently skip other message types (system, rate_limit_event, etc.)
+        } catch {
+          // Non-JSON line — ignore (shouldn't happen with stream-json, but be defensive)
+        }
+      }
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to spawn claude: ${err.message}`));
+    });
+
+    proc.on('close', (code) => {
+      // Ensure trailing newline after streamed text output
+      if (transcript.length > 0) {
+        process.stderr.write('\n');
+      }
+
+      resolve({
+        exitCode: code ?? 1,
+        transcript,
+        costUsd,
+        tokenUsage,
+        providerSessionId,
+      });
     });
   });
 }
