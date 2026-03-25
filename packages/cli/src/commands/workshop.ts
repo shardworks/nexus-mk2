@@ -1,11 +1,7 @@
 import { createCommand } from 'commander';
 import {
-  addWorkshop,
-  removeWorkshop,
-  listWorkshops,
-  createWorkshop,
-  checkGhAuth,
-  deriveWorkshopName,
+  addWorkshop, removeWorkshop, listWorkshops, createWorkshop,
+  showWorkshop, checkGhAuth, deriveWorkshopName,
 } from '@shardworks/nexus-core';
 import { resolveHome } from '../resolve-home.ts';
 
@@ -13,9 +9,9 @@ export function makeWorkshopCommand() {
   const workshop = createCommand('workshop')
     .description('Manage guild workshops (repositories where the guild works)');
 
-  // nsg workshop add <url> [--name <name>]
+  // nsg workshop register <url> [--name <name>]
   workshop.addCommand(
-    createCommand('add')
+    createCommand('register')
       .description('Clone a remote repository and register it as a workshop')
       .argument('<url>', 'Git remote URL to clone')
       .option('--name <name>', 'Workshop name (default: derived from URL)')
@@ -25,7 +21,7 @@ export function makeWorkshopCommand() {
 
         try {
           const result = addWorkshop({ home, name, remoteUrl: url });
-          console.log(`Workshop "${result.name}" added.`);
+          console.log(`Workshop "${result.name}" registered.`);
           console.log(`  Remote: ${result.remoteUrl}`);
           console.log(`  Bare clone: ${result.barePath}`);
         } catch (err) {
@@ -65,7 +61,7 @@ export function makeWorkshopCommand() {
 
           if (workshops.length === 0) {
             console.log('No workshops registered.');
-            console.log('  Add one with: nsg workshop add <url>');
+            console.log('  Register one with: nsg workshop register <url>');
             return;
           }
 
@@ -88,6 +84,36 @@ export function makeWorkshopCommand() {
       }),
   );
 
+  // nsg workshop show <name>
+  workshop.addCommand(
+    createCommand('show')
+      .description('Show detailed information about a workshop')
+      .argument('<name>', 'Workshop name')
+      .action((name: string, _, cmd) => {
+        const home = resolveHome(cmd);
+
+        try {
+          const result = showWorkshop(home, name);
+          if (!result) {
+            console.error(`Workshop "${name}" not found.`);
+            process.exitCode = 1;
+            return;
+          }
+
+          console.log(`${result.name}`);
+          console.log(`  Remote: ${result.remoteUrl}`);
+          console.log(`  Bare path: ${result.barePath}`);
+          console.log(`  Cloned: ${result.cloned ? 'yes' : 'no'}`);
+          if (result.defaultBranch) console.log(`  Default branch: ${result.defaultBranch}`);
+          console.log(`  Active worktrees: ${result.activeWorktrees}`);
+          console.log(`  Added: ${result.addedAt}`);
+        } catch (err) {
+          console.error(`Error: ${(err as Error).message}`);
+          process.exitCode = 1;
+        }
+      }),
+  );
+
   // nsg workshop create <org/name> [--public]
   workshop.addCommand(
     createCommand('create')
@@ -98,7 +124,6 @@ export function makeWorkshopCommand() {
       .action((repo: string, options: { public?: boolean; name?: string }, cmd) => {
         const home = resolveHome(cmd);
 
-        // Precondition: gh must be installed and authenticated
         const authError = checkGhAuth();
         if (authError) {
           console.error(`Error: ${authError}`);
@@ -108,9 +133,7 @@ export function makeWorkshopCommand() {
 
         try {
           const result = createWorkshop({
-            home,
-            repoName: repo,
-            private: !options.public,
+            home, repoName: repo, private: !options.public,
           });
           console.log(`Workshop "${result.name}" created.`);
           console.log(`  Repository: https://github.com/${repo}`);
