@@ -68,20 +68,30 @@ function buildClaudeMcpConfig(
   mcpServerConfigPath: string,
   serverConfig: McpServerConfig,
 ): object {
-  // Resolve the mcp-server entry point within this package
-  const mcpServerUrl = import.meta.resolve('./mcp-server.ts');
+  // Resolve the mcp-server entry point within this package.
+  // Use .js extension — TypeScript's transform-types does not rewrite
+  // extensions in import.meta.resolve() calls, so .ts would be baked
+  // into compiled output and fail at runtime (dist/ only has .js).
+  const mcpServerUrl = import.meta.resolve('./mcp-server.js');
   const mcpServerPath = fileURLToPath(mcpServerUrl);
+
+  // In dev (monorepo), only mcp-server.ts exists — the .js URL won't
+  // resolve on disk. Detect this and swap to .ts with transform flags.
+  const isDev = !fs.existsSync(mcpServerPath);
+  const actualUrl = isDev
+    ? mcpServerUrl.replace(/\.js$/, '.ts')
+    : mcpServerUrl;
 
   // Write a wrapper script that imports and invokes main().
   const wrapperPath = path.join(tmpDir, 'mcp-entry.mjs');
   fs.writeFileSync(
     wrapperPath,
-    `import { main } from ${JSON.stringify(mcpServerUrl)};\nawait main();\n`,
+    `import { main } from ${JSON.stringify(actualUrl)};\nawait main();\n`,
   );
 
-  // In dev the resolved path is .ts source; add the transform flag.
+  // Dev mode needs transform-types to handle the .ts source.
   const nodeArgs: string[] = [];
-  if (mcpServerPath.endsWith('.ts')) {
+  if (isDev) {
     nodeArgs.push(
       '--disable-warning=ExperimentalWarning',
       '--experimental-transform-types',
@@ -133,7 +143,6 @@ export const claudeCodeProvider: SessionProvider = {
 
       // Base args — shared between interactive and print modes
       const args: string[] = [
-        '--bare',
         '--setting-sources', 'user',
         '--dangerously-skip-permissions',
         '--system-prompt-file', systemPromptPath,
