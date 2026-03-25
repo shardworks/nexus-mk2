@@ -19,6 +19,7 @@ import { makeSessionCommand } from './commands/session.ts';
 import { makeEventCommand } from './commands/event.ts';
 import { makeDispatchCommand } from './commands/dispatch.ts';
 import { makeAuditCommand } from './commands/audit.ts';
+import { makeDashboardCommand } from './commands/dashboard.ts';
 
 // Register the Claude Code session provider so core's session funnel
 // can launch claude sessions.
@@ -81,3 +82,6 @@ program.addCommand(makeDispatchCommand());
 
 // nsg audit [list]
 program.addCommand(makeAuditCommand());
+
+// nsg dashboard
+program.addCommand(makeDashboardCommand());
