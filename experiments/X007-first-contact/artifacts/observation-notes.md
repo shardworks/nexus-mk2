@@ -99,11 +99,51 @@ No other significant friction. Once it had the types, it wrote everything withou
 
 ### What surprised the patron?
 
-*(Sean's input needed here)*
+**The Good**
+
+- Steward's performance was amazing:
+  - Standard administration tasks: updating role lists, dispatching commissions, etc.
+  - Data capture: Located and extracted details about anima and session on-demand
+  - Observability: Was able to identify and relay what the Clockworks was doing
+  - Troubleshooting: Triaged, identifyed, and worked around two problems during the experiment
+- Correctlty used the nexus-core API as intended
+- The web UI is surprisingly rich
+  - Pleasing color scheme
+  - Use of more advanced controls (sticky nav, pills)
+  - Multiple types of data formatting (cards, tables)
+- Included data was more thorough than expected (Nexus version, model, timestamps, etc.)
+- The "codex" concept is pretty powerful. It allows the operator of a guild to apply instructions to anything they build--wherever they are running the AI agents, and whatever repositories they are building in. It's got a unique stickiness and global nature that isn't true of other instruction injection mechanisms.
+
+**The Bad**
+
+- Rolled its own HTML escaping function. Probably something I'd wanna use a reliable builtin or library for.
+- Same as above, but for date formatting.
+- Many inline HTML template strings in the code. Maybe forgivable at this scale, but a yellow flag.
+- Inline CSS as text. Much harder to review/maintain than *.css file(s) or other CSS-in-JS solutions.
+
+The UI was much better than expected. Still, for the sake of completeness, I will point out some issues:
+
+- Fonts were too small. Combined with spacing that was a bit too crammed made it look "off" somehow and not as pleasing as it should have been given the overall level of effort.
+- Minor instances where contrast was low enough to be an accessibility or readability issue
+- A big stack of tables with non-uniform length columns looks messy
 
 ### What would the patron change?
 
-*(Sean's input needed here)*
+**The Commission**
+
+- Since we need to import this into another CLI, probably would give more direction about how to publish the package or otherwise make it available.
+
+**Instructions**
+
+- Definitely not give the full "Guild Operations" manual to the artificer. I vaguely thought of this right before starting, but we were already so close to launching I didn't wanna go back and iterate on a new curriculum.
+- I would probably consider a codex entry about not hand-rolling basic formatting and encoding utilities that are in standard library. Especially ones with potential security impact.
+- Need to clarify proper usage of tools.
+- Need to ensure it properly 'strokes' its work, since that is probably going to become a key observability and reliability tool for the system in the future. Does this mean we need to somehow inject this at a framework level, so that the guilds don't have to think about it (or get it wrong)
+
+**Tooling**
+
+- We definintely need to automate the clockworks
+- Need a way to tell the status of work, both while in-progress and after
 
 ---
 
