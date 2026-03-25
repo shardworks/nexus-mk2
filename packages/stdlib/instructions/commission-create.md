@@ -1,11 +1,11 @@
-# commission
+# commission-create
 
 Post a commission to the guild. The Clockworks handles everything downstream — worktree setup, anima summoning, and post-session merge.
 
 ## Usage
 
 ```
-commission <spec> --workshop <workshop>
+commission-create <spec> --workshop <workshop>
 ```
 
 ## Arguments

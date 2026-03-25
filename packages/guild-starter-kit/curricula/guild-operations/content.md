@@ -22,7 +22,7 @@ An anima is the fundamental unit of identity in the guild. Animas are animated b
 
 ### Standing vs. Commissioned
 
-- **Standing** animas persist on the roster indefinitely, called on by name. The advisor is a standing anima.
+- **Standing** animas persist on the roster indefinitely, called on by name. The steward is a standing anima.
 - **Commissioned** animas are created for a specific commission and their tenure ends when the commission completes.
 
 ## Roles
@@ -33,8 +33,8 @@ This guild uses the following roles:
 
 | Role | Function |
 |------|----------|
-| **Advisor** | Helps the patron understand and use the guild. Answers questions, explains state, suggests actions. Does not implement. |
-| **Artificer** | Executes jobs — receives planned work and builds the thing. Works in workshops. |
+| **Steward** | The patron's right hand. Advises on guild state and administers the guild — manages the roster, workshops, commissions, tools, and the Clockworks. Does not build works. |
+| **Artificer** | Executes jobs — receives planned work and builds the thing. Works in workshops. Plans and records strokes for progress tracking. |
 | **Sage** | Plans work. Decomposes commissions into pieces and jobs with concrete requirements. |
 | **Master Sage** | Senior sage. If active, reviews incoming commissions to determine scope and planning approach. |
 
@@ -52,29 +52,29 @@ Four commands manage the workshop lifecycle:
 
 | Command | What it does |
 |---------|-------------|
-| `nsg workshop add <url>` | Clone a remote repo and register it as a workshop |
+| `nsg workshop register <url>` | Clone a remote repo and register it as a workshop |
 | `nsg workshop remove <name>` | Remove a workshop — deletes bare clone, worktrees, and guild.json entry |
 | `nsg workshop list` | List all workshops with clone status and active worktree count |
 | `nsg workshop create <org/name>` | Create a new GitHub repo and register it as a workshop |
 
-### Adding an Existing Repository
+### Registering an Existing Repository
 
 When the patron has an existing repository they want the guild to work on:
 
 ```
-nsg workshop add https://github.com/org/my-app.git
+nsg workshop register https://github.com/org/my-app.git
 ```
 
 This clones the repo as a bare clone into `.nexus/workshops/my-app.git` and adds it to `guild.json`. The workshop name is derived from the URL (the last path segment, minus `.git`). To use a custom name:
 
 ```
-nsg workshop add https://github.com/org/my-app.git --name frontend
+nsg workshop register https://github.com/org/my-app.git --name frontend
 ```
 
 The repository must already exist and be accessible. SSH URLs work too:
 
 ```
-nsg workshop add git@github.com:org/my-app.git
+nsg workshop register git@github.com:org/my-app.git
 ```
 
 ### Creating a New Repository
@@ -159,7 +159,7 @@ Not every commission becomes a work. A small commission might map directly to a 
 
 ### Commission Lifecycle
 
-1. **Posted** — the patron runs `nsg commission <spec> --workshop <name>`. This creates the commission in the Ledger and signals `commission.posted`.
+1. **Posted** — the patron runs `nsg commission create <spec> --workshop <name>`. This creates the commission in the Ledger and signals `commission.posted`.
 2. **Scope determined** — the Master Sage (if active) reviews the commission and determines whether it's a work (needs decomposition), a piece (needs planning into jobs), or a single job (ready for dispatch).
 3. **Planned** — for works and pieces, the sage decomposes and plans, producing concrete jobs with acceptance criteria.
 4. **Worktree prepared** — the `workshop-prepare` engine (triggered by `commission.posted`) creates a job branch and worktree, then signals `commission.ready`.
@@ -190,13 +190,13 @@ posted → in_progress → completed
 
 ## Sessions
 
-A session is a single manifestation of an anima — the span during which an anima is alive and working. Every interaction with an anima happens through a session, whether it's consulting the advisor, dispatching a job, or briefing an anima about an event.
+A session is a single manifestation of an anima — the span during which an anima is alive and working. Every interaction with an anima happens through a session, whether it's consulting the steward, dispatching a job, or briefing an anima about an event.
 
 ### Session Triggers
 
 | Trigger | Meaning |
 |---------|---------|
-| **consult** | Interactive session with a standing anima (e.g., `nsg consult advisor`) |
+| **consult** | Interactive session with a standing anima (e.g., `nsg consult steward`) |
 | **summon** | The anima is summoned by a standing order to act on an event — autonomous, directive |
 | **brief** | The anima is briefed by a standing order about an event — autonomous, informational |
 
@@ -237,14 +237,51 @@ For commissions, the `commission_sessions` join table links commissions to their
 
 ## Tools
 
-Tools that animas wield during work. Each tool ships with instructions delivered to the anima at manifest time. All tools are packaged in `@shardworks/nexus-stdlib`:
+Tools that animas wield during work. Each tool ships with instructions delivered to the anima at manifest time. Tools follow a `<noun>-<verb>` naming convention. All tools are packaged in `@shardworks/nexus-stdlib`:
 
-- **install-tool** — install new tools, engines, or bundles into the guild
-- **remove-tool** — remove installed tools
-- **commission** — post commissions to the guild
-- **instantiate** — create new animas with assigned training and roles
+### Commission Tools
+- **commission-create** — post a commission to the guild
+- **commission-list** — list commissions with optional filters
+- **commission-show** — show details of a specific commission
+- **commission-update** — update a commission's status
+
+### Anima Tools
+- **anima-create** — create a new anima with assigned training and roles
+- **anima-list** — list animas with optional filters
+- **anima-show** — show details of a specific anima
+- **anima-update** — update an anima's status or roles
+- **anima-remove** — remove an anima from the guild
+
+### Workshop Tools
+- **workshop-create** — create a new GitHub repo and register as a workshop
+- **workshop-register** — register an existing repo as a workshop
+- **workshop-list** — list workshops with status
+- **workshop-show** — show workshop details
+- **workshop-remove** — remove a workshop
+
+### Tool Management
+- **tool-install** — install new tools, engines, or bundles into the guild
+- **tool-remove** — remove installed tools
+- **tool-list** — list installed tools
+
+### Work Decomposition Tools
+- **work-create** — create a work (top-level decomposition unit)
+- **work-list** / **work-show** / **work-update** — manage works
+- **piece-create** — create a piece (planning unit within a work)
+- **piece-list** / **piece-show** / **piece-update** — manage pieces
+- **job-create** — create a job (dispatch unit within a piece)
+- **job-list** / **job-show** / **job-update** — manage jobs
+- **stroke-create** — record a stroke (atomic action within a job)
+- **stroke-list** / **stroke-show** / **stroke-update** — manage strokes
+
+### Clockworks Tools
+- **clock-list** — show pending events
+- **clock-tick** — process the next pending event
+- **clock-run** — process all pending events
+
+### Utility Tools
+- **signal** — signal a custom guild event for the Clockworks
 - **nexus-version** — report the installed Nexus framework version
-- **signal** — signal a custom guild event for the Clockworks (not included in the default bundle — must be installed separately)
 
 ### Engines
 
@@ -285,10 +322,14 @@ The guild's operational database (SQLite). Holds anima records, roster, commissi
 | `roster` | Active role assignments (filtered view of active animas) |
 | `commissions` | Commission records with status, content, and workshop |
 | `commission_assignments` | Which anima was assigned to which commission |
+| `works` | Top-level work items linked to commissions |
+| `pieces` | Pieces within works — independently plannable chunks |
+| `jobs` | Dispatchable job assignments within pieces |
+| `strokes` | Atomic actions within jobs — progress tracking |
 | `sessions` | Every session — anima, provider, trigger, metrics, cost |
 | `commission_sessions` | Links commissions to their sessions |
 | `events` | The Clockworks event queue — every event signaled |
-| `dispatches` | Standing order execution records |
+| `event_dispatches` | Standing order execution records |
 | `audit_log` | Who did what, when |
 
 ## The Clockworks
@@ -350,8 +391,8 @@ Example `guild.json` configuration:
       { "on": "commission.posted",         "run": "workshop-prepare" },
       { "on": "commission.ready",          "summon": "artificer" },
       { "on": "commission.session.ended",  "run": "workshop-merge" },
-      { "on": "commission.failed",         "brief": "advisor" },
-      { "on": "code.reviewed",             "brief": "advisor" }
+      { "on": "commission.failed",         "brief": "steward" },
+      { "on": "code.reviewed",             "brief": "steward" }
     ]
   }
 }
@@ -428,7 +469,7 @@ Since there are no standing orders, the event is marked as processed with no dis
 {
   "clockworks": {
     "standingOrders": [
-      { "on": "hello.world", "brief": "advisor" }
+      { "on": "hello.world", "brief": "steward" }
     ]
   }
 }
@@ -441,7 +482,7 @@ nsg signal hello.world
 nsg clock tick
 ```
 
-The Clockworks matches the event to the standing order and dispatches it — the advisor is briefed.
+The Clockworks matches the event to the standing order and dispatches it — the steward is briefed.
 
 ## Training
 
@@ -487,24 +528,62 @@ The command is idempotent — safe to run at any time. If everything is already 
 
 ## CLI Reference
 
-The primary interface is the `nsg` command:
+The primary interface is the `nsg` command, organized by noun groups:
 
+### Top-level Commands
 | Command | Purpose |
 |---------|---------|
 | `nsg init` | Create a new guild |
-| `nsg commission <spec> --workshop <name>` | Post a commission |
-| `nsg consult <name>` | Consult a standing anima (e.g., the advisor) |
+| `nsg consult <name>` | Consult a standing anima (e.g., `nsg consult steward`) |
 | `nsg status` | Show guild status |
 | `nsg signal <name>` | Signal a custom guild event |
+| `nsg guild restore` | Restore runtime state after a fresh clone |
+
+### Commission
+| Command | Purpose |
+|---------|---------|
+| `nsg commission create <spec> --workshop <name>` | Post a commission |
+| `nsg commission list` | List commissions |
+| `nsg commission show <id>` | Show commission details |
+| `nsg commission update <id>` | Update a commission |
+
+### Anima
+| Command | Purpose |
+|---------|---------|
+| `nsg anima create` | Create a new anima |
+| `nsg anima list` | List animas |
+| `nsg anima show <name>` | Show anima details |
+| `nsg anima update <name>` | Update an anima |
+| `nsg anima remove <name>` | Remove an anima |
+| `nsg anima manifest <name>` | Generate an anima's full instructions (debug) |
+
+### Workshop
+| Command | Purpose |
+|---------|---------|
+| `nsg workshop register <url>` | Register an existing repo as a workshop |
+| `nsg workshop create <org/name>` | Create a new GitHub repo and register as a workshop |
+| `nsg workshop list` | List workshops with status |
+| `nsg workshop show <name>` | Show workshop details |
+| `nsg workshop remove <name>` | Remove a workshop |
+
+### Tool
+| Command | Purpose |
+|---------|---------|
+| `nsg tool install <source>` | Install a tool or bundle |
+| `nsg tool remove <name>` | Remove an installed tool |
+| `nsg tool list` | List installed tools |
+
+### Work Decomposition
+| Command | Purpose |
+|---------|---------|
+| `nsg work create/list/show/update` | Manage works |
+| `nsg piece create/list/show/update` | Manage pieces |
+| `nsg job create/list/show/update` | Manage jobs |
+| `nsg stroke create/list/show/update` | Manage strokes |
+
+### Clockworks
+| Command | Purpose |
+|---------|---------|
 | `nsg clock list` | Show pending events |
 | `nsg clock tick [id]` | Process next pending event (or specific id) |
 | `nsg clock run` | Process all pending events |
-| `nsg workshop add <url>` | Clone a remote repo and register it as a workshop |
-| `nsg workshop remove <name>` | Remove a workshop |
-| `nsg workshop list` | List workshops with status |
-| `nsg workshop create <org/name>` | Create a new GitHub repo and register as a workshop |
-| `nsg guild restore` | Restore runtime state after a fresh clone |
-| `nsg tool install <source>` | Install a tool or bundle |
-| `nsg tool remove <name>` | Remove an installed tool |
-| `nsg anima create` | Instantiate a new anima |
-| `nsg anima manifest <name>` | Generate an anima's full instructions |

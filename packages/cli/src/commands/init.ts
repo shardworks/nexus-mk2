@@ -79,8 +79,8 @@ export function makeInitCommand() {
         // 4. Instantiate the starting animas
         instantiate({
           home,
-          name: 'Advisor',
-          roles: ['advisor'],
+          name: 'Steward',
+          roles: ['steward'],
           curriculum: 'guild-operations',
           temperament: 'guide',
         });
@@ -103,6 +103,6 @@ export function makeInitCommand() {
 
       console.log(`Guild "${guildName}" created at ${home}`);
       console.log(`\n  cd ${guildPath}`);
-      console.log(`  nsg consult advisor    # ask your guild advisor for help\n`);
+      console.log(`  nsg consult steward    # ask your guild steward for help\n`);
     });
 }

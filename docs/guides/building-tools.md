@@ -122,7 +122,7 @@ There are five install types, each with different durability guarantees.
 ### Registry — published npm packages
 
 ```
-nexus install-tool some-tool@1.0 --roles artificer
+nsg tool install some-tool@1.0 --roles artificer
 ```
 
 Installs from the npm registry via `npm install --save`. The package is added to the guild's `package.json` as a dependency, so it survives `npm install` on a fresh clone.
@@ -135,7 +135,7 @@ Installs from the npm registry via `npm install --save`. The package is added to
 ### Git URL — packages from git repositories
 
 ```
-nexus install-tool git+https://github.com/someone/tool.git#v1.0 --roles artificer
+nsg tool install git+https://github.com/someone/tool.git#v1.0 --roles artificer
 ```
 
 Same flow as registry — npm handles `git+` URLs natively. The URL is saved to `package.json`.
@@ -146,7 +146,7 @@ Same flow as registry — npm handles `git+` URLs natively. The URL is saved to 
 ### Workshop — forge-built tools
 
 ```
-nexus install-tool workshop:forge#tool/fetch-jira@1.0 --roles artificer
+nsg tool install workshop:forge#tool/fetch-jira@1.0 --roles artificer
 ```
 
 Installs from a workshop bare repo in `.nexus/workshops/`. The source specifier format is `workshop:<name>#<ref>` where `<name>` is the workshop name and `<ref>` is a git ref (branch, tag, or commit).
@@ -162,7 +162,7 @@ This is the path used by forge agents installing tools they've built in a commis
 ### Tarball — local archive files
 
 ```
-nexus install-tool ./my-tool-1.0.0.tgz --roles artificer
+nsg tool install ./my-tool-1.0.0.tgz --roles artificer
 ```
 
 Installs from a local `.tgz` or `.tar.gz` file (e.g. a CI artifact). Uses `--no-save` semantics with full source copied to the tool directory.
@@ -175,7 +175,7 @@ Installs from a local `.tgz` or `.tar.gz` file (e.g. a CI artifact). Uses `--no-
 ### Link — dev mode with symlinks
 
 ```
-nexus install-tool ~/projects/my-tool --link --roles artificer
+nsg tool install ~/projects/my-tool --link --roles artificer
 ```
 
 Creates a symlink in `node_modules/` pointing to the source directory. Changes to the handler are reflected immediately at runtime — no reinstall needed. The tool's own `node_modules` (from the developer's project) resolves dependencies.
@@ -198,7 +198,7 @@ For tools with a `package` field in their descriptor, the manifest engine passes
 ## Removing tools
 
 ```
-nexus remove-tool my-tool
+nsg tool remove my-tool
 ```
 
 Removal behavior depends on how the tool was installed:
@@ -234,8 +234,8 @@ The core library provides utilities that tool handlers commonly need:
 | `writeGuildConfig(home, config)` | Write `guild.json` |
 | `findGuildRoot(startDir?)` | Discover the guild root from cwd |
 | `booksPath(home)` | Resolve path to the Books SQLite database (`.nexus/nexus.db`) |
-| `installTool(opts)` | Core install logic (used by `install-tool` tool) |
-| `removeTool(opts)` | Core remove logic (used by `remove-tool` tool) |
+| `installTool(opts)` | Core install logic (used by `tool-install` tool) |
+| `removeTool(opts)` | Core remove logic (used by `tool-remove` tool) |
 | `rehydrate(home)` | Reconstruct `node_modules` from tracked guild state |
 | `ledgerPath(home)` | *(Deprecated alias for `booksPath`)* |
 | `tool(def)` | The tool SDK factory |

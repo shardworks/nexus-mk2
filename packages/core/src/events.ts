@@ -15,6 +15,10 @@ import type { GuildEvent } from './engine.ts';
 const FRAMEWORK_NAMESPACES = [
   'anima.',
   'commission.',
+  'work.',
+  'piece.',
+  'job.',
+  'stroke.',
   'tool.',
   'migration.',
   'guild.',

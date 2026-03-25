@@ -1,11 +1,11 @@
-# install-tool
+# tool-install
 
 Install a new tool into the guild from a local directory, npm package, or tarball.
 
 ## Usage
 
 ```
-install-tool <source> [--name <name>] [--roles <roles>] [--link]
+tool-install <source> [--name <name>] [--roles <roles>] [--link]
 ```
 
 ## Arguments
@@ -26,19 +26,19 @@ The source is automatically classified:
 
 ## Examples
 
-Install a locally-built implement:
+Install a locally-built tool:
 ```
-install-tool ./path/to/my-tool --roles artificer
+tool-install ./path/to/my-tool --roles artificer
 ```
 
 Install from npm registry:
 ```
-install-tool some-published-tool@1.2.0 --roles herald
+tool-install some-published-tool@1.2.0 --roles artificer
 ```
 
 Link a tool for active development (changes are live):
 ```
-install-tool ~/projects/my-tool --link --roles artificer
+tool-install ~/projects/my-tool --link --roles artificer
 ```
 
-The tool will detect the descriptor type (implement, engine, curriculum, or temperament), install it to the correct location, and register it in guild.json.
+The tool will detect the descriptor type (tool, engine, curriculum, or temperament), install it to the correct location, and register it in guild.json.

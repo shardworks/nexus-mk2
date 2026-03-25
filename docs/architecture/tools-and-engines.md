@@ -41,7 +41,7 @@ Every tool is, at its core, a **handler with a defined contract** — inputs, ou
 ```
 
 - **MCP** — The manifest engine configures an MCP server that exposes tools as typed, callable tools. The anima sees them as native tools alongside built-in tools like Read, Write, and Bash.
-- **CLI** — The `nexus` CLI exposes tools as subcommands (`nexus dispatch`, `nexus install-tool`, etc.).
+- **CLI** — The `nsg` CLI exposes tools as noun-verb subcommands (`nsg commission create`, `nsg tool install`, etc.).
 - **Import** — Engines and other tools can import module-based handlers directly.
 
 ### Two kinds of tools
@@ -149,7 +149,7 @@ A tool's `instructions.md` is an optional teaching document that is delivered to
 
 The MCP schema tells the anima what buttons a tool has. The instructions teach the **craft of using it** — when to reach for it, what judgment to apply, how it fits into the guild's workflows.
 
-Not every tool needs instructions. A simple query tool (`get-anima`) may be fully described by its MCP schema and parameter descriptions. Instructions matter most for tools that require judgment: dispatch, publish, instantiate — tools where knowing the API isn't enough.
+Not every tool needs instructions. A simple query tool (`anima-show`) may be fully described by its MCP schema and parameter descriptions. Instructions matter most for tools that require judgment: `commission-create`, `signal`, `anima-create` — tools where knowing the API isn't enough.
 
 Instructions are also **institutional, not intrinsic**. The MCP schema is the tool's own contract — the same everywhere. Instructions reflect the guild's teaching about how to use the tool, and they compose with the rest of the anima's identity (codex, curriculum, temperament). The same tool installed in two different guilds could have different instructions reflecting different policies and workflows.
 
@@ -213,20 +213,19 @@ Each tool occupies a single directory named after the tool:
 ```
 GUILD_ROOT/
   tools/
-    dispatch/
+    commission-create/
       nexus-tool.json           →  { "entry": "handler.js", ... }
       instructions.md           →  (metadata only for npm-installed tools)
-    install-tool/
-    remove-tool/
-    instantiate/
+    tool-install/
+    tool-remove/
+    anima-create/
     my-tool/
       nexus-tool.json
       instructions.md
   engines/
-    manifest/
+    workshop-prepare/
       nexus-engine.json
-      index.js
-    mcp-server/
+    workshop-merge/
     worktree-setup/
     ledger-migrate/
   nexus/
@@ -250,24 +249,24 @@ Tools are registered in `guild.json` and assigned to roles:
 
 ```json
 {
-  "baseTools": ["dispatch", "install-tool", "remove-tool"],
+  "baseTools": ["nexus-version"],
   "roles": {
+    "steward": {
+      "seats": 1,
+      "tools": ["commission-create", "commission-list", "anima-create", "tool-install", "signal"],
+      "instructions": "roles/steward.md"
+    },
     "artificer": {
       "seats": null,
-      "tools": ["my-linter"],
+      "tools": ["commission-show", "job-update", "stroke-create", "stroke-update", "signal"],
       "instructions": "roles/artificer.md"
-    },
-    "sage": {
-      "seats": 1,
-      "tools": ["plan"],
-      "instructions": "roles/sage.md"
     }
   },
   "tools": {
-    "dispatch": {
-      "upstream": "@shardworks/tool-dispatch@0.1.11",
-      "package": "@shardworks/tool-dispatch",
-      "installedAt": "2026-03-23T12:00:00Z",
+    "commission-create": {
+      "upstream": "@shardworks/nexus-stdlib",
+      "package": "@shardworks/nexus-stdlib",
+      "installedAt": "2026-03-25T12:00:00Z",
       "bundle": "@shardworks/guild-starter-kit@0.1.0"
     },
     "my-custom-tool": {
@@ -289,16 +288,16 @@ Tools are registered in `guild.json` and assigned to roles:
 At manifest time, the manifest engine computes the tool set:
 
 ```
-Anima "Valdris" has roles: [artificer, sage]
+Anima "Valdris" has roles: [artificer, steward]
 
-  dispatch      — roles: [*]            → wildcard         ✓
-  install-tool  — roles: [*]            → wildcard         ✓
-  publish       — roles: [*]            → wildcard         ✓
-  my-linter     — roles: [artificer]    → artificer matches ✓
-  plan          — roles: [sage]         → sage matches     ✓
-  review        — roles: [guildmaster]  → no match         ✗
+  nexus-version    — baseTools              → all animas     ✓
+  commission-show  — roles: [artificer]     → artificer      ✓
+  signal           — roles: [artificer, steward] → both match ✓
+  commission-create — roles: [steward]      → steward matches ✓
+  tool-install     — roles: [steward]       → steward matches ✓
+  work-create      — roles: [sage]          → no match       ✗
 
-  Valdris gets: [dispatch, install-tool, publish, my-linter, plan]
+  Valdris gets: [nexus-version, commission-show, signal, commission-create, tool-install]
 ```
 
 The MCP engine is launched with this resolved set. The anima sees exactly the tools its combined roles permit — no more, no less.
@@ -328,17 +327,17 @@ The manifest engine resolves tool paths by name: `tools/{name}/`.
 
 ## Installation
 
-### The `install-tool` tool
+### The `tool-install` tool
 
-`install-tool` is a base tool provided by Nexus. It accepts a polymorphic **tool source** argument and classifies it into one of five install types:
+`tool-install` is a stdlib tool for installing new tools, engines, and bundles. It accepts a polymorphic **tool source** argument and classifies it into one of five install types:
 
 | Source pattern | Type | Example |
 |----------------|------|---------|
-| `--link` flag + local dir | link | `install-tool ~/projects/my-tool --link` |
-| `workshop:<name>#<ref>` | workshop | `install-tool workshop:forge#tool/fetch-jira@1.0` |
-| Starts with `git+` | git-url | `install-tool git+https://github.com/someone/tool.git#v1.0` |
-| Ends with `.tgz` or `.tar.gz` | tarball | `install-tool ./my-tool-1.0.0.tgz` |
-| Everything else | registry | `install-tool some-tool@1.0`, `install-tool @scope/tool` |
+| `--link` flag + local dir | link | `nsg tool install ~/projects/my-tool --link` |
+| `workshop:<name>#<ref>` | workshop | `nsg tool install workshop:forge#tool/fetch-jira@1.0` |
+| Starts with `git+` | git-url | `nsg tool install git+https://github.com/someone/tool.git#v1.0` |
+| Ends with `.tgz` or `.tar.gz` | tarball | `nsg tool install ./my-tool-1.0.0.tgz` |
+| Everything else | registry | `nsg tool install some-tool@1.0`, `nsg tool install @scope/tool` |
 
 Each type has different durability semantics — see [the building tools guide](../guides/building-tools.md) for full details on each install type and the rehydrate workflow.
 
@@ -351,11 +350,11 @@ The install process:
 5. Register in `guild.json` (upstream, package name, timestamp, bundle provenance)
 6. Commit to the guild
 
-Both the CLI (`nexus install-tool`) and the tool (wielded by animas via MCP) share the same core logic.
+Both the CLI (`nsg tool install`) and the MCP tool (wielded by animas) share the same core logic.
 
-### The `remove-tool` tool
+### The `tool-remove` tool
 
-`remove-tool` is the counterpart to `install-tool`. It deregisters a tool from `guild.json`, removes its directory, and cleans up `node_modules/`. Removal behavior depends on install type: registry/git-url tools are removed via `npm uninstall`; workshop/tarball tools are removed from `node_modules/` directly; linked tools have their symlink removed.
+`tool-remove` is the counterpart to `tool-install`. It deregisters a tool from `guild.json`, removes its directory, and cleans up `node_modules/`. Removal behavior depends on install type: registry/git-url tools are removed via `npm uninstall`; workshop/tarball tools are removed from `node_modules/` directly; linked tools have their symlink removed.
 
 ### Framework tools: workspace packages
 
@@ -367,27 +366,20 @@ The monorepo is structured as a pnpm workspace:
 packages/
   core/                          ← @shardworks/nexus-core — shared library (Books, config, paths, install logic)
   cli/                           ← @shardworks/nexus — the CLI operators run
-  tool-install/                  ← base tool: install-tool
-  engine-mcp-server/             ← base engine: mcp-server
-  engine-ledger-migrate/         ← base engine: ledger-migrate
-  ...                            ← additional base tools/engines as separate packages
+  stdlib/                        ← @shardworks/nexus-stdlib — all standard tools and engines
+  guild-starter-kit/             ← @shardworks/guild-starter-kit — bundle manifest + training content
 ```
 
-All handler modules in base tools import from `@shardworks/nexus-core` — the shared library that owns guild configuration, Books access, path resolution, and core operations like `installTool()`. The CLI is a separate consumer of the same library. This clean separation means:
+All tools are defined using the `tool()` SDK factory in `@shardworks/nexus-stdlib`, which exports them as a collection package. Tool handlers import core functions from `@shardworks/nexus-core`. The CLI auto-generates noun-verb subcommands from tool definitions.
 
-- **Tool handlers don't depend on the CLI** — they import `@shardworks/nexus-core` directly, same as any guild-authored module tool would.
-- **The CLI doesn't contain tool logic** — it's a thin wrapper that imports handlers from `@shardworks/nexus-core` or from tool packages.
-- **New base tools are just new packages** — add a directory under `packages/`, give it a descriptor and a handler that imports from `@shardworks/nexus-core`, done.
+`nsg init` installs base tools and engines via the guild starter kit bundle, registering them in `guild.json` with bundle provenance. Tools are assigned to roles, not `baseTools`.
 
-`nexus init` installs base tools and engines via the guild starter kit bundle, registering them in `guild.json` with bundle provenance. Base tools are added to `baseTools` (available to all animas).
-
-The `nexus` CLI also exposes base tools as subcommands (`nexus install-tool`, etc.) — calling the same handler code from `@shardworks/nexus-core`. Humans use CLI subcommands; animas use MCP tools; both execute the same underlying logic.
+The `nsg` CLI exposes tools as noun-verb subcommands (`nsg commission create`, `nsg tool install`, etc.) — calling the same handler code. Humans use CLI subcommands; animas use MCP tools; both execute the same underlying logic.
 
 This model means:
-- **Same artifact shape** — framework tools are identical in structure to guild tools; the MCP engine loads them the same way
-- **Clean dependency graph** — tools → `@shardworks/nexus-core` ← CLI. No circular dependencies, no tool-knows-about-CLI coupling
-- **Easy iteration** — each base tool is its own package with its own tests, independently buildable and testable
-- **Version coherence** — all base tools share the framework version
+- **Collection package** — all stdlib tools are defined in one package, exported as an array for the manifest engine to resolve by name
+- **Clean dependency graph** — stdlib → `@shardworks/nexus-core` ← CLI. No circular dependencies
+- **Version coherence** — all tools share the framework version
 - **Anima interface** — animas see the same kind of MCP tools whether they came from the framework or the guild
 
 ---
@@ -397,7 +389,7 @@ This model means:
 During development, use `--link` to symlink a local tool directory into the guild:
 
 ```
-nexus install-tool ~/projects/my-tool --link --roles artificer
+nsg tool install ~/projects/my-tool --link --roles artificer
 ```
 
 Changes to the handler are reflected immediately — no reinstall needed. When done iterating, reinstall via a durable method (registry, tarball, workshop).
@@ -420,10 +412,10 @@ When ready to share, `npm pack` creates a `.tgz` that any guild can install. Sin
 An anima commissioned to build a new tool works in a workshop worktree like any other commission. When the commission completes:
 
 1. Leadership reviews the output
-2. `install-tool workshop:forge#tool/my-tool@0.1.0` installs it into the guild from the workshop repo
+2. `nsg tool install workshop:forge#tool/my-tool@0.1.0` installs it into the guild from the workshop repo
 3. The tool is now operational — registered in `guild.json`, full source stored in the tool directory, resolved by the manifest engine
 
-The guildhall is never a workspace — artifacts flow in through deliberate install operations. Since `install-tool` is itself a tool, animas with appropriate access can install tools directly — enabling the guild to extend its own toolkit autonomously.
+The guildhall is never a workspace — artifacts flow in through deliberate install operations. Since `tool-install` is itself a tool, animas with appropriate access (stewards) can install tools directly — enabling the guild to extend its own toolkit autonomously.
 
 ---
 
@@ -493,7 +485,7 @@ Curricula and temperaments have simpler registry entries than tools — no roles
 }
 ```
 
-The registry answers "what training content is available in this guild." It does *not* assign training content to roles — that's the wrong layer. A curriculum and temperament are assigned to an individual **anima** at instantiation time (recorded in the Register). The `instantiate` tool picks from the available set.
+The registry answers "what training content is available in this guild." It does *not* assign training content to roles — that's the wrong layer. A curriculum and temperament are assigned to an individual **anima** at instantiation time (recorded in the Register). The `anima-create` tool picks from the available set.
 
 ### How they differ from tools
 
@@ -504,6 +496,6 @@ The registry answers "what training content is available in this guild." It does
 | `roles` gating? | Yes (tools only) | No — assigned per-anima |
 | `source` field? | Yes (nexus vs guild) | No |
 | Instructions doc? | Optional (tools only) | N/A — they *are* the instructions |
-| Installed by | `install-tool` | `install-tool` (same command) |
+| Installed by | `tool-install` | `tool-install` (same command) |
 | Registered in | `guild.json` tools/engines | `guild.json` curricula/temperaments |
 | Consumed by | Animas at runtime (MCP tools) | Manifest engine at assembly time |

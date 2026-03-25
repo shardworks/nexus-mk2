@@ -1,11 +1,11 @@
-# remove-tool
+# tool-remove
 
 Remove a guild-managed tool — deregisters it from guild.json and removes its on-disk directory.
 
 ## Usage
 
 ```
-remove-tool <name>
+tool-remove <name>
 ```
 
 ## Arguments

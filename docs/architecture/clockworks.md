@@ -86,7 +86,7 @@ A standing order is a registered response to an event. Standing orders are **gui
   "clockworks": {
     "standingOrders": [
       { "on": "commission.sealed",  "run": "cleanup-worktree" },
-      { "on": "commission.failed",  "summon": "advisor" },
+      { "on": "commission.failed",  "summon": "steward" },
       { "on": "tool.installed",     "brief": "guildmaster" },
       { "on": "code.reviewed",      "run": "notify-patron" }
     ]
@@ -109,7 +109,7 @@ See [Engine Contract](#engine-contract) below for how event delivery works.
 #### Anima orders
 
 ```json
-{ "on": "commission.failed", "summon": "advisor" }
+{ "on": "commission.failed", "summon": "steward" }
 { "on": "tool.installed",    "brief": "guildmaster" }
 ```
 
@@ -160,9 +160,9 @@ Standing order failures signal a `standing-order.failed` event:
 {
   name: "standing-order.failed",
   payload: {
-    standingOrder: { on: "commission.failed", summon: "advisor" },
+    standingOrder: { on: "commission.failed", summon: "steward" },
     triggeringEvent: { id: 42, name: "commission.failed", ... },
-    error: "No active anima fills role 'advisor'"
+    error: "No active anima fills role 'steward'"
   }
 }
 ```
@@ -212,10 +212,10 @@ Animas cannot signal framework events (`anima.*`, `commission.*`, `work.*`, `pie
     "standingOrders": [
       { "on": "commission.sealed",     "run": "cleanup-worktree" },
       { "on": "commission.failed",     "run": "notify-patron" },
-      { "on": "commission.failed",     "summon": "advisor" },
+      { "on": "commission.failed",     "summon": "steward" },
       { "on": "tool.installed",        "brief": "guildmaster" },
       { "on": "code.reviewed",         "run": "post-review-summary" },
-      { "on": "standing-order.failed", "summon": "advisor" }
+      { "on": "standing-order.failed", "summon": "steward" }
     ]
   }
 }

@@ -49,32 +49,33 @@ Nexus is the runtime that makes the guild system operational. It provides the ba
 - `worktree-setup` — prepare isolated work environments for commissions
 - `ledger-migrate` — manage database schema (the Books and Clockworks tables)
 
-**Base tools** — thin wrapper scripts that delegate to CLI subcommands. Each tool is a shell script (e.g. `nexus install-tool "$@"`) paired with an `instructions.md` that teaches animas how to use it. The CLI has the logic; the wrapper is just the anima-facing interface.
-- `dispatch` — post commissions targeting a workshop, trigger the manifest engine
-- `install-tool` — install a tool or engine into the guild (from registry, git URL, workshop, tarball, or local link)
-- `remove-tool` — remove a tool or engine from the guild
-- `promote` *(v2)* — change artifact status tiers
-- `instantiate` — create animas from curriculum + temperament
+**Base tools** — module-based tools defined with the `tool()` SDK factory. Each tool ships with instructions delivered to the anima at manifest time. Tools follow a `<noun>-<verb>` naming convention. All tools are packaged in `@shardworks/nexus-stdlib`:
+- `commission-create` — post commissions targeting a workshop
+- `tool-install` — install a tool or engine into the guild (from registry, git URL, workshop, tarball, or local link)
+- `tool-remove` — remove a tool or engine from the guild
+- `anima-create` — create animas from curriculum + temperament
+- `signal` — signal custom guild events for the Clockworks
+- Plus CRUD tools for all entity types: anima, workshop, commission, work, piece, job, stroke, clock
 
 **Database schema** — the base migrations that define the guild's Books and Clockworks tables.
 
 ### The Nexus CLI
 
-The CLI is both the operator interface and the engine behind all base tools. Every base tool is a wrapper script that calls back into the CLI. This means one `npm install` gives the guild all its core capabilities, and version coherence is guaranteed — wrapper scripts always call the co-installed CLI.
+The CLI is both the operator interface and the runtime behind tools. Tools are module-based (using the `tool()` SDK factory) and the CLI auto-generates subcommands from tool definitions. This means one `npm install` gives the guild all its core capabilities.
 
 | Command | What it does |
 |---------|-------------|
-| `nexus init` | Create a new guild — git repo, directory structure, `guild.json`, Books database, base tools installed |
-| `nexus install-tool <source>` | Install a tool, engine, curriculum, or temperament (from registry, git URL, workshop, tarball, or local link) |
-| `nexus remove-tool <name>` | Remove an installed tool and deregister from `guild.json` |
-| `nexus dispatch` | Post a commission and trigger the manifest engine |
-| `nexus instantiate` | Create a new anima from curriculum + temperament |
-| `nexus install <version>` | Install or upgrade the framework to a specific version. Replaces base tools, runs new migrations. |
-| `nexus repair` | Reinstall the current framework version. Restores base tools without touching guild content. |
-| `nexus status` | Show framework version, check for issues |
+| `nsg init` | Create a new guild — git repo, directory structure, `guild.json`, Books database, starter kit installed |
+| `nsg commission create <spec>` | Post a commission targeting a workshop |
+| `nsg consult <name>` | Consult a standing anima (e.g., `nsg consult steward`) |
+| `nsg anima create` | Create a new anima from curriculum + temperament |
+| `nsg tool install <source>` | Install a tool, engine, curriculum, or temperament |
+| `nsg tool remove <name>` | Remove an installed tool |
+| `nsg status` | Show guild status |
 | `nsg signal <event>` | Signal a custom guild event |
 | `nsg clock list` | Show pending Clockworks events |
 | `nsg clock tick [id]` | Process the next pending event (or a specific one) |
+| `nsg clock run` | Process all pending events |
 | `nsg clock run` | Process all pending events until the queue is empty |
 
 Subcommands that correspond to tools share the same core logic — the CLI command and the tool wrapper are two interfaces to the same operation.
@@ -87,29 +88,24 @@ Base tools provided by Nexus and tools authored by the guild live in separate lo
 
 ```
 GUILD_ROOT/
-  nexus/                    ← framework-managed, Nexus CLI owns this
-    tools/
-      dispatch/1.0.0/
-      install-tool/1.0.0/
-      remove-tool/1.0.0/
-      instantiate/1.0.0/
-    engines/
-      manifest/1.0.0/
-      worktree-setup/1.0.0/
-      ledger-migrate/1.0.0/
+  nexus/                    ← framework-managed
     migrations/
-      001-initial-schema.sql
-  tools/                    ← guild-managed, leadership owns this
-  engines/                  ← guild-managed, leadership owns this
-  codex/
+      001-schema.sql
+  tools/                    ← tool metadata (descriptors, instructions)
+  engines/                  ← engine metadata
+  roles/                    ← role instruction files
+  codex/                    ← guild-wide policy documents
   training/
+    curricula/
+    temperaments/
   guild.json
   package.json
+  node_modules/             ← tool/engine runtime code (npm packages)
 ```
 
-**`nexus/`** is framework territory. The Nexus CLI writes it; the guild doesn't touch it. `nexus repair` wipes and restores this directory without affecting anything else. Base tools in `nexus/tools/` are wrapper scripts generated by `nexus init` — each one delegates to a `nexus` CLI subcommand and ships with an `instructions.md` that teaches animas how the tool works.
+**`nexus/`** is framework territory — holds migrations and framework-managed state. Tools and engines are npm packages installed into `node_modules/`, with metadata (descriptors, instructions) in `tools/` and `engines/` directories. The `guild.json` indexes everything.
 
-**Guild tools and engines** live at the guild root level. They are installed via `install-tool` from external sources (registry, workshop, tarball, etc.); the framework doesn't touch them.
+**Guild tools and engines** are installed via `nsg tool install` from external sources (registry, git URL, tarball, or local link); the framework doesn't touch them.
 
 Both framework and guild tools follow the same artifact pattern — see [Tools, Engines, Curricula & Temperaments](tools-and-engines.md). `guild.json` indexes tools from both locations, tracking their source, installation provenance, and role access.
 
@@ -291,7 +287,7 @@ Other guilds can use different role structures while using the same hierarchy.
 
 Some workshops produce works for the patron (applications, services, tools). Others produce artifacts destined for the guildhall — new tools, engines, curricula, or temperaments. The guild system doesn't distinguish between these at the commission level.
 
-When a commission produces artifacts for the guildhall (new tools, curricula, etc.), `install-tool` handles the boundary crossing. The anima commits its work to the workshop repo, and the artifact is installed into the guild via `install-tool workshop:<name>#<ref>`. This resolves the git ref from the workshop's bare clone, installs the package into `node_modules/` for dependency resolution, and copies the full source to the tool directory for durability. The guildhall itself is never a workspace — artifacts flow in through deliberate install operations.
+When a commission produces artifacts for the guildhall (new tools, curricula, etc.), `tool-install` handles the boundary crossing. The anima commits its work to the workshop repo, and the artifact is installed into the guild via `nsg tool install workshop:<name>#<ref>`. This resolves the git ref from the workshop's bare clone, installs the package into `node_modules/` for dependency resolution, and copies the full source to the tool directory for durability. The guildhall itself is never a workspace — artifacts flow in through deliberate install operations.
 
 ---
 

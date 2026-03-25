@@ -1,11 +1,11 @@
-# instantiate
+# anima-create
 
 Create a new anima in the guild — recording its composition (curriculum, temperament, roles) in the Register so it can be manifested for sessions.
 
 ## Usage
 
 ```
-instantiate <name> --roles <roles> [--curriculum <curriculum>] [--temperament <temperament>]
+anima-create <name> --roles <roles> [--curriculum <curriculum>] [--temperament <temperament>]
 ```
 
 ## Arguments
@@ -18,5 +18,5 @@ instantiate <name> --roles <roles> [--curriculum <curriculum>] [--temperament <t
 ## Guidance
 
 - The anima's name should be unique within the guild.
-- Roles determine which implements the anima can access (via role gating).
+- Roles determine which tools the anima can access (via role gating).
 - Curriculum and temperament must already be installed in the guild before they can be assigned.

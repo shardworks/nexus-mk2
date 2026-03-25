@@ -78,7 +78,7 @@ function fullInit(home: string, model: string, bundleDir: string): void {
   stripCliDep(home);
   installBundle({ home, bundleDir, commit: false });
   applyMigrations(home);
-  instantiate({ home, name: 'Advisor', roles: ['advisor'], curriculum: 'guild-operations', temperament: 'guide' });
+  instantiate({ home, name: 'Steward', roles: ['steward'], curriculum: 'guild-operations', temperament: 'guide' });
   instantiate({ home, name: 'Unnamed Artificer', roles: ['artificer'], curriculum: 'guild-operations', temperament: 'artisan' });
   execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
   execFileSync('git', ['commit', '-m', 'Install starter kit'], { cwd: home, stdio: 'pipe' });
@@ -324,7 +324,7 @@ describe('full init sequence', () => {
     }
   });
 
-  it('advisor anima is instantiated with correct composition', () => {
+  it('steward anima is instantiated with correct composition', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-init-'));
     const home = path.join(tmpDir, 'guild');
     const bundleDir = makeLocalBundle(tmpDir);
@@ -332,25 +332,25 @@ describe('full init sequence', () => {
 
     const db = new Database(path.join(home, '.nexus', 'nexus.db'));
     try {
-      // Advisor exists and is active
+      // Steward exists and is active
       const anima = db.prepare(
-        "SELECT * FROM animas WHERE name = 'Advisor'"
+        "SELECT * FROM animas WHERE name = 'Steward'"
       ).get() as { id: number; status: string } | undefined;
-      assert.ok(anima, 'advisor anima not found in ledger');
+      assert.ok(anima, 'steward anima not found in ledger');
       assert.equal(anima.status, 'active');
 
-      // Has advisor role
+      // Has steward role
       const role = db.prepare(
         'SELECT role FROM roster WHERE anima_id = ?'
       ).get(anima.id) as { role: string } | undefined;
-      assert.ok(role, 'advisor role not found in roster');
-      assert.equal(role.role, 'advisor');
+      assert.ok(role, 'steward role not found in roster');
+      assert.equal(role.role, 'steward');
 
       // Composition has curriculum and temperament snapshots
       const comp = db.prepare(
         'SELECT * FROM anima_compositions WHERE anima_id = ?'
       ).get(anima.id) as { curriculum_name: string; temperament_name: string; curriculum_snapshot: string; temperament_snapshot: string } | undefined;
-      assert.ok(comp, 'advisor composition not found');
+      assert.ok(comp, 'steward composition not found');
       assert.equal(comp.curriculum_name, 'guild-operations');
       assert.equal(comp.temperament_name, 'guide');
       assert.ok(comp.curriculum_snapshot.includes('Guild Operations Curriculum'), 'curriculum snapshot missing content');

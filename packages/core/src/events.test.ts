@@ -74,6 +74,10 @@ describe('isFrameworkEvent', () => {
   it('identifies framework namespaces', () => {
     assert.equal(isFrameworkEvent('anima.instantiated'), true);
     assert.equal(isFrameworkEvent('commission.sealed'), true);
+    assert.equal(isFrameworkEvent('work.created'), true);
+    assert.equal(isFrameworkEvent('piece.ready'), true);
+    assert.equal(isFrameworkEvent('job.completed'), true);
+    assert.equal(isFrameworkEvent('stroke.recorded'), true);
     assert.equal(isFrameworkEvent('tool.installed'), true);
     assert.equal(isFrameworkEvent('migration.applied'), true);
     assert.equal(isFrameworkEvent('guild.initialized'), true);

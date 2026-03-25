@@ -5,7 +5,7 @@ Signal a custom guild event. The event is recorded in the Clockworks event queue
 ## Usage
 
 - The event name **must** be declared in `guild.json` under `clockworks.events`.
-- You **cannot** signal framework events (`anima.*`, `commission.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`, `session.*`) — those are emitted automatically by the framework.
+- You **cannot** signal framework events (`anima.*`, `commission.*`, `work.*`, `piece.*`, `job.*`, `stroke.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`, `session.*`) — those are emitted automatically by the framework.
 - The optional payload is a JSON object with event-specific data.
 
 ## When to use
