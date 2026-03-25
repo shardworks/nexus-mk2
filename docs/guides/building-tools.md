@@ -225,26 +225,34 @@ Rehydrate is idempotent and safe to run at any time.
 
 ## Using `@shardworks/nexus-core`
 
-The core library provides utilities that tool handlers commonly need:
+The core library provides utilities that tool handlers commonly need. Common imports for tool authors:
 
 | Export | Purpose |
 |--------|---------|
+| `tool(def)` | The tool SDK factory |
 | `VERSION` | Framework version string |
 | `readGuildConfig(home)` | Read and parse `guild.json` |
 | `writeGuildConfig(home, config)` | Write `guild.json` |
 | `findGuildRoot(startDir?)` | Discover the guild root from cwd |
 | `booksPath(home)` | Resolve path to the Books SQLite database (`.nexus/nexus.db`) |
-| `installTool(opts)` | Core install logic (used by `tool-install` tool) |
-| `removeTool(opts)` | Core remove logic (used by `tool-remove` tool) |
-| `rehydrate(home)` | Reconstruct `node_modules` from tracked guild state |
-| `ledgerPath(home)` | *(Deprecated alias for `booksPath`)* |
-| `tool(def)` | The tool SDK factory |
+| `signalEvent(home, name, payload, emitter)` | Signal a Clockworks event |
+| `listCommissions(home, opts?)` | Query commissions from the Ledger |
+| `listSessions(home, opts?)` | Query sessions from the Daybook |
+| `listAuditLog(home, opts?)` | Query audit trail |
+
+For the full API surface — including work decomposition CRUD, hierarchy rollup, event queries, workshops, and more — see the [Core API Reference](../reference/core-api.md).
+
+For the event system, standing orders, and event-driven automation, see the [Event Catalog](../reference/event-catalog.md).
+
+For the database schema and entity relationships, see the [Schema Reference](../reference/schema.md).
 
 Import from `@shardworks/nexus-core`:
 
 ```typescript
 import { readGuildConfig, findGuildRoot } from '@shardworks/nexus-core';
 ```
+
+**See also:** [Building Engines](building-engines.md) — if you need to build event-driven automation rather than an interactive tool.
 
 ## How it gets loaded
 

@@ -81,7 +81,7 @@ Updated `init-guild.ts` and `nexus-bundle.json`. Steward gained 8 new tools, art
 
 ---
 
-## Phase 2: Reference Documentation — PENDING
+## Phase 2: Reference Documentation — ✅ COMPLETE
 
 ### Location
 
@@ -145,7 +145,7 @@ Update the existing guide's "Using @shardworks/nexus-core" section to point to t
 
 ---
 
-## Phase 3: Building Engines Guide — PENDING
+## Phase 3: Building Engines Guide — ✅ COMPLETE
 
 `docs/guides/building-engines.md` — practical guide parallel to building-tools.md.
 
@@ -163,7 +163,7 @@ Covers:
 
 ---
 
-## Phase 4: Delivery Assessment — PENDING
+## Phase 4: Delivery Assessment — ✅ COMPLETE
 
 Now that the docs exist (once Phases 2-3 are done) and we know their size and shape, how do we get them to animas who need them? This phase produces a recommendation, not an implementation.
 

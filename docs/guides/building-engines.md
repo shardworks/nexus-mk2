@@ -1,0 +1,366 @@
+# Building Engines
+
+This guide explains how to build clockwork engines — event-driven handlers that respond to guild events via standing orders. For building interactive tools that animas wield, see [Building Tools](building-tools.md).
+
+## What engines are
+
+Engines are automated processes with no AI involvement. They run deterministic logic in response to events: rolling up completion status, dispatching work, transforming data, enforcing policies. They don't have instruction documents because no anima wields them — they're guild infrastructure.
+
+Engines are wired to events through **standing orders** in `guild.json`. When an event fires, the Clockworks runner finds matching standing orders and calls the engine's handler with the event.
+
+## Quick start
+
+An engine is a package with these files:
+
+```
+my-engine/
+  package.json              ← npm package metadata
+  nexus-engine.json         ← Nexus descriptor
+  src/
+    handler.ts              ← the engine handler (default export)
+```
+
+### The handler
+
+Use the `engine()` factory from `@shardworks/nexus-core`:
+
+```typescript
+import { engine } from '@shardworks/nexus-core';
+
+export default engine({
+  name: 'my-engine',
+  handler: async (event, { home }) => {
+    // event — the GuildEvent that triggered this engine (or null for direct invocation)
+    // home  — absolute path to the guild root
+
+    if (!event) return; // nothing to do without an event
+
+    console.log(`Handling ${event.name}`, event.payload);
+
+    // Do your work here...
+  }
+});
+```
+
+### Key rules
+
+1. **Default export.** The engine must be the default export. The Clockworks runner does `import(modulePath)` and reads `.default`.
+2. **Async handler.** Engine handlers must return `Promise<void>`. The runner `await`s the handler.
+3. **Event may be null.** When invoked directly (not via a standing order), `event` is `null`. Guard accordingly.
+4. **Throw for errors.** If the handler throws, the Clockworks runner catches the error, records a failed dispatch, and signals `standing-order.failed`.
+5. **Use `home` for everything.** The guild root is your entry point to all guild state — database, config, file system.
+
+### `nexus-engine.json`
+
+```json
+{
+  "entry": "src/handler.ts",
+  "version": "0.1.0",
+  "description": "What this engine does"
+}
+```
+
+Fields:
+- `entry` — (required) path to the handler module
+- `version` — informational, recorded in guild.json `upstream`
+- `description` — human-readable
+
+### `package.json`
+
+```json
+{
+  "name": "@shardworks/engine-my-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/handler.ts"
+  },
+  "dependencies": {
+    "@shardworks/nexus-core": "workspace:*"
+  }
+}
+```
+
+Engines don't need `zod` (no parameter validation) or instruction files (no anima interaction).
+
+## Standing order wiring
+
+Engines are connected to events through standing orders in `guild.json`:
+
+```json
+{
+  "clockworks": {
+    "standingOrders": [
+      { "on": "session.ended", "run": "my-engine" },
+      { "on": "job.completed", "run": "my-engine" }
+    ]
+  }
+}
+```
+
+An engine can respond to multiple events. Multiple engines can respond to the same event — they execute in declaration order.
+
+The engine must also be registered in guild.json's `engines` registry:
+
+```json
+{
+  "engines": {
+    "my-engine": {
+      "upstream": "@shardworks/engine-my-engine@0.1.0",
+      "installedAt": "2026-03-25T00:00:00.000Z",
+      "package": "@shardworks/engine-my-engine"
+    }
+  }
+}
+```
+
+This happens automatically when installed via `nsg tool install`.
+
+## Reading guild state from an engine
+
+Engines have full access to `@shardworks/nexus-core`. Common patterns:
+
+### Reading event payloads
+
+```typescript
+handler: async (event, { home }) => {
+  if (!event) return;
+
+  // Event payloads are typed as `unknown` — cast based on the event name
+  const payload = event.payload as { jobId: string } | null;
+  if (!payload?.jobId) return;
+
+  // Now use the jobId...
+}
+```
+
+### Querying the database
+
+```typescript
+import { showJob, listStrokes, readGuildConfig } from '@shardworks/nexus-core';
+
+handler: async (event, { home }) => {
+  const job = showJob(home, jobId);
+  if (!job) return;
+
+  const strokes = listStrokes(home, { jobId: job.id });
+  const config = readGuildConfig(home);
+  // ...
+}
+```
+
+### Writing to the database
+
+```typescript
+import { updateJob, signalEvent } from '@shardworks/nexus-core';
+
+handler: async (event, { home }) => {
+  // Update entity status
+  updateJob(home, jobId, { status: 'completed' });
+
+  // This automatically signals job.completed — no need to signal manually
+}
+```
+
+## Signaling follow-on events
+
+Engines can signal events to trigger further automation (event chaining):
+
+```typescript
+import { signalEvent } from '@shardworks/nexus-core';
+
+handler: async (event, { home }) => {
+  // Do some work...
+
+  // Signal a custom event for downstream processing
+  signalEvent(home, 'deploy.ready', { version: '1.2.3' }, 'my-engine');
+}
+```
+
+**Important:** Framework events (like `job.completed`) are signaled automatically by the CRUD functions when you update status. Don't double-signal — just call `updateJob()` with `status: 'completed'` and the event fires.
+
+For custom events, you must declare them in `guild.json` first if animas need to signal them. Engines can signal framework events directly (they call `signalEvent()`, which doesn't go through `validateCustomEvent()`).
+
+## Error handling
+
+### The `standing-order.failed` safety net
+
+When an engine handler throws, the Clockworks runner:
+
+1. Catches the error
+2. Records a failed dispatch in `event_dispatches` (with the error message)
+3. Signals `standing-order.failed` with the original event, the standing order, and the error
+
+You can wire a standing order to `standing-order.failed` for alerting:
+
+```json
+{ "on": "standing-order.failed", "brief": "steward" }
+```
+
+**Loop guard:** If processing a `standing-order.failed` event itself fails, the runner stops — it won't cascade infinitely.
+
+### Best practices
+
+- **Fail fast.** Throw with a clear error message. Don't swallow errors silently.
+- **Idempotency.** Design handlers to be safe to retry. The same event might be processed again if the runner is restarted.
+- **Guard against missing data.** Event payloads may be incomplete. Check for null/undefined before accessing fields.
+
+## Engine collections
+
+A single package can export multiple engines:
+
+```typescript
+import { engine } from '@shardworks/nexus-core';
+
+export default [
+  engine({
+    name: 'piece-rollup',
+    handler: async (event, { home }) => { /* ... */ }
+  }),
+  engine({
+    name: 'work-rollup',
+    handler: async (event, { home }) => { /* ... */ }
+  }),
+];
+```
+
+Each engine in the array is resolved by name. Register each one separately in guild.json with the same `package` but different names.
+
+## Installing engines
+
+Same as tools — use `nsg tool install`:
+
+```bash
+nsg tool install @shardworks/engine-my-engine
+```
+
+The installer detects `nexus-engine.json` and registers in the `engines` section of guild.json (not `tools`). All five install types work: registry, git-url, workshop, tarball, link.
+
+## Testing engines
+
+Engine handlers can be called directly in tests:
+
+```typescript
+import { describe, it, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { initGuild, createJob, createStroke } from '@shardworks/nexus-core';
+import myEngine from './handler.ts';
+
+describe('my-engine', () => {
+  let home: string;
+
+  beforeEach(() => {
+    home = '/tmp/test-guild-' + Date.now();
+    initGuild(home, 'test-guild', 'test-model');
+  });
+
+  it('completes a job when all strokes are done', async () => {
+    // Set up test data
+    const job = createJob(home, { title: 'Test job' });
+    const stroke = createStroke(home, { jobId: job.id, kind: 'test' });
+    updateStroke(home, stroke.id, { status: 'complete' });
+
+    // Simulate the event
+    await myEngine.handler(
+      {
+        id: 'evt-test',
+        name: 'stroke.recorded',
+        payload: { strokeId: stroke.id, jobId: job.id },
+        emitter: 'framework',
+        firedAt: new Date().toISOString(),
+      },
+      { home }
+    );
+
+    // Verify the result
+    const updated = showJob(home, job.id);
+    assert.equal(updated?.status, 'completed');
+  });
+});
+```
+
+For integration testing with the full Clockworks, use `clockTick()`:
+
+```typescript
+import { clockTick, signalEvent } from '@shardworks/nexus-core';
+
+// Signal an event
+signalEvent(home, 'job.completed', { jobId: 'j-test' }, 'test');
+
+// Process it through the Clockworks (requires standing orders in guild.json)
+const result = await clockTick(home);
+assert.equal(result?.eventName, 'job.completed');
+```
+
+## Reference implementation: completion rollup engine
+
+A concrete engine that implements the standard completion rollup pattern — when a session ends, check if the associated job's strokes are done, and roll up completion through the hierarchy.
+
+```typescript
+import {
+  engine,
+  showJob,
+  checkJobCompletion,
+  completeJobIfReady,
+  completePieceIfReady,
+  completeWorkIfReady,
+  completeCommissionIfReady,
+} from '@shardworks/nexus-core';
+
+export default engine({
+  name: 'completion-rollup',
+  handler: async (event, { home }) => {
+    if (!event) return;
+
+    // This engine responds to job.completed and job.failed events
+    // It rolls up completion through the hierarchy:
+    //   job → piece → work → commission
+
+    const payload = event.payload as { jobId?: string } | null;
+    if (!payload?.jobId) return;
+
+    const job = showJob(home, payload.jobId);
+    if (!job || !job.pieceId) return;
+
+    // Check and complete the parent piece
+    const pieceResult = completePieceIfReady(home, job.pieceId);
+    if (!pieceResult.changed) return;
+
+    // If the piece completed, check the parent work
+    // We need to find the work from the piece
+    const piece = showPiece(home, job.pieceId);
+    if (!piece || !piece.workId) return;
+
+    const workResult = completeWorkIfReady(home, piece.workId);
+    if (!workResult.changed) return;
+
+    // If the work completed, check the parent commission
+    const work = showWork(home, piece.workId);
+    if (!work || !work.commissionId) return;
+
+    completeCommissionIfReady(home, work.commissionId);
+  }
+});
+```
+
+Wire it in guild.json:
+
+```json
+{
+  "clockworks": {
+    "standingOrders": [
+      { "on": "job.completed", "run": "completion-rollup" },
+      { "on": "job.failed", "run": "completion-rollup" }
+    ]
+  }
+}
+```
+
+The key insight: each `complete*IfReady()` function signals its own completion event (e.g. `piece.completed`). You could alternatively wire separate standing orders for each level — but a single engine that walks up the hierarchy is simpler and avoids event-processing latency at each level.
+
+## Further reading
+
+- [Core API Reference](../reference/core-api.md) — full function signatures for all imports
+- [Event Catalog](../reference/event-catalog.md) — every framework event, payload shapes, standing order types
+- [Schema Reference](../reference/schema.md) — database tables, status lifecycles, entity relationships
+- [The Clockworks](../architecture/clockworks.md) — architectural overview of the event processing system
