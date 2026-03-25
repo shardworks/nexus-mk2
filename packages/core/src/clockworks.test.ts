@@ -36,7 +36,7 @@ function setupTestGuild(clockworksConfig?: Record<string, unknown>): string {
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
     CREATE TABLE events (
-      id         INTEGER PRIMARY KEY,
+      id         TEXT PRIMARY KEY,
       name       TEXT NOT NULL,
       payload    TEXT,
       emitter    TEXT NOT NULL,
@@ -44,8 +44,8 @@ function setupTestGuild(clockworksConfig?: Record<string, unknown>): string {
       processed  INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE event_dispatches (
-      id           INTEGER PRIMARY KEY,
-      event_id     INTEGER NOT NULL REFERENCES events(id),
+      id           TEXT PRIMARY KEY,
+      event_id     TEXT NOT NULL REFERENCES events(id),
       handler_type TEXT NOT NULL,
       handler_name TEXT NOT NULL,
       target_role  TEXT,
@@ -100,8 +100,8 @@ describe('clockTick', () => {
   it('throws on nonexistent event id', async () => {
     const home = setupTestGuild();
     await assert.rejects(
-      () => clockTick(home, 999),
-      /Event #999 not found/,
+      () => clockTick(home, 'evt-nonexistent'),
+      /Event #evt-nonexistent not found/,
     );
   });
 

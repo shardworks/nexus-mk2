@@ -39,7 +39,7 @@ export interface WorktreeConfig {
   /** Workshop name — the bare clone source for the worktree. */
   workshop: string;
   /** Commission ID — used to derive branch name and worktree directory. */
-  commissionId: number;
+  commissionId: string;
   /** Base branch to create the worktree from (default: 'main'). */
   baseBranch?: string;
 }
@@ -50,7 +50,7 @@ export interface WorktreeResult {
   /** Branch name created for the worktree. */
   branch: string;
   /** Commission ID this worktree serves. */
-  commissionId: number;
+  commissionId: string;
 }
 
 function git(args: string[], cwd: string): string {
@@ -95,7 +95,7 @@ export function setupWorktree(config: WorktreeConfig): WorktreeResult {
  * Does NOT delete the branch — the branch should be kept for history
  * until explicitly merged or pruned.
  */
-export function teardownWorktree(home: string, workshop: string, commissionId: number): void {
+export function teardownWorktree(home: string, workshop: string, commissionId: string): void {
   const bareRepo = workshopBarePath(home, workshop);
   const branch = `commission-${commissionId}`;
   const worktreeDir = path.join(worktreesPath(home), workshop, branch);
@@ -140,13 +140,13 @@ export function listWorktrees(home: string, workshop?: string): WorktreeResult[]
     for (const entry of fs.readdirSync(wsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
 
-      const match = entry.name.match(/^commission-(\d+)$/);
+      const match = entry.name.match(/^commission-(.+)$/);
       if (!match) continue;
 
       results.push({
         path: path.join(wsDir, entry.name),
         branch: entry.name,
-        commissionId: parseInt(match[1]!, 10),
+        commissionId: match[1]!,
       });
     }
   }

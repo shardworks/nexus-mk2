@@ -45,7 +45,7 @@ function setupTestGuild(clockworksConfig?: Record<string, unknown>): string {
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
     CREATE TABLE events (
-      id         INTEGER PRIMARY KEY,
+      id         TEXT PRIMARY KEY,
       name       TEXT NOT NULL,
       payload    TEXT,
       emitter    TEXT NOT NULL,
@@ -53,8 +53,8 @@ function setupTestGuild(clockworksConfig?: Record<string, unknown>): string {
       processed  INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE event_dispatches (
-      id           INTEGER PRIMARY KEY,
-      event_id     INTEGER NOT NULL REFERENCES events(id),
+      id           TEXT PRIMARY KEY,
+      event_id     TEXT NOT NULL REFERENCES events(id),
       handler_type TEXT NOT NULL,
       handler_name TEXT NOT NULL,
       target_role  TEXT,
@@ -125,8 +125,8 @@ describe('signalEvent', () => {
     const home = setupTestGuild();
     const id = signalEvent(home, 'test.event', { key: 'value' }, 'test-emitter');
 
-    assert.equal(typeof id, 'number');
-    assert.ok(id > 0);
+    assert.equal(typeof id, 'string');
+    assert.ok(id.startsWith('evt-'));
   });
 
   it('persists with null payload', () => {
@@ -140,7 +140,7 @@ describe('signalEvent', () => {
     const home = setupTestGuild();
     const id1 = signalEvent(home, 'event.a', null, 'emitter');
     const id2 = signalEvent(home, 'event.b', null, 'emitter');
-    assert.ok(id2 > id1);
+    assert.notEqual(id1, id2);
   });
 });
 
@@ -189,7 +189,7 @@ describe('readEvent', () => {
 
   it('returns null for nonexistent id', () => {
     const home = setupTestGuild();
-    assert.equal(readEvent(home, 999), null);
+    assert.equal(readEvent(home, 'evt-nonexistent'), null);
   });
 });
 

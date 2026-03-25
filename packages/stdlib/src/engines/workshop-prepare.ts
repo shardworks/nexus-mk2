@@ -22,13 +22,13 @@ export default engine({
     }
 
     const payload = event.payload as Record<string, unknown> | null;
-    if (!payload || typeof payload.commissionId !== 'number' || typeof payload.workshop !== 'string') {
+    if (!payload || typeof payload.commissionId !== 'string' || typeof payload.workshop !== 'string') {
       throw new Error(
         `workshop-prepare expected payload with { commissionId, workshop }, got: ${JSON.stringify(payload)}`,
       );
     }
 
-    const commissionId = payload.commissionId as number;
+    const commissionId = payload.commissionId as string;
     const workshop = payload.workshop as string;
 
     // Verify commission exists

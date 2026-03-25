@@ -79,9 +79,12 @@ export {
 export {
   type CommissionOptions,
   type CommissionResult,
+  type CommissionSummary,
+  type ListCommissionsOptions,
   commission,
   updateCommissionStatus,
   readCommission,
+  listCommissions,
 } from './commission.ts';
 export {
   type InstantiateOptions,
@@ -109,10 +112,12 @@ export {
   type AddWorkshopResult,
   type RemoveWorkshopOptions,
   type WorkshopInfo,
+  type WorkshopDetail,
   type CreateWorkshopOptions,
   addWorkshop,
   removeWorkshop,
   listWorkshops,
+  showWorkshop,
   createWorkshop,
   checkGhAuth,
   deriveWorkshopName,
@@ -172,3 +177,58 @@ export {
   removeTempWorktree,
   launchSession,
 } from './session.ts';
+export { generateId } from './id.ts';
+export {
+  type AnimaSummary,
+  type AnimaDetail,
+  type ListAnimasOptions,
+  type UpdateAnimaOptions,
+  listAnimas,
+  showAnima,
+  updateAnima,
+  removeAnima,
+} from './anima.ts';
+export {
+  type ToolSummary,
+  listTools,
+} from './tool-registry.ts';
+export {
+  type WorkRecord,
+  type CreateWorkOptions,
+  type ListWorksOptions,
+  type UpdateWorkOptions,
+  createWork,
+  listWorks,
+  showWork,
+  updateWork,
+} from './work.ts';
+export {
+  type PieceRecord,
+  type CreatePieceOptions,
+  type ListPiecesOptions,
+  type UpdatePieceOptions,
+  createPiece,
+  listPieces,
+  showPiece,
+  updatePiece,
+} from './piece.ts';
+export {
+  type JobRecord,
+  type CreateJobOptions,
+  type ListJobsOptions,
+  type UpdateJobOptions,
+  createJob,
+  listJobs,
+  showJob,
+  updateJob,
+} from './job.ts';
+export {
+  type StrokeRecord,
+  type CreateStrokeOptions,
+  type ListStrokesOptions,
+  type UpdateStrokeOptions,
+  createStroke,
+  listStrokes,
+  showStroke,
+  updateStroke,
+} from './stroke.ts';

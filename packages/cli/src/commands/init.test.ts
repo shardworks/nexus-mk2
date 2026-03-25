@@ -184,7 +184,18 @@ describe('installBundle with starter kit', () => {
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
 
     // Implements registered
-    const expectedImplements = ['install-tool', 'remove-tool', 'commission', 'instantiate', 'nexus-version'];
+    const expectedImplements = [
+      'tool-install', 'tool-remove', 'tool-list',
+      'commission-create', 'commission-list', 'commission-show', 'commission-update',
+      'anima-create', 'anima-list', 'anima-show', 'anima-update', 'anima-remove',
+      'workshop-create', 'workshop-register', 'workshop-list', 'workshop-show', 'workshop-remove',
+      'clock-list', 'clock-tick', 'clock-run',
+      'nexus-version',
+      'work-create', 'work-list', 'work-show', 'work-update',
+      'piece-create', 'piece-list', 'piece-show', 'piece-update',
+      'job-create', 'job-list', 'job-show', 'job-update',
+      'stroke-create', 'stroke-list', 'stroke-show', 'stroke-update',
+    ];
     for (const name of expectedImplements) {
       assert.ok(config.tools[name], `${name} not registered`);
       assert.ok(config.tools[name].package, `${name} missing package field`);
@@ -216,7 +227,7 @@ describe('installBundle with starter kit', () => {
     );
 
     // Bundle provenance recorded
-    assert.ok(config.tools['commission'].bundle, 'bundle provenance missing');
+    assert.ok(config.tools['commission-create'].bundle, 'bundle provenance missing');
   });
 
   it('creates a single commit when commit=true', () => {
@@ -256,7 +267,7 @@ describe('full init sequence', () => {
     assert.deepEqual(config.workshops, {});
 
     // Tools registered
-    assert.ok(config.tools['commission'], 'commission not registered');
+    assert.ok(config.tools['commission-create'], 'commission-create not registered');
     assert.ok(config.engines['workshop-prepare'], 'expected engines not registered');
 
     // Training registered
@@ -280,12 +291,17 @@ describe('full init sequence', () => {
       assert.ok(names.includes('animas'), 'animas table missing');
       assert.ok(names.includes('anima_compositions'), 'anima_compositions table missing');
       assert.ok(names.includes('commissions'), 'commissions table missing');
+      assert.ok(names.includes('commission_assignments'), 'commission_assignments table missing');
       assert.ok(names.includes('roster'), 'roster table missing');
       assert.ok(names.includes('audit_log'), 'audit_log table missing');
       assert.ok(names.includes('events'), 'events table missing');
       assert.ok(names.includes('event_dispatches'), 'event_dispatches table missing');
       assert.ok(names.includes('sessions'), 'sessions table missing');
       assert.ok(names.includes('commission_sessions'), 'commission_sessions table missing');
+      assert.ok(names.includes('works'), 'works table missing');
+      assert.ok(names.includes('pieces'), 'pieces table missing');
+      assert.ok(names.includes('jobs'), 'jobs table missing');
+      assert.ok(names.includes('strokes'), 'strokes table missing');
     } finally {
       db.close();
     }
@@ -300,7 +316,7 @@ describe('full init sequence', () => {
     const db = new Database(path.join(home, '.nexus', 'nexus.db'));
     try {
       const rows = db.prepare('SELECT * FROM _migrations ORDER BY sequence').all() as { sequence: number; filename: string }[];
-      assert.equal(rows.length, 4);
+      assert.equal(rows.length, 5);
       assert.equal(rows[0]!.sequence, 1);
       assert.equal(rows[0]!.filename, '001-initial-schema.sql');
       assert.equal(rows[1]!.sequence, 2);
