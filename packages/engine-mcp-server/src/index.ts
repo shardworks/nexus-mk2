@@ -30,7 +30,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { VERSION } from '@shardworks/nexus-core';
+import { VERSION, resolveToolFromExport } from '@shardworks/nexus-core';
 import type { ToolDefinition, ToolContext } from '@shardworks/nexus-core';
 
 /** A single tool to load into the MCP server. */
@@ -51,16 +51,20 @@ export interface ServerConfig {
 
 /**
  * Load a tool definition from a module path.
- * Expects the module's default export to be a ToolDefinition (from the tool() SDK).
+ *
+ * Handles both single-tool and array-of-tools exports:
+ * - Single: `export default tool({...})` → returned directly
+ * - Array: `export default [tool({...}), ...]` → resolved by spec.name
  */
 async function loadTool(spec: ToolSpec): Promise<ToolDefinition | null> {
   try {
     const mod = await import(spec.modulePath);
-    const def: ToolDefinition = mod.default;
+    const def = resolveToolFromExport(mod.default, spec.name);
 
-    if (!def || !def.params || !def.handler || !def.description) {
+    if (!def) {
       console.error(
-        `[mcp-server] ${spec.name}: module does not export a valid tool definition (missing params, handler, or description). Skipping.`,
+        `[mcp-server] ${spec.name}: could not resolve tool from "${spec.modulePath}". ` +
+        `Module must export a tool() definition or an array of tool() definitions with matching names. Skipping.`,
       );
       return null;
     }

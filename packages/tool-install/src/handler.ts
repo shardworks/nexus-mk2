@@ -36,6 +36,7 @@ function detectBundle(home: string, source: string): string | null {
 }
 
 export default tool({
+  name: 'install-tool',
   description: 'Install a tool, engine, curriculum, temperament, or bundle into the guild',
   params: {
     source: z.string().describe('npm package specifier, git URL, workshop ref, tarball path, or bundle specifier'),

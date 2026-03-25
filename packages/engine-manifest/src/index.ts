@@ -25,6 +25,7 @@ import {
   readGuildConfig,
   readPreconditions,
   checkPreconditions,
+  resolveToolFromExport,
 } from '@shardworks/nexus-core';
 import type { GuildConfig, ToolEntry } from '@shardworks/nexus-core';
 
@@ -141,11 +142,11 @@ export function readAnima(home: string, animaName: string): AnimaRecord {
  *
  * Returns available tools, unavailable tools, and any warnings.
  */
-export function resolveTools(
+export async function resolveTools(
   home: string,
   config: GuildConfig,
   animaRoles: string[],
-): { available: ResolvedTool[]; unavailable: UnavailableTool[]; warnings: string[] } {
+): Promise<{ available: ResolvedTool[]; unavailable: UnavailableTool[]; warnings: string[] }> {
   const warnings: string[] = [];
 
   // Collect tool names: start with base, union in role-specific
@@ -193,8 +194,12 @@ export function resolveTools(
       }
     }
 
-    // Read instructions if they exist
+    // Read instructions from multiple sources, in priority order:
+    // 1. Descriptor file on disk (nexus-tool.json → instructions field)
+    // 2. Tool definition (import module → instructions or instructionsFile)
     let instructions: string | null = null;
+
+    // Source 1: descriptor file on disk
     if (fs.existsSync(descriptorPath)) {
       try {
         const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf-8'));
@@ -205,7 +210,32 @@ export function resolveTools(
           }
         }
       } catch {
-        // If descriptor is unreadable, skip instructions
+        // If descriptor is unreadable, skip instructions from descriptor
+      }
+    }
+
+    // Source 2: tool definition (for collection packages or tools with
+    // inline instructions / instructionsFile in the tool() definition)
+    if (!instructions && entry.package) {
+      try {
+        const mod = await import(entry.package);
+        const toolDef = resolveToolFromExport(mod.default, name);
+        if (toolDef) {
+          if (toolDef.instructions) {
+            // Inline instructions text
+            instructions = toolDef.instructions;
+          } else if (toolDef.instructionsFile) {
+            // File path relative to the package root in node_modules
+            const instrPath = path.join(
+              home, 'node_modules', entry.package, toolDef.instructionsFile,
+            );
+            if (fs.existsSync(instrPath)) {
+              instructions = fs.readFileSync(instrPath, 'utf-8');
+            }
+          }
+        }
+      } catch {
+        // If import fails, skip — instructions are optional
       }
     }
 
@@ -399,7 +429,7 @@ export async function manifest(home: string, animaName: string): Promise<Manifes
   }
 
   // Resolve tools based on role definitions + precondition checks
-  const { available, unavailable, warnings } = resolveTools(home, config, anima.roles);
+  const { available, unavailable, warnings } = await resolveTools(home, config, anima.roles);
 
   // Read codex (guild-wide, no role filtering)
   const codex = readCodex(home);

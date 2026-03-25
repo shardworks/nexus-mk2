@@ -9,6 +9,9 @@ export {
   type ToolContext,
   type ToolDefinition,
   tool,
+  isToolDefinition,
+  resolveToolFromExport,
+  resolveAllToolsFromExport,
 } from './tool.ts';
 
 export {
@@ -17,6 +20,7 @@ export {
   type EngineDefinition,
   engine,
   isClockworkEngine,
+  resolveEngineFromExport,
 } from './engine.ts';
 
 export {

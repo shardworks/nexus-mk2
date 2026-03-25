@@ -15,6 +15,7 @@ import { engine, signalEvent, updateCommissionStatus, readCommission } from '@sh
 import { setupWorktree } from '@shardworks/engine-worktree-setup';
 
 export default engine({
+  name: 'workshop-prepare',
   handler: async (event, { home }) => {
     if (!event) {
       throw new Error('workshop-prepare requires an event (cannot be invoked directly).');

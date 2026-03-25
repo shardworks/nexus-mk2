@@ -6,19 +6,28 @@
  * Static engines (manifest, ledger-migrate, etc.) do NOT use this factory —
  * they have bespoke APIs and are called directly by framework code.
  *
- * @example
+ * A package can export a single engine or an array of engines:
+ *
+ * @example Single engine
  * ```typescript
  * import { engine } from '@shardworks/nexus-core';
  *
  * export default engine({
+ *   name: 'my-engine',
  *   handler: async (event, { home }) => {
- *     // event is the triggering GuildEvent when invoked by a standing order
- *     // event is null when invoked directly (CLI, import)
  *     if (event) {
  *       console.log(`Handling ${event.name}`, event.payload);
  *     }
  *   }
  * });
+ * ```
+ *
+ * @example Engine collection
+ * ```typescript
+ * export default [
+ *   engine({ name: 'workshop-prepare', handler: async (event, { home }) => { ... } }),
+ *   engine({ name: 'workshop-merge', handler: async (event, { home }) => { ... } }),
+ * ];
  * ```
  */
 
@@ -45,6 +54,8 @@ export interface EngineContext {
  * clockwork engines from static engines.
  */
 export interface EngineDefinition {
+  /** Engine name — used for resolution when a package exports multiple engines. */
+  readonly name: string;
   readonly __clockwork: true;
   readonly handler: (event: GuildEvent | null, ctx: EngineContext) => Promise<void>;
 }
@@ -52,14 +63,16 @@ export interface EngineDefinition {
 /**
  * Define a clockwork engine.
  *
- * This is the SDK entry point for event-driven engines. Pass a handler
- * function that receives a GuildEvent (or null for direct invocation)
+ * This is the SDK entry point for event-driven engines. Pass a name and a
+ * handler function that receives a GuildEvent (or null for direct invocation)
  * and an EngineContext.
  */
 export function engine(def: {
+  name: string;
   handler: (event: GuildEvent | null, ctx: EngineContext) => Promise<void>;
 }): EngineDefinition {
   return {
+    name: def.name,
     __clockwork: true,
     handler: def.handler,
   };
@@ -74,4 +87,40 @@ export function isClockworkEngine(obj: unknown): obj is EngineDefinition {
     (obj as EngineDefinition).__clockwork === true &&
     typeof (obj as EngineDefinition).handler === 'function'
   );
+}
+
+/**
+ * Resolve a single EngineDefinition from a module's default export.
+ *
+ * Handles both single-engine and array-of-engines exports:
+ * - Single engine: `export default engine({...})` → returned directly
+ * - Array: `export default [engine({...}), engine({...})]` → find by name
+ *
+ * @param moduleDefault - The module's default export
+ * @param engineName - The engine name to find (required for array exports)
+ * @returns The matching EngineDefinition, or null if not found
+ */
+export function resolveEngineFromExport(
+  moduleDefault: unknown,
+  engineName?: string,
+): EngineDefinition | null {
+  // Single engine export
+  if (isClockworkEngine(moduleDefault)) {
+    if (!engineName || moduleDefault.name === engineName) return moduleDefault;
+    return null;
+  }
+
+  // Array of engines — find by name
+  if (Array.isArray(moduleDefault)) {
+    for (const item of moduleDefault) {
+      if (!isClockworkEngine(item)) continue;
+      if (item.name === engineName) return item;
+    }
+    // If no name match but array has exactly one engine, return it
+    const engines = moduleDefault.filter(isClockworkEngine);
+    if (engines.length === 1 && !engineName) return engines[0]!;
+    return null;
+  }
+
+  return null;
 }

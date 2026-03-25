@@ -1,13 +1,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { engine, isClockworkEngine } from './engine.ts';
+import { engine, isClockworkEngine, resolveEngineFromExport } from './engine.ts';
 
 describe('engine SDK', () => {
-  it('creates a definition with __clockwork brand and handler', () => {
+  it('creates a definition with name, __clockwork brand, and handler', () => {
     const def = engine({
+      name: 'test-engine',
       handler: async () => {},
     });
 
+    assert.equal(def.name, 'test-engine');
     assert.equal(def.__clockwork, true);
     assert.equal(typeof def.handler, 'function');
   });
@@ -17,6 +19,7 @@ describe('engine SDK', () => {
     let receivedCtx: unknown;
 
     const def = engine({
+      name: 'event-test',
       handler: async (event, ctx) => {
         receivedEvent = event;
         receivedCtx = ctx;
@@ -40,6 +43,7 @@ describe('engine SDK', () => {
     let receivedEvent: unknown = 'sentinel';
 
     const def = engine({
+      name: 'null-event-test',
       handler: async (event) => {
         receivedEvent = event;
       },
@@ -52,7 +56,7 @@ describe('engine SDK', () => {
 
 describe('isClockworkEngine', () => {
   it('returns true for engine() output', () => {
-    const def = engine({ handler: async () => {} });
+    const def = engine({ name: 'test', handler: async () => {} });
     assert.equal(isClockworkEngine(def), true);
   });
 
@@ -66,5 +70,58 @@ describe('isClockworkEngine', () => {
 
   it('returns false for objects with wrong __clockwork value', () => {
     assert.equal(isClockworkEngine({ __clockwork: false, handler: async () => {} }), false);
+  });
+});
+
+describe('resolveEngineFromExport', () => {
+  const engineA = engine({
+    name: 'alpha',
+    handler: async () => {},
+  });
+
+  const engineB = engine({
+    name: 'beta',
+    handler: async () => {},
+  });
+
+  it('resolves a single engine export by name', () => {
+    const result = resolveEngineFromExport(engineA, 'alpha');
+    assert.equal(result, engineA);
+  });
+
+  it('resolves a single engine export without name', () => {
+    const result = resolveEngineFromExport(engineA);
+    assert.equal(result, engineA);
+  });
+
+  it('returns null for single engine when name does not match', () => {
+    const result = resolveEngineFromExport(engineA, 'wrong-name');
+    assert.equal(result, null);
+  });
+
+  it('resolves an engine from an array by name', () => {
+    const result = resolveEngineFromExport([engineA, engineB], 'beta');
+    assert.equal(result, engineB);
+  });
+
+  it('returns null for array when name does not match', () => {
+    const result = resolveEngineFromExport([engineA, engineB], 'gamma');
+    assert.equal(result, null);
+  });
+
+  it('returns the only engine from a single-element array without name', () => {
+    const result = resolveEngineFromExport([engineA]);
+    assert.equal(result, engineA);
+  });
+
+  it('returns null for multi-element array without name', () => {
+    const result = resolveEngineFromExport([engineA, engineB]);
+    assert.equal(result, null);
+  });
+
+  it('returns null for non-engine values', () => {
+    assert.equal(resolveEngineFromExport(null), null);
+    assert.equal(resolveEngineFromExport('string'), null);
+    assert.equal(resolveEngineFromExport(42), null);
   });
 });

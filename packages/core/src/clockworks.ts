@@ -18,7 +18,7 @@ import {
   recordDispatch,
   signalEvent,
 } from './events.ts';
-import { isClockworkEngine } from './engine.ts';
+import { isClockworkEngine, resolveEngineFromExport } from './engine.ts';
 import type { GuildEvent } from './engine.ts';
 import { ledgerPath } from './nexus-home.ts';
 import { updateCommissionStatus } from './commission.ts';
@@ -155,14 +155,14 @@ async function executeEngineOrder(
       throw new Error(`Engine "${engineName}" has no package field — cannot resolve module.`);
     }
 
-    // Import the engine module
+    // Import the engine module — handles both single and array exports
     const mod = await import(enginePkg);
-    const engineDef = mod.default;
+    const engineDef = resolveEngineFromExport(mod.default, engineName);
 
-    if (!isClockworkEngine(engineDef)) {
+    if (!engineDef) {
       throw new Error(
-        `Engine "${engineName}" does not export a clockwork engine (engine() factory). ` +
-        `Only clockwork engines can be used in "run:" standing orders.`,
+        `Engine "${engineName}" could not be resolved from "${enginePkg}". ` +
+        `Module must export an engine() definition or an array of engine() definitions with matching names.`,
       );
     }
 

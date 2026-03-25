@@ -9,6 +9,7 @@ import { tool, VERSION, readGuildConfig } from '@shardworks/nexus-core';
 import { z } from 'zod';
 
 export default tool({
+  name: 'nexus-version',
   description: "Report version information for the guild's Nexus installation and base tools",
   params: {
     verbose: z.boolean().optional().describe('Include full guild.json tool entries with timestamps'),

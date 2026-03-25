@@ -439,19 +439,24 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
       return packageName;
     }
 
-    // Find descriptor to determine artifact type
+    // Find descriptor to determine artifact type.
+    // For collection packages (exporting arrays), the descriptor may not exist
+    // at the package root — that's fine, the name comes from the bundle manifest.
     const descriptorFile = DESCRIPTOR_MAP[category]!;
     const descriptorPath = path.join(packageDir, descriptorFile);
-    if (!fs.existsSync(descriptorPath)) {
+    const hasDescriptor = fs.existsSync(descriptorPath);
+    const descriptor = hasDescriptor ? readJson(descriptorPath) : {};
+
+    // Determine artifact name — bundle manifest name takes priority
+    const name = entry.name || packageName.replace(/^@[^/]+\//, '');
+
+    if (!hasDescriptor && !entry.name) {
       throw new Error(
-        `Package "${packageName}" does not contain ${descriptorFile}. ` +
-        `Expected a ${category.slice(0, -1)} descriptor.`,
+        `Package "${packageName}" does not contain ${descriptorFile} and no "name" ` +
+        `was specified in the bundle manifest. Collection packages must declare ` +
+        `a "name" for each artifact in the bundle manifest.`,
       );
     }
-    const descriptor = readJson(descriptorPath);
-
-    // Determine artifact name
-    const name = entry.name || packageName.replace(/^@[^/]+\//, '');
 
     // Copy metadata to guild directory
     const parentDir = DIR_MAP[category]!;
@@ -461,34 +466,41 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
     }
     fs.mkdirSync(targetDir, { recursive: true });
 
-    // Copy descriptor
-    fs.copyFileSync(descriptorPath, path.join(targetDir, descriptorFile));
+    if (hasDescriptor) {
+      // Copy descriptor
+      fs.copyFileSync(descriptorPath, path.join(targetDir, descriptorFile));
 
-    // Copy instructions if referenced
-    const instructionsFile = descriptor['instructions'] as string | undefined;
-    if (instructionsFile) {
-      const instrPath = path.join(packageDir, instructionsFile);
-      if (fs.existsSync(instrPath)) {
-        fs.copyFileSync(instrPath, path.join(targetDir, instructionsFile));
+      // Copy instructions if referenced
+      const instructionsFile = descriptor['instructions'] as string | undefined;
+      if (instructionsFile) {
+        const instrPath = path.join(packageDir, instructionsFile);
+        if (fs.existsSync(instrPath)) {
+          fs.copyFileSync(instrPath, path.join(targetDir, instructionsFile));
+        }
+      }
+
+      // Copy content file if referenced (for curricula/temperaments)
+      const contentFile = descriptor['content'] as string | undefined;
+      if (contentFile) {
+        const contentPath = path.join(packageDir, contentFile);
+        if (fs.existsSync(contentPath)) {
+          fs.copyFileSync(contentPath, path.join(targetDir, contentFile));
+        }
       }
     }
-
-    // Copy content file if referenced (for curricula/temperaments)
-    const contentFile = descriptor['content'] as string | undefined;
-    if (contentFile) {
-      const contentPath = path.join(packageDir, contentFile);
-      if (fs.existsSync(contentPath)) {
-        fs.copyFileSync(contentPath, path.join(targetDir, contentFile));
-      }
-    }
+    // For collection packages without a per-tool descriptor: no files to copy.
+    // Instructions come from the tool() definition at runtime (manifest engine
+    // imports the module and reads the `instructions` field).
 
     // Register in guild.json
     const config = readGuildConfig(home);
     const now = new Date().toISOString();
+    const version = descriptor['version'] as string | undefined;
+    const upstreamVersion = version ? `${packageName}@${version}` : packageName;
 
     if (category === 'tools' || category === 'engines') {
       config[category][name] = {
-        upstream: `${packageName}@${descriptor['version'] as string}`,
+        upstream: upstreamVersion,
         installedAt: now,
         package: packageName,
         ...(bundleSource ? { bundle: bundleSource } : {}),
@@ -502,7 +514,7 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
       }
     } else {
       config[category][name] = {
-        upstream: `${packageName}@${descriptor['version'] as string}`,
+        upstream: upstreamVersion,
         installedAt: now,
         ...(bundleSource ? { bundle: bundleSource } : {}),
       };

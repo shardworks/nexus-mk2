@@ -20,6 +20,7 @@ function git(args: string[], cwd: string): string {
 }
 
 export default engine({
+  name: 'workshop-merge',
   handler: async (event, { home }) => {
     if (!event) {
       throw new Error('workshop-merge requires an event (cannot be invoked directly).');
