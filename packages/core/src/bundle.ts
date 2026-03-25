@@ -506,12 +506,10 @@ export function installBundle(opts: InstallBundleOptions): InstallBundleResult {
         ...(bundleSource ? { bundle: bundleSource } : {}),
       };
 
-      // Bundle-installed tools go to baseTools by default
-      if (category === 'tools') {
-        if (!config.baseTools.includes(name)) {
-          config.baseTools.push(name);
-        }
-      }
+      // Bundle-installed tools are registered in the catalog only.
+      // Role assignment is handled by the caller (e.g. init-guild.ts
+      // sets up roles with explicit tool lists). Tools not assigned to
+      // any role or baseTools are installed but not accessible to animas.
     } else {
       config[category][name] = {
         upstream: upstreamVersion,

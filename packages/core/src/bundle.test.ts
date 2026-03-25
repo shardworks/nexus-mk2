@@ -265,8 +265,9 @@ describe('installBundle', () => {
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
     assert.equal(config.tools['test-impl'].package, 'test-impl');
     assert.equal(config.tools['test-impl'].bundle, 'test-bundle@1.0.0');
-    // Bundle-installed tools go to baseTools
-    assert.ok(config.baseTools.includes('test-impl'));
+    // Bundle-installed tools are registered in catalog but NOT added to baseTools
+    // (role assignment is handled by the caller, e.g. init-guild.ts)
+    assert.ok(!config.baseTools.includes('test-impl'));
     assert.equal(config.engines['test-engine'].bundle, 'test-bundle@1.0.0');
   });
 
