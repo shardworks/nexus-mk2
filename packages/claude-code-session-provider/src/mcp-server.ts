@@ -20,7 +20,7 @@
  *   {
  *     "home": "/absolute/path/to/guild-root",
  *     "tools": [
- *       { "name": "install-tool", "modulePath": "@shardworks/nexus-stdlib/tools" },
+ *       { "name": "install-tool", "modulePath": "@shardworks/nexus-stdlib" },
  *       { "name": "my-tool", "modulePath": "/absolute/path/to/handler.ts" }
  *     ]
  *   }
