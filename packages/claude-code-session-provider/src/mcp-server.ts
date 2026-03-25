@@ -2,7 +2,7 @@
  * MCP Server — serves guild tools as typed MCP tools during anima sessions.
  *
  * Absorbed from the former `engine-mcp-server` package. This is an internal
- * module of engine-session-claude-code — not a separate package.
+ * module of claude-code-session-provider — not a separate package.
  *
  * The session provider launches this as a stdio process, configured with
  * the set of tools the anima has access to (based on role gating).

@@ -4,12 +4,11 @@
  * Implements the SessionProvider interface for Claude Code sessions.
  * Handles both interactive (TUI) and autonomous (--print) modes.
  *
- * Absorbs:
- * - Session launching logic from the former cli/session.ts
- * - MCP config generation from the former engine-manifest
- * - MCP server from the former engine-mcp-server (internal module)
+ * This is a platform dependency of the CLI, not a guild-registered engine.
+ * The CLI imports it at startup and registers it as the session provider.
+ * Guilds don't need to know about it — it's a transitive dep of @shardworks/nexus.
  *
- * Key change from the old code: uses async spawn() instead of spawnSync().
+ * Key design choice: uses async spawn() instead of spawnSync().
  * This is required for stream-json transcript parsing, timeout enforcement,
  * and future concurrent session support.
  */

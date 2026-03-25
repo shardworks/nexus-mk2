@@ -115,11 +115,11 @@ Distinct from workshops: workshops are where animas do their craft. The guildhal
 
 ### Engine
 
-An automated mechanical process with no AI — scripts, cron jobs, queue readers, and other deterministic processes built into the guild's infrastructure. Engines handle the repeatable, mechanical work of the guild: manifesting animas for work, setting up work environments, running migrations, triggering lifecycle transitions. Where animas are spirits, engines are clockwork — the pulleys, the waterworks, the mechanisms built into the walls. They are not presences; they are the building working.
+An automated mechanical process with no AI, purpose-built to respond to Clockworks events. Engines export a standard handler contract and are named in standing orders — they are the guild's automated reactions to things that happen. Where animas are spirits, engines are clockwork — the pulleys, the waterworks, the mechanisms built into the walls. They are not presences; they are the building working.
 
 The distinction is essential: **animas are animated** (backed by AI, capable of judgment and creativity, expensive), **engines are inanimate** (no AI, purely mechanical, perfectly repeatable, cheap). Engines are the infrastructure that lets animas focus on the work that requires intelligence.
 
-Two kinds of engines exist. **Static engines** have bespoke APIs and are invoked by specific framework code — the manifest engine, mcp-server, and ledger-migrate are examples. **Clockwork engines** are purpose-built to respond to Clockworks events; they export a standard handler contract and can be named in standing orders.
+Not everything mechanical is an engine. Libraries, session providers, migration runners, and other framework plumbing are just dependencies — they don't respond to events and don't need guild registration. The engine concept is reserved for things that participate in the Clockworks event loop.
 
 ### Clockworks
 

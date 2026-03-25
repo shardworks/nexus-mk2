@@ -183,7 +183,9 @@ function launchSession(options: SessionLaunchOptions): Promise<SessionResult>
 function registerSessionProvider(provider: SessionProvider): void
 ```
 
-### engine-session-claude-code (new package, absorbs two existing packages):
+### claude-code-session-provider (new package, absorbs two existing packages):
+
+This is a **platform dependency** of the CLI, not a guild-registered engine. The CLI imports it at startup and registers it via `registerSessionProvider()`. Guilds don't configure it — it's a transitive dep of `@shardworks/nexus`. No `nexus-engine.json`, not in the bundle manifest.
 
 Absorbs:
 - `engine-mcp-server` — MCP server that serves tools over stdio (inlined, not a dependency)
@@ -211,7 +213,7 @@ Implements `SessionProvider`:
 
 - `nsg consult` — calls `core.manifest()`, then `core.launchSession()` (which delegates to the registered provider)
 - `nsg clock` — calls `core.clockRun()`, which calls `core.launchSession()` for summon orders
-- `program.ts` — at startup, imports `engine-session-claude-code`, registers it as the session provider
+- `program.ts` — at startup, imports `claude-code-session-provider`, registers it as the session provider
 - No more `session.ts` or `summon.ts` in CLI
 
 ### Clockworks simplifies:
@@ -223,26 +225,25 @@ Implements `SessionProvider`:
 ## Dependency Graph (after)
 
 ```
-cli → core                          ✅
-cli → engine-session-claude-code    ✅ (registers at startup)
-core → (nothing above it)           ✅
-engine-session-claude-code → core   ✅ (for types, tool definitions)
-stdlib → core                       ✅ (tools + engines use core APIs)
-stdlib → engine-worktree-setup      ✅ (workshop-prepare/merge use worktree ops)
-engine-worktree-setup → core        ✅ (for workshopBarePath, etc.)
+cli → core                            ✅
+cli → claude-code-session-provider    ✅ (registers at startup)
+core → (nothing above it)             ✅
+claude-code-session-provider → core   ✅ (for types, tool definitions)
+stdlib → core                         ✅ (tools + engines use core APIs)
 ```
 
 No circular dependencies. No callback hacks.
 
 ### Packages deleted by this refactor:
 - `engine-manifest` → absorbed into core
-- `engine-mcp-server` → absorbed into engine-session-claude-code
+- `engine-mcp-server` → absorbed into claude-code-session-provider
+
+### Packages renamed:
+- `engine-session-claude-code` → `claude-code-session-provider` (not an engine, not guild-registered)
 
 ### Packages unchanged:
 - `stdlib` — tools and engines stay put
-- `engine-worktree-setup` — commission worktree lifecycle stays separate
-- `engine-ledger-migrate` — not touched
-- `guild-starter-kit` — not touched (may need bundle manifest updates if package names change)
+- `guild-starter-kit` — session-claude-code removed from bundle (platform dep, not guild concern)
 
 ## The Session Funnel
 

@@ -36,7 +36,6 @@ const STARTER_KIT_DIR = path.join(PACKAGES_DIR, 'guild-starter-kit');
  * Handles both stdlib collection packages and standalone engine packages.
  *
  * "@shardworks/nexus-stdlib@0.x" → local packages/stdlib
- * "@shardworks/engine-session-claude-code@0.x" → local packages/engine-session-claude-code
  */
 function rewritePackagePath(pkg: string): string {
   const bare = pkg.replace(/@0\.x$/, '');
@@ -191,16 +190,10 @@ describe('installBundle with starter kit', () => {
       assert.ok(config.tools[name].package, `${name} missing package field`);
     }
 
-    // Standalone engine packages have descriptors on disk; collection packages (stdlib) do not
-    const standaloneEngines = ['session-claude-code'];
-    const collectionEngines = ['workshop-prepare', 'workshop-merge'];
-    const expectedEngines = [...standaloneEngines, ...collectionEngines];
+    // Clockwork engines from stdlib (collection packages — no per-engine descriptor on disk)
+    const expectedEngines = ['workshop-prepare', 'workshop-merge'];
     for (const name of expectedEngines) {
       assert.ok(config.engines[name], `${name} not registered`);
-    }
-    for (const name of standaloneEngines) {
-      const engDir = path.join(home, 'engines', name);
-      assert.ok(fs.existsSync(path.join(engDir, 'nexus-engine.json')), `${name} descriptor missing`);
     }
 
     // Training installed
@@ -264,7 +257,7 @@ describe('full init sequence', () => {
 
     // Tools registered
     assert.ok(config.tools['commission'], 'commission not registered');
-    assert.ok(config.engines['session-claude-code'] || config.engines['workshop-prepare'], 'expected engines not registered');
+    assert.ok(config.engines['workshop-prepare'], 'expected engines not registered');
 
     // Training registered
     assert.ok(config.curricula['guild-operations'], 'curriculum not registered');

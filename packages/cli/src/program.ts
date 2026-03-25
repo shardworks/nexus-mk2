@@ -1,6 +1,6 @@
 import { createCommand } from 'commander';
 import { VERSION, registerSessionProvider } from '@shardworks/nexus-core';
-import { claudeCodeProvider } from '@shardworks/engine-session-claude-code';
+import { claudeCodeProvider } from '@shardworks/claude-code-session-provider';
 import { makeInitCommand } from './commands/init.ts';
 import { makeInstallToolCommand } from './commands/install-tool.ts';
 import { makeRemoveToolCommand } from './commands/remove-tool.ts';
