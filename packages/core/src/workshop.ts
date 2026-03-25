@@ -13,6 +13,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { readGuildConfig, writeGuildConfig } from './guild-config.ts';
 import type { WorkshopEntry } from './guild-config.ts';
@@ -259,15 +260,21 @@ export function createWorkshop(opts: CreateWorkshopOptions): AddWorkshopResult {
   const remoteUrl = `https://github.com/${repoName}.git`;
   const name = deriveWorkshopName(repoName);
 
-  // Need to initialize the repo so bare clone works.
-  // gh repo create with --confirm creates it but it may be empty.
-  // We'll clone it (possibly empty) — git clone --bare handles empty repos.
-  const result = addWorkshop({ home, name, remoteUrl });
+  // The new GitHub repo is empty — we need to seed it with an initial
+  // commit so the bare clone has a real 'main' branch that worktrees
+  // can branch from. Clone into a temp dir, commit a README, push, then
+  // discard the temp clone and do the real bare clone via addWorkshop.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-workshop-'));
+  try {
+    git(['clone', remoteUrl, tmpDir]);
+    git(['checkout', '-b', 'main'], tmpDir);
+    fs.writeFileSync(path.join(tmpDir, 'README.md'), `# ${name}\n`);
+    git(['add', 'README.md'], tmpDir);
+    git(['commit', '-m', 'Initial commit'], tmpDir);
+    git(['push', '-u', 'origin', 'main'], tmpDir);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 
-  // Ensure the bare repo's default branch is 'main', not 'master'.
-  // Empty bare clones inherit git's init.defaultBranch setting, which
-  // may be 'master'. The workshop-merge engine expects 'main'.
-  git(['symbolic-ref', 'HEAD', 'refs/heads/main'], result.barePath);
-
-  return result;
+  return addWorkshop({ home, name, remoteUrl });
 }
