@@ -29,6 +29,17 @@ import {
 } from '@shardworks/nexus-core';
 import type { GuildConfig, ToolEntry } from '@shardworks/nexus-core';
 
+/** Extract the npm package name from a package specifier that may include a subpath. */
+function basePackageName(pkg: string): string {
+  // Scoped: @scope/name/subpath → @scope/name
+  if (pkg.startsWith('@')) {
+    const parts = pkg.split('/');
+    return parts.slice(0, 2).join('/');
+  }
+  // Unscoped: name/subpath → name
+  return pkg.split('/')[0]!;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────
 
 /** An anima's composition as stored in the Ledger. */
@@ -225,9 +236,10 @@ export async function resolveTools(
             // Inline instructions text
             instructions = toolDef.instructions;
           } else if (toolDef.instructionsFile) {
-            // File path relative to the package root in node_modules
+            // File path relative to the package root in node_modules.
+            // Strip subpath from package name (e.g. @shardworks/nexus-stdlib/tools → @shardworks/nexus-stdlib)
             const instrPath = path.join(
-              home, 'node_modules', entry.package, toolDef.instructionsFile,
+              home, 'node_modules', basePackageName(entry.package), toolDef.instructionsFile,
             );
             if (fs.existsSync(instrPath)) {
               instructions = fs.readFileSync(instrPath, 'utf-8');

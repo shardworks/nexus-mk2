@@ -9,7 +9,7 @@ describe('MCP server engine', () => {
       tools: [
         {
           name: 'install-tool',
-          modulePath: '@shardworks/tool-install',
+          modulePath: '@shardworks/nexus-stdlib/tools',
         },
       ],
     };

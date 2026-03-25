@@ -11,6 +11,7 @@ import { z } from 'zod';
 export default tool({
   name: 'instantiate',
   description: 'Instantiate a new anima in the guild with assigned curriculum, temperament, and roles',
+  instructionsFile: './instructions/instantiate.md',
   params: {
     name: z.string().describe('Name for the new anima'),
     roles: z.array(z.string()).describe('Roles the anima will hold (e.g. artificer, sage)'),

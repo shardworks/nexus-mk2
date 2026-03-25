@@ -32,6 +32,22 @@ const PACKAGES_DIR = path.resolve(__dirname, '../../../../packages');
 const STARTER_KIT_DIR = path.join(PACKAGES_DIR, 'guild-starter-kit');
 
 /**
+ * Rewrite a bundle manifest package specifier to a local workspace path.
+ * Handles both stdlib collection packages and standalone engine packages.
+ *
+ * "@shardworks/nexus-stdlib@0.x" → local packages/stdlib
+ * "@shardworks/engine-manifest@0.x" → local packages/engine-manifest
+ */
+function rewritePackagePath(pkg: string): string {
+  const bare = pkg.replace(/@0\.x$/, '');
+  if (bare === '@shardworks/nexus-stdlib') {
+    return path.join(PACKAGES_DIR, 'stdlib');
+  }
+  const name = bare.replace('@shardworks/', '');
+  return path.join(PACKAGES_DIR, name);
+}
+
+/**
  * Create a workspace-local copy of the starter kit bundle that resolves
  * package specifiers to local workspace paths instead of npm registry.
  * This lets the test run without depending on npm-published versions.
@@ -44,13 +60,10 @@ function makeLocalBundle(tmpDir: string): string {
   const manifest = JSON.parse(fs.readFileSync(path.join(bundleDir, 'nexus-bundle.json'), 'utf-8'));
 
   for (const entry of manifest.tools ?? []) {
-    // "@shardworks/tool-commission@0.x" → local path
-    const name = entry.package.replace(/@0\.x$/, '').replace('@shardworks/', '');
-    entry.package = path.join(PACKAGES_DIR, name);
+    entry.package = rewritePackagePath(entry.package);
   }
   for (const entry of manifest.engines ?? []) {
-    const name = entry.package.replace(/@0\.x$/, '').replace('@shardworks/', '');
-    entry.package = path.join(PACKAGES_DIR, name);
+    entry.package = rewritePackagePath(entry.package);
   }
 
   fs.writeFileSync(
@@ -176,14 +189,16 @@ describe('installBundle with starter kit', () => {
     for (const name of expectedImplements) {
       assert.ok(config.tools[name], `${name} not registered`);
       assert.ok(config.tools[name].package, `${name} missing package field`);
-      const implDir = path.join(home, 'tools', name);
-      assert.ok(fs.existsSync(path.join(implDir, 'nexus-tool.json')), `${name} descriptor missing`);
     }
 
-    // Engines registered
-    const expectedEngines = ['manifest', 'mcp-server', 'worktree-setup', 'workshop-prepare', 'workshop-merge', 'ledger-migrate'];
+    // Standalone engine packages have descriptors on disk; collection packages (stdlib) do not
+    const standaloneEngines = ['manifest', 'mcp-server', 'worktree-setup', 'ledger-migrate'];
+    const collectionEngines = ['workshop-prepare', 'workshop-merge'];
+    const expectedEngines = [...standaloneEngines, ...collectionEngines];
     for (const name of expectedEngines) {
       assert.ok(config.engines[name], `${name} not registered`);
+    }
+    for (const name of standaloneEngines) {
       const engDir = path.join(home, 'engines', name);
       assert.ok(fs.existsSync(path.join(engDir, 'nexus-engine.json')), `${name} descriptor missing`);
     }

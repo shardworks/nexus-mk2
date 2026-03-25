@@ -11,6 +11,7 @@ import { z } from 'zod';
 export default tool({
   name: 'signal',
   description: 'Signal a custom guild event for the Clockworks',
+  instructionsFile: './instructions/signal.md',
   params: {
     name: z.string().describe('Event name (must be declared in guild.json clockworks.events)'),
     payload: z.record(z.string(), z.unknown()).optional().describe('Event payload (JSON object)'),

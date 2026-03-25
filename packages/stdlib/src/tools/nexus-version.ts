@@ -11,6 +11,7 @@ import { z } from 'zod';
 export default tool({
   name: 'nexus-version',
   description: "Report version information for the guild's Nexus installation and base tools",
+  instructionsFile: './instructions/nexus-version.md',
   params: {
     verbose: z.boolean().optional().describe('Include full guild.json tool entries with timestamps'),
   },
