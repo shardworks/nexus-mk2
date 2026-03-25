@@ -81,6 +81,68 @@ export function readCommission(
   }
 }
 
+// ── List / Show ────────────────────────────────────────────────────────
+
+export interface CommissionSummary {
+  id: string;
+  content: string;
+  status: string;
+  workshop: string;
+  statusReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListCommissionsOptions {
+  status?: string;
+  workshop?: string;
+}
+
+/**
+ * List commissions with optional filters.
+ */
+export function listCommissions(home: string, opts: ListCommissionsOptions = {}): CommissionSummary[] {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    let query = `SELECT id, content, status, workshop, status_reason, created_at, updated_at FROM commissions`;
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (opts.status) {
+      conditions.push(`status = ?`);
+      params.push(opts.status);
+    }
+    if (opts.workshop) {
+      conditions.push(`workshop = ?`);
+      params.push(opts.workshop);
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+    query += ` ORDER BY created_at DESC`;
+
+    const rows = db.prepare(query).all(...params) as {
+      id: string; content: string; status: string; workshop: string;
+      status_reason: string | null; created_at: string; updated_at: string;
+    }[];
+
+    return rows.map(row => ({
+      id: row.id,
+      content: row.content,
+      status: row.status,
+      workshop: row.workshop,
+      statusReason: row.status_reason,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  } finally {
+    db.close();
+  }
+}
+
 /**
  * Post a commission to the guild.
  *

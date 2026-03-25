@@ -205,6 +205,50 @@ export function listWorkshops(home: string): WorkshopInfo[] {
   return results;
 }
 
+export interface WorkshopDetail extends WorkshopInfo {
+  /** Absolute path to the bare clone on disk. */
+  barePath: string;
+  /** Default branch name, if bare clone exists. */
+  defaultBranch: string | null;
+}
+
+/**
+ * Show detailed info for a single workshop.
+ */
+export function showWorkshop(home: string, name: string): WorkshopDetail | null {
+  const config = readGuildConfig(home);
+  const entry = config.workshops[name];
+  if (!entry) return null;
+
+  const barePath = workshopBarePath(home, name);
+  const cloned = fs.existsSync(barePath);
+
+  let activeWorktrees = 0;
+  const wtDir = path.join(worktreesPath(home), name);
+  if (fs.existsSync(wtDir)) {
+    activeWorktrees = fs.readdirSync(wtDir, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .length;
+  }
+
+  let defaultBranch: string | null = null;
+  if (cloned) {
+    try {
+      defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], barePath);
+    } catch { /* bare repos may not have HEAD set */ }
+  }
+
+  return {
+    name,
+    remoteUrl: entry.remoteUrl,
+    addedAt: entry.addedAt,
+    cloned,
+    activeWorktrees,
+    barePath,
+    defaultBranch,
+  };
+}
+
 /**
  * Check whether `gh` is installed and authenticated.
  * Returns null if OK, or an error message if not.
