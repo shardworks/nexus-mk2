@@ -6,6 +6,7 @@
 import Database from 'better-sqlite3';
 import { booksPath } from './nexus-home.ts';
 import { generateId } from './id.ts';
+import { signalEvent } from './events.ts';
 
 export interface StrokeRecord {
   id: string;
@@ -42,9 +43,21 @@ export function createStroke(home: string, opts: CreateStrokeOptions): StrokeRec
       `INSERT INTO strokes (id, job_id, kind, content) VALUES (?, ?, ?, ?)`,
     ).run(id, opts.jobId, opts.kind, opts.content ?? null);
 
-    return db.prepare(
+    db.prepare(
+      `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(generateId('aud'), 'operator', 'stroke_created', 'stroke', id, JSON.stringify(opts));
+
+    const row = db.prepare(
       `SELECT id, job_id, kind, content, status, created_at, updated_at FROM strokes WHERE id = ?`,
-    ).get(id) as StrokeRecord;
+    ).get(id) as { id: string; job_id: string; kind: string; content: string | null; status: string; created_at: string; updated_at: string };
+    const record = {
+      id: row.id, jobId: row.job_id, kind: row.kind, content: row.content,
+      status: row.status, createdAt: row.created_at, updatedAt: row.updated_at,
+    };
+
+    signalEvent(home, 'stroke.recorded', { strokeId: id, jobId: opts.jobId }, 'framework');
+
+    return record;
   } finally {
     db.close();
   }
@@ -113,6 +126,10 @@ export function updateStroke(home: string, strokeId: string, opts: UpdateStrokeO
     params.push(strokeId);
 
     db.prepare(`UPDATE strokes SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+
+    db.prepare(
+      `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(generateId('aud'), 'operator', 'stroke_updated', 'stroke', strokeId, JSON.stringify(opts));
 
     const result = showStroke(home, strokeId);
     if (!result) throw new Error(`Stroke "${strokeId}" not found.`);

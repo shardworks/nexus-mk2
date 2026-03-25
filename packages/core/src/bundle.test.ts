@@ -509,7 +509,7 @@ describe('installBundle', () => {
       description: 'Starter kit content test',
       temperaments: [{ path: 'temperaments/guide' }],
       curricula: [{ path: 'curricula/guild-operations' }],
-      migrations: [{ path: 'migrations/001-initial-schema.sql' }],
+      migrations: [{ path: 'migrations/001-schema.sql' }],
     }));
 
     const result = installBundle({
@@ -557,7 +557,7 @@ describe('installBundle', () => {
     assert.ok(result.migrationProvenance);
     const migProv = Object.values(result.migrationProvenance!)[0]!;
     assert.equal(migProv.bundle, '@shardworks/guild-starter-kit@0.1.5');
-    assert.equal(migProv.originalName, '001-initial-schema.sql');
+    assert.equal(migProv.originalName, '001-schema.sql');
   });
 
   it('installs transitive bundles', () => {

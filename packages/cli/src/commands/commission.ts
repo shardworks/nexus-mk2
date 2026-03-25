@@ -101,18 +101,5 @@ export function makeCommissionCommand() {
       }),
   );
 
-  // Alias: `nsg commission <spec>` (bare, without subcommand) → create
-  // Commander doesn't natively support this. We use .argument() on the group
-  // command itself with .passthrough() as a fallback. Instead, we'll set
-  // the default subcommand explicitly.
-  cmd.action((...args) => {
-    // If called without a known subcommand, treat first positional as spec
-    // and delegate to the create subcommand.
-    const rawArgs = cmd.args;
-    if (rawArgs.length > 0) {
-      createCmd.parseAsync(rawArgs, { from: 'user' });
-    }
-  });
-
   return cmd;
 }

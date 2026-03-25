@@ -316,15 +316,9 @@ describe('full init sequence', () => {
     const db = new Database(path.join(home, '.nexus', 'nexus.db'));
     try {
       const rows = db.prepare('SELECT * FROM _migrations ORDER BY sequence').all() as { sequence: number; filename: string }[];
-      assert.equal(rows.length, 5);
+      assert.equal(rows.length, 1);
       assert.equal(rows[0]!.sequence, 1);
-      assert.equal(rows[0]!.filename, '001-initial-schema.sql');
-      assert.equal(rows[1]!.sequence, 2);
-      assert.equal(rows[1]!.filename, '002-clockworks.sql');
-      assert.equal(rows[2]!.sequence, 3);
-      assert.equal(rows[2]!.filename, '003-commission-status-reason.sql');
-      assert.equal(rows[3]!.sequence, 4);
-      assert.equal(rows[3]!.filename, '004-sessions.sql');
+      assert.equal(rows[0]!.filename, '001-schema.sql');
     } finally {
       db.close();
     }

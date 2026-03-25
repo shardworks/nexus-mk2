@@ -183,8 +183,36 @@ export function updateAnima(
         JSON.stringify(opts),
       );
 
-      // Return updated record
-      return showAnima(home, existing.id)!;
+      // Read updated record inline (same connection, inside transaction)
+      const row = db.prepare(
+        `SELECT a.id, a.name, a.status, a.created_at, a.updated_at,
+                c.curriculum_name, c.curriculum_version,
+                c.temperament_name, c.temperament_version
+         FROM animas a
+         LEFT JOIN anima_compositions c ON c.anima_id = a.id
+         WHERE a.id = ?`,
+      ).get(existing.id) as {
+        id: string; name: string; status: string; created_at: string; updated_at: string;
+        curriculum_name: string | null; curriculum_version: string | null;
+        temperament_name: string | null; temperament_version: string | null;
+      };
+
+      const roles = (db.prepare(
+        `SELECT role FROM roster WHERE anima_id = ? ORDER BY role`,
+      ).all(existing.id) as { role: string }[]).map(r => r.role);
+
+      return {
+        id: row.id,
+        name: row.name,
+        status: row.status,
+        roles,
+        curriculumName: row.curriculum_name ?? '',
+        curriculumVersion: row.curriculum_version ?? '',
+        temperamentName: row.temperament_name ?? '',
+        temperamentVersion: row.temperament_version ?? '',
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
     })();
   } finally {
     db.close();

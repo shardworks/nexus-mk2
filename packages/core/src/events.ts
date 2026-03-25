@@ -93,7 +93,7 @@ export function readPendingEvents(home: string): GuildEvent[] {
 
   try {
     const rows = db.prepare(
-      `SELECT id, name, payload, emitter, fired_at FROM events WHERE processed = 0 ORDER BY fired_at, id`,
+      `SELECT id, name, payload, emitter, fired_at FROM events WHERE processed = 0 ORDER BY fired_at, rowid`,
     ).all() as { id: string; name: string; payload: string | null; emitter: string; fired_at: string }[];
 
     return rows.map(row => ({

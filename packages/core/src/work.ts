@@ -7,6 +7,7 @@
 import Database from 'better-sqlite3';
 import { booksPath } from './nexus-home.ts';
 import { generateId } from './id.ts';
+import { signalEvent } from './events.ts';
 
 export interface WorkRecord {
   id: string;
@@ -44,7 +45,21 @@ export function createWork(home: string, opts: CreateWorkOptions): WorkRecord {
       `INSERT INTO works (id, commission_id, title, description) VALUES (?, ?, ?, ?)`,
     ).run(id, opts.commissionId ?? null, opts.title, opts.description ?? null);
 
-    return db.prepare(`SELECT * FROM works WHERE id = ?`).get(id) as WorkRecord;
+    db.prepare(
+      `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(generateId('aud'), 'operator', 'work_created', 'work', id, JSON.stringify(opts));
+
+    const row = db.prepare(
+      `SELECT id, commission_id, title, description, status, created_at, updated_at FROM works WHERE id = ?`,
+    ).get(id) as { id: string; commission_id: string | null; title: string; description: string | null; status: string; created_at: string; updated_at: string };
+    const record = {
+      id: row.id, commissionId: row.commission_id, title: row.title, description: row.description,
+      status: row.status, createdAt: row.created_at, updatedAt: row.updated_at,
+    };
+
+    signalEvent(home, 'work.created', { workId: id, commissionId: opts.commissionId ?? null }, 'framework');
+
+    return record;
   } finally {
     db.close();
   }
@@ -115,8 +130,17 @@ export function updateWork(home: string, workId: string, opts: UpdateWorkOptions
 
     db.prepare(`UPDATE works SET ${sets.join(', ')} WHERE id = ?`).run(...params);
 
+    db.prepare(
+      `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(generateId('aud'), 'operator', 'work_updated', 'work', workId, JSON.stringify(opts));
+
     const result = showWork(home, workId);
     if (!result) throw new Error(`Work "${workId}" not found.`);
+
+    if (opts.status === 'completed') {
+      signalEvent(home, 'work.completed', { workId }, 'framework');
+    }
+
     return result;
   } finally {
     db.close();
