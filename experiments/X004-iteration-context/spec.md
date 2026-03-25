@@ -1,5 +1,5 @@
 ---
-status: draft
+status: ready
 ---
 
 # X004 — Iteration Context
@@ -62,6 +62,15 @@ However, it's also possible that agents are good enough at code exploration that
 - Guild dispatch infrastructure (commission dispatch, workshop setup, session capture)
 - Sessions with populated transcripts (post-transcript-capture fix, commit `9d5bd96`)
 - At least one completed commission to use as the base for amendment variants
+
+## Relationship to X010
+
+X010 (Staged Sessions) asks a closely related question: if we break a single commission into multiple shorter sessions, can a "stage notes" handoff file bridge the context gap? X010's stage notes are essentially X004's "summary context" variant, applied to continuation rather than iteration.
+
+- X004 tests context variants for **amendments to completed work** (a new commission touching prior output).
+- X010 tests context bridging for **continuation of in-progress work** (same commission, split across sessions).
+- X004 includes a **full-context variant** (session resume/fork) that X010 doesn't consider.
+- Findings from either experiment inform the other. Shared data collection instruments (orientation cost analysis, quality assessment).
 
 ## What This Experiment Is NOT
 

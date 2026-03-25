@@ -1,5 +1,5 @@
 ---
-status: draft
+status: ready
 ---
 
 # X009 — Metaphor as Implicit Instruction

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: ready
 ---
 
 # X003 — Commission Prompt Tuning

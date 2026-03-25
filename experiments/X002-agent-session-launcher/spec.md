@@ -1,5 +1,6 @@
 ---
-status: ready
+status: superseded
+supersededReason: The session launcher was built as part of the session refactor (claude-code-session-provider) rather than via commissioned agent. The specific deliverable this experiment targeted already exists.
 ---
 
 # X002 — Agent Session Launcher
