@@ -67,7 +67,8 @@ The quality of the commission spec will matter more than the quality of the guil
 
 All artifacts go to `experiments/X007-first-contact/artifacts/`:
 
-- `manifested-context.md` — the full instruction set the agent received
+- `artificer-session.json` — complete session data from the implementation agent, including jsonl transcript from Claude
+- `manifested-context.json` — the full instruction set the agent received
 - `commission-spec.md` — the commission as written
 - `patron-expectations.md` — Sean's pre-dispatch predictions (written before seeing results)
 - `observation-notes.md` — structured observations from during/after the dispatch
