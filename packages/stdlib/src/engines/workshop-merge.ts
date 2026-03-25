@@ -13,7 +13,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { engine, signalEvent, updateCommissionStatus, workshopBarePath } from '@shardworks/nexus-core';
-import { teardownWorktree } from '@shardworks/engine-worktree-setup';
+import { teardownWorktree } from '@shardworks/nexus-core';
 
 function git(args: string[], cwd: string): string {
   return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();

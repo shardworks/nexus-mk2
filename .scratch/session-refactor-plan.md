@@ -89,6 +89,8 @@ interface SessionLaunchOptions {
 
 /** What comes back from any session, regardless of provider. */
 interface SessionResult {
+  /** Ledger row ID — written by the funnel before provider launch. */
+  sessionId: number;
   exitCode: number;
   /** Provider-reported token usage, if available. */
   tokenUsage?: {
@@ -104,24 +106,13 @@ interface SessionResult {
   /** Session ID from the provider, if available (e.g. claude session ID). */
   providerSessionId?: string;
   /**
-   * Full conversation transcript — everything that happened during the session.
-   * Provider returns this as structured data; the funnel writes it to disk.
-   * For claude-code with --output-format stream-json: array of message events.
+   * Full conversation transcript — raw provider output, minimally typed.
+   * For claude-code with --output-format stream-json: array of stream events.
    * For API providers: the messages array from the conversation.
+   * Stored as-is in the session record; typed normalization deferred until
+   * we need to analyze transcripts programmatically.
    */
-  transcript?: TranscriptMessage[];
-}
-
-/** A single message in a session transcript. */
-interface TranscriptMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool_use' | 'tool_result';
-  content: string;
-  /** Timestamp of the message, if available from the provider. */
-  timestamp?: string;
-  /** For tool_use: which tool was called. */
-  toolName?: string;
-  /** For tool_use: the input parameters. */
-  toolInput?: Record<string, unknown>;
+  transcript?: Record<string, unknown>[];
 }
 ```
 
@@ -152,7 +143,7 @@ type ResolvedWorkspace =
 Resolution rules (applied by the session funnel, not the provider):
 
 1. **`worktreePath` present** → use it directly, don't touch it. Caller owns the lifecycle. This is `workshop-managed` — the commission pipeline (or whatever) created it and will clean it up. The session launcher just uses it as `cwd`.
-2. **`workshop` present, no `worktreePath`** → create a fresh temporary worktree checked out to main. This is `workshop-temp`. The session funnel creates it before launching and tears it down after. Every session gets a clean, current snapshot. No staleness, no conflicts between concurrent sessions.
+2. **`workshop` present, no `worktreePath`** → create a fresh temporary worktree checked out to main. This is `workshop-temp`. The session funnel creates it before launching. For autonomous sessions, it tears it down after. For interactive sessions, it leaves it in place — the user may have un-pushed work. Cleanup is manual or via a future reaping mechanism.
 3. **Neither** → guildhall. `cwd` is `home`.
 
 For callers outside clockworks (e.g. `nsg consult --workshop frontend-app`), the CLI resolves the workspace context before calling `launchSession()`. Same rules apply.
@@ -164,13 +155,25 @@ For callers outside clockworks (e.g. `nsg consult --workshop frontend-app`), the
  *
  * This is THE code path for all sessions. It:
  * 1. If workspace is workshop-temp: create fresh worktree from main
- * 2. Records session.started in the Ledger
+ * 2. Records session.started in the Ledger → gets sessionId
  * 3. Signals session.started event
  * 4. Delegates to the provider (passing resolved cwd)
  * 5. Records session.ended in the Ledger (with metrics)
- * 6. Signals session.ended event (with full metrics in payload)
- * 7. If workspace is workshop-temp: tear down the worktree
- * 8. Returns the result
+ * 6. Writes the SessionRecord JSON to .nexus/sessions/{uuid}.json
+ * 7. Signals session.ended event (with full metrics + sessionId in payload)
+ * 8. If workspace is workshop-temp AND session is autonomous: tear down the worktree
+ *    (interactive sessions leave the worktree for manual cleanup)
+ * 9. Returns the result (including sessionId)
+ *
+ * Error handling guarantee: Steps 5–8 MUST execute even if the provider
+ * throws. The funnel wraps step 4 in try/finally. If the provider crashes,
+ * the session row still gets ended_at, exit_code, and the session.ended
+ * event still fires (with error details in the payload). If the funnel
+ * itself fails during recording (e.g. Ledger locked), it signals
+ * session.record-failed as a core event and continues with remaining
+ * cleanup steps. Worktree teardown failures are logged but do not throw —
+ * stale worktrees are assumed to be reaped by a separate mechanism (out
+ * of scope for this refactor).
  */
 function launchSession(options: SessionLaunchOptions): Promise<SessionResult>
 ```
@@ -188,7 +191,7 @@ Absorbs:
 - MCP config generation from `engine-manifest` — `generateMcpConfig()`
 
 Implements `SessionProvider`:
-- `launch()` builds MCP config from resolved tools, writes temp files, spawns `claude --print` (or interactive), captures output, parses `--output-format stream-json` for metrics and transcript
+- `launch()` builds MCP config from resolved tools, writes temp files, spawns `claude` via async `spawn` (not `spawnSync` — required for stream-json parsing, timeout enforcement, and future concurrent sessions), captures output, parses `--output-format stream-json` for metrics and transcript
 - Owns the `buildClaudeMcpConfig()` helper, the wrapper script generation, all the Claude Code-specific flag assembly
 - The MCP server code ships inside this package (no separate `engine-mcp-server`)
 
@@ -255,7 +258,7 @@ nsg consult --workshop frontend-app (interactive, workshop)
   → core.manifest(home, animaName)
   → core.launchSession({ interactive: true, prompt: null,
       workspace: { kind: 'workshop-temp', workshop: 'frontend-app' } })
-  → (funnel creates fresh worktree, tears it down after)
+  → (funnel creates fresh worktree, leaves it in place — interactive, no auto-teardown)
 
 clockworks summon (commissioned — event has worktreePath from workshop-prepare)
   → core.manifest(home, animaName)
@@ -277,12 +280,15 @@ clockworks brief (guildhall — event has no workspace fields)
 
 Every path through the funnel:
 1. If `workshop-temp`: create fresh worktree from workshop's bare repo (checked out to main)
-2. Writes a `sessions` row to the Ledger (start time, anima, provider, trigger source, workspace)
+2. Writes a `sessions` row to the Ledger (start time, anima, provider, trigger source, workspace) → gets `sessionId`
 3. Signals `session.started` event (for clockworks standing orders)
-4. Delegates to the provider (with resolved `cwd`)
+4. Delegates to the provider (with resolved `cwd`) — **wrapped in try/finally**
 5. Updates the `sessions` row (end time, exit code, token usage, cost, duration)
-6. Signals `session.ended` event (with full metrics in payload)
-7. If `workshop-temp`: tear down the worktree
+6. Writes `SessionRecord` JSON to `.nexus/sessions/{uuid}.json`
+7. Signals `session.ended` event (with full metrics + `sessionId` in payload)
+8. If `workshop-temp` AND `interactive: false`: tear down the worktree
+
+Steps 5–8 execute even if step 4 throws. Recording failures signal `session.record-failed` (core event) and continue. Teardown failures are logged but swallowed — stale worktree reaping is out of scope.
 
 This means:
 - `nsg status` (or a future dashboard) can show all sessions, their costs, their outcomes
@@ -340,15 +346,18 @@ Session records are stored as JSON files on disk, not in SQLite. The Ledger row 
 
 ```
 .nexus/sessions/
-  session-1.json      -- full session record (record_path = ".nexus/sessions/session-1.json")
-  session-2.json
+  {uuid}.json      -- full session record (record_path = ".nexus/sessions/{uuid}.json")
   ...
 ```
+
+File names are UUIDs (v4), not Ledger row IDs. This decouples disk storage from database identity — safe across Ledger rebuilds, migrations, and test environments.
 
 Each file contains a `SessionRecord`:
 
 ```typescript
 interface SessionRecord {
+  /** Ledger session row ID (for cross-reference). */
+  sessionId: number;
   /** The anima that ran this session, with full composition provenance. */
   anima: {
     id: number;
@@ -368,8 +377,8 @@ interface SessionRecord {
   unavailableTools: Array<{ name: string; reasons: string[] }>;
   /** The user-facing prompt (commission spec, brief, etc). */
   userPrompt: string | null;
-  /** Full conversation transcript from the provider. */
-  transcript: TranscriptMessage[];
+  /** Raw conversation transcript from the provider — minimally typed. */
+  transcript: Record<string, unknown>[];
 }
 ```
 
@@ -377,9 +386,11 @@ This is the object written to disk at the path stored in `sessions.record_path`.
 
 The session funnel:
 1. Before launch: captures anima composition, system prompt, user prompt, tools — all known before the provider runs
-2. After launch: adds transcript from `SessionResult.transcript` — comes back from the provider
-3. Writes the `SessionRecord` JSON to `.nexus/sessions/`
+2. After launch: adds transcript from `SessionResult.transcript` (raw `Record<string, unknown>[]`) — comes back from the provider
+3. Writes the `SessionRecord` JSON to `.nexus/sessions/{uuid}.json`
 4. Records `record_path` in the sessions table
+
+If step 3 or 4 fails, the funnel signals `session.record-failed` and continues cleanup. The session row still gets `ended_at` from step 5 of the main funnel.
 
 This means every session has a complete, reviewable record: what the anima was told, what it did, what it said. Queryable via the Ledger (find sessions by anima, workshop, curriculum version, cost), readable in detail via the session record files.
 
@@ -387,52 +398,63 @@ This means every session has a complete, reviewable record: what the anima was t
 
 This is a refactor of existing code, not new features. The external behavior doesn't change — commissions still work, consult still works. The packages shift.
 
-### Phase 1: Move manifest into core
+### Phase 1: Move manifest into core + create engine-session-claude-code
+
+These two moves happen together because `generateMcpConfig()` needs a home at every point — it leaves engine-manifest and lands in engine-session-claude-code in the same phase. No broken intermediate state.
+
+**Manifest → core:**
 - Move all functions from `engine-manifest/src/index.ts` into `core/src/manifest.ts`
 - Widen `readAnima()` query to include `curriculum_name`, `curriculum_version`, `temperament_name`, `temperament_version` from `anima_compositions`
 - Update `manifest()` to retain individual composition ingredients (codex, role instructions, curriculum, temperament, tool instructions) on `ManifestResult.composition` instead of discarding them after prompt assembly
-- Remove MCP config generation (stays behind for Phase 2)
+- `generateMcpConfig()` does NOT move to core — it goes to engine-session-claude-code (transport detail)
 - Update all imports (cli, summon, tests)
 - Delete `engine-manifest` package
 
-### Phase 2: Create engine-session-claude-code
+**engine-session-claude-code (new package):**
 - New package `packages/engine-session-claude-code/`
-- Move `cli/src/session.ts` logic here
+- Move `cli/src/session.ts` logic here, **switching from `spawnSync` to async `spawn`** (required for stream-json parsing, timeout enforcement, future concurrent sessions)
 - Move `engine-mcp-server` code here (inline as internal module, not a separate package)
-- Move `generateMcpConfig()` here (from what was engine-manifest)
+- Move `generateMcpConfig()` here (from engine-manifest)
 - Implement `SessionProvider` interface
 - Delete `engine-mcp-server` package
 - Update stdlib if it had any direct dependency on engine-mcp-server (it doesn't — stdlib signals events, doesn't launch sessions)
 
-### Phase 3: Session funnel in core
+### Phase 2: Session funnel in core
 - Add `SessionProvider` interface and `registerSessionProvider()` to core
 - Add `WorkspaceContext`, `ResolvedWorkspace` types
 - Add `resolveWorkspace(eventPayload)` — inspects event payload for standard `workshop`/`worktreePath` fields, returns `ResolvedWorkspace`
 - Add `createTempWorktree()` / `removeTempWorktree()` to core — thin wrappers around `git worktree add/remove` for `workshop-temp` sessions (simpler than engine-worktree-setup's commission branch lifecycle)
-- Add `launchSession()` to core — the funnel with workspace lifecycle, logging, events, metrics, transcript capture
-  - `workshop-temp`: create temp worktree before, tear down after
+- Add `launchSession()` to core — the funnel with workspace lifecycle, logging, events, metrics, transcript capture, session record writing
+  - `workshop-temp` + autonomous: create temp worktree before, tear down after
+  - `workshop-temp` + interactive: create temp worktree before, leave in place after
   - `workshop-managed`: use as-is
   - `guildhall`: use `home`
+- Error handling: try/finally around provider launch; recording failures signal `session.record-failed`; teardown failures logged and swallowed; stale worktree reaping out of scope (assumed handled by a separate mechanism, e.g. future clockwork standing order or CLI command)
 - Add `sessions` table migration
 - Update clockworks to use `core.launchSession()` directly, remove `registerSummonHandler()`
 - Move summon orchestration logic (resolve role, read commission, write assignment, update status) from `cli/src/summon.ts` into clockworks — it was only in CLI because of the session launcher dependency
 
-### Phase 4: Wire it up in CLI
+### Phase 3: Wire it up in CLI
 - `program.ts` imports `engine-session-claude-code`, registers it
 - `nsg consult` calls `core.manifest()` + `core.launchSession()`
 - Delete `cli/src/summon.ts`
 - Delete `cli/src/session.ts`
 
-### Phase 5: Metrics capture
-- Update `engine-session-claude-code` to use `--output-format json` and parse token usage from claude's output
+### Phase 4: Metrics capture
+- Update `engine-session-claude-code` to use `--output-format stream-json` and parse token usage from claude's streamed output
 - Feed metrics into `SessionResult`
 - Core's funnel records them in the Ledger automatically
 
 ## Decisions (from review)
 
 - **Interactive sessions through the funnel** — yes, same funnel, `interactive: true` flag changes provider behavior (inherit stdio, no `--print`). No open question.
-- **Interactive consult + temp worktree** — fine for now. Temp worktree is torn down after session. Anima instructions should note this so the anima can alert the user or handle merging if needed.
+- **Interactive consult + temp worktree** — the funnel does NOT auto-teardown `workshop-temp` worktrees for interactive sessions. Interactive sessions may have un-pushed commits; tearing down would destroy work. The worktree is left in place and must be cleaned up manually (e.g. `nsg workshop cleanup` or a future reaping mechanism). Auto-teardown only applies to autonomous (`interactive: false`) sessions.
 - **Temp worktree naming** — use a crypto-safe random hash, not timestamps. E.g. `.nexus/worktrees/{workshop}/{hash}/`.
+- **Async spawn** — `engine-session-claude-code` uses async `spawn` (not `spawnSync`). Required for stream-json transcript parsing, timeout enforcement, and eventual concurrent session support. Interactive mode still inherits stdio; async spawn handles this fine.
+- **Session ID surfacing** — the funnel writes the Ledger session row before launching the provider, so `sessionId` is known. It's returned on `SessionResult` so callers (e.g. clockworks commission pipeline) can write join rows like `commission_sessions`.
+- **Session record file naming** — UUID v4, not Ledger row ID. Decouples disk from database identity.
+- **Transcript typing** — `Record<string, unknown>[]` for now. Raw provider output, stored as-is. Typed normalization deferred until we need programmatic transcript analysis.
+- **Funnel error events** — recording failures (Ledger write, session record write) signal `session.record-failed` as a core event, following the same pattern as `standing-order.failed`. Teardown failures are logged but swallowed. Stale worktree reaping is out of scope for this refactor.
 
 ## Transcript Capture Strategy
 
@@ -447,7 +469,7 @@ This is a refactor of existing code, not new features. The external behavior doe
 - After the session exits, the funnel reads the JSONL file from claude's storage and copies/references it as the session transcript
 - No TUI interference, no tee hack — just read what claude already saved
 
-This means both session types get full transcript capture. The format differs (stream-json events vs claude's JSONL), but the `SessionArchive` normalizes them into a common structure.
+This means both session types get full transcript capture. The format differs (stream-json events vs claude's JSONL), but both are stored as `Record<string, unknown>[]` in the session record. Typed normalization is deferred until we need programmatic analysis.
 
 ## Open Questions
 

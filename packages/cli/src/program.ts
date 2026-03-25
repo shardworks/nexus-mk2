@@ -1,5 +1,6 @@
 import { createCommand } from 'commander';
-import { VERSION, registerSummonHandler } from '@shardworks/nexus-core';
+import { VERSION, registerSessionProvider } from '@shardworks/nexus-core';
+import { claudeCodeProvider } from '@shardworks/engine-session-claude-code';
 import { makeInitCommand } from './commands/init.ts';
 import { makeInstallToolCommand } from './commands/install-tool.ts';
 import { makeRemoveToolCommand } from './commands/remove-tool.ts';
@@ -12,12 +13,10 @@ import { makeConsultCommand } from './commands/consult.ts';
 import { makeSignalCommand } from './commands/signal.ts';
 import { makeClockCommand } from './commands/clock.ts';
 import { makeWorkshopCommand } from './commands/workshop.ts';
-import { createSummonHandler } from './summon.ts';
 
-// Register the summon handler so Clockworks can launch anima sessions.
-// This wires the CLI's session launcher into the core's event processing
-// without creating a circular dependency.
-registerSummonHandler(createSummonHandler());
+// Register the Claude Code session provider so core's session funnel
+// can launch claude sessions.
+registerSessionProvider(claudeCodeProvider);
 
 export const program = createCommand('nsg')
   .description('Nexus Mk 2.1 — experimental multi-agent AI system')

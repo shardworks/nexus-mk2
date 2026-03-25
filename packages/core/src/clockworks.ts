@@ -6,6 +6,10 @@
  * finds matching standing orders, and dispatches them (run engines, or
  * summon/brief animas). Each event is marked as processed after all its
  * standing orders have been dispatched.
+ *
+ * Anima orders (summon/brief) are handled directly via the session funnel —
+ * no callback hack needed. The clockworks resolves roles to animas,
+ * manifests them, and calls launchSession().
  */
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -21,34 +25,9 @@ import {
 import { isClockworkEngine, resolveEngineFromExport } from './engine.ts';
 import type { GuildEvent } from './engine.ts';
 import { ledgerPath } from './nexus-home.ts';
-import { updateCommissionStatus } from './commission.ts';
-
-/**
- * Callback for launching anima sessions. Provided by the CLI layer since
- * the core package cannot depend on the CLI or engine-manifest directly.
- *
- * The Clockworks runner calls this when processing a `summon` standing order.
- * The callback should: resolve the role to an anima, manifest it, launch
- * a claude session, wait for exit, and return the result.
- *
- * If no handler is registered, summon orders are recorded but skipped.
- */
-export type SummonHandler = (
-  home: string,
-  event: GuildEvent,
-  roleName: string,
-  noticeType: 'summon' | 'brief',
-) => Promise<{ animaName: string; exitCode: number }>;
-
-let _summonHandler: SummonHandler | null = null;
-
-/**
- * Register a summon handler. Called once at CLI startup to wire in the
- * session launcher without creating a circular dependency.
- */
-export function registerSummonHandler(handler: SummonHandler): void {
-  _summonHandler = handler;
-}
+import { updateCommissionStatus, readCommission } from './commission.ts';
+import { manifest } from './manifest.ts';
+import { launchSession, resolveWorkspace, getSessionProvider } from './session.ts';
 
 /** Result of processing a single event. */
 export interface TickResult {
@@ -198,13 +177,40 @@ async function executeEngineOrder(
 }
 
 /**
+ * Resolve the name of the first active anima holding a given role.
+ *
+ * If multiple animas share the role, one is selected arbitrarily (lowest id).
+ * Throws if no active anima holds the role.
+ */
+function resolveAnimaByRole(home: string, role: string): string {
+  const db = new Database(ledgerPath(home));
+  db.pragma('foreign_keys = ON');
+  try {
+    const row = db.prepare(`
+      SELECT a.name FROM animas a
+      JOIN roster r ON r.anima_id = a.id
+      WHERE r.role = ? AND a.status = 'active'
+      ORDER BY a.id ASC
+      LIMIT 1
+    `).get(role) as { name: string } | undefined;
+
+    if (!row) {
+      throw new Error(`No active anima found for role "${role}".`);
+    }
+    return row.name;
+  } finally {
+    db.close();
+  }
+}
+
+/**
  * Execute a `summon:` or `brief:` standing order.
  *
- * If a summon handler is registered (by the CLI layer), delegates to it
- * for full session lifecycle: resolve anima, manifest, launch claude,
- * wait for exit, signal session ended.
+ * Resolves the role to an anima, manifests it, and launches a session
+ * through the unified session funnel. For summon orders with commission
+ * context, writes the commission assignment and updates status.
  *
- * If no handler is registered, records the dispatch as skipped.
+ * If no session provider is registered, records the dispatch as skipped.
  */
 async function executeAnimaOrder(
   home: string,
@@ -214,8 +220,8 @@ async function executeAnimaOrder(
 ): Promise<DispatchSummary> {
   const startedAt = new Date().toISOString();
 
-  if (!_summonHandler) {
-    // No handler registered — record intent but skip execution.
+  if (!getSessionProvider()) {
+    // No provider registered — record intent but skip execution.
     const endedAt = new Date().toISOString();
 
     recordDispatch(home, {
@@ -233,18 +239,102 @@ async function executeAnimaOrder(
       handlerType: 'anima',
       handlerName: `(role: ${roleName})`,
       status: 'skipped',
-      error: 'No summon handler registered — anima session not launched.',
+      error: 'No session provider registered — anima session not launched.',
     };
   }
 
   try {
-    const result = await _summonHandler(home, event, roleName, noticeType);
+    const payload = event.payload as Record<string, unknown> | null;
+
+    // Resolve role to a specific anima
+    const animaName = resolveAnimaByRole(home, roleName);
+
+    // Commission-specific lifecycle: write assignment, update status
+    const commissionId = payload?.commissionId as number | undefined;
+    if (commissionId != null && noticeType === 'summon') {
+      // Write commission assignment
+      const db = new Database(ledgerPath(home));
+      db.pragma('foreign_keys = ON');
+      try {
+        const animaRow = db.prepare(
+          `SELECT id FROM animas WHERE name = ?`,
+        ).get(animaName) as { id: number } | undefined;
+
+        if (animaRow) {
+          db.prepare(
+            `INSERT OR IGNORE INTO commission_assignments (commission_id, anima_id) VALUES (?, ?)`,
+          ).run(commissionId, animaRow.id);
+        }
+      } finally {
+        db.close();
+      }
+
+      updateCommissionStatus(
+        home,
+        commissionId,
+        'in_progress',
+        `summoned ${animaName} (${roleName})`,
+      );
+    }
+
+    // Manifest the anima
+    const manifestResult = await manifest(home, animaName);
+
+    // Resolve workspace from event payload
+    const workspace = resolveWorkspace(payload);
+
+    // Determine the user prompt
+    let userPrompt: string | null = null;
+    if (commissionId != null) {
+      const commissionRecord = readCommission(home, commissionId);
+      userPrompt = commissionRecord?.content ?? null;
+    } else if (payload?.brief && typeof payload.brief === 'string') {
+      userPrompt = payload.brief;
+    }
+
+    // Launch session through the funnel
+    const sessionResult = await launchSession({
+      home,
+      manifest: manifestResult,
+      prompt: userPrompt,
+      interactive: false,
+      workspace,
+      trigger: noticeType,
+      name: commissionId != null ? `commission-${commissionId}` : undefined,
+    });
+
+    // Write commission_sessions join row if applicable
+    if (commissionId != null) {
+      try {
+        const db = new Database(ledgerPath(home));
+        db.pragma('foreign_keys = ON');
+        try {
+          db.prepare(
+            `INSERT OR IGNORE INTO commission_sessions (commission_id, session_id) VALUES (?, ?)`,
+          ).run(commissionId, sessionResult.sessionId);
+        } finally {
+          db.close();
+        }
+      } catch { /* best effort — don't fail the dispatch for a join row */ }
+    }
+
+    // Signal commission.session.ended for the commission pipeline
+    if (commissionId != null) {
+      const workshop = payload?.workshop as string | undefined;
+      signalEvent(
+        home,
+        'commission.session.ended',
+        { commissionId, workshop, exitCode: sessionResult.exitCode },
+        'framework',
+      );
+    }
+
     const endedAt = new Date().toISOString();
 
     recordDispatch(home, {
       eventId: event.id,
       handlerType: 'anima',
-      handlerName: result.animaName,
+      handlerName: animaName,
       targetRole: roleName,
       noticeType,
       startedAt,
@@ -254,7 +344,7 @@ async function executeAnimaOrder(
 
     return {
       handlerType: 'anima',
-      handlerName: result.animaName,
+      handlerName: animaName,
       status: 'success',
     };
   } catch (err) {

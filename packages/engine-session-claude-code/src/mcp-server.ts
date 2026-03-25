@@ -1,22 +1,20 @@
 /**
- * MCP Server Engine
+ * MCP Server — serves guild tools as typed MCP tools during anima sessions.
  *
- * Serves guild tools as typed MCP tools during anima sessions.
- * The manifest engine launches this as a stdio process, configured with
+ * Absorbed from the former `engine-mcp-server` package. This is an internal
+ * module of engine-session-claude-code — not a separate package.
+ *
+ * The session provider launches this as a stdio process, configured with
  * the set of tools the anima has access to (based on role gating).
- *
- * For each tool:
- *   - kind: "module" → imports the handler and registers it as an MCP tool
- *   - kind: "script" → registers an MCP tool that shells out to the script
  *
  * One process per session. All the anima's tools. Claude's runtime manages
  * the lifecycle — spawns at session start, kills at session end.
  *
  * ## Usage
  *
- * The engine reads a JSON config from a file path passed as argv[2]:
+ * The server reads a JSON config from a file path passed as argv[2]:
  *
- *   node engine-mcp-server <config.json>
+ *   node mcp-server <config.json>
  *
  * Config shape:
  *   {
@@ -41,12 +39,14 @@ export interface ToolSpec {
   modulePath: string;
 }
 
-/** Configuration for the MCP server engine. */
-export interface ServerConfig {
+/** Configuration for the MCP server. */
+export interface McpServerConfig {
   /** Absolute path to the guild root. */
   home: string;
   /** Tools to register as MCP tools. */
   tools: ToolSpec[];
+  /** Environment variables for the MCP server process. */
+  env?: Record<string, string>;
 }
 
 /**
@@ -83,7 +83,7 @@ async function loadTool(spec: ToolSpec): Promise<ToolDefinition | null> {
  * (which handles JSON Schema conversion). The handler is wrapped to inject
  * the framework context and format the result as MCP tool output.
  */
-export async function createMcpServer(config: ServerConfig): Promise<McpServer> {
+export async function createMcpServer(config: McpServerConfig): Promise<McpServer> {
   const server = new McpServer({
     name: 'nexus-guild',
     version: VERSION,
@@ -143,7 +143,7 @@ export async function main(configPath?: string): Promise<void> {
 
   const fs = await import('node:fs');
   const configText = fs.readFileSync(resolvedPath, 'utf-8');
-  const config: ServerConfig = JSON.parse(configText);
+  const config: McpServerConfig = JSON.parse(configText);
 
   const server = await createMcpServer(config);
   const transport = new StdioServerTransport();

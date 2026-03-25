@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import readline from 'node:readline/promises';
 import { initGuild, installBundle, instantiate } from '@shardworks/nexus-core';
-import { applyMigrations } from '@shardworks/engine-ledger-migrate';
+import { applyMigrations } from '@shardworks/nexus-core';
 
 const DEFAULT_MODEL = 'sonnet';
 const DEFAULT_BUNDLE = '@shardworks/guild-starter-kit';

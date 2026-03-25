@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { initGuild, installBundle, instantiate, VERSION } from '@shardworks/nexus-core';
-import { applyMigrations } from '@shardworks/engine-ledger-migrate';
+import { applyMigrations } from '@shardworks/nexus-core';
 
 /**
  * Strip the @shardworks/nexus dependency from a guild's package.json.
@@ -36,7 +36,7 @@ const STARTER_KIT_DIR = path.join(PACKAGES_DIR, 'guild-starter-kit');
  * Handles both stdlib collection packages and standalone engine packages.
  *
  * "@shardworks/nexus-stdlib@0.x" → local packages/stdlib
- * "@shardworks/engine-manifest@0.x" → local packages/engine-manifest
+ * "@shardworks/engine-session-claude-code@0.x" → local packages/engine-session-claude-code
  */
 function rewritePackagePath(pkg: string): string {
   const bare = pkg.replace(/@0\.x$/, '');
@@ -192,7 +192,7 @@ describe('installBundle with starter kit', () => {
     }
 
     // Standalone engine packages have descriptors on disk; collection packages (stdlib) do not
-    const standaloneEngines = ['manifest', 'mcp-server', 'worktree-setup', 'ledger-migrate'];
+    const standaloneEngines = ['session-claude-code'];
     const collectionEngines = ['workshop-prepare', 'workshop-merge'];
     const expectedEngines = [...standaloneEngines, ...collectionEngines];
     for (const name of expectedEngines) {
@@ -264,7 +264,7 @@ describe('full init sequence', () => {
 
     // Tools registered
     assert.ok(config.tools['commission'], 'commission not registered');
-    assert.ok(config.engines['manifest'], 'manifest not registered');
+    assert.ok(config.engines['session-claude-code'] || config.engines['workshop-prepare'], 'expected engines not registered');
 
     // Training registered
     assert.ok(config.curricula['guild-operations'], 'curriculum not registered');
@@ -291,6 +291,8 @@ describe('full init sequence', () => {
       assert.ok(names.includes('audit_log'), 'audit_log table missing');
       assert.ok(names.includes('events'), 'events table missing');
       assert.ok(names.includes('event_dispatches'), 'event_dispatches table missing');
+      assert.ok(names.includes('sessions'), 'sessions table missing');
+      assert.ok(names.includes('commission_sessions'), 'commission_sessions table missing');
     } finally {
       db.close();
     }
@@ -305,13 +307,15 @@ describe('full init sequence', () => {
     const db = new Database(path.join(home, '.nexus', 'nexus.db'));
     try {
       const rows = db.prepare('SELECT * FROM _migrations ORDER BY sequence').all() as { sequence: number; filename: string }[];
-      assert.equal(rows.length, 3);
+      assert.equal(rows.length, 4);
       assert.equal(rows[0]!.sequence, 1);
       assert.equal(rows[0]!.filename, '001-initial-schema.sql');
       assert.equal(rows[1]!.sequence, 2);
       assert.equal(rows[1]!.filename, '002-clockworks.sql');
       assert.equal(rows[2]!.sequence, 3);
       assert.equal(rows[2]!.filename, '003-commission-status-reason.sql');
+      assert.equal(rows[3]!.sequence, 4);
+      assert.equal(rows[3]!.filename, '004-sessions.sql');
     } finally {
       db.close();
     }

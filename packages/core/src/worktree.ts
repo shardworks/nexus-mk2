@@ -1,17 +1,17 @@
 /**
- * Worktree Setup Engine
+ * Commission worktree management — creates isolated git worktrees for
+ * commission sessions.
  *
- * Creates isolated git worktrees for commission sessions. When an anima is
- * dispatched to work on a commission, this engine:
- *
+ * When an anima is dispatched to work on a commission, this module:
  * 1. Creates a new git branch for the commission
  * 2. Sets up a git worktree pointing at that branch
- * 3. Returns the worktree path so the manifest engine can launch the
- *    session in the correct working directory
+ * 3. Returns the worktree path so the session can launch in the correct cwd
  *
  * Worktrees provide isolation — each commission gets its own working copy
  * of the repo, so multiple animas can work concurrently without conflicts
  * in the working directory.
+ *
+ * Absorbed from the former `engine-worktree-setup` package.
  *
  * ## Directory layout
  *
@@ -31,7 +31,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { workshopBarePath, worktreesPath } from '@shardworks/nexus-core';
+import { workshopBarePath, worktreesPath } from './nexus-home.ts';
 
 export interface WorktreeConfig {
   /** Absolute path to the guild root. */

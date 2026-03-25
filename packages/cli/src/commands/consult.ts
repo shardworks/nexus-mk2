@@ -4,15 +4,13 @@
  * Starts an interactive Claude session with a guild member (anima).
  * The anima is identified by role (positional) or by name (--name flag).
  *
- * Uses the shared session launcher so interactive and commissioned sessions
- * share the same setup/teardown/metrics path.
+ * Uses the unified session funnel in core for setup, metrics, and cleanup.
  */
 import { createCommand } from 'commander';
 import Database from 'better-sqlite3';
-import { manifest } from '@shardworks/engine-manifest';
-import { ledgerPath } from '@shardworks/nexus-core';
+import { manifest, launchSession, ledgerPath } from '@shardworks/nexus-core';
+import type { ResolvedWorkspace } from '@shardworks/nexus-core';
 import { resolveHome } from '../resolve-home.ts';
-import { launchSession } from '../session.ts';
 
 /**
  * Look up the name of the first active anima holding a given role.
@@ -72,7 +70,7 @@ export function makeConsultCommand() {
         return;
       }
 
-      // Manifest the anima (system prompt + MCP config)
+      // Manifest the anima (system prompt + tools)
       let result: Awaited<ReturnType<typeof manifest>>;
       try {
         result = await manifest(home, animaName);
@@ -84,11 +82,21 @@ export function makeConsultCommand() {
 
       console.log(`Consulting ${result.anima.name} (${result.anima.roles.join(', ')})...\n`);
 
-      launchSession({
-        home,
-        cwd: home,
-        manifest: result,
-        mode: 'interactive',
-      });
+      // Workspace: guildhall for now (future: --workshop flag)
+      const workspace: ResolvedWorkspace = { kind: 'guildhall' };
+
+      try {
+        await launchSession({
+          home,
+          manifest: result,
+          prompt: null,
+          interactive: true,
+          workspace,
+          trigger: 'consult',
+        });
+      } catch (err) {
+        console.error(`Error: ${(err as Error).message}`);
+        process.exitCode = 1;
+      }
     });
 }

@@ -1,5 +1,5 @@
 import { createCommand } from 'commander';
-import { manifest } from '@shardworks/engine-manifest';
+import { manifest } from '@shardworks/nexus-core';
 import { resolveHome } from '../resolve-home.ts';
 
 export function makeManifestCommand() {
@@ -17,7 +17,7 @@ export function makeManifestCommand() {
           console.log(JSON.stringify(result, null, 2));
         } else {
           console.log(`Anima: ${result.anima.name} (${result.anima.roles.join(', ')})`);
-          console.log(`Tools: ${result.mcpConfig.tools.map(i => i.name).join(', ')}`);
+          console.log(`Tools: ${result.tools.map(i => i.name).join(', ')}`);
           console.log(`System prompt: ${result.systemPrompt.length} chars`);
         }
       } catch (err) {

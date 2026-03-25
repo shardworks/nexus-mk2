@@ -18,6 +18,7 @@ const FRAMEWORK_NAMESPACES = [
   'migration.',
   'guild.',
   'standing-order.',
+  'session.',
 ];
 
 /**

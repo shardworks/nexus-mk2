@@ -12,7 +12,7 @@
  *     → signals commission.ready { commissionId, workshop, worktreePath }
  */
 import { engine, signalEvent, updateCommissionStatus, readCommission } from '@shardworks/nexus-core';
-import { setupWorktree } from '@shardworks/engine-worktree-setup';
+import { setupWorktree } from '@shardworks/nexus-core';
 
 export default engine({
   name: 'workshop-prepare',

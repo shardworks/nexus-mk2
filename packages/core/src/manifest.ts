@@ -1,33 +1,26 @@
 /**
- * Manifest Engine
+ * Manifest — assembles an anima's identity for a session.
  *
- * The core session-setup engine. When an anima needs to be brought into
- * presence for a session, the manifest engine:
+ * Reads the anima's composition from the Ledger (roles, curricula, temperament),
+ * resolves tools by role gating and precondition checks, reads all prompt
+ * ingredients from disk, and assembles the composed system prompt.
  *
- * 1. Reads the anima's composition from the Ledger (roles, curricula, temperament)
- * 2. Resolves tools — starts with baseTools, then unions in each
- *    role's tools (validated against guild.json role definitions)
- * 3. Runs precondition checks on each resolved tool
- * 4. Reads codex content, role instructions, curricula content, temperament
- *    content, and tool instructions from disk
- * 5. Assembles the composed system prompt
- * 6. Generates an MCP server config with the available tool set
+ * The manifest is the anima's *identity*: who are you, what can you do.
+ * The *user prompt* (commission spec, brief, conversation topic) is NOT part
+ * of the manifest — it comes from the caller.
  *
- * The manifest engine is deterministic infrastructure — no AI involvement.
- * It reconstitutes a working identity from institutional records.
+ * Absorbed from the former `engine-manifest` package. MCP config generation
+ * is NOT here — that's a transport detail owned by session providers.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import {
-  ledgerPath,
-  readGuildConfig,
-  readPreconditions,
-  checkPreconditions,
-  resolveToolFromExport,
-} from '@shardworks/nexus-core';
-import type { GuildConfig, ToolEntry } from '@shardworks/nexus-core';
+import { ledgerPath } from './nexus-home.ts';
+import { readGuildConfig } from './guild-config.ts';
+import { readPreconditions, checkPreconditions } from './preconditions.ts';
+import { resolveToolFromExport } from './tool.ts';
+import type { GuildConfig, ToolEntry } from './guild-config.ts';
 
 /** Extract the npm package name from a package specifier that may include a subpath. */
 function basePackageName(pkg: string): string {
@@ -42,13 +35,17 @@ function basePackageName(pkg: string): string {
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-/** An anima's composition as stored in the Ledger. */
+/** An anima's record from the Ledger, including composition metadata. */
 export interface AnimaRecord {
   id: number;
   name: string;
   status: string;
   roles: string[];
+  curriculumName: string;
+  curriculumVersion: string;
   curriculumSnapshot: string;
+  temperamentName: string;
+  temperamentVersion: string;
   temperamentSnapshot: string;
 }
 
@@ -72,28 +69,26 @@ export interface UnavailableTool {
   reasons: string[];
 }
 
-/** The fully-resolved session configuration. */
+/** The fully-resolved manifest for an anima session. */
 export interface ManifestResult {
   /** The anima record from the Ledger. */
   anima: AnimaRecord;
   /** The composed system prompt for the anima. */
   systemPrompt: string;
-  /** MCP server config — tools the anima has access to. */
-  mcpConfig: McpServerConfig;
+  /** The individual ingredients that produced the system prompt. */
+  composition: {
+    codex: string;
+    roleInstructions: string;
+    curriculum: { name: string; version: string; content: string } | null;
+    temperament: { name: string; version: string; content: string } | null;
+    toolInstructions: Array<{ toolName: string; instructions: string }>;
+  };
+  /** Resolved tools the anima has access to. */
+  tools: ResolvedTool[];
   /** Tools that matched the anima's roles but failed precondition checks. */
   unavailable: UnavailableTool[];
   /** Warnings generated during manifest (e.g. undefined roles). */
   warnings: string[];
-}
-
-/** Configuration passed to the MCP server engine. */
-export interface McpServerConfig {
-  /** Absolute path to the guild root. */
-  home: string;
-  /** Tools to register as MCP tools. */
-  tools: Array<{ name: string; modulePath: string }>;
-  /** Environment variables for the MCP server process. */
-  env?: Record<string, string>;
 }
 
 // ── Core Functions ─────────────────────────────────────────────────────
@@ -121,17 +116,30 @@ export function readAnima(home: string, animaName: string): AnimaRecord {
     ).all(anima.id) as { role: string }[];
     const roles = roleRows.map(r => r.role);
 
-    // Get composition
+    // Get composition — now includes name/version metadata
     const composition = db.prepare(
-      `SELECT curriculum_snapshot, temperament_snapshot FROM anima_compositions WHERE anima_id = ?`,
-    ).get(anima.id) as { curriculum_snapshot: string; temperament_snapshot: string } | undefined;
+      `SELECT curriculum_name, curriculum_version, curriculum_snapshot,
+              temperament_name, temperament_version, temperament_snapshot
+       FROM anima_compositions WHERE anima_id = ?`,
+    ).get(anima.id) as {
+      curriculum_name: string;
+      curriculum_version: string;
+      curriculum_snapshot: string;
+      temperament_name: string;
+      temperament_version: string;
+      temperament_snapshot: string;
+    } | undefined;
 
     return {
       id: anima.id,
       name: anima.name,
       status: anima.status,
       roles,
+      curriculumName: composition?.curriculum_name ?? '',
+      curriculumVersion: composition?.curriculum_version ?? '',
       curriculumSnapshot: composition?.curriculum_snapshot ?? '',
+      temperamentName: composition?.temperament_name ?? '',
+      temperamentVersion: composition?.temperament_version ?? '',
       temperamentSnapshot: composition?.temperament_snapshot ?? '',
     };
   } finally {
@@ -237,7 +245,6 @@ export async function resolveTools(
             instructions = toolDef.instructions;
           } else if (toolDef.instructionsFile) {
             // File path relative to the package root in node_modules.
-            // Strip subpath from package name (e.g. @shardworks/nexus-stdlib/tools → @shardworks/nexus-stdlib)
             const instrPath = path.join(
               home, 'node_modules', basePackageName(entry.package), toolDef.instructionsFile,
             );
@@ -266,8 +273,6 @@ export async function resolveTools(
  * Read codex documents from the guildhall — guild-wide policy for all animas.
  *
  * Reads all .md files in the codex/ directory (non-recursive top level).
- * Role-specific content is no longer in codex/roles/ — it's owned by
- * role definitions in guild.json.
  */
 export function readCodex(home: string): string {
   const codexDir = path.join(home, 'codex');
@@ -293,8 +298,6 @@ export function readCodex(home: string): string {
  * For each role the anima holds, reads the instructions file pointed to by
  * the role definition in guild.json. Skips undefined roles (warning already
  * emitted by resolveTools). Skips roles without instructions.
- *
- * Returns the composed text of all role instructions, or empty string.
  */
 export function readRoleInstructions(
   home: string,
@@ -388,47 +391,11 @@ export function assembleSystemPrompt(
 }
 
 /**
- * Generate the MCP server config for the resolved tool set.
- *
- * For tools with a `package` field in guild.json, the modulePath is the
- * npm package name (resolved via NODE_PATH at runtime). For tools without
- * a package field, the modulePath is an absolute path to the entry point.
- */
-export function generateMcpConfig(
-  home: string,
-  tools: ResolvedTool[],
-): McpServerConfig {
-  const mcpTools: Array<{ name: string; modulePath: string }> = [];
-
-  for (const t of tools) {
-    // If guild.json has a `package` field, resolve by npm package name
-    // (the MCP server process uses NODE_PATH to find it in node_modules).
-    // Otherwise, read the entry point from the descriptor and use the absolute file path.
-    if (t.package) {
-      mcpTools.push({ name: t.name, modulePath: t.package });
-    } else {
-      const descriptorPath = path.join(t.path, 'nexus-tool.json');
-      if (!fs.existsSync(descriptorPath)) continue;
-
-      const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf-8'));
-      const entry = descriptor.entry as string;
-      mcpTools.push({ name: t.name, modulePath: path.join(t.path, entry) });
-    }
-  }
-
-  // Set NODE_PATH so the MCP server process can resolve npm-installed guild
-  // tools from the guildhall's node_modules, regardless of where the MCP
-  // engine code itself lives on disk.
-  const nodePath = path.join(home, 'node_modules');
-  return { home, tools: mcpTools, env: { NODE_PATH: nodePath } };
-}
-
-/**
  * Manifest an anima for a session.
  *
  * This is the main entry point. Reads the anima's composition, resolves
  * tools by role, assembles the system prompt, and returns the full
- * session configuration.
+ * manifest with composition provenance.
  */
 export async function manifest(home: string, animaName: string): Promise<ManifestResult> {
   const config = readGuildConfig(home);
@@ -452,8 +419,31 @@ export async function manifest(home: string, animaName: string): Promise<Manifes
   // Assemble system prompt (includes role instructions and unavailability notices)
   const systemPrompt = assembleSystemPrompt(codex, roleInstructions, anima, available, unavailable);
 
-  // Generate MCP config (only available tools)
-  const mcpConfig = generateMcpConfig(home, available);
+  // Build composition provenance
+  const curriculum = anima.curriculumName
+    ? { name: anima.curriculumName, version: anima.curriculumVersion, content: anima.curriculumSnapshot }
+    : null;
 
-  return { anima, systemPrompt, mcpConfig, unavailable, warnings };
+  const temperament = anima.temperamentName
+    ? { name: anima.temperamentName, version: anima.temperamentVersion, content: anima.temperamentSnapshot }
+    : null;
+
+  const toolInstructions = available
+    .filter(t => t.instructions)
+    .map(t => ({ toolName: t.name, instructions: t.instructions! }));
+
+  return {
+    anima,
+    systemPrompt,
+    composition: {
+      codex,
+      roleInstructions,
+      curriculum,
+      temperament,
+      toolInstructions,
+    },
+    tools: available,
+    unavailable,
+    warnings,
+  };
 }

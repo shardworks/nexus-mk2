@@ -37,10 +37,8 @@ export {
   type TickResult,
   type DispatchSummary,
   type ClockRunResult,
-  type SummonHandler,
   clockTick,
   clockRun,
-  registerSummonHandler,
 } from './clockworks.ts';
 
 export { createLedger } from './ledger.ts';
@@ -132,3 +130,45 @@ export {
   checkAllPreconditions,
   checkToolPreconditions,
 } from './preconditions.ts';
+export {
+  type WorktreeConfig,
+  type WorktreeResult,
+  setupWorktree,
+  teardownWorktree,
+  listWorktrees,
+} from './worktree.ts';
+export {
+  type MigrationFile,
+  type MigrationProvenance,
+  type MigrateResult,
+  discoverMigrations,
+  applyMigrations,
+} from './migrate.ts';
+export {
+  type AnimaRecord,
+  type ResolvedTool,
+  type UnavailableTool,
+  type ManifestResult,
+  readAnima,
+  resolveTools,
+  readCodex,
+  readRoleInstructions,
+  assembleSystemPrompt,
+  manifest,
+} from './manifest.ts';
+export {
+  type SessionProvider,
+  type SessionProviderLaunchOptions,
+  type SessionProviderResult,
+  type SessionLaunchOptions,
+  type SessionResult,
+  type WorkspaceContext,
+  type ResolvedWorkspace,
+  type SessionRecord,
+  registerSessionProvider,
+  getSessionProvider,
+  resolveWorkspace,
+  createTempWorktree,
+  removeTempWorktree,
+  launchSession,
+} from './session.ts';

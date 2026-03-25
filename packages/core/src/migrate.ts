@@ -1,12 +1,11 @@
 /**
- * Ledger Migration Engine
+ * Ledger migration — applies pending SQL migrations to the guild's Ledger.
  *
- * Applies pending SQL migrations from the guildhall's nexus/migrations/
- * directory to the Ledger database. Runs at guild bootstrap, before dispatch,
- * and on demand after framework upgrades.
+ * Runs at guild bootstrap, before dispatch, and on demand after framework
+ * upgrades. Absorbed from the former `engine-ledger-migrate` package.
  *
  * Migrations are numbered sequentially (001-initial-schema.sql, etc.) and
- * applied in order. The engine tracks which migrations have been applied in
+ * applied in order. The module tracks which migrations have been applied in
  * a `_migrations` table and only runs new ones.
  *
  * ## Migration file naming
@@ -23,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { ledgerPath } from '@shardworks/nexus-core';
+import { ledgerPath } from './nexus-home.ts';
 
 /** A migration file discovered on disk. */
 export interface MigrationFile {
@@ -60,7 +59,7 @@ const MIGRATION_PATTERN = /^(\d{3})-(.+)\.sql$/;
  * Ensure the _migrations tracking table exists.
  *
  * This table is NOT part of the regular schema migrations — it's the
- * engine's own bookkeeping, created on first use.
+ * module's own bookkeeping, created on first use.
  */
 function ensureMigrationsTable(db: Database.Database): void {
   db.exec(`
