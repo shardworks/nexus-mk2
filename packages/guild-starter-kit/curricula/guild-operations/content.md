@@ -23,18 +23,20 @@ An anima is the fundamental unit of identity in the guild. Animas are animated b
 ### Standing vs. Commissioned
 
 - **Standing** animas persist on the roster indefinitely, called on by name. The advisor is a standing anima.
-- **Commissioned** animas are created for a specific commission and their tenure ends when the commission completes. Artificers are typically commissioned.
+- **Commissioned** animas are created for a specific commission and their tenure ends when the commission completes.
 
 ## Roles
 
-Roles define what kind of work an anima performs.
+Roles define what kind of work an anima performs. Roles are not a fixed set — a guild defines its own roles to match how it organizes work. The framework provides infrastructure for roles (registration, tool gating, role resolution in standing orders) but does not prescribe which roles a guild must have.
+
+This guild uses the following roles:
 
 | Role | Function |
 |------|----------|
 | **Advisor** | Helps the patron understand and use the guild. Answers questions, explains state, suggests actions. Does not implement. |
-| **Artificer** | Undertakes commissions — receives a plan and builds the thing. Works in workshops. |
-| **Sage** | Plans commission work. Refines vague instructions into concrete requirements. |
-| **Master Sage** | Senior sage. If active, must be consulted before any commission is undertaken. |
+| **Artificer** | Executes jobs — receives planned work and builds the thing. Works in workshops. |
+| **Sage** | Plans work. Decomposes commissions into pieces and jobs with concrete requirements. |
+| **Master Sage** | Senior sage. If active, reviews incoming commissions to determine scope and planning approach. |
 
 Other roles may emerge as the guild evolves.
 
@@ -42,7 +44,7 @@ Other roles may emerge as the guild evolves.
 
 A workshop is a repository where animas do their work. Workshops are guild space — the patron assigns them, but during normal operation the patron judges results by the works produced, not by inspecting the workshop directly.
 
-Each workshop is registered in `guild.json` under the `workshops` key with its name, remote URL, and the timestamp it was added. On disk, the guild maintains a bare clone of each workshop at `.nexus/workshops/{name}.git`. Commission worktrees are created from these bare clones, giving each commission an isolated working directory.
+Each workshop is registered in `guild.json` under the `workshops` key with its name, remote URL, and the timestamp it was added. On disk, the guild maintains a bare clone of each workshop at `.nexus/workshops/{name}.git`. Worktrees are created from these bare clones, giving each job an isolated working directory.
 
 ### Managing Workshops
 
@@ -102,7 +104,7 @@ If `gh` is not installed or not authenticated, the command fails with a clear me
 `nsg workshop list` shows each workshop with:
 
 - **✓ / ✗** — whether the bare clone exists on disk (it may be missing after a fresh guild clone before running `nsg guild restore`)
-- **Active worktrees** — how many commissions currently have worktrees checked out
+- **Active worktrees** — how many jobs currently have worktrees checked out
 - **Remote URL** — where the repo lives
 
 If a bare clone is missing, the output includes a hint to run `nsg guild restore`.
@@ -113,17 +115,17 @@ If a bare clone is missing, the output includes a hint to run `nsg guild restore
 nsg workshop remove my-app
 ```
 
-This deletes the bare clone, any commission worktrees for that workshop, and removes the entry from `guild.json`. This is a destructive operation — the workshop's local state is gone. The remote repository is not affected.
+This deletes the bare clone, any job worktrees for that workshop, and removes the entry from `guild.json`. This is a destructive operation — the workshop's local state is gone. The remote repository is not affected.
 
-### How Workshops Are Used in Commissions
+### How Workshops Are Used
 
-When a commission is dispatched to a workshop, the workshop-prepare engine:
+When a job is dispatched to a workshop, the workshop-prepare engine:
 
-1. Creates a commission-specific branch from `main` in the workshop's bare clone
+1. Creates a job-specific branch from `main` in the workshop's bare clone
 2. Checks out a git worktree at `.nexus/worktrees/{workshop}/commission-{id}/`
 3. The anima works in this isolated directory
 
-This means multiple commissions can run concurrently in the same workshop without interfering with each other — each gets its own branch and working directory.
+This means multiple jobs can run concurrently in the same workshop without interfering with each other — each gets its own branch and working directory.
 
 ### guild.json Shape
 
@@ -140,19 +142,44 @@ This means multiple commissions can run concurrently in the same workshop withou
 
 The `remoteUrl` is the source of truth. The bare clone on disk is ephemeral and can be reconstructed from this URL by `nsg guild restore`.
 
-## Commissions
+## Commissions and Work Decomposition
 
-A commission is a unit of work posted by the patron and undertaken by the guild. Commissions flow through an event-driven pipeline powered by standing orders:
+A commission is the patron's act of requesting work. The guild receives commissions and organizes the resulting labor through a four-level decomposition hierarchy:
+
+### The Shape of Labor
+
+| Level | What It Is | Who Handles It (in this guild) |
+|-------|-----------|-------------------------------|
+| **Work** | A large undertaking — too broad to plan directly, must be broken into pieces | Sage decomposes into pieces |
+| **Piece** | An independently-plannable chunk of a work | Sage plans into concrete jobs |
+| **Job** | A single assignment for one anima — one continuous effort, one deliverable | Artificer executes |
+| **Stroke** | An atomic, verifiable action within a job — one test, one function, one integration step | Artificer records and completes |
+
+Not every commission becomes a work. A small commission might map directly to a single job. The hierarchy describes the shape of the labor, not a mandatory sequence of steps.
 
 ### Commission Lifecycle
 
 1. **Posted** — the patron runs `nsg commission <spec> --workshop <name>`. This creates the commission in the Ledger and signals `commission.posted`.
-2. **Worktree prepared** — the `workshop-prepare` engine (triggered by `commission.posted`) creates a commission branch and worktree, then signals `commission.ready`.
-3. **Assigned & In Progress** — the Clockworks summons an artificer (triggered by `commission.ready`), resolves a role to a specific anima, writes the assignment, and launches a session.
-4. **Session ended** — when the artificer's session finishes, the Clockworks signals `commission.session.ended`.
-5. **Merged or Failed** — the `workshop-merge` engine (triggered by `commission.session.ended`) merges the commission branch back to main. On success it signals `commission.completed`; on conflict it signals `commission.failed`.
+2. **Scope determined** — the Master Sage (if active) reviews the commission and determines whether it's a work (needs decomposition), a piece (needs planning into jobs), or a single job (ready for dispatch).
+3. **Planned** — for works and pieces, the sage decomposes and plans, producing concrete jobs with acceptance criteria.
+4. **Worktree prepared** — the `workshop-prepare` engine (triggered by `commission.posted`) creates a job branch and worktree, then signals `commission.ready`.
+5. **Dispatched & In Progress** — the Clockworks summons an artificer (triggered by `commission.ready`), resolves the role to a specific anima, writes the assignment, and launches a session.
+6. **Strokes recorded** — the artificer plans strokes at the start of the job and records progress throughout. Each stroke is tracked in the Ledger.
+7. **Session ended** — when the session finishes, the Clockworks checks the stroke record. If pending strokes remain, the anima is re-summoned in a fresh session (staged sessions). If all strokes are complete, the Clockworks signals `commission.session.ended`.
+8. **Merged or Failed** — the `workshop-merge` engine (triggered by `commission.session.ended`) merges the job branch back to main. On success it signals `commission.completed`; on conflict it signals `commission.failed`.
 
 Each step is driven by a standing order in `guild.json`, making the pipeline configurable and extensible.
+
+### Staged Sessions
+
+A job may span multiple sessions when the context window fills up. The stroke record provides continuity between sessions:
+
+- The anima records strokes via tool throughout the job
+- When a session ends with pending strokes, the Clockworks re-summons the anima in a fresh session
+- The next session receives the original job spec plus the stroke record — a structured checklist of what's done and what remains
+- The anima picks up where the previous session left off
+
+The anima does not need to write freeform handoff notes — the stroke record is the handoff.
 
 ### Commission Status Flow
 
@@ -163,7 +190,7 @@ posted → in_progress → completed
 
 ## Sessions
 
-A session is a single manifestation of an anima — the span during which an anima is alive and working. Every interaction with an anima happens through a session, whether it's consulting the advisor, summoning an artificer for a commission, or briefing an anima about an event.
+A session is a single manifestation of an anima — the span during which an anima is alive and working. Every interaction with an anima happens through a session, whether it's consulting the advisor, dispatching a job, or briefing an anima about an event.
 
 ### Session Triggers
 
@@ -206,7 +233,7 @@ The `sessions` table tracks every session with:
 - Start/end times, exit code, token usage, cost, and duration
 - A link to the full session record JSON on disk
 
-For commissions, the `commission_sessions` join table links commissions to their sessions — a commission may involve multiple sessions (retries, sub-tasks).
+For commissions, the `commission_sessions` join table links commissions to their sessions — a commission may involve multiple sessions (staged sessions, retries).
 
 ## Tools
 
@@ -226,13 +253,13 @@ Engines are automated mechanical processes with no AI involvement. Two kinds:
 **Core engines** — fundamental capabilities absorbed into the Nexus framework itself (`@shardworks/nexus-core`). These are not registered in `guild.json` as engines — they are framework internals that the system calls directly:
 
 - **manifest** — assembles an anima's identity for a session (codex, curriculum, temperament, tool instructions → system prompt)
-- **worktree** — creates and manages git worktrees for commissions and temporary sessions
+- **worktree** — creates and manages git worktrees for jobs
 - **migrate** — applies database migrations to the Ledger
 
 **Clockwork engines** — purpose-built to respond to events via standing orders. Use the `engine()` SDK factory from `@shardworks/nexus-core`. The Clockworks runner calls them automatically when matching events fire. Packaged in `@shardworks/nexus-stdlib`:
 
 - **workshop-prepare** — creates a worktree when a commission is posted (`commission.posted` → `commission.ready`)
-- **workshop-merge** — merges a commission branch after the session ends (`commission.session.ended` → `commission.completed` or `commission.failed`)
+- **workshop-merge** — merges a job branch after the session ends (`commission.session.ended` → `commission.completed` or `commission.failed`)
 
 ### Session Providers
 
@@ -248,7 +275,7 @@ Role-specific codex entries live in `codex/roles/` and are delivered only to ani
 
 ## The Ledger
 
-The guild's operational database (SQLite). Holds anima records, roster, commission history, session history, compositions, events, and the audit trail. Lives at `.nexus/nexus.db` in the guildhall. Managed by the migrate engine in core.
+The guild's operational database (SQLite). Holds anima records, roster, commission history, work decomposition state, session history, compositions, events, and the audit trail. Lives at `.nexus/nexus.db` in the guildhall. Managed by the migrate engine in core.
 
 ### Key Tables
 
@@ -274,7 +301,7 @@ An event is an immutable fact: *this happened*. Events are recorded in the Ledge
 
 Two kinds:
 
-- **Framework events** — signaled automatically by the system. Animas cannot signal these. Reserved namespaces: `anima.*`, `commission.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`, `session.*`.
+- **Framework events** — signaled automatically by the system. Animas cannot signal these. Reserved namespaces: `anima.*`, `commission.*`, `work.*`, `piece.*`, `job.*`, `stroke.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`, `session.*`.
 - **Custom events** — declared by the guild in `guild.json` under `clockworks.events`. Animas signal these using the `signal` tool.
 
 ### Key Framework Events
@@ -283,9 +310,14 @@ Two kinds:
 |-------|--------------|----------------------|
 | `commission.posted` | A new commission is created | `run: workshop-prepare` |
 | `commission.ready` | Worktree is set up, commission is ready for work | `summon: artificer` |
-| `commission.session.ended` | An artificer's session finishes | `run: workshop-merge` |
+| `commission.session.ended` | A job session finishes (all strokes complete) | `run: workshop-merge` |
 | `commission.completed` | Commission branch merged to main | (guild-defined) |
 | `commission.failed` | Commission failed (merge conflict, error) | (guild-defined) |
+| `work.created` | A work is created in the decomposition hierarchy | (guild-defined) |
+| `piece.ready` | A piece is ready for planning | (guild-defined) |
+| `job.ready` | A job is ready for dispatch | (guild-defined) |
+| `job.completed` | A job completes successfully | (guild-defined) |
+| `stroke.recorded` | A stroke is planned or completed | (guild-defined) |
 | `session.started` | Any session begins | (guild-defined) |
 | `session.ended` | Any session ends (with metrics) | (guild-defined) |
 | `standing-order.failed` | A standing order execution failed | (guild-defined) |
@@ -311,7 +343,7 @@ Example `guild.json` configuration:
   "clockworks": {
     "events": {
       "code.reviewed": {
-        "description": "Signaled when an artificer completes a code review"
+        "description": "Signaled when an anima completes a code review"
       }
     },
     "standingOrders": [
@@ -333,7 +365,7 @@ Use the **signal** tool to signal custom events:
 signal({ name: "code.reviewed", payload: { pr: 42, issues_found: 0 } })
 ```
 
-The event name must be declared in `guild.json clockworks.events`. Framework namespaces (`anima.*`, `commission.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`, `session.*`) are reserved.
+The event name must be declared in `guild.json clockworks.events`. Framework namespaces are reserved.
 
 ### Processing Events
 

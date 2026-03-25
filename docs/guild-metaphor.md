@@ -26,8 +26,8 @@ Every anima exists in one of three states:
 
 | State | Meaning |
 |-------|---------|
-| **Aspirant** | Being trained, not yet dispatchable. The anima exists in the register but cannot be assigned to commissions. |
-| **Active** | On the roster, available for dispatch or currently commissioned. This is a working anima. |
+| **Aspirant** | Being trained, not yet dispatchable. The anima exists in the register but cannot be assigned work. |
+| **Active** | On the roster, available for dispatch or currently working. This is a working anima. |
 | **Retired** | No longer active. The anima's record persists in the register forever, but they are no longer dispatchable. |
 
 #### Standing vs. Commissioned
@@ -35,7 +35,7 @@ Every anima exists in one of three states:
 The meaningful distinction among active animas is not named vs. unnamed (all animas are named) but **standing** vs. **commissioned**:
 
 - **Standing** — available indefinitely, called on by name. A standing anima persists on the roster across commissions. They are always there, always available.
-- **Commissioned** — instantiated for a specific commission. A commissioned anima's roster membership lasts only as long as the commission it was created for. Artificers are typically commissioned — a fresh anima is created (or an existing one is commissioned) for each commission, and their tenure ends when the commission completes.
+- **Commissioned** — instantiated for a specific commission. A commissioned anima's roster membership lasts only as long as the commission it was created for. A fresh anima is created (or an existing one is commissioned) for each commission, and their tenure ends when the commission completes.
 
 Concretely, standing and commissioned animas are the same thing: entries in the register with names, instructions, and history. The difference is tenure, not nature.
 
@@ -49,35 +49,51 @@ The active subset of the register. The roster is a filtered view, not a separate
 
 ## Roles
 
-A unique function in the guild, filled by zero or more members. Roles define *what kind of work* a member performs and *when they are invoked*. Roles are not a fixed set — new roles can emerge as the system evolves.
+A function in the guild, filled by zero or more members. Roles define *what kind of work* a member performs and *when they are invoked*. Roles are not a fixed set — a guild defines its own roles to match how it organizes its work. New roles can emerge as the guild evolves; old ones can be retired.
+
+A guild might have planners and builders, or architects and developers, or a single generalist role that does everything. The organizational structure is the guild's choice. The guild-starter-kit ships with a set of roles as a starting point:
 
 | Role | Function |
 |------|----------|
-| **Artificer** | Undertakes commissions. The implementation agent — receives a plan and builds the thing. "Artificer" captures the craft and fabrication nature of the work, with a slight magical resonance that fits the guild's spirit. |
-| **Sage** | Plans commission work. Refines vague instructions into concrete requirements and acceptance criteria. |
-| **Master Sage** | Senior sage. If a Master Sage is active in the guild, they are consulted before any commission is undertaken by an artificer. Augments the commission with advice that artificers must follow. May convene a Council of Sages for complex cases. |
+| **Artificer** | Executes jobs. Receives planned work and builds the thing. |
+| **Sage** | Plans work. Decomposes commissions, refines vague instructions into concrete jobs with acceptance criteria. |
+| **Master Sage** | Senior sage. Reviews incoming commissions, determines scope, and may convene a Council of Sages for complex cases. |
 
-Other roles (Guildmaster, Coinmaster, Oracle, Instructor, and others) are anticipated but not yet defined at the foundational level. See `.scratch/guild-metaphor-draft.md` for emerging concepts.
+These are one guild's organizational model — not requirements. Other roles (Guildmaster, Coinmaster, Oracle, Instructor, and others) are anticipated but not yet defined.
 
 ## Work
 
 ### Commission
 
-A unit of work posted by the patron and undertaken by the guild. The patron commissions work; the guild builds it. A commission describes what needs to be built, is dispatched to an artificer, and tracked through a lifecycle. The output is the guild's works — delivered to the patron, judged by use.
+The patron's act of requesting work. The patron commissions work; the guild determines how to fulfill it. A commission might call for something large — "build me a notification system" — or something small — "fix this bug." The guild receives the commission and decides how the labor should be organized.
 
-#### Sage Consultation
+A commission describes **origin** — it is the patron's request, the thing that crosses the threshold inward. It does not imply a particular size or shape of labor. That's for the guild to determine.
 
-If a **Master Sage** is active in the guild, they must be consulted before any commission is undertaken by an artificer. The Master Sage reviews the commission and provides "sage advice" — a plan that the artificer must follow. Artificers are instructed to never contradict sage advice.
+### The Shape of Labor
 
-If other Sages are active in the guild, they form a **Council of Sages**. The Master Sage may choose to convene the council for complex cases, gathering multiple perspectives before producing advice. Council consultation is at the Master Sage's discretion, not automatic.
+The guild organizes labor into four levels, each with a distinct character:
+
+**Work** — A large undertaking that must be broken into pieces before the guild can plan it. When a commission arrives and the scope is too broad for anyone to plan directly, the guild recognizes it as a work and looks for the natural seams — the independently-plannable chunks. Not every commission becomes a work; many are small enough to plan or execute directly.
+
+**Piece** — A plannable portion of a work. A piece is coherent enough that someone can sit down and figure out exactly what jobs need doing. Multiple pieces of the same work can be planned and worked in parallel — the event pipeline and the delivery service don't need to wait for each other.
+
+**Job** — An assignment for one anima. The thing that gets handed off: here's what needs building, go build it. One anima owns a job from start to finish — they may take breaks (sessions end, new ones begin), but the job is theirs until it's done or they signal for help.
+
+**Stroke** — A single deliberate action within a job. One cut of the chisel, one brush mark, one test written. The smallest unit the guild tracks — where progress becomes visible, where continuity is maintained between sessions, and where the record shows exactly how far along a job has come. An anima plans their strokes, records them as they go, and marks them complete. The stroke record is the job's living checklist.
+
+An additional aspirational level, the **opus**, sits above and outside the operational hierarchy. The opus is the patron's long-term vision — the full body of work across months or years. It exists as a north star for decision-making but is not tracked as an operational entity. Think of it as the guild's understanding of what the patron is ultimately building.
+
+See [Work Decomposition](work-decomposition.md) for the design rationale behind these levels — why a named hierarchy over a generic tree, how the levels interact with staged sessions and capability tiering, and how the framework-vs-guild-policy boundary works.
 
 ### Works
 
 The guild's output — what crosses the threshold to the patron. Works are intentionally vague: running software, usable tools, deployed services, solved problems. The patron judges works by using them. What counts as a work is defined by what the patron can touch, run, or interact with.
 
+"Works" (the guild's delivered output) and "work" (a level in the labor hierarchy) are related but distinct. A bug fix is part of the guild's works — it crosses the threshold — but in the hierarchy it's probably just a job, not a work. See [Work Decomposition](work-decomposition.md) for this distinction.
+
 ## Workshops
 
-A repository where the guild does its work. Workshops are guild space — the patron assigns them but does not enter them during normal operation. An artificer working a commission does their craft inside a workshop; the patron judges the result by the works it produces, not by reading the code on the workbench.
+A repository where the guild does its work. Workshops are guild space — the patron assigns them but does not enter them during normal operation. An anima working a job does their craft inside a workshop; the patron judges the result by the works it produces, not by reading the code on the workbench.
 
 Some workshops produce works for the patron (applications, services, tools). Others are purely guild infrastructure — tools, training materials, databases. These aren't built for the patron; they are how the guild operates. Both kinds are guild space.
 
@@ -103,7 +119,7 @@ A binding commitment made by a specific anima — identity-level, not institutio
 
 ### Edict
 
-A directive from leadership that applies across the guild. An edict doesn't produce deliverables — it changes *how the guild operates*. "All artificers must write tests." "No commission may exceed 500k tokens." Edicts are tracked with full lifecycle (issued, active, superseded, revoked) and injected into anima instructions at manifest time alongside the codex. The distinction: the codex is standing policy; an edict is a temporal directive with a lifecycle.
+A directive from leadership that applies across the guild. An edict doesn't produce deliverables — it changes *how the guild operates*. "All animas must write tests." "No commission may exceed 500k tokens." Edicts are tracked with full lifecycle (issued, active, superseded, revoked) and injected into anima instructions at manifest time alongside the codex. The distinction: the codex is standing policy; an edict is a temporal directive with a lifecycle.
 
 ## Infrastructure
 
@@ -129,10 +145,6 @@ The guild's nervous system — an event-driven layer that connects things that h
 
 A registered response to an event, defined in `guild.json`. A standing order says: *whenever this event is signaled, do this*. Two types: engine orders (`run`) invoke a clockwork engine; anima orders (`summon` or `brief`) manifest an anima in the named role and deliver the event as their context. Standing orders are guild policy — they live in configuration, not in engine code.
 
-### Task
-
-A granular, internal work item. Tasks are distinct from commissions: a commission comes from the patron and may have sweeping scope; a task is guild-internal and specific. Tasks may be assigned to an anima or sit unassigned on the board (the guild's backlog of open work). They may be decomposed from a commission or arise from an anima's own judgment during a session.
-
 ### Tool
 
 A tool an anima actively wields during work. Tools are the guild's toolkit — instruments that animas use to interact with guild systems, query information, record notes, and perform operations. Each tool ships with instructions that are delivered to the anima when manifested for a session, so the anima knows how to use its tools.
@@ -141,7 +153,7 @@ Distinct from engines: tools are wielded by animas during work; engines run auto
 
 ### Ledger
 
-The guild's operational record book — who exists, what they've done, what they were told. The ledger holds runtime state: anima records, roster, commission history, audit trail. It does not track what's installed or what artifacts exist — that's the guildhall's filesystem and configuration. The ledger answers the questions that matter over time: who was activated, what were they composed of, what did they build, and what happened.
+The guild's operational record book — who exists, what they've done, what they were told. The ledger holds runtime state: anima records, roster, commission history, the shape of labor in progress, audit trail. It does not track what's installed or what artifacts exist — that's the guildhall's filesystem and configuration. The ledger answers the questions that matter over time: who was activated, what were they composed of, what did they build, and what happened.
 
 ### Relic
 

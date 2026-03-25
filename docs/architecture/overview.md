@@ -6,9 +6,13 @@ The guild system is a framework for running an autonomous AI workforce. **Nexus*
 
 The guild is an autonomous workforce. The patron gives it work; it delivers results. Five pillars define the system:
 
-### 1. The Commission Pipeline
+### 1. The Commission Pipeline & Work Decomposition
 
-The guild receives work as commissions and routes them through a structured lifecycle of phases — planning, building, reviewing, integrating, and whatever else the work demands. Each phase is handled by a named anima in a defined role, working in an isolated environment. The pipeline is not a fixed sequence; it's a framework for composing phases as the guild's sophistication grows. Today it's simple. Tomorrow it decomposes large commissions, runs parallel workstreams, and has dedicated reviewers and integrators. The infrastructure supports both.
+The guild receives work as commissions and organizes the resulting labor through a structured decomposition hierarchy: works break into pieces, pieces into jobs, jobs into strokes. Each level has a distinct operational role — decomposition, planning, dispatch, and progress tracking — and the clockworks routes work through the appropriate phases based on the guild's standing orders.
+
+The pipeline is not a fixed sequence; it's a framework for composing phases as the guild's sophistication grows. Guilds decide which roles handle which levels: one guild might have sages who plan and artificers who build; another might use a single generalist role. The framework provides the hierarchy, the lifecycle management, and the event-driven routing; the guild provides the organizational structure.
+
+See [Work Decomposition](../work-decomposition.md) for the full theory and design rationale behind the hierarchy.
 
 ### 2. Tools & Engines
 
@@ -245,9 +249,35 @@ No per-anima markdown files on the filesystem. The anima's identity is the *comb
 
 ---
 
-## Commissions and Workshops
+## Commissions, Work Decomposition, and Workshops
 
-All commission infrastructure lives in the guildhall — the pipeline, the engines, the dispatch logic. When leadership posts a commission, they specify a **target workshop**: the repo where the anima will do the work. The anima is manifested and launched into a worktree of that target workshop, but the commission lifecycle (posting, tracking, status transitions) is managed centrally through the guildhall's tools and engines.
+All commission and work-tracking infrastructure lives in the guildhall — the pipeline, the engines, the dispatch logic, the Ledger tables that track works, pieces, jobs, and strokes. When a commission is posted, it specifies a **target workshop**: the repo where animas will do the work. Animas are manifested and launched into worktrees of that target workshop, but the work lifecycle (posting, decomposition, tracking, status transitions) is managed centrally through the guildhall's tools and engines.
+
+### The Decomposition Hierarchy
+
+The framework provides a four-level hierarchy for organizing labor. Each level has distinct operational semantics:
+
+| Level | Operational Role | Framework Behavior |
+|-------|-----------------|-------------------|
+| **Work** | Decomposition boundary | Tracked in Ledger. Too large to plan directly — must be decomposed into pieces. |
+| **Piece** | Planning boundary | Tracked in Ledger. Independently plannable. Produces concrete jobs. May run in parallel with other pieces. |
+| **Job** | Dispatch boundary | Tracked in Ledger. Assigned to one anima. Dispatched by the clockworks. Owned from start to finish. |
+| **Stroke** | Progress boundary | Tracked in Ledger. Recorded by the executing anima via tool. Provides granular progress, context bridging between sessions, and crash recovery. |
+
+A **commission** is the patron's request — it describes origin, not scope. The guild receives a commission and determines where it maps in the hierarchy: a large commission becomes a work; a moderate one might be a single piece; a small one might be dispatched directly as a job.
+
+### Roles and the Hierarchy
+
+The framework provides infrastructure for roles — registration in `guild.json`, role-based tool gating, role resolution in standing orders — but does not prescribe which roles a guild must have. The decomposition hierarchy defines **what operations occur** at each level (decomposition, planning, dispatch, tracking); the guild's roles and standing orders define **who performs them**.
+
+For example, the guild-starter-kit maps:
+- **Scope triage** → Master Sage (reviews incoming commissions)
+- **Work decomposition & piece planning** → Sage (breaks works into pieces, pieces into jobs)
+- **Job execution** → Artificer (receives a job, plans strokes, builds the thing)
+
+Other guilds can use different role structures while using the same hierarchy.
+
+### Workshops
 
 Some workshops produce works for the patron (applications, services, tools). Others produce artifacts destined for the guildhall — new tools, engines, curricula, or temperaments. The guild system doesn't distinguish between these at the commission level.
 
@@ -262,7 +292,7 @@ When an anima is manifested for a session, its instructions are assembled by the
 ### Delivery
 
 - **System prompt**: Anima-specific instructions — codex, curriculum, temperament, tool instructions. Everything that defines *who this anima is and how they operate*. Frozen at manifest time. *(v2 adds oaths and edicts.)*
-- **Initial prompt**: Commission context — the spec, sage advice, clarification thread, task-specific instructions. Everything about *what to do right now*.
+- **Initial prompt**: Work context — the job specification, any planning advice, clarification thread, work-specific instructions. Everything about *what to do right now*.
 
 ### What reaches an anima
 
@@ -292,8 +322,8 @@ SYSTEM PROMPT (identity + environment):
 
 INITIAL PROMPT (task):
 ┌─────────────────────────────────────┐
-│  7. Commission context              │  Spec, sage advice, clarification
-│     (when commissioned)             │  thread, task-specific instructions
+│  7. Work context                    │  Job spec, planning advice,
+│     (when commissioned)             │  clarification thread, stroke record
 └─────────────────────────────────────┘
 ```
 
@@ -321,7 +351,7 @@ The Ledger is guild infrastructure — owned by the institution, maintained by f
 
 ## Vocabulary
 
-This document uses the guild vocabulary defined in [`guild-metaphor.md`](../guild-metaphor.md) and the project philosophy in [`philosophy.md`](../philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, works, workshop, threshold, codex, curriculum, temperament, oath *(v2)*, edict *(v2)*, engine, tool, relic, guildhall, ledger, clockworks, standing order, task.
+This document uses the guild vocabulary defined in [`guild-metaphor.md`](../guild-metaphor.md), the work decomposition hierarchy in [`work-decomposition.md`](../work-decomposition.md), and the project philosophy in [`philosophy.md`](../philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, work, piece, job, stroke, works, workshop, threshold, codex, curriculum, temperament, oath *(v2)*, edict *(v2)*, engine, tool, relic, guildhall, ledger, clockworks, standing order.
 
 One term is specific to this architecture and not defined in the metaphor:
 

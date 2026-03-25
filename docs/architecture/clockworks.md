@@ -37,6 +37,12 @@ Signaled automatically by `nexus-core` operations. Always available; no guild co
 | `commission.state.changed` | A commission transitions state |
 | `commission.sealed` | A commission completes successfully |
 | `commission.failed` | A commission fails |
+| `work.created` | A work is created in the decomposition hierarchy |
+| `piece.ready` | A piece is ready for planning |
+| `job.ready` | A job is ready for dispatch |
+| `job.completed` | A job completes successfully |
+| `job.failed` | A job fails |
+| `stroke.recorded` | A stroke is planned or completed by an anima |
 | `tool.installed` | A tool (implement, engine, curriculum, or temperament) is installed |
 | `tool.removed` | A tool is removed |
 | `migration.applied` | A Ledger migration is applied |
@@ -54,7 +60,7 @@ Guilds declare their own events in `guild.json` under the `clockworks` key:
   "clockworks": {
     "events": {
       "code.reviewed": {
-        "description": "Signaled when an artificer completes a code review",
+        "description": "Signaled when an anima completes a code review",
         "schema": { "pr": "number", "issues_found": "number" }
       },
       "deploy.approved": {
@@ -65,7 +71,7 @@ Guilds declare their own events in `guild.json` under the `clockworks` key:
 }
 ```
 
-Custom events use any name not in a reserved framework namespace (`anima.*`, `commission.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`). Bundles may also declare events they introduce; these are merged into `guild.json` on installation.
+Custom events use any name not in a reserved framework namespace (`anima.*`, `commission.*`, `work.*`, `piece.*`, `job.*`, `stroke.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`). Bundles may also declare events they introduce; these are merged into `guild.json` on installation.
 
 Animas signal custom events using the `signal` tool. The tool validates the event name against declared events in `guild.json` before persisting.
 
@@ -188,7 +194,7 @@ tool({
 
 Also exposed as `nsg signal <name> [--payload <json>]` for operator use.
 
-Animas cannot signal framework events (`anima.*`, `commission.*`, `tool.*`, etc.). Only guild-declared custom events. This keeps the event record trustworthy — framework events come from authoritative code paths.
+Animas cannot signal framework events (`anima.*`, `commission.*`, `work.*`, `piece.*`, `job.*`, `stroke.*`, `tool.*`, etc.). Only guild-declared custom events. This keeps the event record trustworthy — framework events come from authoritative code paths.
 
 ---
 
@@ -199,7 +205,7 @@ Animas cannot signal framework events (`anima.*`, `commission.*`, `tool.*`, etc.
   "clockworks": {
     "events": {
       "code.reviewed": {
-        "description": "Signaled when an artificer completes a code review",
+        "description": "Signaled when an anima completes a code review",
         "schema": { "pr": "number", "issues_found": "number" }
       }
     },
@@ -292,7 +298,7 @@ No new fields needed. The descriptor's `entry` field already points to the modul
 
 **Tools** — `signal` is a new base tool. All other tools unchanged.
 
-**The Ledger** — two new tables: `events`, `event_dispatches`.
+**The Ledger** — two new tables: `events`, `event_dispatches`. Work decomposition tables (works, pieces, jobs, strokes) are defined separately — see the architecture overview.
 
 **The Manifest Engine** — invoked by anima standing orders (summon/brief). Receives event context rather than a patron-posted commission brief. Minor extension to handle event-triggered manifestation.
 
