@@ -569,15 +569,5 @@ export function applyUpgrade(
     }
   }
 
-  // ── Update nexus version in guild.json ────────────────────────────
-
-  const config = readGuildConfig(home);
-  // Extract version from bundleSource (e.g. "@shardworks/guild-starter-kit@0.1.55" → "0.1.55")
-  const versionMatch = plan.bundleSource.match(/@(\d+\.\d+\.\d+.*)$/);
-  if (versionMatch) {
-    config.nexus = versionMatch[1]!;
-    writeGuildConfig(home, config);
-  }
-
   return result;
 }

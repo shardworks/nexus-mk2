@@ -294,15 +294,17 @@ describe('applyUpgrade', () => {
     assert.ok(content.includes('v2'), 'curriculum content should be v2');
   });
 
-  it('updates nexus version in guild.json', () => {
+  it('does not update nexus version — that is the CLI responsibility', () => {
     const home = createTestGuild(tmpDir);
     const v2 = createV2Bundle(tmpDir);
 
     const plan = planUpgrade(home, v2);
     applyUpgrade(home, v2, plan);
 
+    // applyUpgrade no longer stamps the version — the CLI layer does that
+    // so it can stamp even when the bundle plan is empty (npm-only upgrade).
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
-    assert.equal(config.nexus, '2.0.0');
+    assert.equal(config.nexus, '0.1.54', 'version should be unchanged by applyUpgrade');
   });
 
   it('is idempotent — second run finds nothing to do', () => {

@@ -1,7 +1,8 @@
 import { createCommand } from 'commander';
+import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { planUpgrade, applyUpgrade, readGuildConfig } from '@shardworks/nexus-core';
+import { planUpgrade, applyUpgrade, readGuildConfig, writeGuildConfig } from '@shardworks/nexus-core';
 import { resolveHome } from '../resolve-home.ts';
 
 const DEFAULT_BUNDLE = '@shardworks/guild-starter-kit';
@@ -24,9 +25,66 @@ function fetchBundle(home: string, bundleSpec: string): string {
   return path.join(home, 'node_modules', packageName);
 }
 
+/** Read the resolved version of a package from its installed package.json. */
+function installedVersion(home: string, packageName: string): string | null {
+  const pkgPath = path.join(home, 'node_modules', packageName, 'package.json');
+  if (!fs.existsSync(pkgPath)) return null;
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  return (pkg.version as string) ?? null;
+}
+
+/** A dependency that was updated by npm. */
+interface DependencyUpdate {
+  name: string;
+  from: string | null;
+  to: string | null;
+}
+
+/**
+ * Update @shardworks/* dependencies to their latest versions.
+ *
+ * Reads the guild's package.json for @shardworks/* deps, snapshots their
+ * current installed versions, runs `npm install <pkg>@latest` for each,
+ * then diffs to find what actually changed. This updates both the
+ * package.json specifiers and the lockfile.
+ */
+function updateDependencies(home: string): DependencyUpdate[] {
+  // Read the guild's declared dependencies
+  const pkgPath = path.join(home, 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  const deps = (pkg.dependencies ?? {}) as Record<string, string>;
+
+  // Find @shardworks/* packages
+  const shardworksDeps = Object.keys(deps).filter(name => name.startsWith('@shardworks/'));
+  if (shardworksDeps.length === 0) return [];
+
+  // Snapshot current installed versions
+  const before = new Map<string, string | null>();
+  for (const name of shardworksDeps) {
+    before.set(name, installedVersion(home, name));
+  }
+
+  // Install latest versions — this updates both package.json specifiers
+  // and the lockfile, unlike `npm update` which only touches the lockfile.
+  const specs = shardworksDeps.map(name => `${name}@latest`);
+  execFileSync('npm', ['install', ...specs], { cwd: home, stdio: 'pipe' });
+
+  // Diff versions
+  const updates: DependencyUpdate[] = [];
+  for (const name of shardworksDeps) {
+    const fromVersion = before.get(name) ?? null;
+    const toVersion = installedVersion(home, name);
+    if (fromVersion !== toVersion) {
+      updates.push({ name, from: fromVersion, to: toVersion });
+    }
+  }
+
+  return updates;
+}
+
 export function makeUpgradeCommand() {
   return createCommand('upgrade')
-    .description('Upgrade the guild to the latest framework version — migrations, training content, and stale anima detection')
+    .description('Upgrade the guild to the latest framework version — npm packages, migrations, training content, and stale anima detection')
     .option('--dry-run', 'Show what would change without applying')
     .option('--recompose', 'Retire and recreate stale animas with fresh compositions')
     .option('--bundle <spec>', 'Bundle to upgrade from (npm specifier)', DEFAULT_BUNDLE)
@@ -39,7 +97,22 @@ export function makeUpgradeCommand() {
         console.log(`Current nexus version: ${config.nexus}`);
         console.log();
 
-        // Fetch the latest bundle
+        // ── Step 1: Update npm dependencies ──────────────────────────
+
+        console.log('Updating @shardworks/* packages...');
+        const depUpdates = options.dryRun ? [] : updateDependencies(home);
+
+        if (depUpdates.length > 0) {
+          for (const dep of depUpdates) {
+            console.log(`  ↑ ${dep.name}: ${dep.from ?? 'not installed'} → ${dep.to}`);
+          }
+        } else {
+          console.log('  All packages up to date.');
+        }
+        console.log();
+
+        // ── Step 2: Fetch and plan bundle upgrade ────────────────────
+
         console.log(`Fetching ${options.bundle}...`);
         const bundleDir = fetchBundle(home, options.bundle);
         console.log();
@@ -49,7 +122,7 @@ export function makeUpgradeCommand() {
 
         // ── Report ────────────────────────────────────────────────────
 
-        console.log(`Upgrade plan from ${plan.bundleSource}:`);
+        console.log(`Bundle plan from ${plan.bundleSource}:`);
         console.log();
 
         // Migrations
@@ -94,10 +167,15 @@ export function makeUpgradeCommand() {
           console.log();
         }
 
-        // Nothing to do
-        if (plan.isEmpty) {
+        // Nothing to do in the bundle
+        if (plan.isEmpty && depUpdates.length === 0) {
           console.log('  Everything is up to date. Nothing to upgrade.');
           return;
+        }
+
+        if (plan.isEmpty) {
+          console.log('  Bundle content is up to date.');
+          console.log();
         }
 
         // Dry run stops here
@@ -106,26 +184,43 @@ export function makeUpgradeCommand() {
           return;
         }
 
-        // ── Apply ───────────────────────────────────────────────────
+        // ── Step 3: Apply bundle changes ─────────────────────────────
 
-        console.log('Applying upgrade...');
-        const result = applyUpgrade(home, bundleDir, plan, {
-          recompose: options.recompose,
-        });
+        if (!plan.isEmpty) {
+          console.log('Applying bundle upgrade...');
+          const result = applyUpgrade(home, bundleDir, plan, {
+            recompose: options.recompose,
+          });
 
-        if (result.migrationsApplied.length > 0) {
-          console.log(`  ✓ Applied ${result.migrationsApplied.length} migration(s)`);
-        }
-        if (result.contentUpdated.length > 0) {
-          console.log(`  ✓ Updated ${result.contentUpdated.length} content artifact(s)`);
-        }
-        if (result.recomposedAnimas.length > 0) {
-          console.log(`  ✓ Recomposed ${result.recomposedAnimas.length} anima(s): ${result.recomposedAnimas.join(', ')}`);
-        } else if (result.staleAnimaCount > 0) {
-          console.log(`  ⚠ ${result.staleAnimaCount} anima(s) using outdated compositions`);
+          if (result.migrationsApplied.length > 0) {
+            console.log(`  ✓ Applied ${result.migrationsApplied.length} migration(s)`);
+          }
+          if (result.contentUpdated.length > 0) {
+            console.log(`  ✓ Updated ${result.contentUpdated.length} content artifact(s)`);
+          }
+          if (result.recomposedAnimas.length > 0) {
+            console.log(`  ✓ Recomposed ${result.recomposedAnimas.length} anima(s): ${result.recomposedAnimas.join(', ')}`);
+          } else if (result.staleAnimaCount > 0) {
+            console.log(`  ⚠ ${result.staleAnimaCount} anima(s) using outdated compositions`);
+          }
+          console.log();
         }
 
-        console.log();
+        // ── Step 4: Update nexus version stamp ───────────────────────
+        // Always stamp the version — even if the bundle had no changes,
+        // the framework packages may have been updated.
+
+        const versionMatch = plan.bundleSource.match(/@(\d+\.\d+\.\d+.*)$/);
+        if (versionMatch) {
+          const updatedConfig = readGuildConfig(home);
+          const newVersion = versionMatch[1]!;
+          if (updatedConfig.nexus !== newVersion) {
+            updatedConfig.nexus = newVersion;
+            writeGuildConfig(home, updatedConfig);
+            console.log(`Nexus version: ${config.nexus} → ${newVersion}`);
+          }
+        }
+
         console.log('Upgrade complete.');
 
       } catch (err) {
