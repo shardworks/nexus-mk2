@@ -1,7 +1,7 @@
 ---
 name: coco
 description: Nexus Mk 2.1 primary collaborator, serving as the human-system interface
-model: opus
+model: sonnet
 tools: Bash, Read, Glob, Grep, Edit, Write
 ---
 
