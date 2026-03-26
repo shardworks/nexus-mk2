@@ -1,12 +1,25 @@
-# Guild Monitor Patch Notes — Session ID & Circuit Breaker
+# Guild Monitor Patch Notes — Core API Updates
 
-## Context
+## Summary
 
-`@shardworks/nexus-core` now exposes two new APIs that replace the raw SQL
-patterns guild-monitor was using. These ship in the next core release (the
-publish is in-flight now).
+`@shardworks/nexus-core` ≥ 0.1.72 exposes new APIs for session counting and
+pre-generated session IDs. Guild-monitor should bump its core dependency to
+pick these up.
 
-## What changed in core
+Guild-monitor's `package.json` (commission-c-30757435 worktree) currently
+declares only one dependency:
+
+```json
+"@shardworks/nexus-core": "^0.1.69"
+```
+
+No `better-sqlite3` dependency was found — guild-monitor was not using raw SQL
+patterns. The notes below describe what changed in core for awareness, plus the
+one concrete action required.
+
+---
+
+## What changed in core (≥ 0.1.72)
 
 ### 1. Pre-generated session IDs
 
@@ -17,7 +30,7 @@ one internally.
 This lets callers bind a writ to a real session ID *before* the provider
 launches — no more `'pending'` placeholder, no post-launch SQL swap.
 
-**Pattern:**
+**New pattern (summon-engine uses this):**
 
 ```typescript
 import { generateId, activateWrit, launchSession } from '@shardworks/nexus-core';
@@ -55,51 +68,35 @@ sessions by their bound writ.
 const sessions = listSessions(home, { writId: 'wrt_abc123' });
 ```
 
-## What to patch in guild-monitor
+### 4. `failWrit` now cascades to linked commission (≥ 0.1.77)
 
-If guild-monitor has any of these patterns, replace them:
+When a mandate writ fails, the linked commission is now automatically marked
+`failed` (status_reason: `'mandate failed'`) and a `commission.failed` event
+fires. Previously the commission stayed `in_progress` indefinitely when an
+anima called `fail-writ`. If guild-monitor listens for `commission.failed`,
+this new event will start arriving.
 
-### A. The `'pending'` placeholder dance
+---
 
-**Before:**
-```typescript
-activateWrit(home, writId, 'pending');
-const result = await launchSession({ ... });
-// raw SQL: UPDATE writs SET session_id = ? WHERE id = ? AND session_id = 'pending'
+## Action required
+
+**Bump `@shardworks/nexus-core` to `>=0.1.72`** (or latest) in `package.json`.
+
+That's it — no patterns to replace, no dependencies to remove.
+
+```json
+"@shardworks/nexus-core": ">=0.1.72"
 ```
 
-**After:**
-```typescript
-const sessionId = generateId('ses');
-activateWrit(home, writId, sessionId);
-await launchSession({ ...opts, sessionId });
-// No post-launch fixup needed
-```
+After bumping, run `pnpm install` and verify the build passes.
 
-### B. Raw SQL session counting for circuit breaker
+---
 
-**Before:**
-```typescript
-import Database from 'better-sqlite3';
-const db = new Database(booksPath(home));
-const row = db.prepare('SELECT COUNT(*) as n FROM sessions WHERE writ_id = ?').get(writId);
-```
+## Minimum core version reference
 
-**After:**
-```typescript
-import { countSessionsForWrit } from '@shardworks/nexus-core';
-const count = countSessionsForWrit(home, writId);
-```
-
-### C. Drop `better-sqlite3` dependency
-
-If the only reason guild-monitor depends on `better-sqlite3` directly was for
-these raw queries, remove it from `dependencies` and `@types/better-sqlite3`
-from `devDependencies`. All DB access should go through core APIs.
-
-## Minimum core version
-
-These APIs require `@shardworks/nexus-core` at whatever version publishes from
-commit `7197cdd`. Check npm for the exact version once the publish completes.
-nsg signal mandate.ready --payload 
-  '{"writId":"wrt-7a033e26","type":"mandate","parentId":null}' --force     
+| Feature                        | Minimum version |
+|-------------------------------|-----------------|
+| `sessionId` on `launchSession` | 0.1.72          |
+| `countSessionsForWrit`         | 0.1.72          |
+| `writId` filter on `listSessions` | 0.1.72       |
+| `failWrit` cascades commission | 0.1.77          |
