@@ -5,17 +5,6 @@ disable-model-invocation: true
 
 # Wrap-Up: Complete Work and Generate Session Summary
 
-## Complete Work
-
-- Commit any changes you have made, if any
-- Push main to the remote
-
-## Reminders
-
-Check for things Sean should be nudged about:
-
-- **Ethnographer interview:** Check the most recent interview file in `experiments/ethnography/interviews/` (files named `YYYY-MM-DDTHHMMSS.md`). If the most recent one is more than a day old — or if none exist yet — remind Sean to run an ethnographer session. Keep it light: *"It's been a couple days since your last ethnographer interview — might be a good time to check in."*
-
 ## Generate Summary
 
 Generate a structured summary of the current session. This summary serves two audiences:
@@ -55,6 +44,17 @@ Flag anything relevant to active experiments. Omit this section if nothing appli
 - **X008 (Patron's Hands):** If Coco did implementation work this session, note: what task, how it was directed (Sean asked vs. Coco offered), scope (files/lines), and whether a commission was considered as an alternative.
 - **X007 (First Contact):** If an autonomous commission was dispatched or discussed, note the context.
 <expected-format>
+
+## Complete Work
+
+- Commit any changes you have made, if any
+- Push main to the remote
+
+## Reminders
+
+Check for things Sean should be nudged about:
+
+- **Ethnographer interview:** Check the most recent interview file in `experiments/ethnography/interviews/` (files named `YYYY-MM-DDTHHMMSS.md`). If the most recent one is more than a day old — or if none exist yet — remind Sean to run an ethnographer session. Keep it light: *"It's been a couple days since your last ethnographer interview — might be a good time to check in."*
 
 ## Guidelines
 
