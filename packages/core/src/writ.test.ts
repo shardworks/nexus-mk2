@@ -583,6 +583,55 @@ describe('mandate → commission completion', () => {
   });
 });
 
+describe('mandate → commission failure', () => {
+  it('marks commission failed when mandate fails', () => {
+    const home = setupTestGuild();
+
+    // Create a mandate writ
+    const mandate = createWrit(home, { type: 'mandate', title: 'Build it' });
+
+    // Link a commission to it
+    const db = new Database(path.join(home, '.nexus', 'nexus.db'));
+    db.pragma('foreign_keys = ON');
+    db.prepare(`INSERT INTO commissions (id, content, status, workshop, writ_id) VALUES (?, ?, ?, ?, ?)`).run(
+      'com-fail-test', 'Build the thing', 'in_progress', 'test-ws', mandate.id,
+    );
+    db.close();
+
+    // Fail the mandate (from active state)
+    activateWrit(home, mandate.id, 'ses-1');
+    failWrit(home, mandate.id);
+
+    // Commission should be failed
+    const db2 = new Database(path.join(home, '.nexus', 'nexus.db'));
+    const row = db2.prepare(`SELECT status, status_reason FROM commissions WHERE id = ?`).get('com-fail-test') as { status: string; status_reason: string };
+    db2.close();
+    assert.equal(row.status, 'failed');
+    assert.equal(row.status_reason, 'mandate failed');
+  });
+
+  it('marks commission failed when mandate fails from ready state', () => {
+    const home = setupTestGuild();
+
+    const mandate = createWrit(home, { type: 'mandate', title: 'Build it' });
+
+    const db = new Database(path.join(home, '.nexus', 'nexus.db'));
+    db.pragma('foreign_keys = ON');
+    db.prepare(`INSERT INTO commissions (id, content, status, workshop, writ_id) VALUES (?, ?, ?, ?, ?)`).run(
+      'com-fail-ready', 'Build the thing', 'posted', 'test-ws', mandate.id,
+    );
+    db.close();
+
+    // Fail directly from ready (no activation needed — failWrit accepts any non-terminal state)
+    failWrit(home, mandate.id);
+
+    const db2 = new Database(path.join(home, '.nexus', 'nexus.db'));
+    const row = db2.prepare(`SELECT status FROM commissions WHERE id = ?`).get('com-fail-ready') as { status: string };
+    db2.close();
+    assert.equal(row.status, 'failed');
+  });
+});
+
 // ── Progress Appendix ──────────────────────────────────────────────────
 
 describe('buildProgressAppendix', () => {

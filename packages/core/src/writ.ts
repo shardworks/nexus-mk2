@@ -334,6 +334,11 @@ export function failWrit(home: string, writId: string): WritRecord {
       type: current.type,
     }, 'framework');
 
+    // Handle mandate → commission failure
+    if (current.type === 'mandate') {
+      failMandateCommission(db, home, writId);
+    }
+
     // Cascade: cancel incomplete children (not active ones — let them finish)
     cascadeCancelChildren(db, home, writId);
 
@@ -664,5 +669,28 @@ function completeMandateCommission(db: Database.Database, home: string, writId: 
       JSON.stringify({ mandateWritId: writId }));
 
     signalEvent(home, 'commission.completed', { commissionId: row.id }, 'framework');
+  }
+}
+
+/**
+ * When a mandate writ fails, mark its commission as failed.
+ * Mirror of completeMandateCommission.
+ */
+function failMandateCommission(db: Database.Database, home: string, writId: string): void {
+  const row = db.prepare(
+    `SELECT id FROM commissions WHERE writ_id = ?`,
+  ).get(writId) as { id: string } | undefined;
+
+  if (row) {
+    db.prepare(
+      `UPDATE commissions SET status = 'failed', status_reason = 'mandate failed', updated_at = datetime('now') WHERE id = ?`,
+    ).run(row.id);
+
+    db.prepare(
+      `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(generateId('aud'), 'framework', 'commission_failed', 'commission', row.id,
+      JSON.stringify({ mandateWritId: writId }));
+
+    signalEvent(home, 'commission.failed', { commissionId: row.id }, 'framework');
   }
 }
