@@ -68,6 +68,8 @@ export interface ListSessionsOptions {
   trigger?: string;
   /** Filter by active (no ended_at) or completed (has ended_at). */
   status?: 'active' | 'completed';
+  /** Filter by bound writ ID. */
+  writId?: string;
   /** Maximum number of results. */
   limit?: number;
 }
@@ -106,6 +108,11 @@ export function listSessions(home: string, opts: ListSessionsOptions = {}): Sess
       params.push(opts.trigger);
     }
 
+    if (opts.writId) {
+      conditions.push(`s.writ_id = ?`);
+      params.push(opts.writId);
+    }
+
     if (opts.status === 'active') {
       conditions.push(`s.ended_at IS NULL`);
     } else if (opts.status === 'completed') {
@@ -142,6 +149,23 @@ export function listSessions(home: string, opts: ListSessionsOptions = {}): Sess
       costUsd: r.cost_usd,
       durationMs: r.duration_ms,
     }));
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Count sessions bound to a given writ. Used by circuit breakers to cap
+ * retry attempts without fetching full session rows.
+ */
+export function countSessionsForWrit(home: string, writId: string): number {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+  try {
+    const row = db.prepare(
+      'SELECT COUNT(*) as n FROM sessions WHERE writ_id = ?',
+    ).get(writId) as { n: number };
+    return row.n;
   } finally {
     db.close();
   }
@@ -303,6 +327,12 @@ export interface SessionLaunchOptions {
   maxBudgetUsd?: number;
   /** Bound writ ID, if any. Set by clockworks for writ-driven sessions. */
   writId?: string;
+  /**
+   * Pre-generated session ID. If provided, launchSession uses this instead of
+   * generating one internally. This allows callers to bind resources (e.g. writs)
+   * to the session ID before the provider launches.
+   */
+  sessionId?: string;
   /** Conversation ID, if this session is a turn in a conversation. */
   conversationId?: string;
   /** Turn number within the conversation (1-indexed). */
@@ -554,6 +584,7 @@ function writeSessionRecord(home: string, record: SessionRecord): string {
 function insertSessionRow(
   home: string,
   opts: {
+    sessionId?: string;
     animaId: string;
     provider: string;
     trigger: string;
@@ -573,7 +604,7 @@ function insertSessionRow(
   const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
   try {
-    const id = generateId('ses');
+    const id = opts.sessionId ?? generateId('ses');
     db.prepare(
       `INSERT INTO sessions (id, anima_id, provider, trigger, workshop, workspace_kind,
         curriculum_name, curriculum_version, temperament_name, temperament_version,
@@ -684,6 +715,7 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
   }
 
   const { home, prompt, interactive, trigger, name, maxBudgetUsd, writId,
+    sessionId: preGeneratedSessionId,
     conversationId, turnNumber, claudeSessionId, onChunk, systemPromptAppendix } = options;
 
   // Apply system prompt appendix (e.g. writ protocol) if provided.
@@ -713,6 +745,7 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
   let sessionId: string;
   try {
     sessionId = insertSessionRow(home, {
+      sessionId: preGeneratedSessionId,
       animaId: manifest.anima.id,
       provider: _provider.name,
       trigger,

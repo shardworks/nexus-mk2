@@ -19,15 +19,15 @@
  *   - `prompt` — prompt template with {{writ.title}}, {{writ.description}} etc.
  *   - `maxSessions` — circuit breaker: max session attempts per writ before auto-fail (default: 10)
  */
-import Database from 'better-sqlite3';
 import {
   engine,
-  booksPath,
+  generateId,
   resolveAnimaByRole,
   manifest,
   resolveWorkspace,
   getSessionProvider,
   launchSession,
+  countSessionsForWrit,
   createWrit,
   readWrit,
   activateWrit,
@@ -89,18 +89,10 @@ export default engine({
 
     // Step 3: Circuit breaker — check session count for this writ
     if (maxSessions > 0) {
-      const db = new Database(booksPath(home));
-      db.pragma('foreign_keys = ON');
-      try {
-        const row = db.prepare(
-          'SELECT COUNT(*) as n FROM sessions WHERE writ_id = ?',
-        ).get(writId) as { n: number };
-        if (row.n >= maxSessions) {
-          failWrit(home, writId);
-          return;
-        }
-      } finally {
-        db.close();
+      const count = countSessionsForWrit(home, writId);
+      if (count >= maxSessions) {
+        failWrit(home, writId);
+        return;
       }
     }
 
@@ -121,16 +113,17 @@ export default engine({
       userPrompt = appendix;
     }
 
-    // Step 7: Activate writ before launch
-    activateWrit(home, writId, 'pending');
+    // Step 7: Pre-generate session ID so we can activate the writ with the
+    // real ID before the provider launches. No placeholder, no post-launch swap.
+    const sessionId = generateId('ses');
+    activateWrit(home, writId, sessionId);
 
     // Set NEXUS_WRIT_ID for tools to read during the session
     const prevWritId = process.env.NEXUS_WRIT_ID;
     process.env.NEXUS_WRIT_ID = writId;
 
-    let sessionResult;
     try {
-      sessionResult = await launchSession({
+      await launchSession({
         home,
         manifest: manifestResult,
         prompt: userPrompt,
@@ -138,6 +131,7 @@ export default engine({
         workspace,
         trigger: 'summon',
         writId,
+        sessionId,
         systemPromptAppendix: WRIT_SESSION_PROTOCOL,
       });
     } finally {
@@ -147,19 +141,6 @@ export default engine({
         delete process.env.NEXUS_WRIT_ID;
       }
     }
-
-    // Update writ with actual session ID (best effort)
-    try {
-      const db = new Database(booksPath(home));
-      db.pragma('foreign_keys = ON');
-      try {
-        db.prepare(
-          `UPDATE writs SET session_id = ? WHERE id = ? AND session_id = 'pending'`,
-        ).run(sessionResult.sessionId, writId);
-      } finally {
-        db.close();
-      }
-    } catch { /* best effort */ }
 
     // Step 8: Handle session end — check writ status
     const finalWrit = readWrit(home, writId);

@@ -205,6 +205,7 @@ export {
   removeTempWorktree,
   launchSession,
   listSessions,
+  countSessionsForWrit,
   showSession,
 } from './session.ts';
 export {
