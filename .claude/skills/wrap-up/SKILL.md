@@ -47,6 +47,8 @@ Flag anything relevant to active experiments. Omit this section if nothing appli
 
 ## Complete Work
 
+After wrapping up, **ALWAYS**:
+
 - Commit any changes you have made, if any
 - Push main to the remote
 
