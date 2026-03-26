@@ -1,43 +1,13 @@
-# Nexus Mk 2.1
+# Nexus Mk 2.1 — Sanctum
 
-Nexus Mk 2.1 is an experimental multi-agent AI system. It is also a documented experiment — Sean is exploring AI-enabled development practices and intends to publish findings.
+This is the sanctum: the patron-side home base for the Nexus Mk 2.1 project. It holds experiments, research, operational tooling, and the domain model — but not the framework source code. The framework lives at `/workspace/nexus/`.
 
-## Tech Stack
-
-- **Language:** TypeScript
-- **Runtime:** Node.js (v24)
-- **Monorepo:** pnpm workspaces
-- **Database:** SQLite (WAL mode) via better-sqlite3
-- **CLI:** Commander.js (`nsg` command)
-- **Published under:** `@shardworks` npm scope
+Nexus Mk 2.1 is also a documented experiment — Sean is exploring AI-enabled development practices and intends to publish findings.
 
 ## Project Structure
 
 ```
-nexus-mk2/
-├── packages/                    # pnpm workspace packages
-│   ├── core/                    # @shardworks/nexus-core — shared framework library
-│   │   └── src/                 #   anima, clockworks, commission, conversation, writ,
-│   │                            #   session, events, manifest, guild-config, workshop, etc.
-│   ├── cli/                     # @shardworks/nexus — the `nsg` CLI
-│   │   └── src/commands/        #   commission, consult, convene, clock, init, dispatch, etc.
-│   ├── stdlib/                  # @shardworks/nexus-stdlib — MCP tools & clockwork engines
-│   │   ├── src/tools/           #   ~30 tools: writ CRUD, commission, anima, clock, workshop, etc.
-│   │   ├── src/engines/         #   workshop-prepare, workshop-merge
-│   │   └── instructions/        #   per-tool markdown instructions for animas
-│   ├── claude-code-session-provider/  # Session provider (launches claude CLI sessions)
-│   └── guild-starter-kit/       # Scaffolding for new guilds
-│       ├── migrations/          #   SQL migrations (001-initial, 002-writs, 003-conversations)
-│       ├── curricula/           #   guild-operations curriculum
-│       └── temperaments/        #   artisan, guide
-├── docs/                        # Project documentation
-│   ├── philosophy.md            #   Project "why" — experiment goals, Mk 2.0 vs 2.1
-│   ├── guild-metaphor.md        #   Conceptual model (metaphorical register, not technical)
-│   ├── architecture/            #   System design: overview, clockworks, writs, tools-and-engines
-│   ├── reference/               #   Lookup docs: core-api, schema, event-catalog, conversations
-│   ├── guides/                  #   How-to: building-tools, building-engines
-│   ├── future/                  #   Backlog: known-gaps, uncommissioned feature ideas
-│   └── archive/                 #   Completed commissions, deprecated docs
+nexus-mk2/  (the sanctum)
 ├── experiments/                 # Research & experiment tracking
 │   ├── X001–X012/              #   Numbered experiments, each with spec.md + artifacts/
 │   └── ethnography/            #   Qualitative research on human-agent interaction
@@ -48,7 +18,15 @@ nexus-mk2/
 │   ├── ontology/                #   TypeScript type definitions — formal domain model
 │   ├── requirements/            #   System requirements (YAML)
 │   └── backlog/                 #   Feature ideas not yet commissioned
-├── bin/                         # Shell scripts for operations (coco.sh, dispatch.sh, build.sh, etc.)
+├── docs/                        # Sanctum-side documentation
+│   ├── future/                  #   Backlog: known-gaps, uncommissioned feature ideas
+│   └── archive/                 #   Completed commissions, deprecated docs
+├── bin/                         # Shell scripts for operations
+│   ├── coco.sh                  #   Launch Coco session
+│   ├── dispatch.sh              #   Dispatch autonomous agents (auditor, builder, scribe, etc.)
+│   ├── build.sh                 #   Run the builder
+│   ├── commission.sh            #   Post a commission to the live guild
+│   └── ...                      #   Other operational scripts
 ├── .claude/                     # Claude Code agent configuration
 │   ├── CLAUDE.md                #   THIS FILE — shared instructions for all agents
 │   ├── agents/                  #   Agent-specific instructions (coco.md, ethnographer.md)
@@ -57,11 +35,15 @@ nexus-mk2/
 ├── .artifacts/                  # Build & assessment artifacts (JSON, timestamped)
 ├── .scratch/                    # Ephemeral working space
 │   └── recent-sessions/         #   Coco session summaries (read at startup for continuity)
-├── .locks/                      # Feature locks for concurrent agent coordination
-└── .github/workflows/           # CI and publish workflows
+└── .locks/                      # Feature locks for concurrent agent coordination
 ```
 
-### Key Concepts
+## Related Repositories
+
+- **`/workspace/nexus/`** — the framework source code (TypeScript packages, published to npm)
+- **`/workspace/shardworks/`** — the live guild workspace where animas operate
+
+## Key Concepts
 
 - **Guild** — an instantiated workspace where animas operate. Created via `nsg init`.
 - **Anima** — an AI identity with a name, role, curriculum, and temperament.
@@ -73,8 +55,8 @@ nexus-mk2/
 
 ## Foundational Documents
 
-- **[Project Philosophy](../docs/philosophy.md)** — the "why" of this project: experiment goals, Mk 2.0 vs 2.1 differences, the human-as-user model.
-- **[Guild Metaphor](../docs/guild-metaphor.md)** — the conceptual model and vocabulary for the system. Read this to understand guild terminology (anima, commission, writ, clockworks, etc.) and write in the correct register.
+- **[Project Philosophy](/workspace/nexus/docs/philosophy.md)** — the "why" of this project: experiment goals, Mk 2.0 vs 2.1 differences, the human-as-user model.
+- **[Guild Metaphor](/workspace/nexus/docs/guild-metaphor.md)** — the conceptual model and vocabulary for the system. Read this to understand guild terminology (anima, commission, writ, clockworks, etc.) and write in the correct register.
 
 ## Directives
 
