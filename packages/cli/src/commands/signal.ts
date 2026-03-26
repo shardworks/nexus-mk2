@@ -7,7 +7,8 @@ export function makeSignalCommand() {
     .description('Signal a custom guild event')
     .argument('<name>', 'Event name (must be declared in guild.json clockworks.events)')
     .option('--payload <json>', 'Event payload as JSON')
-    .action((name: string, options: { payload?: string }, cmd) => {
+    .option('--force', 'Bypass event validation (for recovery — allows framework-namespace events)')
+    .action((name: string, options: { payload?: string; force?: boolean }, cmd) => {
       const home = resolveHome(cmd);
 
       let payload: unknown = null;
@@ -22,7 +23,9 @@ export function makeSignalCommand() {
       }
 
       try {
-        validateCustomEvent(home, name);
+        if (!options.force) {
+          validateCustomEvent(home, name);
+        }
         const eventId = signalEvent(home, name, payload, 'operator');
         console.log(`Event #${eventId} signaled: ${name}`);
       } catch (err) {

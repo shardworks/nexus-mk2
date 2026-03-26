@@ -2,7 +2,7 @@ import { createCommand } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { planUpgrade, applyUpgrade, readGuildConfig, writeGuildConfig } from '@shardworks/nexus-core';
+import { planUpgrade, applyUpgrade, readGuildConfig, writeGuildConfig, clockStatus, clockStop, clockStart } from '@shardworks/nexus-core';
 import { resolveHome } from '../resolve-home.ts';
 
 const DEFAULT_BUNDLE = '@shardworks/guild-starter-kit';
@@ -220,6 +220,18 @@ export function makeUpgradeCommand() {
             writeGuildConfig(home, updatedConfig);
             console.log(`Nexus version: ${config.nexus} → ${newVersion}`);
           }
+        }
+
+        // ── Step 5: Restart clockworks daemon if running ──────────────────
+        // New packages are now installed — the running daemon must be restarted
+        // to clear its module import cache and pick up the updated code.
+
+        const status = clockStatus(home);
+        if (status.running) {
+          clockStop(home);
+          clockStart(home);
+          console.log(`Clockworks daemon restarted (was PID ${status.pid}).`);
+          console.log();
         }
 
         console.log('Upgrade complete.');

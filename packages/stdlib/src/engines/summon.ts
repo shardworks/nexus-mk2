@@ -61,6 +61,14 @@ export default engine({
     const promptTemplate = params.prompt as string | undefined;
     const maxSessions = (params.maxSessions as number | undefined) ?? 10;
 
+    // Fail fast if no prompt template — absent or empty is a config mistake.
+    if (!promptTemplate) {
+      throw new Error(
+        'summon-engine: standing order is missing a "prompt" field. ' +
+        'Add a prompt template, e.g. "{{writ.title}}\\n\\n{{writ.description}}".',
+      );
+    }
+
     // Require a session provider
     if (!getSessionProvider()) {
       throw new Error('No session provider registered — cannot launch anima session.');

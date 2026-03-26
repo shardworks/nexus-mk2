@@ -15,10 +15,13 @@ export default tool({
   params: {
     name: z.string().describe('Event name (must be declared in guild.json clockworks.events)'),
     payload: z.record(z.string(), z.unknown()).optional().describe('Event payload (JSON object)'),
+    force: z.boolean().optional().describe('Bypass event validation — allows framework-namespace events. Use for recovery only.'),
   },
   handler: (params, { home }) => {
-    // Validate the event name is declared and not reserved
-    validateCustomEvent(home, params.name);
+    // Validate the event name is declared and not reserved (unless --force)
+    if (!params.force) {
+      validateCustomEvent(home, params.name);
+    }
 
     // Persist the event
     const eventId = signalEvent(home, params.name, params.payload ?? null, 'anima');
