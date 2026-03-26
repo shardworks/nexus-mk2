@@ -34,9 +34,9 @@ describe('engine SDK', () => {
       firedAt: '2026-03-24T00:00:00Z',
     };
 
-    await def.handler(testEvent, { home: '/tmp/test' });
+    await def.handler(testEvent, { home: '/tmp/test', params: {} });
     assert.deepEqual(receivedEvent, testEvent);
-    assert.deepEqual(receivedCtx, { home: '/tmp/test' });
+    assert.deepEqual(receivedCtx, { home: '/tmp/test', params: {} });
   });
 
   it('handler accepts null event for direct invocation', async () => {
@@ -49,7 +49,7 @@ describe('engine SDK', () => {
       },
     });
 
-    await def.handler(null, { home: '/tmp/test' });
+    await def.handler(null, { home: '/tmp/test', params: {} });
     assert.equal(receivedEvent, null);
   });
 });

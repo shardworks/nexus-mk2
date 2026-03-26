@@ -5,7 +5,9 @@ import path from 'node:path';
 import os from 'node:os';
 import Database from 'better-sqlite3';
 import { clockTick, clockRun } from './clockworks.ts';
+import { desugarOrder, extractParams } from './clockworks.ts';
 import { signalEvent, readPendingEvents } from './events.ts';
+import type { StandingOrder } from './guild-config.ts';
 
 /** Set up a minimal guild with Ledger including the clockworks tables. */
 function setupTestGuild(clockworksConfig?: Record<string, unknown>): string {
@@ -61,6 +63,78 @@ function setupTestGuild(clockworksConfig?: Record<string, unknown>): string {
   return home;
 }
 
+// ── desugarOrder ──────────────────────────────────────────────────────
+
+describe('desugarOrder', () => {
+  it('passes through run orders unchanged', () => {
+    const order: StandingOrder = { on: 'test.event', run: 'my-engine' };
+    const result = desugarOrder(order);
+    assert.deepEqual(result, { on: 'test.event', run: 'my-engine' });
+  });
+
+  it('desugars summon to summon-engine with role param', () => {
+    const order = { on: 'mandate.ready', summon: 'artificer' } as StandingOrder;
+    const result = desugarOrder(order);
+    assert.equal(result.run, 'summon-engine');
+    assert.equal(result.role, 'artificer');
+    assert.equal(result.on, 'mandate.ready');
+    assert.equal(result.summon, undefined);
+  });
+
+  it('preserves prompt and extra keys through desugar', () => {
+    // Simulate a standing order with extra keys (from JSON parse)
+    const order = { on: 'mandate.ready', summon: 'artificer', prompt: 'Hello {{writ.title}}', maxSessions: 3 } as unknown as StandingOrder;
+    const result = desugarOrder(order);
+    assert.equal(result.run, 'summon-engine');
+    assert.equal(result.role, 'artificer');
+    assert.equal(result.prompt, 'Hello {{writ.title}}');
+    assert.equal(result.maxSessions, 3);
+  });
+
+  it('desugars brief to summon-engine with role param (legacy)', () => {
+    const order = { on: 'code.reviewed', brief: 'steward' } as StandingOrder;
+    const result = desugarOrder(order);
+    assert.equal(result.run, 'summon-engine');
+    assert.equal(result.role, 'steward');
+    assert.equal(result.brief, undefined);
+  });
+});
+
+// ── extractParams ─────────────────────────────────────────────────────
+
+describe('extractParams', () => {
+  it('returns empty object for order with only reserved keys', () => {
+    const result = extractParams({ on: 'test.event', run: 'my-engine' });
+    assert.deepEqual(result, {});
+  });
+
+  it('extracts non-reserved keys as params', () => {
+    const result = extractParams({
+      on: 'test.event',
+      run: 'circuit-breaker',
+      maxAttempts: 3,
+      environment: 'staging',
+    });
+    assert.deepEqual(result, { maxAttempts: 3, environment: 'staging' });
+  });
+
+  it('extracts role and prompt from desugared summon order', () => {
+    const desugared = desugarOrder(
+      { on: 'mandate.ready', summon: 'artificer', prompt: 'Do the thing' } as unknown as StandingOrder,
+    );
+    const result = extractParams(desugared);
+    assert.equal(result.role, 'artificer');
+    assert.equal(result.prompt, 'Do the thing');
+  });
+
+  it('does not include reserved keys in params', () => {
+    const result = extractParams({ on: 'x', run: 'y', summon: 'z', brief: 'w', extra: true });
+    assert.deepEqual(result, { extra: true });
+  });
+});
+
+// ── clockTick ─────────────────────────────────────────────────────────
+
 describe('clockTick', () => {
   it('returns null when no pending events', async () => {
     const home = setupTestGuild();
@@ -105,7 +179,7 @@ describe('clockTick', () => {
     );
   });
 
-  it('records anima dispatch for summon standing order', async () => {
+  it('desugars summon order and dispatches as engine', async () => {
     const home = setupTestGuild({
       events: { 'my.event': { description: 'test' } },
       standingOrders: [
@@ -118,16 +192,12 @@ describe('clockTick', () => {
 
     assert.ok(result);
     assert.equal(result.dispatches.length, 1);
-    assert.equal(result.dispatches[0]!.handlerType, 'anima');
-    assert.equal(result.dispatches[0]!.status, 'skipped'); // Phase 1: not actually manifested
-
-    // Verify dispatch record in database
-    const db = new Database(path.join(home, '.nexus', 'nexus.db'));
-    const rows = db.prepare('SELECT * FROM event_dispatches').all() as Record<string, unknown>[];
-    db.close();
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0]!.target_role, 'advisor');
-    assert.equal(rows[0]!.notice_type, 'summon');
+    // After desugaring, summon becomes an engine dispatch for 'summon-engine'
+    assert.equal(result.dispatches[0]!.handlerType, 'engine');
+    assert.equal(result.dispatches[0]!.handlerName, 'summon-engine');
+    // Engine not installed in test guild, so it errors
+    assert.equal(result.dispatches[0]!.status, 'error');
+    assert.ok(result.dispatches[0]!.error!.includes('not found in guild.json'));
   });
 
   it('errors on engine standing order for missing engine', async () => {

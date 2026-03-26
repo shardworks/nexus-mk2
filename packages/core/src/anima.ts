@@ -65,6 +65,33 @@ export interface AnimaStaleness {
 // ── Functions ──────────────────────────────────────────────────────────
 
 /**
+ * Resolve the name of the first active anima holding a given role.
+ *
+ * If multiple animas share the role, one is selected arbitrarily (lowest id).
+ * Throws if no active anima holds the role.
+ */
+export function resolveAnimaByRole(home: string, role: string): string {
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+  try {
+    const row = db.prepare(`
+      SELECT a.name FROM animas a
+      JOIN roster r ON r.anima_id = a.id
+      WHERE r.role = ? AND a.status = 'active'
+      ORDER BY a.id ASC
+      LIMIT 1
+    `).get(role) as { name: string } | undefined;
+
+    if (!row) {
+      throw new Error(`No active anima found for role "${role}".`);
+    }
+    return row.name;
+  } finally {
+    db.close();
+  }
+}
+
+/**
  * List animas with optional filters.
  */
 export function listAnimas(home: string, opts: ListAnimasOptions = {}): AnimaSummary[] {

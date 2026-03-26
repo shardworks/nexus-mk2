@@ -326,12 +326,22 @@ describe('failWrit', () => {
     assert.equal(result.status, 'failed');
   });
 
-  it('throws on non-active writ', () => {
+  it('fails a ready writ (not yet active)', () => {
     const home = setupTestGuild();
     const w = createWrit(home, { type: 'mandate', title: 'X' });
+    assert.equal(w.status, 'ready');
+    const result = failWrit(home, w.id);
+    assert.equal(result.status, 'failed');
+  });
+
+  it('throws on terminal writ', () => {
+    const home = setupTestGuild();
+    const w = createWrit(home, { type: 'mandate', title: 'X' });
+    activateWrit(home, w.id, 'ses-1');
+    failWrit(home, w.id);
     assert.throws(
       () => failWrit(home, w.id),
-      /expected "active"/,
+      /terminal/,
     );
   });
 });

@@ -4,18 +4,17 @@
  *
  * This is the core of Pillar 5. It reads unprocessed events from the
  * Clockworks event queue, finds matching standing orders, and dispatches
- * them (run engines, or summon/brief animas). Each event is marked as
- * processed after all its standing orders have been dispatched.
+ * them as engine invocations. Each event is marked as processed after all
+ * its standing orders have been dispatched.
  *
- * Anima orders (summon/brief) are handled directly via the session funnel —
- * no callback hack needed. The clockworks resolves roles to animas,
- * manifests them, and calls launchSession().
+ * Standing orders have one canonical form: `{ on, run, ...params }`.
+ * The `summon` verb is syntactic sugar — desugared to a `summon-engine`
+ * invocation at dispatch time. All dispatch flows through engines.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import Database from 'better-sqlite3';
 import { readGuildConfig } from './guild-config.ts';
 import type { GuildConfig, StandingOrder } from './guild-config.ts';
 import {
@@ -27,33 +26,51 @@ import {
 } from './events.ts';
 import { isClockworkEngine, resolveEngineFromExport } from './engine.ts';
 import type { GuildEvent } from './engine.ts';
-import { booksPath, clockPidPath, clockLogPath } from './nexus-home.ts';
-import { generateId } from './id.ts';
-import { manifest } from './manifest.ts';
-import { launchSession, resolveWorkspace, getSessionProvider } from './session.ts';
-import {
-  createWrit,
-  readWrit,
-  activateWrit,
-  interruptWrit,
-  hydratePromptTemplate,
-  buildProgressAppendix,
-} from './writ.ts';
+import { clockPidPath, clockLogPath } from './nexus-home.ts';
 
-// ── Session Protocol ──────────────────────────────────────────────────
+// ── Standing Order Desugaring ─────────────────────────────────────────
+
+/** Reserved keys on a standing order — everything else is an engine param. */
+const RESERVED_KEYS = new Set(['on', 'run', 'summon', 'brief']);
 
 /**
- * Protocol block injected into the system prompt for all writ-bound sessions.
- * Without this, animas won't know to call complete-session, and every session
- * will be treated as interrupted and re-dispatched in an infinite loop.
+ * Desugar a standing order into canonical form: `{ on, run, ...params }`.
+ *
+ * - `{ on, run, ... }` passes through unchanged.
+ * - `{ on, summon, prompt?, ... }` becomes `{ on, run: "summon-engine", role: <summon>, prompt?, ... }`.
+ * - `{ on, brief, ... }` becomes `{ on, run: "summon-engine", role: <brief>, ... }` (legacy).
+ *
+ * Returns a plain object (not typed as StandingOrder) because the sugar
+ * forms carry arbitrary extra keys that the TS type doesn't declare.
  */
-export const WRIT_SESSION_PROTOCOL = `## Session Protocol
+export function desugarOrder(order: StandingOrder): Record<string, unknown> {
+  const raw = order as Record<string, unknown>;
 
-You are working on a writ (tracked work item). You MUST signal completion before your session ends:
+  if ('summon' in raw && typeof raw.summon === 'string') {
+    const { summon, ...rest } = raw;
+    return { ...rest, run: 'summon-engine', role: summon };
+  }
 
-- Call \`complete-session\` when you have finished your work. If you created child writs, the system will wait for them to complete automatically.
-- Call \`fail-writ\` with a reason if the work cannot be completed.
-- If your session ends without calling either tool, the system treats it as an interruption and will re-dispatch the work to a new session.`;
+  // Legacy brief support — desugar to summon-engine
+  if ('brief' in raw && typeof raw.brief === 'string') {
+    const { brief, ...rest } = raw;
+    return { ...rest, run: 'summon-engine', role: brief };
+  }
+
+  return raw;
+}
+
+/**
+ * Extract engine params from a desugared standing order.
+ * Returns all keys except the reserved structural ones.
+ */
+export function extractParams(order: Record<string, unknown>): Record<string, unknown> {
+  const params: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(order)) {
+    if (!RESERVED_KEYS.has(key)) params[key] = value;
+  }
+  return params;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -80,6 +97,10 @@ export interface ClockRunResult {
 
 /**
  * Process a single event: find matching standing orders and execute them.
+ *
+ * All standing orders are desugared into `{ on, run, ...params }` form and
+ * dispatched as engine invocations. The `summon` verb is syntactic sugar
+ * for `{ run: "summon-engine", role: <summon-value>, ... }`.
  *
  * @param home - Absolute path to the guild root.
  * @param event - The event to process.
@@ -109,29 +130,15 @@ async function processEvent(home: string, event: GuildEvent): Promise<TickResult
   }
 
   for (const order of matching) {
-    if ('run' in order && order.run) {
-      const summary = await executeEngineOrder(home, event, order.run, config);
-      dispatches.push(summary);
+    const desugared = desugarOrder(order);
+    const engineName = desugared.run as string;
+    const params = extractParams(desugared);
+    const summary = await executeEngineOrder(home, event, engineName, config, params);
+    dispatches.push(summary);
 
-      // On failure, signal standing-order.failed
-      if (summary.status === 'error') {
-        signalStandingOrderFailed(home, order, event, summary.error!);
-      }
-    } else if ('summon' in order && order.summon) {
-      const promptTpl = 'prompt' in order ? (order as { prompt?: string }).prompt : undefined;
-      const summary = await executeAnimaOrder(home, event, order.summon, 'summon', promptTpl);
-      dispatches.push(summary);
-
-      if (summary.status === 'error') {
-        signalStandingOrderFailed(home, order, event, summary.error!);
-      }
-    } else if ('brief' in order && order.brief) {
-      const summary = await executeAnimaOrder(home, event, order.brief, 'brief');
-      dispatches.push(summary);
-
-      if (summary.status === 'error') {
-        signalStandingOrderFailed(home, order, event, summary.error!);
-      }
+    // On failure, signal standing-order.failed
+    if (summary.status === 'error') {
+      signalStandingOrderFailed(home, order, event, summary.error!);
     }
   }
 
@@ -140,13 +147,17 @@ async function processEvent(home: string, event: GuildEvent): Promise<TickResult
 }
 
 /**
- * Execute a `run:` standing order — load and call a clockwork engine.
+ * Execute an engine standing order — load and call a clockwork engine.
+ *
+ * Params from the standing order are passed through to the engine via
+ * `EngineContext.params`.
  */
 async function executeEngineOrder(
   home: string,
   event: GuildEvent,
   engineName: string,
   config: GuildConfig,
+  params: Record<string, unknown> = {},
 ): Promise<DispatchSummary> {
   const startedAt = new Date().toISOString();
 
@@ -174,7 +185,7 @@ async function executeEngineOrder(
       );
     }
 
-    await engineDef.handler(event, { home });
+    await engineDef.handler(event, { home, params });
 
     const endedAt = new Date().toISOString();
     recordDispatch(home, {
@@ -205,205 +216,6 @@ async function executeEngineOrder(
   }
 }
 
-/**
- * Resolve the name of the first active anima holding a given role.
- *
- * If multiple animas share the role, one is selected arbitrarily (lowest id).
- * Throws if no active anima holds the role.
- */
-function resolveAnimaByRole(home: string, role: string): string {
-  const db = new Database(booksPath(home));
-  db.pragma('foreign_keys = ON');
-  try {
-    const row = db.prepare(`
-      SELECT a.name FROM animas a
-      JOIN roster r ON r.anima_id = a.id
-      WHERE r.role = ? AND a.status = 'active'
-      ORDER BY a.id ASC
-      LIMIT 1
-    `).get(role) as { name: string } | undefined;
-
-    if (!row) {
-      throw new Error(`No active anima found for role "${role}".`);
-    }
-    return row.name;
-  } finally {
-    db.close();
-  }
-}
-
-/**
- * Execute a `summon:` standing order.
- *
- * Resolves the role to an anima, binds or synthesizes a writ, hydrates
- * the prompt template, manifests the anima, and launches a session.
- * On session end, handles writ lifecycle (completion, pending, interruption).
- *
- * If no session provider is registered, records the dispatch as skipped.
- */
-async function executeAnimaOrder(
-  home: string,
-  event: GuildEvent,
-  roleName: string,
-  noticeType: 'summon' | 'brief',
-  promptTemplate?: string,
-): Promise<DispatchSummary> {
-  const startedAt = new Date().toISOString();
-
-  if (!getSessionProvider()) {
-    const endedAt = new Date().toISOString();
-
-    recordDispatch(home, {
-      eventId: event.id,
-      handlerType: 'anima',
-      handlerName: `(role: ${roleName})`,
-      targetRole: roleName,
-      noticeType,
-      startedAt,
-      endedAt,
-      status: 'success',
-    });
-
-    return {
-      handlerType: 'anima',
-      handlerName: `(role: ${roleName})`,
-      status: 'skipped',
-      error: 'No session provider registered — anima session not launched.',
-    };
-  }
-
-  try {
-    const payload = (event.payload as Record<string, unknown>) ?? {};
-
-    // Resolve role to a specific anima
-    const animaName = resolveAnimaByRole(home, roleName);
-
-    // Step 1: Bind or synthesize writ
-    const existingWritId = payload.writId as string | undefined;
-    let writId: string;
-
-    if (existingWritId) {
-      writId = existingWritId;
-    } else {
-      // Synthesize a summon writ for non-writ events
-      const writ = createWrit(home, {
-        type: 'summon',
-        title: `Summon ${roleName}: ${event.name}`,
-        description: JSON.stringify(event.payload),
-      });
-      writId = writ.id;
-    }
-
-    // Step 2: Manifest the anima
-    const manifestResult = await manifest(home, animaName);
-
-    // Step 3: Resolve workspace from event payload
-    const workspace = resolveWorkspace(payload);
-
-    // Step 4: Hydrate prompt template
-    let userPrompt = hydratePromptTemplate(home, promptTemplate, payload, writId);
-
-    // Append progress appendix for resumed sessions
-    const appendix = buildProgressAppendix(home, writId);
-    if (appendix && userPrompt) {
-      userPrompt = `${userPrompt}\n\n---\n${appendix}`;
-    } else if (appendix) {
-      userPrompt = appendix;
-    }
-
-    // Step 5: Activate writ before launch
-    // We don't have the session ID yet (launchSession creates it internally),
-    // so we activate with a placeholder. The session row has the writ_id
-    // reference for the authoritative link.
-    activateWrit(home, writId, 'pending');
-
-    // Set NEXUS_WRIT_ID for tools to read during the session
-    const prevWritId = process.env.NEXUS_WRIT_ID;
-    process.env.NEXUS_WRIT_ID = writId;
-
-    let sessionResult;
-    try {
-      sessionResult = await launchSession({
-        home,
-        manifest: manifestResult,
-        prompt: userPrompt,
-        interactive: false,
-        workspace,
-        trigger: 'summon',
-        writId,
-        systemPromptAppendix: WRIT_SESSION_PROTOCOL,
-      });
-    } finally {
-      if (prevWritId !== undefined) {
-        process.env.NEXUS_WRIT_ID = prevWritId;
-      } else {
-        delete process.env.NEXUS_WRIT_ID;
-      }
-    }
-
-    // Update writ with actual session ID (best effort)
-    try {
-      const db = new Database(booksPath(home));
-      db.pragma('foreign_keys = ON');
-      try {
-        db.prepare(
-          `UPDATE writs SET session_id = ? WHERE id = ? AND session_id = 'pending'`,
-        ).run(sessionResult.sessionId, writId);
-      } finally {
-        db.close();
-      }
-    } catch { /* best effort */ }
-
-    // Step 6: Handle session end — check writ status
-    const finalWrit = readWrit(home, writId);
-    if (finalWrit && finalWrit.status === 'active') {
-      // Session ended without complete-session or fail-writ → interrupted
-      interruptWrit(home, writId);
-    }
-    // If status is completed, pending, or failed — the tool already handled it
-
-    const endedAt = new Date().toISOString();
-
-    recordDispatch(home, {
-      eventId: event.id,
-      handlerType: 'anima',
-      handlerName: animaName,
-      targetRole: roleName,
-      noticeType,
-      startedAt,
-      endedAt,
-      status: 'success',
-    });
-
-    return {
-      handlerType: 'anima',
-      handlerName: animaName,
-      status: 'success',
-    };
-  } catch (err) {
-    const endedAt = new Date().toISOString();
-    const errorMsg = err instanceof Error ? err.message : String(err);
-
-    recordDispatch(home, {
-      eventId: event.id,
-      handlerType: 'anima',
-      handlerName: `(role: ${roleName})`,
-      targetRole: roleName,
-      noticeType,
-      startedAt,
-      endedAt,
-      status: 'error',
-      error: errorMsg,
-    });
-
-    return {
-      handlerType: 'anima',
-      handlerName: `(role: ${roleName})`,
-      status: 'error',
-      error: errorMsg,
-    };
-  }
-}
 
 /**
  * Signal standing-order.failed when a standing order execution fails.

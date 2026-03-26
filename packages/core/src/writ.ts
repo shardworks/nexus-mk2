@@ -315,8 +315,8 @@ export function failWrit(home: string, writId: string): WritRecord {
   try {
     const current = readWritById(db, writId);
     if (!current) throw new Error(`Writ "${writId}" not found.`);
-    if (current.status !== 'active') {
-      throw new Error(`Cannot fail writ "${writId}" — status is "${current.status}", expected "active".`);
+    if (current.status === 'completed' || current.status === 'failed' || current.status === 'cancelled') {
+      throw new Error(`Cannot fail writ "${writId}" — status is "${current.status}" (terminal).`);
     }
 
     db.prepare(

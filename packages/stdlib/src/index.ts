@@ -37,6 +37,7 @@ export { default as convene } from './tools/convene.ts';
 // ── Engines ────────────────────────────────────────────────────────────
 export { default as workshopPrepare } from './engines/workshop-prepare.ts';
 export { default as workshopMerge } from './engines/workshop-merge.ts';
+export { default as summonEngine } from './engines/summon.ts';
 
 // ── Default export: all tools + engines as flat array ──────────────────
 import commissionCreate from './tools/commission.ts';
@@ -75,6 +76,7 @@ import conversationEndTool from './tools/conversation-end.ts';
 import conveneTool from './tools/convene.ts';
 import workshopPrepare from './engines/workshop-prepare.ts';
 import workshopMerge from './engines/workshop-merge.ts';
+import summonEngine from './engines/summon.ts';
 
 export default [
   commissionCreate, commissionList, commissionShow, commissionUpdate,
@@ -85,5 +87,5 @@ export default [
   signal, nexusVersion,
   createWritTool, listWritsTool, showWritTool, completeSessionTool, failWritTool,
   conversationListTool, conversationShowTool, conversationEndTool, conveneTool,
-  workshopPrepare, workshopMerge,
+  workshopPrepare, workshopMerge, summonEngine,
 ];

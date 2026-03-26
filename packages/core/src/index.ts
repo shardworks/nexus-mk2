@@ -51,6 +51,8 @@ export {
   clockStart,
   clockStop,
   clockStatus,
+  desugarOrder,
+  extractParams,
 } from './clockworks.ts';
 
 export {
@@ -239,6 +241,7 @@ export {
   type UpdateAnimaOptions,
   type AnimaStaleness,
   type StalenessInfo,
+  resolveAnimaByRole,
   listAnimas,
   showAnima,
   updateAnima,

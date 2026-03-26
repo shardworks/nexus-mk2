@@ -44,6 +44,12 @@ export interface GuildEvent {
 export interface EngineContext {
   /** Absolute path to the guild root. */
   home: string;
+  /**
+   * Parameters extracted from the standing order that triggered this engine.
+   * Any key on the standing order that isn't a reserved structural key
+   * (`on`, `run`) is passed through here. Empty object when no params.
+   */
+  params: Record<string, unknown>;
 }
 
 /**
