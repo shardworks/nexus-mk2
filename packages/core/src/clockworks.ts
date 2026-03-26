@@ -537,15 +537,22 @@ export function clockStart(home: string, options?: ClockStartOptions): ClockStar
   const logFd = fs.openSync(logFile, 'a');
 
   // Resolve the daemon script from this module's directory.
-  // clock-daemon.ts lives alongside clockworks.ts in the same package.
+  // clock-daemon lives alongside clockworks in the same package.
+  // When running from source it's .ts; when running from dist it's .js.
   const thisDir = path.dirname(fileURLToPath(import.meta.url));
-  const daemonScript = path.join(thisDir, 'clock-daemon.ts');
+  const daemonScript = fs.existsSync(path.join(thisDir, 'clock-daemon.ts'))
+    ? path.join(thisDir, 'clock-daemon.ts')
+    : path.join(thisDir, 'clock-daemon.js');
+
+  // Use --experimental-transform-types for .ts, not needed for .js
+  const nodeArgs = daemonScript.endsWith('.ts')
+    ? ['--disable-warning=ExperimentalWarning', '--experimental-transform-types']
+    : [];
 
   const child = spawn(
     process.execPath,
     [
-      '--disable-warning=ExperimentalWarning',
-      '--experimental-transform-types',
+      ...nodeArgs,
       daemonScript,
       home,
       String(interval),
