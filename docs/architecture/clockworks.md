@@ -146,9 +146,21 @@ No daemon required. The operator decides when and how much the Clockworks runs.
 
 #### Phase 2 — daemon
 
-A long-running `nsg clock start` process watches the event queue continuously. Processes events as they arrive. Enables external event injection — webhooks, file watchers, scheduled jobs. The guild acts on itself without a human CLI invocation.
+A background daemon that polls the event queue and processes events automatically.
 
-Phase 2 requires no architectural changes to events, standing orders, or the Clockworks schema — only a new runner invocation mode. The infrastructure is identical; the trigger changes.
+| Command | Behavior |
+|---|---|
+| `nsg clock start [--interval <ms>]` | Start the daemon as a detached background process (default interval: 2000ms) |
+| `nsg clock stop` | Send SIGTERM and clean up the PID file |
+| `nsg clock status` | Show whether the daemon is running, with PID, uptime, and log file path |
+
+The daemon spawns as a detached child process. It writes a PID file at `<home>/.nexus/clock.pid` and logs to `<home>/.nexus/clock.log` (append mode). Only event-processing cycles are logged; idle polls are silent.
+
+The daemon registers the session provider at startup, enabling it to dispatch anima sessions (summon/brief standing orders) autonomously.
+
+Phase 1 commands (`list`, `tick`, `run`) continue to work alongside the daemon. If the daemon is running, `tick` and `run` print a warning but still execute — SQLite handles concurrent access safely.
+
+Core API: `clockStart(home, options?)`, `clockStop(home)`, `clockStatus(home)`. The `clock-status` MCP tool exposes daemon status to animas.
 
 ---
 
@@ -311,5 +323,5 @@ No new fields needed. The descriptor's `entry` field already points to the modul
 - **Natural language trigger syntax** — `'when a commission is posted'` instead of `'commission.posted'`. Worth pursuing once real guilds have standing orders in production and vocabulary needs are understood. Requires validation tooling to be safe.
 - **Pre-event hooks** — cancellable `before.*` events. Powerful but complex. Start with observation-only (post-facto) events.
 - **Payload schema enforcement** — schema field in custom event declarations is documented but not validated. Enforcement deferred.
-- **Phase 2 daemon** — continuous event processing. Deferred until Phase 1 is proven.
+- **Phase 2 daemon enhancements** — external event injection (webhooks, file watchers), log rotation, concurrency.
 - **Scheduled standing orders** — time-triggered rather than event-triggered. Deferred.

@@ -278,6 +278,9 @@ Tools that animas wield during work. Each tool ships with instructions delivered
 - **clock-list** — show pending events
 - **clock-tick** — process the next pending event
 - **clock-run** — process all pending events
+- **clock-start** — start the clockworks daemon
+- **clock-stop** — stop the clockworks daemon
+- **clock-status** — check if the clockworks daemon is running (PID, uptime, log file)
 
 ### Utility Tools
 - **signal** — signal a custom guild event for the Clockworks
@@ -410,13 +413,25 @@ The event name must be declared in `guild.json clockworks.events`. Framework nam
 
 ### Processing Events
 
-Events are not processed automatically. The operator controls when the Clockworks runs:
+Events can be processed manually or automatically via the daemon.
+
+**Manual processing:**
 
 | Command | What it does |
 |---------|-------------|
 | `nsg clock list` | Show all pending (unprocessed) events |
 | `nsg clock tick [id]` | Process the next pending event, or a specific one by id |
 | `nsg clock run` | Process all pending events until the queue is empty |
+
+**Daemon (automatic processing):**
+
+| Command | What it does |
+|---------|-------------|
+| `nsg clock start [--interval <ms>]` | Start the daemon (polls every 2s by default) |
+| `nsg clock stop` | Stop the daemon |
+| `nsg clock status` | Check if the daemon is running |
+
+The daemon runs as a background process, polling the event queue and processing events as they arrive. Use the `clock-status` tool to verify the daemon is active before dispatching work that depends on automatic event processing.
 
 ### Error Handling
 
@@ -587,3 +602,6 @@ The primary interface is the `nsg` command, organized by noun groups:
 | `nsg clock list` | Show pending events |
 | `nsg clock tick [id]` | Process next pending event (or specific id) |
 | `nsg clock run` | Process all pending events |
+| `nsg clock start [--interval <ms>]` | Start the daemon |
+| `nsg clock stop` | Stop the daemon |
+| `nsg clock status` | Show daemon status |

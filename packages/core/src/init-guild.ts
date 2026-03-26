@@ -143,7 +143,7 @@ export function initGuild(home: string, name: string, model: string): void {
         'anima-create', 'anima-list', 'anima-show', 'anima-update', 'anima-remove',
         'workshop-create', 'workshop-register', 'workshop-list', 'workshop-show', 'workshop-remove',
         'tool-install', 'tool-remove', 'tool-list',
-        'clock-list', 'clock-tick', 'clock-run',
+        'clock-list', 'clock-tick', 'clock-run', 'clock-start', 'clock-stop', 'clock-status',
         'work-list', 'work-show', 'work-update', 'work-check',
         'piece-list', 'piece-show', 'piece-update', 'piece-check',
         'job-list', 'job-show', 'job-update', 'job-check',

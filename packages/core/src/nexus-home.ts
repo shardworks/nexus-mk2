@@ -53,3 +53,13 @@ export function workshopsPath(home: string): string {
 export function workshopBarePath(home: string, name: string): string {
   return path.join(home, '.nexus', 'workshops', `${name}.git`);
 }
+
+/** Path to the clockworks daemon PID file. */
+export function clockPidPath(home: string): string {
+  return path.join(home, '.nexus', 'clock.pid');
+}
+
+/** Path to the clockworks daemon log file. */
+export function clockLogPath(home: string): string {
+  return path.join(home, '.nexus', 'clock.log');
+}

@@ -56,7 +56,7 @@ program.addCommand(makeAnimaCommand());
 // nsg commission [create|list|show|update]
 program.addCommand(makeCommissionCommand());
 
-// nsg clock [list|tick|run]
+// nsg clock [list|tick|run|start|stop|status]
 program.addCommand(makeClockCommand());
 
 // nsg work [create|list|show|update]

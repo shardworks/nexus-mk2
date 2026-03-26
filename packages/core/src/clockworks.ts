@@ -11,7 +11,10 @@
  * no callback hack needed. The clockworks resolves roles to animas,
  * manifests them, and calls launchSession().
  */
+import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { readGuildConfig } from './guild-config.ts';
 import type { GuildConfig, StandingOrder } from './guild-config.ts';
@@ -24,7 +27,7 @@ import {
 } from './events.ts';
 import { isClockworkEngine, resolveEngineFromExport } from './engine.ts';
 import type { GuildEvent } from './engine.ts';
-import { booksPath } from './nexus-home.ts';
+import { booksPath, clockPidPath, clockLogPath } from './nexus-home.ts';
 import { generateId } from './id.ts';
 import { updateCommissionStatus, readCommission } from './commission.ts';
 import { manifest } from './manifest.ts';
@@ -438,4 +441,182 @@ export async function clockRun(home: string): Promise<ClockRunResult> {
   }
 
   return { processed, totalEvents };
+}
+
+// ── Daemon lifecycle ──────────────────────────────────────────────────
+
+/** Options for starting the clockworks daemon. */
+export interface ClockStartOptions {
+  /** Polling interval in milliseconds. Default: 2000. */
+  interval?: number;
+}
+
+/** Result of starting the clockworks daemon. */
+export interface ClockStartResult {
+  pid: number;
+  logFile: string;
+}
+
+/** Result of stopping the clockworks daemon. */
+export interface ClockStopResult {
+  pid: number;
+  stopped: boolean;
+}
+
+/** Current status of the clockworks daemon. */
+export interface ClockStatus {
+  running: boolean;
+  pid?: number;
+  logFile?: string;
+  uptime?: number;
+}
+
+/**
+ * Check if a process is alive by sending signal 0.
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read the PID file. Returns { pid, startedAt } or null if no file.
+ */
+function readPidFile(home: string): { pid: number; startedAt: string } | null {
+  const pidFile = clockPidPath(home);
+  if (!fs.existsSync(pidFile)) return null;
+  try {
+    const content = fs.readFileSync(pidFile, 'utf-8').trim();
+    const lines = content.split('\n');
+    const pid = parseInt(lines[0]!, 10);
+    const startedAt = lines[1] ?? new Date().toISOString();
+    if (isNaN(pid)) return null;
+    return { pid, startedAt };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clean up a stale PID file (process is dead).
+ */
+function cleanStalePid(home: string): void {
+  const pidFile = clockPidPath(home);
+  try { fs.unlinkSync(pidFile); } catch { /* already gone */ }
+}
+
+/**
+ * Start the clockworks daemon as a detached background process.
+ *
+ * Spawns a child process that polls the event queue at the given interval.
+ * Returns immediately after the child is spawned.
+ *
+ * @param home - Guild root path.
+ * @param options - Daemon options (interval).
+ * @returns PID and log file path.
+ */
+export function clockStart(home: string, options?: ClockStartOptions): ClockStartResult {
+  const interval = options?.interval ?? 2000;
+
+  // Check if daemon is already running
+  const existing = readPidFile(home);
+  if (existing && isProcessAlive(existing.pid)) {
+    throw new Error(`Clockworks daemon is already running (PID ${existing.pid}).`);
+  }
+
+  // Clean up stale PID file if needed
+  if (existing) cleanStalePid(home);
+
+  const logFile = clockLogPath(home);
+
+  // Open log file for append
+  const logFd = fs.openSync(logFile, 'a');
+
+  // Resolve the daemon script from this module's directory.
+  // clock-daemon.ts lives alongside clockworks.ts in the same package.
+  const thisDir = path.dirname(fileURLToPath(import.meta.url));
+  const daemonScript = path.join(thisDir, 'clock-daemon.ts');
+
+  const child = spawn(
+    process.execPath,
+    [
+      '--disable-warning=ExperimentalWarning',
+      '--experimental-transform-types',
+      daemonScript,
+      home,
+      String(interval),
+    ],
+    {
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+      env: { ...process.env },
+    },
+  );
+
+  const pid = child.pid!;
+
+  // Write PID file: line 1 = PID, line 2 = start timestamp
+  const pidFile = clockPidPath(home);
+  fs.writeFileSync(pidFile, `${pid}\n${new Date().toISOString()}\n`);
+
+  // Detach from parent
+  child.unref();
+  fs.closeSync(logFd);
+
+  return { pid, logFile };
+}
+
+/**
+ * Stop the running clockworks daemon.
+ *
+ * @param home - Guild root path.
+ * @returns PID that was stopped and whether the process was still alive.
+ */
+export function clockStop(home: string): ClockStopResult {
+  const pidInfo = readPidFile(home);
+  if (!pidInfo) {
+    throw new Error('Clockworks daemon is not running (no PID file).');
+  }
+
+  const alive = isProcessAlive(pidInfo.pid);
+  if (alive) {
+    process.kill(pidInfo.pid, 'SIGTERM');
+  }
+
+  cleanStalePid(home);
+
+  return { pid: pidInfo.pid, stopped: alive };
+}
+
+/**
+ * Get the current status of the clockworks daemon.
+ *
+ * @param home - Guild root path.
+ * @returns Daemon status including PID, log file, and uptime if running.
+ */
+export function clockStatus(home: string): ClockStatus {
+  const pidInfo = readPidFile(home);
+  if (!pidInfo) {
+    return { running: false };
+  }
+
+  const alive = isProcessAlive(pidInfo.pid);
+  if (!alive) {
+    cleanStalePid(home);
+    return { running: false };
+  }
+
+  const logFile = clockLogPath(home);
+  const uptime = Date.now() - new Date(pidInfo.startedAt).getTime();
+
+  return {
+    running: true,
+    pid: pidInfo.pid,
+    logFile,
+    uptime,
+  };
 }

@@ -503,6 +503,36 @@ Process a single event. If `eventId` is provided, processes that specific event.
 
 Process all pending events until the queue is empty. Loops because standing order failures may generate new events (`standing-order.failed`).
 
+### `clockStart(home, options?): ClockStartResult`
+
+Start the clockworks daemon as a detached background process. The daemon polls the event queue at the specified interval and processes events automatically.
+
+```typescript
+clockStart(home, { interval: 2000 })
+// => { pid: 12345, logFile: '/path/to/.nexus/clock.log' }
+```
+
+Options: `{ interval?: number }` — polling interval in ms (default 2000). All options are optional. Throws if the daemon is already running.
+
+### `clockStop(home): ClockStopResult`
+
+Stop the running clockworks daemon. Sends SIGTERM and removes the PID file. Handles stale PID files gracefully.
+
+```typescript
+clockStop(home)
+// => { pid: 12345, stopped: true }
+```
+
+### `clockStatus(home): ClockStatus`
+
+Check whether the clockworks daemon is running. Cleans up stale PID files automatically.
+
+```typescript
+clockStatus(home)
+// => { running: true, pid: 12345, logFile: '...', uptime: 360000 }
+// or { running: false }
+```
+
 ### Types
 
 | Type | Description |
@@ -510,6 +540,10 @@ Process all pending events until the queue is empty. Loops because standing orde
 | `TickResult` | `{ eventId, eventName, dispatches: DispatchSummary[] }` |
 | `DispatchSummary` | `{ handlerType, handlerName, status, error? }` |
 | `ClockRunResult` | `{ processed: TickResult[], totalEvents }` |
+| `ClockStartOptions` | `{ interval?: number }` |
+| `ClockStartResult` | `{ pid, logFile }` |
+| `ClockStopResult` | `{ pid, stopped }` |
+| `ClockStatus` | `{ running, pid?, logFile?, uptime? }` |
 
 ---
 

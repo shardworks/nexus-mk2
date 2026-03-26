@@ -42,8 +42,15 @@ export {
   type TickResult,
   type DispatchSummary,
   type ClockRunResult,
+  type ClockStartOptions,
+  type ClockStartResult,
+  type ClockStopResult,
+  type ClockStatus,
   clockTick,
   clockRun,
+  clockStart,
+  clockStop,
+  clockStatus,
 } from './clockworks.ts';
 
 export {
@@ -68,6 +75,8 @@ export {
   worktreesPath,
   workshopsPath,
   workshopBarePath,
+  clockPidPath,
+  clockLogPath,
 } from './nexus-home.ts';
 export {
   type InstallToolOptions,

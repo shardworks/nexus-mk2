@@ -87,14 +87,14 @@ These are typical of agent-generated UIs that optimize for feature completeness 
 ## Changes Before Next Commission
 
 ### Must-do
-- [ ] Build lean artificer curriculum (strip guild-ops to role essentials, strokes front-and-center)
-- [ ] Add codex entry: don't hand-roll security-sensitive utilities
-- [ ] Add codex entry: use MCP tools, not CLI commands
-- [ ] Fix session provider MCP registration gap
-- [ ] Fix baseTools override in starter kit
+- [x] Build lean artificer curriculum (strip guild-ops to role essentials, strokes front-and-center)
+- [x] Add codex entry: don't hand-roll security-sensitive utilities
+- [x] Add codex entry: use MCP tools, not CLI commands
+- [x] Fix session provider MCP registration gap
+- [x] Fix baseTools override in starter kit
 
 ### Should-do
-- [ ] Automate clockworks (remove manual clock-running requirement)
+- [x] Automate clockworks (remove manual clock-running requirement)
 - [ ] Build status/monitoring tooling for in-flight commissions
 - [ ] Commission packaging/publishing guidance (how does agent-built code get distributed?)
 

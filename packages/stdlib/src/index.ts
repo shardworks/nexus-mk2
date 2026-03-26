@@ -19,6 +19,9 @@ export { default as toolList } from './tools/tool-list.ts';
 export { default as clockList } from './tools/clock-list.ts';
 export { default as clockTick } from './tools/clock-tick.ts';
 export { default as clockRun } from './tools/clock-run.ts';
+export { default as clockStatus } from './tools/clock-status.ts';
+export { default as clockStart } from './tools/clock-start.ts';
+export { default as clockStop } from './tools/clock-stop.ts';
 export { default as signal } from './tools/signal.ts';
 export { default as nexusVersion } from './tools/nexus-version.ts';
 export { default as workCreate } from './tools/work-create.ts';
@@ -63,6 +66,9 @@ import toolList from './tools/tool-list.ts';
 import clockList from './tools/clock-list.ts';
 import clockTick from './tools/clock-tick.ts';
 import clockRun from './tools/clock-run.ts';
+import clockStatus from './tools/clock-status.ts';
+import clockStartTool from './tools/clock-start.ts';
+import clockStopTool from './tools/clock-stop.ts';
 import signal from './tools/signal.ts';
 import nexusVersion from './tools/nexus-version.ts';
 import workCreate from './tools/work-create.ts';
@@ -89,7 +95,7 @@ export default [
   animaCreate, animaList, animaShow, animaUpdate, animaRemove,
   workshopCreate, workshopRegister, workshopList, workshopShow, workshopRemove,
   toolInstall, toolRemove, toolList,
-  clockList, clockTick, clockRun,
+  clockList, clockTick, clockRun, clockStatus, clockStartTool, clockStopTool,
   signal, nexusVersion,
   workCreate, workList, workShow, workUpdate,
   pieceCreate, pieceList, pieceShow, pieceUpdate,
