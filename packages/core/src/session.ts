@@ -318,6 +318,12 @@ export interface SessionLaunchOptions {
    * as they arrive.
    */
   onChunk?: (chunk: SessionChunk) => void;
+  /**
+   * Additional content appended to the system prompt after manifest assembly.
+   * Used by clockworks to inject session protocol (e.g. writ completion requirements).
+   * Keeps dispatch concerns separate from manifest (identity).
+   */
+  systemPromptAppendix?: string;
 }
 
 /** What the funnel returns to callers. */
@@ -677,8 +683,14 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
     );
   }
 
-  const { home, manifest, prompt, interactive, trigger, name, maxBudgetUsd, writId,
-    conversationId, turnNumber, claudeSessionId, onChunk } = options;
+  const { home, prompt, interactive, trigger, name, maxBudgetUsd, writId,
+    conversationId, turnNumber, claudeSessionId, onChunk, systemPromptAppendix } = options;
+
+  // Apply system prompt appendix (e.g. writ protocol) if provided.
+  // This keeps dispatch concerns (clockworks) separate from identity (manifest).
+  const manifest = systemPromptAppendix
+    ? { ...options.manifest, systemPrompt: options.manifest.systemPrompt + '\n\n' + systemPromptAppendix }
+    : options.manifest;
   let { workspace } = options;
 
   // Step 1: If workshop-temp, create fresh worktree

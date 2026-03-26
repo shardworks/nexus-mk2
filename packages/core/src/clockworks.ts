@@ -40,6 +40,23 @@ import {
   buildProgressAppendix,
 } from './writ.ts';
 
+// ── Session Protocol ──────────────────────────────────────────────────
+
+/**
+ * Protocol block injected into the system prompt for all writ-bound sessions.
+ * Without this, animas won't know to call complete-session, and every session
+ * will be treated as interrupted and re-dispatched in an infinite loop.
+ */
+export const WRIT_SESSION_PROTOCOL = `## Session Protocol
+
+You are working on a writ (tracked work item). You MUST signal completion before your session ends:
+
+- Call \`complete-session\` when you have finished your work. If you created child writs, the system will wait for them to complete automatically.
+- Call \`fail-writ\` with a reason if the work cannot be completed.
+- If your session ends without calling either tool, the system treats it as an interruption and will re-dispatch the work to a new session.`;
+
+// ── Types ─────────────────────────────────────────────────────────────
+
 /** Result of processing a single event. */
 export interface TickResult {
   eventId: string;
@@ -314,6 +331,7 @@ async function executeAnimaOrder(
         workspace,
         trigger: 'summon',
         writId,
+        systemPromptAppendix: WRIT_SESSION_PROTOCOL,
       });
     } finally {
       if (prevWritId !== undefined) {
