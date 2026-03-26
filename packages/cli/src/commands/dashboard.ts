@@ -1,5 +1,4 @@
 import { createCommand } from 'commander';
-import { startMonitor } from '@shardworks/guild-monitor';
 import { resolveHome } from '../resolve-home.ts';
 
 export function makeDashboardCommand() {
@@ -18,6 +17,18 @@ export function makeDashboardCommand() {
       const port = parseInt(opts.port, 10);
       if (isNaN(port)) {
         console.error(`Invalid port: ${opts.port}`);
+        process.exit(1);
+      }
+
+      // Lazy-load guild-monitor so a broken/outdated version doesn't
+      // take down every CLI command at import time.
+      let startMonitor: (opts: { home: string; port: number }) => Promise<void>;
+      try {
+        ({ startMonitor } = await import('@shardworks/guild-monitor'));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`Failed to load @shardworks/guild-monitor: ${msg}`);
+        console.error('Try updating: npm install -g @shardworks/nexus@latest');
         process.exit(1);
       }
 
