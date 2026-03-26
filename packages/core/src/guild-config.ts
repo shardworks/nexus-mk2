@@ -37,10 +37,16 @@ export interface EventDeclaration {
   schema?: Record<string, string>;
 }
 
+/** A writ type declaration in guild.json. */
+export interface WritTypeDeclaration {
+  /** Human-readable description of this writ type. */
+  description: string;
+}
+
 /** A standing order — a registered response to an event. */
 export type StandingOrder =
   | { on: string; run: string }
-  | { on: string; summon: string }
+  | { on: string; summon: string; prompt?: string }
   | { on: string; brief: string };
 
 /** The clockworks configuration block in guild.json. */
@@ -93,6 +99,8 @@ export interface GuildConfig {
   temperaments: Record<string, TrainingEntry>;
   /** Clockworks configuration — events, standing orders. */
   clockworks?: ClockworksConfig;
+  /** Writ types declared by this guild. Built-in types (mandate, summon) are implicit. */
+  writTypes?: Record<string, WritTypeDeclaration>;
 }
 
 /**

@@ -1,5 +1,7 @@
 # Work Decomposition
 
+> **⚠️ Superseded.** This document describes the old four-level hierarchy (work → piece → job → stroke). The system now uses the unified writ model. See [writs.md](writs.md) for the current design.
+
 How the guild breaks work into manageable, trackable, dispatchable units — and why each level of the hierarchy exists.
 
 ## The Hierarchy

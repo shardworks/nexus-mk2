@@ -275,6 +275,8 @@ export interface SessionLaunchOptions {
   name?: string;
   /** Budget cap, if any. */
   maxBudgetUsd?: number;
+  /** Bound writ ID, if any. Set by clockworks for writ-driven sessions. */
+  writId?: string;
 }
 
 /** What the funnel returns to callers. */
@@ -297,6 +299,8 @@ export interface SessionResult {
   providerSessionId?: string;
   /** Raw transcript from the provider. */
   transcript?: Record<string, unknown>[];
+  /** Bound writ ID, if any. */
+  writId?: string;
 }
 
 /**
@@ -510,6 +514,7 @@ function insertSessionRow(
     temperamentVersion: string | null;
     roles: string[];
     startedAt: string;
+    writId?: string;
   },
 ): string {
   const db = new Database(booksPath(home));
@@ -519,8 +524,8 @@ function insertSessionRow(
     db.prepare(
       `INSERT INTO sessions (id, anima_id, provider, trigger, workshop, workspace_kind,
         curriculum_name, curriculum_version, temperament_name, temperament_version,
-        roles, started_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        roles, started_at, writ_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       opts.animaId,
@@ -534,6 +539,7 @@ function insertSessionRow(
       opts.temperamentVersion,
       JSON.stringify(opts.roles),
       opts.startedAt,
+      opts.writId ?? null,
     );
     return id;
   } finally {
@@ -622,7 +628,7 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
     );
   }
 
-  const { home, manifest, prompt, interactive, trigger, name, maxBudgetUsd } = options;
+  const { home, manifest, prompt, interactive, trigger, name, maxBudgetUsd, writId } = options;
   let { workspace } = options;
 
   // Step 1: If workshop-temp, create fresh worktree
@@ -656,6 +662,7 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
       temperamentVersion: manifest.composition.temperament?.version ?? null,
       roles: manifest.anima.roles,
       startedAt,
+      writId,
     });
   } catch (err) {
     // If we can't even write the session row, signal failure and abort
@@ -775,5 +782,6 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
     durationMs,
     providerSessionId: providerResult?.providerSessionId,
     transcript: providerResult?.transcript,
+    writId,
   };
 }

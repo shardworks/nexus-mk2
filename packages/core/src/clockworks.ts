@@ -29,9 +29,16 @@ import { isClockworkEngine, resolveEngineFromExport } from './engine.ts';
 import type { GuildEvent } from './engine.ts';
 import { booksPath, clockPidPath, clockLogPath } from './nexus-home.ts';
 import { generateId } from './id.ts';
-import { updateCommissionStatus, readCommission } from './commission.ts';
 import { manifest } from './manifest.ts';
 import { launchSession, resolveWorkspace, getSessionProvider } from './session.ts';
+import {
+  createWrit,
+  readWrit,
+  activateWrit,
+  interruptWrit,
+  hydratePromptTemplate,
+  buildProgressAppendix,
+} from './writ.ts';
 
 /** Result of processing a single event. */
 export interface TickResult {
@@ -94,7 +101,8 @@ async function processEvent(home: string, event: GuildEvent): Promise<TickResult
         signalStandingOrderFailed(home, order, event, summary.error!);
       }
     } else if ('summon' in order && order.summon) {
-      const summary = await executeAnimaOrder(home, event, order.summon, 'summon');
+      const promptTpl = 'prompt' in order ? (order as { prompt?: string }).prompt : undefined;
+      const summary = await executeAnimaOrder(home, event, order.summon, 'summon', promptTpl);
       dispatches.push(summary);
 
       if (summary.status === 'error') {
@@ -208,11 +216,11 @@ function resolveAnimaByRole(home: string, role: string): string {
 }
 
 /**
- * Execute a `summon:` or `brief:` standing order.
+ * Execute a `summon:` standing order.
  *
- * Resolves the role to an anima, manifests it, and launches a session
- * through the unified session funnel. For summon orders with commission
- * context, writes the commission assignment and updates status.
+ * Resolves the role to an anima, binds or synthesizes a writ, hydrates
+ * the prompt template, manifests the anima, and launches a session.
+ * On session end, handles writ lifecycle (completion, pending, interruption).
  *
  * If no session provider is registered, records the dispatch as skipped.
  */
@@ -221,11 +229,11 @@ async function executeAnimaOrder(
   event: GuildEvent,
   roleName: string,
   noticeType: 'summon' | 'brief',
+  promptTemplate?: string,
 ): Promise<DispatchSummary> {
   const startedAt = new Date().toISOString();
 
   if (!getSessionProvider()) {
-    // No provider registered — record intent but skip execution.
     const endedAt = new Date().toISOString();
 
     recordDispatch(home, {
@@ -248,90 +256,93 @@ async function executeAnimaOrder(
   }
 
   try {
-    const payload = event.payload as Record<string, unknown> | null;
+    const payload = (event.payload as Record<string, unknown>) ?? {};
 
     // Resolve role to a specific anima
     const animaName = resolveAnimaByRole(home, roleName);
 
-    // Commission-specific lifecycle: write assignment, update status
-    const commissionId = payload?.commissionId as string | undefined;
-    if (commissionId != null && noticeType === 'summon') {
-      // Write commission assignment
+    // Step 1: Bind or synthesize writ
+    const existingWritId = payload.writId as string | undefined;
+    let writId: string;
+
+    if (existingWritId) {
+      writId = existingWritId;
+    } else {
+      // Synthesize a summon writ for non-writ events
+      const writ = createWrit(home, {
+        type: 'summon',
+        title: `Summon ${roleName}: ${event.name}`,
+        description: JSON.stringify(event.payload),
+      });
+      writId = writ.id;
+    }
+
+    // Step 2: Manifest the anima
+    const manifestResult = await manifest(home, animaName);
+
+    // Step 3: Resolve workspace from event payload
+    const workspace = resolveWorkspace(payload);
+
+    // Step 4: Hydrate prompt template
+    let userPrompt = hydratePromptTemplate(home, promptTemplate, payload, writId);
+
+    // Append progress appendix for resumed sessions
+    const appendix = buildProgressAppendix(home, writId);
+    if (appendix && userPrompt) {
+      userPrompt = `${userPrompt}\n\n---\n${appendix}`;
+    } else if (appendix) {
+      userPrompt = appendix;
+    }
+
+    // Step 5: Activate writ before launch
+    // We don't have the session ID yet (launchSession creates it internally),
+    // so we activate with a placeholder. The session row has the writ_id
+    // reference for the authoritative link.
+    activateWrit(home, writId, 'pending');
+
+    // Set NEXUS_WRIT_ID for tools to read during the session
+    const prevWritId = process.env.NEXUS_WRIT_ID;
+    process.env.NEXUS_WRIT_ID = writId;
+
+    let sessionResult;
+    try {
+      sessionResult = await launchSession({
+        home,
+        manifest: manifestResult,
+        prompt: userPrompt,
+        interactive: false,
+        workspace,
+        trigger: 'summon',
+        writId,
+      });
+    } finally {
+      if (prevWritId !== undefined) {
+        process.env.NEXUS_WRIT_ID = prevWritId;
+      } else {
+        delete process.env.NEXUS_WRIT_ID;
+      }
+    }
+
+    // Update writ with actual session ID (best effort)
+    try {
       const db = new Database(booksPath(home));
       db.pragma('foreign_keys = ON');
       try {
-        const animaRow = db.prepare(
-          `SELECT id FROM animas WHERE name = ?`,
-        ).get(animaName) as { id: string } | undefined;
-
-        if (animaRow) {
-          db.prepare(
-            `INSERT OR IGNORE INTO commission_assignments (id, commission_id, anima_id) VALUES (?, ?, ?)`,
-          ).run(generateId('ca'), commissionId, animaRow.id);
-        }
+        db.prepare(
+          `UPDATE writs SET session_id = ? WHERE id = ? AND session_id = 'pending'`,
+        ).run(sessionResult.sessionId, writId);
       } finally {
         db.close();
       }
+    } catch { /* best effort */ }
 
-      updateCommissionStatus(
-        home,
-        commissionId,
-        'in_progress',
-        `summoned ${animaName} (${roleName})`,
-      );
+    // Step 6: Handle session end — check writ status
+    const finalWrit = readWrit(home, writId);
+    if (finalWrit && finalWrit.status === 'active') {
+      // Session ended without complete-session or fail-writ → interrupted
+      interruptWrit(home, writId);
     }
-
-    // Manifest the anima
-    const manifestResult = await manifest(home, animaName);
-
-    // Resolve workspace from event payload
-    const workspace = resolveWorkspace(payload);
-
-    // Determine the user prompt
-    let userPrompt: string | null = null;
-    if (commissionId != null) {
-      const commissionRecord = readCommission(home, commissionId);
-      userPrompt = commissionRecord?.content ?? null;
-    } else if (payload?.brief && typeof payload.brief === 'string') {
-      userPrompt = payload.brief;
-    }
-
-    // Launch session through the funnel
-    const sessionResult = await launchSession({
-      home,
-      manifest: manifestResult,
-      prompt: userPrompt,
-      interactive: false,
-      workspace,
-      trigger: noticeType,
-      name: commissionId != null ? `commission-${commissionId}` : undefined,
-    });
-
-    // Write commission_sessions join row if applicable
-    if (commissionId != null) {
-      try {
-        const db = new Database(booksPath(home));
-        db.pragma('foreign_keys = ON');
-        try {
-          db.prepare(
-            `INSERT OR IGNORE INTO commission_sessions (commission_id, session_id) VALUES (?, ?)`,
-          ).run(commissionId, sessionResult.sessionId);
-        } finally {
-          db.close();
-        }
-      } catch { /* best effort — don't fail the dispatch for a join row */ }
-    }
-
-    // Signal commission.session.ended for the commission pipeline
-    if (commissionId != null) {
-      const workshop = payload?.workshop as string | undefined;
-      signalEvent(
-        home,
-        'commission.session.ended',
-        { commissionId, workshop, exitCode: sessionResult.exitCode },
-        'framework',
-      );
-    }
+    // If status is completed, pending, or failed — the tool already handled it
 
     const endedAt = new Date().toISOString();
 

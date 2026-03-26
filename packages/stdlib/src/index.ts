@@ -24,22 +24,11 @@ export { default as clockStart } from './tools/clock-start.ts';
 export { default as clockStop } from './tools/clock-stop.ts';
 export { default as signal } from './tools/signal.ts';
 export { default as nexusVersion } from './tools/nexus-version.ts';
-export { default as workCreate } from './tools/work-create.ts';
-export { default as workList } from './tools/work-list.ts';
-export { default as workShow } from './tools/work-show.ts';
-export { default as workUpdate } from './tools/work-update.ts';
-export { default as pieceCreate } from './tools/piece-create.ts';
-export { default as pieceList } from './tools/piece-list.ts';
-export { default as pieceShow } from './tools/piece-show.ts';
-export { default as pieceUpdate } from './tools/piece-update.ts';
-export { default as jobCreate } from './tools/job-create.ts';
-export { default as jobList } from './tools/job-list.ts';
-export { default as jobShow } from './tools/job-show.ts';
-export { default as jobUpdate } from './tools/job-update.ts';
-export { default as strokeCreate } from './tools/stroke-create.ts';
-export { default as strokeList } from './tools/stroke-list.ts';
-export { default as strokeShow } from './tools/stroke-show.ts';
-export { default as strokeUpdate } from './tools/stroke-update.ts';
+export { default as createWrit } from './tools/create-writ.ts';
+export { default as listWrits } from './tools/list-writs.ts';
+export { default as showWrit } from './tools/show-writ.ts';
+export { default as completeSession } from './tools/complete-session.ts';
+export { default as failWrit } from './tools/fail-writ.ts';
 
 // ── Engines ────────────────────────────────────────────────────────────
 export { default as workshopPrepare } from './engines/workshop-prepare.ts';
@@ -71,22 +60,11 @@ import clockStartTool from './tools/clock-start.ts';
 import clockStopTool from './tools/clock-stop.ts';
 import signal from './tools/signal.ts';
 import nexusVersion from './tools/nexus-version.ts';
-import workCreate from './tools/work-create.ts';
-import workList from './tools/work-list.ts';
-import workShow from './tools/work-show.ts';
-import workUpdate from './tools/work-update.ts';
-import pieceCreate from './tools/piece-create.ts';
-import pieceList from './tools/piece-list.ts';
-import pieceShow from './tools/piece-show.ts';
-import pieceUpdate from './tools/piece-update.ts';
-import jobCreate from './tools/job-create.ts';
-import jobList from './tools/job-list.ts';
-import jobShow from './tools/job-show.ts';
-import jobUpdate from './tools/job-update.ts';
-import strokeCreate from './tools/stroke-create.ts';
-import strokeList from './tools/stroke-list.ts';
-import strokeShow from './tools/stroke-show.ts';
-import strokeUpdate from './tools/stroke-update.ts';
+import createWritTool from './tools/create-writ.ts';
+import listWritsTool from './tools/list-writs.ts';
+import showWritTool from './tools/show-writ.ts';
+import completeSessionTool from './tools/complete-session.ts';
+import failWritTool from './tools/fail-writ.ts';
 import workshopPrepare from './engines/workshop-prepare.ts';
 import workshopMerge from './engines/workshop-merge.ts';
 
@@ -97,9 +75,6 @@ export default [
   toolInstall, toolRemove, toolList,
   clockList, clockTick, clockRun, clockStatus, clockStartTool, clockStopTool,
   signal, nexusVersion,
-  workCreate, workList, workShow, workUpdate,
-  pieceCreate, pieceList, pieceShow, pieceUpdate,
-  jobCreate, jobList, jobShow, jobUpdate,
-  strokeCreate, strokeList, strokeShow, strokeUpdate,
+  createWritTool, listWritsTool, showWritTool, completeSessionTool, failWritTool,
   workshopPrepare, workshopMerge,
 ];

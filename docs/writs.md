@@ -1,6 +1,6 @@
 # Writs
 
-**Status:** Clean draft, 2026-03-26. Distilled from design discussion between Sean and Coco.
+**Status:** Implemented, 2026-03-26. Distilled from design discussion between Sean and Coco.
 
 This document specifies the writ system — a redesign of work decomposition and dispatch that replaces the rigid four-level hierarchy (work → piece → job → stroke) with a flexible, type-driven model. It eliminates strokes as a separate concept, introduces prompt templates, and provides uniform writ binding for all summons.
 

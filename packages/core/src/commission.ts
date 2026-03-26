@@ -10,6 +10,7 @@ import { booksPath } from './nexus-home.ts';
 import { readGuildConfig } from './guild-config.ts';
 import { signalEvent } from './events.ts';
 import { generateId } from './id.ts';
+import { createWrit } from './writ.ts';
 
 export interface CommissionOptions {
   /** Absolute path to the guild root. */
@@ -225,22 +226,37 @@ export function showCommission(
 }
 
 /**
- * Check commission completion — counts child works.
+ * Check commission completion via its mandate writ's children.
+ *
+ * @deprecated Commission completion is now handled automatically by the writ
+ * system's completion rollup. When a mandate writ completes, the framework
+ * marks the corresponding commission as completed. This function is retained
+ * for backward compatibility with existing tools.
  */
 export function checkCommissionCompletion(home: string, commissionId: string): CompletionCheck {
   const db = new Database(booksPath(home));
   db.pragma('foreign_keys = ON');
 
   try {
+    // Find the mandate writ for this commission
+    const commission = db.prepare(
+      `SELECT writ_id FROM commissions WHERE id = ?`,
+    ).get(commissionId) as { writ_id: string | null } | undefined;
+
+    if (!commission?.writ_id) {
+      return { complete: false, total: 0, done: 0, pending: 0, failed: 0 };
+    }
+
     const rows = db.prepare(
-      `SELECT status, COUNT(*) as cnt FROM works WHERE commission_id = ? GROUP BY status`,
-    ).all(commissionId) as Array<{ status: string; cnt: number }>;
+      `SELECT status, COUNT(*) as cnt FROM writs WHERE parent_id = ? GROUP BY status`,
+    ).all(commission.writ_id) as Array<{ status: string; cnt: number }>;
 
     let total = 0, done = 0, pending = 0, failed = 0;
     for (const r of rows) {
       total += r.cnt;
       if (r.status === 'completed' || r.status === 'cancelled') done += r.cnt;
-      else if (r.status === 'open' || r.status === 'active') pending += r.cnt;
+      else if (r.status === 'failed') failed += r.cnt;
+      else pending += r.cnt;
     }
 
     return { complete: total > 0 && pending === 0 && failed === 0, total, done, pending, failed };
@@ -250,40 +266,24 @@ export function checkCommissionCompletion(home: string, commissionId: string): C
 }
 
 /**
- * Complete a commission if all works are completed/cancelled.
- * Signals commission.completed on transition.
+ * @deprecated Commission completion is now handled by writ completion rollup.
+ * When a mandate writ completes, the framework marks the commission as completed.
  */
 export function completeCommissionIfReady(home: string, commissionId: string): CompletionResult {
   const check = checkCommissionCompletion(home, commissionId);
   if (!check.complete || check.total === 0) {
-    // Read current status for the return value
     const current = readCommission(home, commissionId);
     return { changed: false, newStatus: current?.status ?? 'unknown' };
   }
 
-  const db = new Database(booksPath(home));
-  db.pragma('foreign_keys = ON');
-
-  try {
-    const current = db.prepare(`SELECT status FROM commissions WHERE id = ?`).get(commissionId) as { status: string } | undefined;
-    if (!current || current.status === 'completed') {
-      return { changed: false, newStatus: current?.status ?? 'unknown' };
-    }
-
-    db.prepare(
-      `UPDATE commissions SET status = 'completed', status_reason = 'all works completed', updated_at = datetime('now') WHERE id = ?`,
-    ).run(commissionId);
-
-    db.prepare(
-      `INSERT INTO audit_log (id, actor, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(generateId('aud'), 'framework', 'commission_completed', 'commission', commissionId, JSON.stringify(check));
-
-    signalEvent(home, 'commission.completed', { commissionId }, 'framework');
-
-    return { changed: true, newStatus: 'completed' };
-  } finally {
-    db.close();
+  const current = readCommission(home, commissionId);
+  if (!current || current.status === 'completed') {
+    return { changed: false, newStatus: current?.status ?? 'unknown' };
   }
+
+  updateCommissionStatus(home, commissionId, 'completed', 'all writs completed');
+  signalEvent(home, 'commission.completed', { commissionId }, 'framework');
+  return { changed: true, newStatus: 'completed' };
 }
 
 /**
@@ -329,8 +329,23 @@ export function commission(opts: CommissionOptions): CommissionResult {
       JSON.stringify({ workshop }),
     );
 
-    // Signal for Clockworks
+    // Signal for Clockworks — commission system event (pre-writ)
     signalEvent(home, 'commission.posted', { commissionId, workshop }, 'framework');
+
+    // Create the mandate writ — bridges commission system to writ system.
+    // Events are FIFO: commission.posted handlers (e.g. workshop-prepare) run
+    // before mandate.ready handlers (e.g. summon artificer).
+    const title = spec.split('\n')[0]!.substring(0, 200);
+    const mandate = createWrit(home, {
+      type: 'mandate',
+      title,
+      description: spec,
+    });
+
+    // Link commission to its mandate writ
+    db.prepare(
+      `UPDATE commissions SET writ_id = ? WHERE id = ?`,
+    ).run(mandate.id, commissionId);
 
     return { commissionId };
   } finally {

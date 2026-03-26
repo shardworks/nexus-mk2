@@ -11,10 +11,6 @@ import { makeSignalCommand } from './commands/signal.ts';
 import { makeClockCommand } from './commands/clock.ts';
 import { makeWorkshopCommand } from './commands/workshop.ts';
 import { makeAnimaCommand } from './commands/anima.ts';
-import { makeWorkCommand } from './commands/work.ts';
-import { makePieceCommand } from './commands/piece.ts';
-import { makeJobCommand } from './commands/job.ts';
-import { makeStrokeCommand } from './commands/stroke.ts';
 import { makeSessionCommand } from './commands/session.ts';
 import { makeEventCommand } from './commands/event.ts';
 import { makeDispatchCommand } from './commands/dispatch.ts';
@@ -59,18 +55,6 @@ program.addCommand(makeCommissionCommand());
 
 // nsg clock [list|tick|run|start|stop|status]
 program.addCommand(makeClockCommand());
-
-// nsg work [create|list|show|update]
-program.addCommand(makeWorkCommand());
-
-// nsg piece [create|list|show|update]
-program.addCommand(makePieceCommand());
-
-// nsg job [create|list|show|update]
-program.addCommand(makeJobCommand());
-
-// nsg stroke [create|list|show|update]
-program.addCommand(makeStrokeCommand());
 
 // nsg session [list|show]
 program.addCommand(makeSessionCommand());
