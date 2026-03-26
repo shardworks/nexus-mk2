@@ -8,7 +8,7 @@ export default tool({
   params: {
     anima: z.string().optional().describe('Filter by anima name or ID'),
     workshop: z.string().optional().describe('Filter by workshop name'),
-    trigger: z.string().optional().describe('Filter by trigger type (consult, summon, brief)'),
+    trigger: z.string().optional().describe('Filter by trigger type (consult, summon, brief, convene)'),
     status: z.enum(['active', 'completed']).optional().describe('Filter by active or completed'),
     limit: z.number().optional().default(20).describe('Maximum results'),
   },

@@ -186,6 +186,7 @@ export {
   type SessionProviderResult,
   type SessionLaunchOptions,
   type SessionResult,
+  type SessionChunk,
   type WorkspaceContext,
   type ResolvedWorkspace,
   type SessionRecord,
@@ -201,6 +202,21 @@ export {
   listSessions,
   showSession,
 } from './session.ts';
+export {
+  type ConversationChunk,
+  type CreateConversationOptions,
+  type CreateConversationResult,
+  type ConversationSummary,
+  type ConversationDetail,
+  type ListConversationsOptions,
+  createConversation,
+  takeTurn,
+  endConversation,
+  nextParticipant,
+  listConversations,
+  showConversation,
+  formatConveneMessage,
+} from './conversation.ts';
 export {
   type UpgradePlan,
   type UpgradeResult,

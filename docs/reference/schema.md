@@ -284,7 +284,7 @@ Session records — every session launched through the funnel.
 | `anima_id` | TEXT | NOT NULL, FK → animas | |
 | `provider` | TEXT | NOT NULL | Session provider name (e.g. `claude-code`) |
 | `model` | TEXT | | Model identifier |
-| `trigger` | TEXT | NOT NULL | `consult`, `summon`, or `brief` |
+| `trigger` | TEXT | NOT NULL | `consult`, `summon`, `brief`, or `convene` |
 | `workshop` | TEXT | | Workshop name (null for guildhall sessions) |
 | `workspace_kind` | TEXT | NOT NULL | `guildhall`, `workshop-temp`, or `workshop-managed` |
 | `curriculum_name` | TEXT | | |
@@ -303,6 +303,37 @@ Session records — every session launched through the funnel.
 | `duration_ms` | INTEGER | | |
 | `provider_session_id` | TEXT | | Provider's own session identifier |
 | `record_path` | TEXT | | Path to the SessionRecord JSON file (relative to guild root) |
+| `conversation_id` | TEXT | FK → conversations | Conversation this turn belongs to (null for standalone sessions) |
+| `turn_number` | INTEGER | | Position within the conversation (1-indexed) |
+| `writ_id` | TEXT | FK → writs | Bound writ (set by clockworks for writ-driven sessions) |
+
+### `conversations`
+
+Multi-turn interactions grouping multiple sessions.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (conv-) |
+| `status` | TEXT | NOT NULL, DEFAULT 'active', CHECK | One of: `active`, `concluded`, `abandoned` |
+| `kind` | TEXT | NOT NULL, CHECK | `consult` or `convene` |
+| `topic` | TEXT | | Seeding prompt or subject |
+| `turn_limit` | INTEGER | | Maximum total turns (null = unlimited) |
+| `created_at` | TEXT | NOT NULL, DEFAULT now | |
+| `ended_at` | TEXT | | |
+| `event_id` | TEXT | | For convene: the triggering event ID |
+
+### `conversation_participants`
+
+Participants in a conversation — human or anima.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (cpart-) |
+| `conversation_id` | TEXT | NOT NULL, FK → conversations | |
+| `kind` | TEXT | NOT NULL, CHECK | `anima` or `human` |
+| `name` | TEXT | NOT NULL | Anima name or `'patron'` |
+| `anima_id` | TEXT | | FK to animas (null for humans) |
+| `claude_session_id` | TEXT | | Provider session ID for `--resume` threading |
 
 ### `commission_sessions`
 
@@ -389,6 +420,17 @@ open → active → completed
 - **failed** — at least one stroke failed (set by `completeJobIfReady()`)
 - **cancelled** — abandoned
 
+### Conversation
+
+```
+active → concluded
+       → abandoned
+```
+
+- **active** — conversation is in progress, turns can be taken
+- **concluded** — conversation ended normally (turn limit reached or explicitly concluded)
+- **abandoned** — conversation ended abnormally (browser disconnect, timeout)
+
 ### Stroke
 
 ```
@@ -410,6 +452,8 @@ All entity IDs use the format `{prefix}-{8 hex chars}` where the hex is generate
 |--------|--------|---------|
 | `a-` | Anima | `a-5e6f7a8b` |
 | `c-` | Commission | `c-a3f7b2c1` |
+| `conv-` | Conversation | `conv-1a2b3c4d` |
+| `cpart-` | Conversation participant | `cpart-5e6f7a8b` |
 | `evt-` | Event | `evt-1a2b3c4d` |
 | `ses-` | Session | `ses-deadbeef` |
 | `w-` | Work | `w-12345678` |

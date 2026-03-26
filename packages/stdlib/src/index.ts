@@ -29,6 +29,10 @@ export { default as listWrits } from './tools/list-writs.ts';
 export { default as showWrit } from './tools/show-writ.ts';
 export { default as completeSession } from './tools/complete-session.ts';
 export { default as failWrit } from './tools/fail-writ.ts';
+export { default as conversationList } from './tools/conversation-list.ts';
+export { default as conversationShow } from './tools/conversation-show.ts';
+export { default as conversationEnd } from './tools/conversation-end.ts';
+export { default as convene } from './tools/convene.ts';
 
 // ── Engines ────────────────────────────────────────────────────────────
 export { default as workshopPrepare } from './engines/workshop-prepare.ts';
@@ -65,6 +69,10 @@ import listWritsTool from './tools/list-writs.ts';
 import showWritTool from './tools/show-writ.ts';
 import completeSessionTool from './tools/complete-session.ts';
 import failWritTool from './tools/fail-writ.ts';
+import conversationListTool from './tools/conversation-list.ts';
+import conversationShowTool from './tools/conversation-show.ts';
+import conversationEndTool from './tools/conversation-end.ts';
+import conveneTool from './tools/convene.ts';
 import workshopPrepare from './engines/workshop-prepare.ts';
 import workshopMerge from './engines/workshop-merge.ts';
 
@@ -76,5 +84,6 @@ export default [
   clockList, clockTick, clockRun, clockStatus, clockStartTool, clockStopTool,
   signal, nexusVersion,
   createWritTool, listWritsTool, showWritTool, completeSessionTool, failWritTool,
+  conversationListTool, conversationShowTool, conversationEndTool, conveneTool,
   workshopPrepare, workshopMerge,
 ];

@@ -208,12 +208,33 @@ export function showSession(home: string, sessionId: string): SessionDetail | nu
 
 // ── Types ──────────────────────────────────────────────────────────────
 
+/** A chunk emitted during streaming session output. */
+export type SessionChunk =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; tool: string }
+  | { type: 'tool_result'; tool: string };
+
 /** What a session provider must implement. */
 export interface SessionProvider {
   /** Provider identifier (e.g. "claude-code", "claude-api", "bedrock"). */
   name: string;
   /** Launch a session and return when it completes. */
   launch(options: SessionProviderLaunchOptions): Promise<SessionProviderResult>;
+  /**
+   * Launch a session with streaming output.
+   *
+   * Returns an async iterable of chunks for real-time output AND a promise
+   * for the final result. Used by conversation turns to stream responses
+   * to the dashboard while still capturing the full result for the funnel.
+   *
+   * Optional — providers that don't support streaming just omit this.
+   * The conversation system falls back to launch() (no streaming, just
+   * the final result).
+   */
+  launchStreaming?(options: SessionProviderLaunchOptions): {
+    chunks: AsyncIterable<SessionChunk>;
+    result: Promise<SessionProviderResult>;
+  };
 }
 
 /** Options passed to the provider's launch() — provider-specific subset. */
@@ -232,6 +253,11 @@ export interface SessionProviderLaunchOptions {
   name?: string;
   /** Budget cap, if any. */
   maxBudgetUsd?: number;
+  /**
+   * Claude session ID to resume. When provided, the provider uses --resume
+   * to continue an existing conversation instead of starting fresh.
+   */
+  claudeSessionId?: string;
 }
 
 /** What comes back from the provider (before the funnel adds its own fields). */
@@ -270,13 +296,28 @@ export interface SessionLaunchOptions {
   /** Workspace context. */
   workspace: ResolvedWorkspace;
   /** What triggered this session. */
-  trigger: 'consult' | 'summon' | 'brief';
+  trigger: 'consult' | 'summon' | 'brief' | 'convene';
   /** Display name for tracking. */
   name?: string;
   /** Budget cap, if any. */
   maxBudgetUsd?: number;
   /** Bound writ ID, if any. Set by clockworks for writ-driven sessions. */
   writId?: string;
+  /** Conversation ID, if this session is a turn in a conversation. */
+  conversationId?: string;
+  /** Turn number within the conversation (1-indexed). */
+  turnNumber?: number;
+  /**
+   * Claude session ID to resume. Passed through to the provider for
+   * --resume support in multi-turn conversations.
+   */
+  claudeSessionId?: string;
+  /**
+   * Callback for streaming chunks during the session. When provided and
+   * the provider supports launchStreaming(), chunks are forwarded here
+   * as they arrive.
+   */
+  onChunk?: (chunk: SessionChunk) => void;
 }
 
 /** What the funnel returns to callers. */
@@ -301,6 +342,10 @@ export interface SessionResult {
   transcript?: Record<string, unknown>[];
   /** Bound writ ID, if any. */
   writId?: string;
+  /** Conversation ID, if this session is a turn in a conversation. */
+  conversationId?: string;
+  /** Turn number within the conversation. */
+  turnNumber?: number;
 }
 
 /**
@@ -515,6 +560,8 @@ function insertSessionRow(
     roles: string[];
     startedAt: string;
     writId?: string;
+    conversationId?: string;
+    turnNumber?: number;
   },
 ): string {
   const db = new Database(booksPath(home));
@@ -524,8 +571,8 @@ function insertSessionRow(
     db.prepare(
       `INSERT INTO sessions (id, anima_id, provider, trigger, workshop, workspace_kind,
         curriculum_name, curriculum_version, temperament_name, temperament_version,
-        roles, started_at, writ_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        roles, started_at, writ_id, conversation_id, turn_number)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       opts.animaId,
@@ -540,6 +587,8 @@ function insertSessionRow(
       JSON.stringify(opts.roles),
       opts.startedAt,
       opts.writId ?? null,
+      opts.conversationId ?? null,
+      opts.turnNumber ?? null,
     );
     return id;
   } finally {
@@ -628,7 +677,8 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
     );
   }
 
-  const { home, manifest, prompt, interactive, trigger, name, maxBudgetUsd, writId } = options;
+  const { home, manifest, prompt, interactive, trigger, name, maxBudgetUsd, writId,
+    conversationId, turnNumber, claudeSessionId, onChunk } = options;
   let { workspace } = options;
 
   // Step 1: If workshop-temp, create fresh worktree
@@ -663,6 +713,8 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
       roles: manifest.anima.roles,
       startedAt,
       writId,
+      conversationId,
+      turnNumber,
     });
   } catch (err) {
     // If we can't even write the session row, signal failure and abort
@@ -692,7 +744,7 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
   let providerError: Error | null = null;
 
   try {
-    providerResult = await _provider.launch({
+    const launchOpts: SessionProviderLaunchOptions = {
       home,
       manifest,
       prompt,
@@ -700,7 +752,19 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
       cwd,
       name,
       maxBudgetUsd,
-    });
+      claudeSessionId,
+    };
+
+    // Use streaming provider if available and caller wants chunks
+    if (onChunk && _provider.launchStreaming) {
+      const { chunks, result } = _provider.launchStreaming(launchOpts);
+      for await (const chunk of chunks) {
+        onChunk(chunk);
+      }
+      providerResult = await result;
+    } else {
+      providerResult = await _provider.launch(launchOpts);
+    }
   } catch (err) {
     providerError = err instanceof Error ? err : new Error(String(err));
   }
@@ -783,5 +847,7 @@ export async function launchSession(options: SessionLaunchOptions): Promise<Sess
     providerSessionId: providerResult?.providerSessionId,
     transcript: providerResult?.transcript,
     writId,
+    conversationId,
+    turnNumber,
   };
 }

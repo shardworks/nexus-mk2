@@ -414,7 +414,7 @@ List sessions with optional filters. Returns newest first.
 **Options (`ListSessionsOptions`):**
 - `anima?: string` — filter by anima name or ID
 - `workshop?: string`
-- `trigger?: string` — `"consult"`, `"summon"`, or `"brief"`
+- `trigger?: string` — `"consult"`, `"summon"`, `"brief"`, or `"convene"`
 - `status?: 'active' | 'completed'` — active = no `ended_at`, completed = has `ended_at`
 - `limit?: number`
 
@@ -478,16 +478,62 @@ Launch a session through the registered provider. The complete lifecycle:
 | `SessionSummary` | id, animaId, provider, trigger, workshop, workspaceKind, startedAt, endedAt, exitCode, costUsd, durationMs |
 | `SessionDetail` | Full record including token usage, composition metadata, providerSessionId, recordPath |
 | `ListSessionsOptions` | Filters for `listSessions()` |
-| `SessionProvider` | `{ name, launch(opts) }` — the provider contract |
-| `SessionProviderLaunchOptions` | What the provider receives (home, manifest, prompt, interactive, cwd, ...) |
+| `SessionProvider` | `{ name, launch(opts), launchStreaming?(opts) }` — the provider contract |
+| `SessionProviderLaunchOptions` | What the provider receives (home, manifest, prompt, interactive, cwd, claudeSessionId?, ...) |
 | `SessionProviderResult` | What the provider returns (exitCode, tokenUsage?, costUsd?, durationMs, ...) |
-| `SessionLaunchOptions` | Full options for `launchSession()` |
-| `SessionResult` | `{ sessionId, exitCode, tokenUsage?, costUsd?, durationMs, providerSessionId?, transcript? }` |
+| `SessionLaunchOptions` | Full options for `launchSession()` — includes conversationId?, turnNumber?, claudeSessionId?, onChunk? |
+| `SessionResult` | `{ sessionId, exitCode, tokenUsage?, costUsd?, durationMs, providerSessionId?, transcript?, conversationId?, turnNumber? }` |
+| `SessionChunk` | Union: `{ type: 'text', text }` \| `{ type: 'tool_use', tool }` \| `{ type: 'tool_result', tool }` |
 | `WorkspaceContext` | `{ workshop?, worktreePath? }` — standard event payload fields |
 | `ResolvedWorkspace` | Discriminated union: guildhall, workshop-temp, or workshop-managed |
 | `SessionRecord` | Full session record written to disk as JSON |
 | `AuditEntry` | id, actor, action, targetType, targetId, detail, timestamp |
 | `ListAuditLogOptions` | Filters for `listAuditLog()` |
+
+---
+
+## Conversations
+
+Multi-turn interaction with animas — web consultation and convene sessions. See the **[Conversations API Reference](./conversations.md)** for the full guide including schema, integration patterns, and analytics queries.
+
+### `createConversation(home, opts): CreateConversationResult`
+
+Create a new conversation with participant records. Does NOT take a first turn.
+
+### `takeTurn(home, conversationId, participantId, message): AsyncGenerator<ConversationChunk>`
+
+Take a turn in a conversation. Manifests the anima, calls `launchSession()` with `--resume` threading, streams response chunks. The core primitive.
+
+### `endConversation(home, conversationId, reason?): void`
+
+End a conversation. Sets status to `'concluded'` or `'abandoned'`.
+
+### `nextParticipant(home, conversationId): { participantId, name } | null`
+
+Next participant in a convene rotation (round-robin). Returns `null` if done.
+
+### `formatConveneMessage(home, conversationId, participantId): string`
+
+Format the message for the next convene participant (new turns since their last).
+
+### `listConversations(home, opts?): ConversationSummary[]`
+
+List conversations. Filter by `status`, `kind`, `limit`.
+
+### `showConversation(home, conversationId): ConversationDetail | null`
+
+Full conversation detail including all turns.
+
+### Types
+
+| Type | Description |
+|------|-------------|
+| `ConversationChunk` | Union: text, tool_use, tool_result, turn_complete |
+| `CreateConversationOptions` | Options for `createConversation()` |
+| `CreateConversationResult` | `{ conversationId, participants[] }` |
+| `ConversationSummary` | List view with computed turnCount and totalCostUsd |
+| `ConversationDetail` | Full view with turns array |
+| `ListConversationsOptions` | Filters for `listConversations()` |
 
 ---
 
@@ -608,6 +654,8 @@ Generate a prefixed hex ID: `{prefix}-{8 hex chars}`.
 |--------|--------|
 | `a-` | anima |
 | `c-` | commission |
+| `conv-` | conversation |
+| `cpart-` | conversation participant |
 | `evt-` | event |
 | `ses-` | session |
 | `w-` | work |

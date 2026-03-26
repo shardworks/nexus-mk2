@@ -17,6 +17,8 @@ import { makeDispatchCommand } from './commands/dispatch.ts';
 import { makeAuditCommand } from './commands/audit.ts';
 import { makeDashboardCommand } from './commands/dashboard.ts';
 import { makeUpgradeCommand } from './commands/upgrade.ts';
+import { makeConversationCommand } from './commands/conversation.ts';
+import { makeConveneCommand } from './commands/convene.ts';
 
 // Register the Claude Code session provider so core's session funnel
 // can launch claude sessions.
@@ -30,6 +32,7 @@ export const program = createCommand('nsg')
 // ── Top-level commands (special operations, not noun-verb) ─────────────
 program.addCommand(makeInitCommand());
 program.addCommand(makeConsultCommand());
+program.addCommand(makeConveneCommand());
 program.addCommand(makeStatusCommand());
 program.addCommand(makeSignalCommand());
 
@@ -67,6 +70,9 @@ program.addCommand(makeDispatchCommand());
 
 // nsg audit [list]
 program.addCommand(makeAuditCommand());
+
+// nsg conversation [list|show|end]
+program.addCommand(makeConversationCommand());
 
 // nsg dashboard
 program.addCommand(makeDashboardCommand());

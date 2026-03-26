@@ -6,14 +6,16 @@
  * more than sufficient for a local single-guild system.
  *
  * Prefixes by entity type:
- *   a-   anima
- *   c-   commission
- *   evt- event
- *   ses- session
- *   w-   work
- *   p-   piece
- *   j-   job
- *   s-   stroke
+ *   a-     anima
+ *   c-     commission
+ *   conv-  conversation
+ *   cpart- conversation participant
+ *   evt-   event
+ *   ses-   session
+ *   w-     work
+ *   p-     piece
+ *   j-     job
+ *   s-     stroke
  */
 import { randomBytes } from 'node:crypto';
 
