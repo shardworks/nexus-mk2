@@ -97,6 +97,20 @@ export function makeUpgradeCommand() {
         console.log(`Current nexus version: ${config.nexus}`);
         console.log();
 
+        // ── Step 0: Stop daemon before upgrading ─────────────────────
+        // Node.js caches ESM imports, so the running daemon must be stopped
+        // before packages change. We also don't want the daemon processing
+        // events with a half-upgraded package set. Restart in finally{}.
+
+        const wasDaemonRunning = !options.dryRun && clockStatus(home).running;
+        if (wasDaemonRunning) {
+          clockStop(home);
+          console.log('Clockworks daemon stopped for upgrade.');
+          console.log();
+        }
+
+        try {
+
         // ── Step 1: Update npm dependencies ──────────────────────────
 
         console.log('Updating @shardworks/* packages...');
@@ -222,19 +236,19 @@ export function makeUpgradeCommand() {
           }
         }
 
-        // ── Step 5: Restart clockworks daemon if running ──────────────────
-        // New packages are now installed — the running daemon must be restarted
-        // to clear its module import cache and pick up the updated code.
-
-        const status = clockStatus(home);
-        if (status.running) {
-          clockStop(home);
-          clockStart(home);
-          console.log(`Clockworks daemon restarted (was PID ${status.pid}).`);
-          console.log();
-        }
-
         console.log('Upgrade complete.');
+
+        } finally {
+          // ── Restart daemon if it was running before we stopped it ────
+          if (wasDaemonRunning) {
+            try {
+              const result = clockStart(home);
+              console.log(`Clockworks daemon restarted (PID ${result.pid}).`);
+            } catch (restartErr) {
+              console.error(`Warning: failed to restart clockworks daemon: ${(restartErr as Error).message}`);
+            }
+          }
+        }
 
       } catch (err) {
         console.error(`Error: ${(err as Error).message}`);
