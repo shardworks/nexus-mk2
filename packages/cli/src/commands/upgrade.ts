@@ -125,15 +125,6 @@ export function makeUpgradeCommand() {
         console.log(`Bundle plan from ${plan.bundleSource}:`);
         console.log();
 
-        // Migrations
-        if (plan.migrations.length > 0) {
-          console.log(`  Migrations (${plan.migrations.length} new):`);
-          for (const m of plan.migrations) {
-            console.log(`    + ${m.guildFilename}  (from ${m.bundleFilename})`);
-          }
-          console.log();
-        }
-
         // New tools/engines
         if (plan.newTools.length > 0) {
           console.log(`  New tools/engines (${plan.newTools.length}):`);
@@ -202,9 +193,6 @@ export function makeUpgradeCommand() {
             recompose: options.recompose,
           });
 
-          if (result.migrationsApplied.length > 0) {
-            console.log(`  ✓ Applied ${result.migrationsApplied.length} migration(s)`);
-          }
           if (result.toolsRegistered.length > 0) {
             console.log(`  ✓ Registered ${result.toolsRegistered.length} tool(s)/engine(s)`);
           }

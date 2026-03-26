@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { findGuildRoot } from '@shardworks/nexus-core';
+import { findGuildRoot, ensureBooks } from '@shardworks/nexus-core';
 
 /** Minimal interface for reading global options from any Commander command. */
 interface CommandLike {
@@ -11,9 +11,13 @@ interface CommandLike {
  *
  * Reads `--guild-root` from the root program's options. If not set, walks
  * up from cwd looking for guild.json.
+ *
+ * Also ensures the Books database has all pending core migrations applied
+ * (unless the guild has `settings.autoMigrate: false`).
  */
 export function resolveHome(cmd: CommandLike): string {
   const rootOpts = cmd.optsWithGlobals() as { guildRoot?: string };
-  if (rootOpts.guildRoot) return path.resolve(rootOpts.guildRoot);
-  return findGuildRoot();
+  const home = rootOpts.guildRoot ? path.resolve(rootOpts.guildRoot) : findGuildRoot();
+  ensureBooks(home);
+  return home;
 }

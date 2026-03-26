@@ -4,13 +4,14 @@
  * Compares the guild's current state against a bundle (typically the
  * guild-starter-kit at a newer version) and produces a plan describing:
  *
- * - New database migrations to apply
  * - New tools and engines to register (with role assignments)
  * - Updated curricula and temperaments
  * - Stale anima compositions (using outdated training content)
  *
- * The plan can be inspected (dry-run) or applied. Migrations are
- * renumbered into the guild's existing sequence. Content artifacts
+ * Database migrations are handled separately by nexus-core and applied
+ * automatically on database open (see `ensureBooks()` in migrate.ts).
+ *
+ * The plan can be inspected (dry-run) or applied. Content artifacts
  * are overwritten with the newer version. Stale animas are reported
  * but not automatically recomposed — the operator decides.
  */
@@ -21,7 +22,6 @@ import Database from 'better-sqlite3';
 import { booksPath } from './nexus-home.ts';
 import { readGuildConfig, writeGuildConfig } from './guild-config.ts';
 import { readBundleManifest, type BundleManifest } from './bundle.ts';
-import { discoverMigrations, applyMigrations, type MigrationProvenance } from './migrate.ts';
 import { listAnimas, checkAllAnimaStaleness } from './anima.ts';
 import { removeAnima } from './anima.ts';
 import { instantiate } from './instantiate.ts';
@@ -116,8 +116,6 @@ export interface UpgradeResult {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-const MIGRATION_PATTERN = /^(\d{3})-(.+)\.sql$/;
-
 function readJson(filePath: string): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 }
@@ -195,10 +193,6 @@ export function planUpgrade(
     isEmpty: true,
   };
 
-  // ── Migration diff ──────────────────────────────────────────────────
-
-  planMigrations(home, bundleDir, manifest, bundleSource, plan);
-
   // ── Tool/engine diff ───────────────────────────────────────────────
 
   planNewTools(home, manifest, 'tools', plan);
@@ -216,115 +210,11 @@ export function planUpgrade(
 
   detectStaleAnimas(home, plan);
 
-  plan.isEmpty = plan.migrations.length === 0
-    && plan.newTools.length === 0
+  plan.isEmpty = plan.newTools.length === 0
     && plan.contentUpdates.length === 0
     && plan.staleAnimas.length === 0;
 
   return plan;
-}
-
-/**
- * Diff bundle migrations against what the guild already has.
- *
- * Strategy: read the guild's _migrations table for provenance data.
- * For each bundle migration, check if a migration with the same original
- * name from the same bundle (or a prior version of it) has already been
- * applied. If not, it's new and needs to be installed.
- */
-function planMigrations(
-  home: string,
-  bundleDir: string,
-  manifest: BundleManifest,
-  bundleSource: string,
-  plan: UpgradePlan,
-): void {
-  if (!manifest.migrations || manifest.migrations.length === 0) return;
-
-  // Read applied migrations from the _migrations table
-  const dbPath = booksPath(home);
-  let appliedOriginals = new Set<string>();
-
-  if (fs.existsSync(dbPath)) {
-    const db = new Database(dbPath);
-    try {
-      // Check if _migrations table exists
-      const tableExists = db.prepare(
-        `SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'`,
-      ).get();
-
-      if (tableExists) {
-        // Get all original_name values from migrations delivered by any version
-        // of this bundle's package. Compare by package name, not full version.
-        const bundlePackage = bundleSource.replace(/@[^@]+$/, '');
-        const rows = db.prepare(
-          `SELECT original_name, filename FROM _migrations WHERE bundle LIKE ? OR bundle IS NULL`,
-        ).all(`${bundlePackage}%`) as { original_name: string | null; filename: string }[];
-
-        for (const row of rows) {
-          if (row.original_name) {
-            appliedOriginals.add(row.original_name);
-          }
-        }
-
-        // Also check by content: for migrations installed before provenance
-        // tracking existed, compare the actual SQL content
-        if (rows.some(r => r.original_name === null)) {
-          // Fall back to filename-based matching for legacy migrations
-          const allApplied = db.prepare(
-            `SELECT filename FROM _migrations`,
-          ).all() as { filename: string }[];
-          for (const row of allApplied) {
-            // Extract description part (strip sequence prefix)
-            const match = row.filename.match(MIGRATION_PATTERN);
-            if (match) {
-              appliedOriginals.add(row.filename);
-              // Also add just the description part for fuzzy matching
-              appliedOriginals.add(match[2]!);
-            }
-          }
-        }
-      }
-    } finally {
-      db.close();
-    }
-  }
-
-  // Find the current highest sequence in the guild's migrations dir
-  const migrationsDir = path.join(home, 'nexus', 'migrations');
-  let maxSeq = 0;
-  if (fs.existsSync(migrationsDir)) {
-    for (const file of fs.readdirSync(migrationsDir)) {
-      const match = file.match(MIGRATION_PATTERN);
-      if (match) maxSeq = Math.max(maxSeq, parseInt(match[1]!, 10));
-    }
-  }
-
-  // Check each bundle migration against what's already applied
-  for (const entry of manifest.migrations!) {
-    const srcPath = path.resolve(bundleDir, entry.path);
-    const originalName = path.basename(srcPath);
-
-    // Extract description from the bundle filename
-    const descMatch = originalName.match(/^\d{3}-(.+)$/);
-    const description = descMatch ? descMatch[1]! : originalName;
-
-    // Check if this migration (by original name or description) is already applied
-    const alreadyApplied = appliedOriginals.has(originalName)
-      || appliedOriginals.has(description);
-
-    if (!alreadyApplied) {
-      maxSeq++;
-      const seq = String(maxSeq).padStart(3, '0');
-      const guildFilename = `${seq}-${description}`;
-
-      plan.migrations.push({
-        bundleFilename: originalName,
-        guildSequence: maxSeq,
-        guildFilename,
-      });
-    }
-  }
 }
 
 /**
@@ -518,43 +408,6 @@ export function applyUpgrade(
     staleAnimaCount: plan.staleAnimas.length,
     recomposedAnimas: [],
   };
-
-  // ── Install new migrations ────────────────────────────────────────
-
-  // ── Install new migration files from the bundle ───────────────────
-
-  const provenance: Record<string, MigrationProvenance> = {};
-
-  if (plan.migrations.length > 0) {
-    const migrationsDir = path.join(home, 'nexus', 'migrations');
-    fs.mkdirSync(migrationsDir, { recursive: true });
-
-    const manifest = readBundleManifest(bundleDir);
-
-    for (const entry of plan.migrations) {
-      // Find the matching bundle migration entry
-      const bundleEntry = manifest.migrations!.find(m => {
-        const name = path.basename(path.resolve(bundleDir, m.path));
-        return name === entry.bundleFilename;
-      });
-
-      if (!bundleEntry) continue;
-
-      const srcPath = path.resolve(bundleDir, bundleEntry.path);
-      const destPath = path.join(migrationsDir, entry.guildFilename);
-      fs.copyFileSync(srcPath, destPath);
-
-      provenance[entry.guildFilename] = {
-        bundle: plan.bundleSource,
-        originalName: entry.bundleFilename,
-      };
-    }
-  }
-
-  // Always apply pending migrations — migration files may have been
-  // delivered by a previous upgrade but not yet applied to the database.
-  const migrateResult = applyMigrations(home, provenance);
-  result.migrationsApplied = migrateResult.applied;
 
   // ── Update content artifacts ──────────────────────────────────────
 

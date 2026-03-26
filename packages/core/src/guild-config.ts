@@ -75,6 +75,16 @@ export interface WorkshopEntry {
   addedAt: string;
 }
 
+/** Guild-level settings — operational flags and preferences. */
+export interface GuildSettings {
+  /**
+   * Automatically apply pending database migrations when the Books are opened.
+   * Defaults to `true` when not specified. Set to `false` to require explicit
+   * migration via `nsg guild upgrade-books`.
+   */
+  autoMigrate?: boolean;
+}
+
 /** The guild's central configuration file shape (`guild.json`). */
 export interface GuildConfig {
   /** Guild name — used as the guildhall npm package name. */
@@ -101,6 +111,8 @@ export interface GuildConfig {
   clockworks?: ClockworksConfig;
   /** Writ types declared by this guild. Built-in types (mandate, summon) are implicit. */
   writTypes?: Record<string, WritTypeDeclaration>;
+  /** Guild-level settings — operational flags and preferences. */
+  settings?: GuildSettings;
 }
 
 /**

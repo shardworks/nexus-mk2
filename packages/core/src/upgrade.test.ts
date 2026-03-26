@@ -157,16 +157,14 @@ afterEach(() => {
 });
 
 describe('planUpgrade', () => {
-  it('detects new migrations from a newer bundle', () => {
+  it('does not plan bundle migrations (core handles migrations now)', () => {
     const home = createTestGuild(tmpDir);
     const v2 = createV2Bundle(tmpDir);
 
     const plan = planUpgrade(home, v2);
 
-    assert.equal(plan.migrations.length, 1);
-    assert.equal(plan.migrations[0]!.bundleFilename, '002-more-stuff.sql');
-    assert.equal(plan.migrations[0]!.guildSequence, 2);
-    assert.equal(plan.migrations[0]!.guildFilename, '002-more-stuff.sql');
+    // Migrations are no longer planned from bundles — core owns them
+    assert.equal(plan.migrations.length, 0);
   });
 
   it('detects updated curricula', () => {
@@ -305,28 +303,19 @@ describe('planUpgrade', () => {
 });
 
 describe('applyUpgrade', () => {
-  it('installs new migrations and updates content', () => {
+  it('updates content (migrations are handled by core separately)', () => {
     const home = createTestGuild(tmpDir);
     const v2 = createV2Bundle(tmpDir);
 
     const plan = planUpgrade(home, v2);
     const result = applyUpgrade(home, v2, plan);
 
-    // Migration was applied
-    assert.equal(result.migrationsApplied.length, 1);
-    assert.ok(result.migrationsApplied[0]!.includes('more-stuff'));
+    // Migrations are no longer applied by applyUpgrade — core handles them
+    assert.equal(result.migrationsApplied.length, 0);
 
     // Content was updated
     assert.equal(result.contentUpdated.length, 1);
     assert.ok(result.contentUpdated[0]!.includes('basics'));
-
-    // Verify the new table exists
-    const db = new Database(booksPath(home));
-    const tables = db.prepare(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name='widgets'`,
-    ).get() as { name: string } | undefined;
-    db.close();
-    assert.ok(tables, 'widgets table should exist after migration');
 
     // Verify curriculum content was updated
     const content = fs.readFileSync(

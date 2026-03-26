@@ -63,6 +63,7 @@ export {
   type StandingOrder,
   type ClockworksConfig,
   type WritTypeDeclaration,
+  type GuildSettings,
   createInitialGuildConfig,
   guildConfigPath,
   readGuildConfig,
@@ -167,6 +168,8 @@ export {
   type MigrateResult,
   discoverMigrations,
   applyMigrations,
+  applyCoreMigrations,
+  ensureBooks,
 } from './migrate.ts';
 export {
   type AnimaRecord,

@@ -6,8 +6,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { initGuild, installBundle, instantiate, VERSION } from '@shardworks/nexus-core';
-import { applyMigrations } from '@shardworks/nexus-core';
+import { initGuild, installBundle, instantiate, VERSION, applyCoreMigrations } from '@shardworks/nexus-core';
 
 /**
  * Strip the @shardworks/nexus dependency from a guild's package.json.
@@ -77,7 +76,7 @@ function fullInit(home: string, model: string, bundleDir: string): void {
   initGuild(home, 'test-guild', model);
   stripCliDep(home);
   installBundle({ home, bundleDir, commit: false });
-  applyMigrations(home);
+  applyCoreMigrations(home);
   instantiate({ home, name: 'Steward', roles: ['steward'], curriculum: 'guild-operations', temperament: 'guide' });
   instantiate({ home, name: 'Unnamed Artificer', roles: ['artificer'], curriculum: 'guild-operations', temperament: 'artisan' });
   execFileSync('git', ['add', '-A'], { cwd: home, stdio: 'pipe' });
@@ -186,15 +185,14 @@ describe('installBundle with starter kit', () => {
     // Implements registered
     const expectedImplements = [
       'tool-install', 'tool-remove', 'tool-list',
-      'commission-create', 'commission-list', 'commission-show', 'commission-update',
+      'commission-create', 'commission-list', 'commission-show', 'commission-update', 'commission-check',
       'anima-create', 'anima-list', 'anima-show', 'anima-update', 'anima-remove',
       'workshop-create', 'workshop-register', 'workshop-list', 'workshop-show', 'workshop-remove',
-      'clock-list', 'clock-tick', 'clock-run',
-      'nexus-version',
-      'work-create', 'work-list', 'work-show', 'work-update',
-      'piece-create', 'piece-list', 'piece-show', 'piece-update',
-      'job-create', 'job-list', 'job-show', 'job-update',
-      'stroke-create', 'stroke-list', 'stroke-show', 'stroke-update',
+      'clock-list', 'clock-tick', 'clock-run', 'clock-start', 'clock-stop', 'clock-status',
+      'nexus-version', 'signal',
+      'create-writ', 'list-writs', 'show-writ', 'fail-writ', 'complete-session',
+      'convene', 'conversation-list', 'conversation-show', 'conversation-end',
+      'session-list', 'session-show', 'event-list', 'event-show',
     ];
     for (const name of expectedImplements) {
       assert.ok(config.tools[name], `${name} not registered`);
@@ -219,12 +217,8 @@ describe('installBundle with starter kit', () => {
       'temperament content missing',
     );
 
-    // Migration delivered
-    assert.ok(result.artifacts.migrations.length > 0, 'no migrations installed');
-    assert.ok(
-      fs.existsSync(path.join(home, 'nexus', 'migrations', result.artifacts.migrations[0]!)),
-      'migration file missing on disk',
-    );
+    // Migrations are now handled by core, not bundles
+    assert.equal(result.artifacts.migrations.length, 0, 'bundle should not deliver migrations');
 
     // Bundle provenance recorded
     assert.ok(config.tools['commission-create'].bundle, 'bundle provenance missing');
@@ -298,10 +292,9 @@ describe('full init sequence', () => {
       assert.ok(names.includes('event_dispatches'), 'event_dispatches table missing');
       assert.ok(names.includes('sessions'), 'sessions table missing');
       assert.ok(names.includes('commission_sessions'), 'commission_sessions table missing');
-      assert.ok(names.includes('works'), 'works table missing');
-      assert.ok(names.includes('pieces'), 'pieces table missing');
-      assert.ok(names.includes('jobs'), 'jobs table missing');
-      assert.ok(names.includes('strokes'), 'strokes table missing');
+      assert.ok(names.includes('writs'), 'writs table missing');
+      assert.ok(names.includes('conversations'), 'conversations table missing');
+      assert.ok(names.includes('conversation_participants'), 'conversation_participants table missing');
     } finally {
       db.close();
     }
@@ -316,9 +309,13 @@ describe('full init sequence', () => {
     const db = new Database(path.join(home, '.nexus', 'nexus.db'));
     try {
       const rows = db.prepare('SELECT * FROM _migrations ORDER BY sequence').all() as { sequence: number; filename: string }[];
-      assert.equal(rows.length, 1);
+      assert.equal(rows.length, 3);
       assert.equal(rows[0]!.sequence, 1);
       assert.equal(rows[0]!.filename, '001-schema.sql');
+      assert.equal(rows[1]!.sequence, 2);
+      assert.equal(rows[1]!.filename, '002-writs.sql');
+      assert.equal(rows[2]!.sequence, 3);
+      assert.equal(rows[2]!.filename, '003-conversations.sql');
     } finally {
       db.close();
     }

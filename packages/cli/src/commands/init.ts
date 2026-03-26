@@ -2,8 +2,7 @@ import { createCommand } from 'commander';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import readline from 'node:readline/promises';
-import { initGuild, installBundle, instantiate } from '@shardworks/nexus-core';
-import { applyMigrations } from '@shardworks/nexus-core';
+import { initGuild, installBundle, instantiate, applyCoreMigrations } from '@shardworks/nexus-core';
 
 const DEFAULT_MODEL = 'sonnet';
 const DEFAULT_BUNDLE = '@shardworks/guild-starter-kit';
@@ -73,8 +72,8 @@ export function makeInitCommand() {
         const bundleDir = fetchBundle(home, options.bundle);
         installBundle({ home, bundleDir, commit: false });
 
-        // 3. Create ledger via migration engine
-        applyMigrations(home);
+        // 3. Create Books database via core migrations
+        applyCoreMigrations(home);
 
         // 4. Instantiate the starting animas
         instantiate({

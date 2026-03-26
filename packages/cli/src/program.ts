@@ -19,6 +19,7 @@ import { makeDashboardCommand } from './commands/dashboard.ts';
 import { makeUpgradeCommand } from './commands/upgrade.ts';
 import { makeConversationCommand } from './commands/conversation.ts';
 import { makeConveneCommand } from './commands/convene.ts';
+import { makeUpgradeBooksCommand } from './commands/upgrade-books.ts';
 
 // Register the Claude Code session provider so core's session funnel
 // can launch claude sessions.
@@ -42,6 +43,7 @@ program.addCommand(makeSignalCommand());
 const guildGroup = createCommand('guild')
   .description('Guild-wide operations');
 guildGroup.addCommand(makeRestoreCommand());
+guildGroup.addCommand(makeUpgradeBooksCommand());
 program.addCommand(guildGroup);
 
 // nsg workshop [create|register|list|show|remove]
