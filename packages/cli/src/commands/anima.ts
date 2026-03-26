@@ -2,6 +2,7 @@ import { createCommand } from 'commander';
 import {
   instantiate, manifest,
   listAnimas, showAnima, updateAnima, removeAnima,
+  checkAnimaStaleness, checkAllAnimaStaleness,
 } from '@shardworks/nexus-core';
 import { resolveHome } from '../resolve-home.ts';
 
@@ -61,11 +62,22 @@ export function makeAnimaCommand() {
             return;
           }
 
+          // Check staleness for all active animas in one pass
+          const stalenessMap = checkAllAnimaStaleness(home);
+
           console.log(`${animas.length} anima${animas.length === 1 ? '' : 's'}:\n`);
           for (const a of animas) {
+            const staleness = stalenessMap.get(a.id);
             const statusIcon = a.status === 'active' ? '●' : a.status === 'retired' ? '○' : '◌';
-            console.log(`  ${statusIcon} ${a.name} [${a.id}]`);
+            const staleFlag = staleness ? ' ⚠ stale' : '';
+            console.log(`  ${statusIcon} ${a.name} [${a.id}]${staleFlag}`);
             console.log(`    Roles: ${a.roles.join(', ')}`);
+            if (staleness?.curriculum) {
+              console.log(`    Curriculum: ${staleness.curriculum.composedVersion} → ${staleness.curriculum.currentVersion} available`);
+            }
+            if (staleness?.temperament) {
+              console.log(`    Temperament: ${staleness.temperament.composedVersion} → ${staleness.temperament.currentVersion} available`);
+            }
           }
         } catch (err) {
           console.error(`Error: ${(err as Error).message}`);
@@ -89,11 +101,27 @@ export function makeAnimaCommand() {
             return;
           }
 
+          const staleness = result.status === 'active'
+            ? checkAnimaStaleness(home, result.id)
+            : null;
+
           console.log(`${result.name} [${result.id}]`);
-          console.log(`  Status: ${result.status}`);
+          console.log(`  Status: ${result.status}${staleness?.stale ? ' ⚠ stale composition' : ''}`);
           console.log(`  Roles: ${result.roles.join(', ')}`);
-          if (result.curriculumName) console.log(`  Curriculum: ${result.curriculumName} v${result.curriculumVersion}`);
-          if (result.temperamentName) console.log(`  Temperament: ${result.temperamentName} v${result.temperamentVersion}`);
+          if (result.curriculumName) {
+            const currStale = staleness?.curriculum;
+            const currLabel = currStale
+              ? ` (${currStale.composedVersion} → ${currStale.currentVersion} available)`
+              : '';
+            console.log(`  Curriculum: ${result.curriculumName} v${result.curriculumVersion}${currLabel}`);
+          }
+          if (result.temperamentName) {
+            const tempStale = staleness?.temperament;
+            const tempLabel = tempStale
+              ? ` (${tempStale.composedVersion} → ${tempStale.currentVersion} available)`
+              : '';
+            console.log(`  Temperament: ${result.temperamentName} v${result.temperamentVersion}${tempLabel}`);
+          }
           console.log(`  Created: ${result.createdAt}`);
           console.log(`  Updated: ${result.updatedAt}`);
         } catch (err) {

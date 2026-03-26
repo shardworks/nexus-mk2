@@ -2,6 +2,8 @@ import { createCommand } from 'commander';
 import {
   readGuildConfig,
   checkAllPreconditions,
+  listAnimas,
+  checkAllAnimaStaleness,
   VERSION,
 } from '@shardworks/nexus-core';
 import type { ToolPreconditionResult } from '@shardworks/nexus-core';
@@ -57,6 +59,28 @@ export function makeStatusCommand() {
         }
       } else {
         console.log('Roles: (none defined)');
+      }
+
+      // Animas
+      try {
+        const activeAnimas = listAnimas(home, { status: 'active' });
+        if (activeAnimas.length > 0) {
+          const stalenessMap = checkAllAnimaStaleness(home);
+          const staleCount = stalenessMap.size;
+
+          console.log(`\nAnimas (${activeAnimas.length} active):`);
+          for (const a of activeAnimas) {
+            const staleness = stalenessMap.get(a.id);
+            const staleFlag = staleness ? ' ⚠ stale' : '';
+            console.log(`  ${a.name} (${a.roles.join(', ')})${staleFlag}`);
+          }
+          if (staleCount > 0) {
+            console.log(`\n  ⚠ ${staleCount} anima(s) using outdated compositions.`);
+            console.log(`    Run \`nsg upgrade --recompose\` to refresh them.`);
+          }
+        }
+      } catch {
+        // Books database may not exist yet (pre-init)
       }
 
       // Base tools

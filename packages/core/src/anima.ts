@@ -5,6 +5,8 @@
  * Read-by-name is handled by manifest.ts's readAnima() (used at manifest time).
  * This module provides the remaining CRUD surface.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { booksPath } from './nexus-home.ts';
 import { generateId } from './id.ts';
@@ -40,6 +42,24 @@ export interface ListAnimasOptions {
 export interface UpdateAnimaOptions {
   status?: string;
   roles?: string[];
+}
+
+/** Staleness info for a single training content axis (curriculum or temperament). */
+export interface StalenessInfo {
+  /** Version baked into the anima's composition. */
+  composedVersion: string;
+  /** Version currently on disk. */
+  currentVersion: string;
+}
+
+/** Staleness check result for an anima. */
+export interface AnimaStaleness {
+  /** Whether the anima has any stale content. */
+  stale: boolean;
+  /** Curriculum staleness (null if current or no curriculum). */
+  curriculum: StalenessInfo | null;
+  /** Temperament staleness (null if current or no temperament). */
+  temperament: StalenessInfo | null;
 }
 
 // ── Functions ──────────────────────────────────────────────────────────
@@ -217,6 +237,127 @@ export function updateAnima(
   } finally {
     db.close();
   }
+}
+
+/**
+ * Read the version from a training content descriptor on disk.
+ * Returns 'unknown' if the descriptor is missing or has no version.
+ */
+function readTrainingVersion(
+  home: string,
+  category: 'curricula' | 'temperaments',
+  name: string,
+): string | null {
+  const descriptorFile = category === 'curricula'
+    ? 'nexus-curriculum.json'
+    : 'nexus-temperament.json';
+  const parentDir = category === 'curricula' ? 'training/curricula' : 'training/temperaments';
+  const descriptorPath = path.join(home, parentDir, name, descriptorFile);
+
+  if (!fs.existsSync(descriptorPath)) return null;
+  try {
+    const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf-8'));
+    return (descriptor.version as string) || 'unknown';
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check whether an anima's composition is stale (using outdated training content).
+ *
+ * Compares the curriculum and temperament versions baked into the anima's
+ * composition against the versions currently on disk.
+ */
+export function checkAnimaStaleness(home: string, animaId: string): AnimaStaleness | null {
+  const detail = showAnima(home, animaId);
+  if (!detail) return null;
+
+  let curriculum: StalenessInfo | null = null;
+  let temperament: StalenessInfo | null = null;
+
+  if (detail.curriculumName) {
+    const currentVersion = readTrainingVersion(home, 'curricula', detail.curriculumName);
+    if (currentVersion && currentVersion !== detail.curriculumVersion) {
+      curriculum = { composedVersion: detail.curriculumVersion, currentVersion };
+    }
+  }
+
+  if (detail.temperamentName) {
+    const currentVersion = readTrainingVersion(home, 'temperaments', detail.temperamentName);
+    if (currentVersion && currentVersion !== detail.temperamentVersion) {
+      temperament = { composedVersion: detail.temperamentVersion, currentVersion };
+    }
+  }
+
+  return {
+    stale: curriculum !== null || temperament !== null,
+    curriculum,
+    temperament,
+  };
+}
+
+/**
+ * Check staleness for all active animas at once.
+ * Returns a map of anima ID → staleness info, only including stale animas.
+ */
+export function checkAllAnimaStaleness(home: string): Map<string, AnimaStaleness> {
+  const result = new Map<string, AnimaStaleness>();
+
+  // Build the current version map once (avoid repeated disk reads)
+  const versionCache = new Map<string, string | null>();
+  function getCachedVersion(category: 'curricula' | 'temperaments', name: string): string | null {
+    const key = `${category}:${name}`;
+    if (!versionCache.has(key)) {
+      versionCache.set(key, readTrainingVersion(home, category, name));
+    }
+    return versionCache.get(key)!;
+  }
+
+  const db = new Database(booksPath(home));
+  db.pragma('foreign_keys = ON');
+
+  try {
+    const animas = db.prepare(`
+      SELECT a.id, a.name,
+             c.curriculum_name, c.curriculum_version,
+             c.temperament_name, c.temperament_version
+      FROM animas a
+      LEFT JOIN anima_compositions c ON c.anima_id = a.id
+      WHERE a.status = 'active'
+    `).all() as {
+      id: string; name: string;
+      curriculum_name: string | null; curriculum_version: string | null;
+      temperament_name: string | null; temperament_version: string | null;
+    }[];
+
+    for (const anima of animas) {
+      let curriculum: StalenessInfo | null = null;
+      let temperament: StalenessInfo | null = null;
+
+      if (anima.curriculum_name && anima.curriculum_version) {
+        const currentVersion = getCachedVersion('curricula', anima.curriculum_name);
+        if (currentVersion && currentVersion !== anima.curriculum_version) {
+          curriculum = { composedVersion: anima.curriculum_version, currentVersion };
+        }
+      }
+
+      if (anima.temperament_name && anima.temperament_version) {
+        const currentVersion = getCachedVersion('temperaments', anima.temperament_name);
+        if (currentVersion && currentVersion !== anima.temperament_version) {
+          temperament = { composedVersion: anima.temperament_version, currentVersion };
+        }
+      }
+
+      if (curriculum || temperament) {
+        result.set(anima.id, { stale: true, curriculum, temperament });
+      }
+    }
+  } finally {
+    db.close();
+  }
+
+  return result;
 }
 
 /**

@@ -742,6 +742,23 @@ Discover migration files matching `NNN-description.sql`, sorted by sequence.
 
 Apply pending SQL migrations. Each runs in its own transaction. Tracks applied migrations in `_migrations` table.
 
+### Upgrade
+
+#### `planUpgrade(home, bundleDir, bundleSource?): UpgradePlan`
+
+Plan a framework upgrade by diffing the guild's current state against a bundle. Read-only — inspects the guild and bundle but makes no changes. Returns an `UpgradePlan` describing new migrations, updated content, and stale animas.
+
+#### `applyUpgrade(home, bundleDir, plan): UpgradeResult`
+
+Apply an upgrade plan. Installs new migrations (renumbered into the guild's sequence), updates content artifacts (curricula/temperaments), and bumps the nexus version in `guild.json`. Does **not** recompose stale animas — that is a separate operator decision.
+
+**Types:**
+- `UpgradePlan` — `{ bundleSource, migrations, contentUpdates, staleAnimas, isEmpty }`
+- `UpgradeResult` — `{ migrationsApplied, contentUpdated, staleAnimaCount }`
+- `MigrationPlanEntry` — `{ bundleFilename, guildSequence, guildFilename }`
+- `ContentUpdateEntry` — `{ category, name, installedVersion, bundleVersion, bundlePath }`
+- `StaleAnimaEntry` — `{ id, name, roles, curriculum, temperament }` (curriculum/temperament are `{ composedVersion, currentVersion } | null`)
+
 ### Guild Init
 
 #### `initGuild(home, name, model): void`

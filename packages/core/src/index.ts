@@ -200,16 +200,30 @@ export {
   listSessions,
   showSession,
 } from './session.ts';
+export {
+  type UpgradePlan,
+  type UpgradeResult,
+  type ApplyUpgradeOptions,
+  type MigrationPlanEntry,
+  type ContentUpdateEntry,
+  type StaleAnimaEntry,
+  planUpgrade,
+  applyUpgrade,
+} from './upgrade.ts';
 export { generateId } from './id.ts';
 export {
   type AnimaSummary,
   type AnimaDetail,
   type ListAnimasOptions,
   type UpdateAnimaOptions,
+  type AnimaStaleness,
+  type StalenessInfo,
   listAnimas,
   showAnima,
   updateAnima,
   removeAnima,
+  checkAnimaStaleness,
+  checkAllAnimaStaleness,
 } from './anima.ts';
 export {
   type ToolSummary,
