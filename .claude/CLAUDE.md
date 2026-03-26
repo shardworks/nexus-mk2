@@ -49,7 +49,6 @@ nexus-mk2/
 │   ├── requirements/            #   System requirements (YAML)
 │   └── backlog/                 #   Feature ideas not yet commissioned
 ├── bin/                         # Shell scripts for operations (coco.sh, dispatch.sh, build.sh, etc.)
-├── scripts/                     # Release tooling (release.sh)
 ├── .claude/                     # Claude Code agent configuration
 │   ├── CLAUDE.md                #   THIS FILE — shared instructions for all agents
 │   ├── agents/                  #   Agent-specific instructions (coco.md, ethnographer.md)
