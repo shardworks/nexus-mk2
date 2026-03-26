@@ -521,12 +521,15 @@ export function applyUpgrade(
 
   // ── Install new migrations ────────────────────────────────────────
 
+  // ── Install new migration files from the bundle ───────────────────
+
+  const provenance: Record<string, MigrationProvenance> = {};
+
   if (plan.migrations.length > 0) {
     const migrationsDir = path.join(home, 'nexus', 'migrations');
     fs.mkdirSync(migrationsDir, { recursive: true });
 
     const manifest = readBundleManifest(bundleDir);
-    const provenance: Record<string, MigrationProvenance> = {};
 
     for (const entry of plan.migrations) {
       // Find the matching bundle migration entry
@@ -546,11 +549,12 @@ export function applyUpgrade(
         originalName: entry.bundleFilename,
       };
     }
-
-    // Apply the new migrations
-    const migrateResult = applyMigrations(home, provenance);
-    result.migrationsApplied = migrateResult.applied;
   }
+
+  // Always apply pending migrations — migration files may have been
+  // delivered by a previous upgrade but not yet applied to the database.
+  const migrateResult = applyMigrations(home, provenance);
+  result.migrationsApplied = migrateResult.applied;
 
   // ── Update content artifacts ──────────────────────────────────────
 
