@@ -92,7 +92,7 @@ Engines are connected to events through standing orders in `guild.json`:
   "clockworks": {
     "standingOrders": [
       { "on": "session.ended", "run": "my-engine" },
-      { "on": "job.completed", "run": "my-engine" }
+      { "on": "task.completed", "run": "my-engine" }
     ]
   }
 }
@@ -127,23 +127,23 @@ handler: async (event, { home }) => {
   if (!event) return;
 
   // Event payloads are typed as `unknown` — cast based on the event name
-  const payload = event.payload as { jobId: string } | null;
-  if (!payload?.jobId) return;
+  const payload = event.payload as { writId: string } | null;
+  if (!payload?.writId) return;
 
-  // Now use the jobId...
+  // Now use the writId...
 }
 ```
 
 ### Querying the database
 
 ```typescript
-import { showJob, listStrokes, readGuildConfig } from '@shardworks/nexus-core';
+import { showWrit, listWrits, readGuildConfig } from '@shardworks/nexus-core';
 
 handler: async (event, { home }) => {
-  const job = showJob(home, jobId);
-  if (!job) return;
+  const writ = showWrit(home, writId);
+  if (!writ) return;
 
-  const strokes = listStrokes(home, { jobId: job.id });
+  const children = listWrits(home, { parentId: writ.id });
   const config = readGuildConfig(home);
   // ...
 }
@@ -152,13 +152,11 @@ handler: async (event, { home }) => {
 ### Writing to the database
 
 ```typescript
-import { updateJob, signalEvent } from '@shardworks/nexus-core';
+import { completeWrit, signalEvent } from '@shardworks/nexus-core';
 
 handler: async (event, { home }) => {
-  // Update entity status
-  updateJob(home, jobId, { status: 'completed' });
-
-  // This automatically signals job.completed — no need to signal manually
+  // Complete a writ — this automatically signals {type}.completed
+  completeWrit(home, writId);
 }
 ```
 
@@ -177,7 +175,7 @@ handler: async (event, { home }) => {
 }
 ```
 
-**Important:** Framework events (like `job.completed`) are signaled automatically by the CRUD functions when you update status. Don't double-signal — just call `updateJob()` with `status: 'completed'` and the event fires.
+**Important:** Writ lifecycle events (like `task.completed`) are signaled automatically by `completeWrit()` and `failWrit()`. Don't double-signal — just call the appropriate function and the event fires.
 
 For custom events, you must declare them in `guild.json` first if animas need to signal them. Engines can signal framework events directly (they call `signalEvent()`, which doesn't go through `validateCustomEvent()`).
 
@@ -214,11 +212,11 @@ import { engine } from '@shardworks/nexus-core';
 
 export default [
   engine({
-    name: 'piece-rollup',
+    name: 'writ-notify',
     handler: async (event, { home }) => { /* ... */ }
   }),
   engine({
-    name: 'work-rollup',
+    name: 'writ-audit',
     handler: async (event, { home }) => { /* ... */ }
   }),
 ];
@@ -243,7 +241,7 @@ Engine handlers can be called directly in tests:
 ```typescript
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { initGuild, createJob, createStroke } from '@shardworks/nexus-core';
+import { initGuild, createWrit, completeWrit, showWrit } from '@shardworks/nexus-core';
 import myEngine from './handler.ts';
 
 describe('my-engine', () => {
@@ -254,18 +252,17 @@ describe('my-engine', () => {
     initGuild(home, 'test-guild', 'test-model');
   });
 
-  it('completes a job when all strokes are done', async () => {
+  it('processes a completed writ event', async () => {
     // Set up test data
-    const job = createJob(home, { title: 'Test job' });
-    const stroke = createStroke(home, { jobId: job.id, kind: 'test' });
-    updateStroke(home, stroke.id, { status: 'complete' });
+    const writ = createWrit(home, { type: 'task', title: 'Test task' });
+    completeWrit(home, writ.id);
 
     // Simulate the event
     await myEngine.handler(
       {
         id: 'evt-test',
-        name: 'stroke.recorded',
-        payload: { strokeId: stroke.id, jobId: job.id },
+        name: 'task.completed',
+        payload: { writId: writ.id },
         emitter: 'framework',
         firedAt: new Date().toISOString(),
       },
@@ -273,7 +270,7 @@ describe('my-engine', () => {
     );
 
     // Verify the result
-    const updated = showJob(home, job.id);
+    const updated = showWrit(home, writ.id);
     assert.equal(updated?.status, 'completed');
   });
 });
@@ -285,60 +282,39 @@ For integration testing with the full Clockworks, use `clockTick()`:
 import { clockTick, signalEvent } from '@shardworks/nexus-core';
 
 // Signal an event
-signalEvent(home, 'job.completed', { jobId: 'j-test' }, 'test');
+signalEvent(home, 'task.completed', { writId: 'wrt-test' }, 'test');
 
 // Process it through the Clockworks (requires standing orders in guild.json)
 const result = await clockTick(home);
-assert.equal(result?.eventName, 'job.completed');
+assert.equal(result?.eventName, 'task.completed');
 ```
 
-## Reference implementation: completion rollup engine
+## Reference implementation: notification engine
 
-A concrete engine that implements the standard completion rollup pattern — when a session ends, check if the associated job's strokes are done, and roll up completion through the hierarchy.
+A concrete engine that sends a notification when a mandate completes — a simple pattern for post-completion automation.
 
 ```typescript
-import {
-  engine,
-  showJob,
-  checkJobCompletion,
-  completeJobIfReady,
-  completePieceIfReady,
-  completeWorkIfReady,
-  completeCommissionIfReady,
-} from '@shardworks/nexus-core';
+import { engine, showWrit, readCommission } from '@shardworks/nexus-core';
 
 export default engine({
-  name: 'completion-rollup',
+  name: 'mandate-notify',
   handler: async (event, { home }) => {
     if (!event) return;
 
-    // This engine responds to job.completed and job.failed events
-    // It rolls up completion through the hierarchy:
-    //   job → piece → work → commission
+    // This engine responds to mandate.completed events
+    const payload = event.payload as { writId?: string; commissionId?: string } | null;
+    if (!payload?.writId) return;
 
-    const payload = event.payload as { jobId?: string } | null;
-    if (!payload?.jobId) return;
+    const writ = showWrit(home, payload.writId);
+    if (!writ) return;
 
-    const job = showJob(home, payload.jobId);
-    if (!job || !job.pieceId) return;
+    // Look up the commission for context
+    const commission = payload.commissionId
+      ? readCommission(home, payload.commissionId)
+      : null;
 
-    // Check and complete the parent piece
-    const pieceResult = completePieceIfReady(home, job.pieceId);
-    if (!pieceResult.changed) return;
-
-    // If the piece completed, check the parent work
-    // We need to find the work from the piece
-    const piece = showPiece(home, job.pieceId);
-    if (!piece || !piece.workId) return;
-
-    const workResult = completeWorkIfReady(home, piece.workId);
-    if (!workResult.changed) return;
-
-    // If the work completed, check the parent commission
-    const work = showWork(home, piece.workId);
-    if (!work || !work.commissionId) return;
-
-    completeCommissionIfReady(home, work.commissionId);
+    console.log(`Mandate "${writ.title}" completed for commission ${commission?.id ?? 'unknown'}`);
+    // In a real engine: send a Slack message, write a summary, etc.
   }
 });
 ```
@@ -349,14 +325,13 @@ Wire it in guild.json:
 {
   "clockworks": {
     "standingOrders": [
-      { "on": "job.completed", "run": "completion-rollup" },
-      { "on": "job.failed", "run": "completion-rollup" }
+      { "on": "mandate.completed", "run": "mandate-notify" }
     ]
   }
 }
 ```
 
-The key insight: each `complete*IfReady()` function signals its own completion event (e.g. `piece.completed`). You could alternatively wire separate standing orders for each level — but a single engine that walks up the hierarchy is simpler and avoids event-processing latency at each level.
+**Note:** Completion rollup for writs is handled automatically by the framework. When all children of a writ complete, the parent transitions from `pending` → `ready` (or auto-completes). You don't need a custom engine for rollup — the framework does it internally when `completeWrit()` or `failWrit()` is called.
 
 ## Further reading
 

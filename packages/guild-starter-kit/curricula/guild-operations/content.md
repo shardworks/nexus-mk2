@@ -34,8 +34,8 @@ This guild uses the following roles:
 | Role | Function |
 |------|----------|
 | **Steward** | The patron's right hand. Advises on guild state and administers the guild — manages the roster, workshops, commissions, tools, and the Clockworks. Does not build works. |
-| **Artificer** | Executes jobs — receives planned work and builds the thing. Works in workshops. Plans and records strokes for progress tracking. |
-| **Sage** | Plans work. Decomposes commissions into pieces and jobs with concrete requirements. |
+| **Artificer** | Executes writs — receives planned work and builds the thing. Works in workshops. Creates child writs for sub-task tracking. |
+| **Sage** | Plans work. Decomposes commissions into concrete writs with acceptance criteria. |
 | **Master Sage** | Senior sage. If active, reviews incoming commissions to determine scope and planning approach. |
 
 Other roles may emerge as the guild evolves.
@@ -142,44 +142,60 @@ This means multiple jobs can run concurrently in the same workshop without inter
 
 The `remoteUrl` is the source of truth. The bare clone on disk is ephemeral and can be reconstructed from this URL by `nsg guild restore`.
 
-## Commissions and Work Decomposition
+## Commissions and Writs
 
-A commission is the patron's act of requesting work. The guild receives commissions and organizes the resulting labor through a four-level decomposition hierarchy:
+A commission is the patron's act of requesting work. The guild receives commissions and tracks the resulting labor through **writs** — typed, tree-structured work items.
 
-### The Shape of Labor
+### Writs
 
-| Level | What It Is | Who Handles It (in this guild) |
-|-------|-----------|-------------------------------|
-| **Work** | A large undertaking — too broad to plan directly, must be broken into pieces | Sage decomposes into pieces |
-| **Piece** | An independently-plannable chunk of a work | Sage plans into concrete jobs |
-| **Job** | A single assignment for one anima — one continuous effort, one deliverable | Artificer executes |
-| **Stroke** | An atomic, verifiable action within a job — one test, one function, one integration step | Artificer records and completes |
+A writ is the system's record of an outstanding obligation. Every summoned session is bound to a writ. Writs have:
 
-Not every commission becomes a work. A small commission might map directly to a single job. The hierarchy describes the shape of the labor, not a mandatory sequence of steps.
+- A **type** — guild-defined (e.g. `task`, `feature`, `step`) or built-in (`mandate`, `summon`)
+- A **status** — `ready`, `active`, `pending`, `completed`, `failed`, `cancelled`
+- Optional **parent/child** relationships — forming trees of arbitrary depth
+- A **title** and optional **description** — the description serves as the prompt template content
+
+### Writ Lifecycle
+
+```
+ready → active → completed
+               → failed
+               → pending → ready (cycle)
+         → cancelled
+```
+
+- **ready** — dispatchable, waiting to be picked up by a standing order
+- **active** — an anima is working on it in a session
+- **pending** — the anima called `complete-session` but child writs are still incomplete
+- **completed** — all work finished (fires `<type>.completed`)
+- **failed** — unrecoverable failure (fires `<type>.failed`, cancels incomplete children)
+- **cancelled** — cancelled by the system or cascade
+
+### Completion Rollup
+
+When all children of a pending writ complete, the parent automatically transitions:
+- To **ready** if a standing order exists for `<type>.ready` (re-dispatched for final integration)
+- To **completed** if no standing order exists (container auto-complete)
+
+This lets animas decompose work into sub-items without managing the coordination.
 
 ### Commission Lifecycle
 
-1. **Posted** — the patron runs `nsg commission create <spec> --workshop <name>`. This creates the commission in the Ledger and signals `commission.posted`.
-2. **Scope determined** — the Master Sage (if active) reviews the commission and determines whether it's a work (needs decomposition), a piece (needs planning into jobs), or a single job (ready for dispatch).
-3. **Planned** — for works and pieces, the sage decomposes and plans, producing concrete jobs with acceptance criteria.
-4. **Worktree prepared** — the `workshop-prepare` engine (triggered by `commission.posted`) creates a job branch and worktree, then signals `commission.ready`.
-5. **Dispatched & In Progress** — the Clockworks summons an artificer (triggered by `commission.ready`), resolves the role to a specific anima, writes the assignment, and launches a session.
-6. **Strokes recorded** — the artificer plans strokes at the start of the job and records progress throughout. Each stroke is tracked in the Ledger.
-7. **Session ended** — when the session finishes, the Clockworks checks the stroke record. If pending strokes remain, the anima is re-summoned in a fresh session (staged sessions). If all strokes are complete, the Clockworks signals `commission.session.ended`.
-8. **Merged or Failed** — the `workshop-merge` engine (triggered by `commission.session.ended`) merges the job branch back to main. On success it signals `commission.completed`; on conflict it signals `commission.failed`.
-
-Each step is driven by a standing order in `guild.json`, making the pipeline configurable and extensible.
+1. **Posted** — the patron runs `nsg commission create <spec> --workshop <name>`. This creates the commission and a `mandate` writ in the Ledger, and signals `commission.posted`.
+2. **Worktree prepared** — the `workshop-prepare` engine (triggered by `commission.posted`) creates a branch and worktree, then signals `commission.ready`.
+3. **Dispatched** — the Clockworks matches `mandate.ready` and summons an artificer, hydrating the prompt template with writ fields.
+4. **In Progress** — the artificer works on the writ. They may create child writs for sub-tasks using `create-writ`.
+5. **Session ended** — the artificer calls `complete-session` when done. If child writs exist and are incomplete, the writ goes to `pending`. If the session ends without `complete-session`, the writ is interrupted and re-dispatched.
+6. **Rollup** — as child writs complete, the parent rolls up. When all children are done, the mandate completes.
+7. **Merged or Failed** — the `workshop-merge` engine (triggered by `mandate.completed`) merges the branch back to main.
 
 ### Staged Sessions
 
-A job may span multiple sessions when the context window fills up. The stroke record provides continuity between sessions:
+Work may span multiple sessions when the context window fills up. The writ system provides continuity:
 
-- The anima records strokes via tool throughout the job
-- When a session ends with pending strokes, the Clockworks re-summons the anima in a fresh session
-- The next session receives the original job spec plus the stroke record — a structured checklist of what's done and what remains
+- If a session ends without `complete-session` or `fail-writ`, the writ is interrupted (active → ready) and re-dispatched
+- The next session receives the prompt template plus a **progress appendix** — a structured summary of child writ statuses
 - The anima picks up where the previous session left off
-
-The anima does not need to write freeform handoff notes — the stroke record is the handoff.
 
 ### Commission Status Flow
 
@@ -190,7 +206,7 @@ posted → in_progress → completed
 
 ## Sessions
 
-A session is a single manifestation of an anima — the span during which an anima is alive and working. Every interaction with an anima happens through a session, whether it's consulting the steward, dispatching a job, or briefing an anima about an event.
+A session is a single manifestation of an anima — the span during which an anima is alive and working. Every interaction with an anima happens through a session, whether it's consulting the steward, dispatching a writ, or briefing an anima about an event.
 
 ### Session Triggers
 
@@ -233,7 +249,7 @@ The `sessions` table tracks every session with:
 - Start/end times, exit code, token usage, cost, and duration
 - A link to the full session record JSON on disk
 
-For commissions, the `commission_sessions` join table links commissions to their sessions — a commission may involve multiple sessions (staged sessions, retries).
+Every summoned session is bound to a writ via the `writ_id` column. A commission's work may span multiple sessions — the writ tracks continuity across them.
 
 ## Tools
 
@@ -264,15 +280,12 @@ Tools that animas wield during work. Each tool ships with instructions delivered
 - **tool-remove** — remove installed tools
 - **tool-list** — list installed tools
 
-### Work Decomposition Tools
-- **work-create** — create a work (top-level decomposition unit)
-- **work-list** / **work-show** / **work-update** — manage works
-- **piece-create** — create a piece (planning unit within a work)
-- **piece-list** / **piece-show** / **piece-update** — manage pieces
-- **job-create** — create a job (dispatch unit within a piece)
-- **job-list** / **job-show** / **job-update** — manage jobs
-- **stroke-create** — record a stroke (atomic action within a job)
-- **stroke-list** / **stroke-show** / **stroke-update** — manage strokes
+### Writ Tools
+- **complete-session** — signal that the current writ's work is done. Mandatory before session end.
+- **fail-writ** — signal that the current writ cannot be completed. Terminal.
+- **create-writ** — create a child writ for sub-task tracking
+- **list-writs** — list writs with optional filters (type, status, parent)
+- **show-writ** — show details of a specific writ
 
 ### Clockworks Tools
 - **clock-list** — show pending events
@@ -293,13 +306,13 @@ Engines are automated mechanical processes with no AI involvement. Two kinds:
 **Core engines** — fundamental capabilities absorbed into the Nexus framework itself (`@shardworks/nexus-core`). These are not registered in `guild.json` as engines — they are framework internals that the system calls directly:
 
 - **manifest** — assembles an anima's identity for a session (codex, curriculum, temperament, tool instructions → system prompt)
-- **worktree** — creates and manages git worktrees for jobs
+- **worktree** — creates and manages git worktrees for commissions
 - **migrate** — applies database migrations to the Ledger
 
 **Clockwork engines** — purpose-built to respond to events via standing orders. Use the `engine()` SDK factory from `@shardworks/nexus-core`. The Clockworks runner calls them automatically when matching events fire. Packaged in `@shardworks/nexus-stdlib`:
 
 - **workshop-prepare** — creates a worktree when a commission is posted (`commission.posted` → `commission.ready`)
-- **workshop-merge** — merges a job branch after the session ends (`commission.session.ended` → `commission.completed` or `commission.failed`)
+- **workshop-merge** — merges the commission branch after the mandate completes (`mandate.completed` → `commission.completed` or `commission.failed`)
 
 ### Session Providers
 
@@ -315,7 +328,7 @@ Role-specific codex entries live in `codex/roles/` and are delivered only to ani
 
 ## The Ledger
 
-The guild's operational database (SQLite). Holds anima records, roster, commission history, work decomposition state, session history, compositions, events, and the audit trail. Lives at `.nexus/nexus.db` in the guildhall. Managed by the migrate engine in core.
+The guild's operational database (SQLite). Holds anima records, roster, commission history, writs, session history, compositions, events, and the audit trail. Lives at `.nexus/nexus.db` in the guildhall. Managed by the migrate engine in core.
 
 ### Key Tables
 
@@ -323,14 +336,10 @@ The guild's operational database (SQLite). Holds anima records, roster, commissi
 |-------|--------------|
 | `animas` | Every anima that has ever existed — name, status, composition |
 | `roster` | Active role assignments (filtered view of active animas) |
-| `commissions` | Commission records with status, content, and workshop |
+| `commissions` | Commission records with status, content, workshop, and linked mandate writ |
 | `commission_assignments` | Which anima was assigned to which commission |
-| `works` | Top-level work items linked to commissions |
-| `pieces` | Pieces within works — independently plannable chunks |
-| `jobs` | Dispatchable job assignments within pieces |
-| `strokes` | Atomic actions within jobs — progress tracking |
-| `sessions` | Every session — anima, provider, trigger, metrics, cost |
-| `commission_sessions` | Links commissions to their sessions |
+| `writs` | Tracked work items — type, status, parent/child hierarchy, bound session |
+| `sessions` | Every session — anima, provider, trigger, metrics, cost, bound writ |
 | `events` | The Clockworks event queue — every event signaled |
 | `event_dispatches` | Standing order execution records |
 | `audit_log` | Who did what, when |
@@ -345,7 +354,7 @@ An event is an immutable fact: *this happened*. Events are recorded in the Ledge
 
 Two kinds:
 
-- **Framework events** — signaled automatically by the system. Animas cannot signal these. Reserved namespaces: `anima.*`, `commission.*`, `work.*`, `piece.*`, `job.*`, `stroke.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`, `session.*`.
+- **Framework events** — signaled automatically by the system. Animas cannot signal these. Reserved namespaces: `anima.*`, `commission.*`, `writ.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`, `session.*`. Note: writ lifecycle events like `task.ready` use guild-defined type names but are emitted by the framework.
 - **Custom events** — declared by the guild in `guild.json` under `clockworks.events`. Animas signal these using the `signal` tool.
 
 ### Key Framework Events
@@ -353,15 +362,13 @@ Two kinds:
 | Event | When it fires | Typical standing order |
 |-------|--------------|----------------------|
 | `commission.posted` | A new commission is created | `run: workshop-prepare` |
-| `commission.ready` | Worktree is set up, commission is ready for work | `summon: artificer` |
-| `commission.session.ended` | A job session finishes (all strokes complete) | `run: workshop-merge` |
-| `commission.completed` | Commission branch merged to main | (guild-defined) |
-| `commission.failed` | Commission failed (merge conflict, error) | (guild-defined) |
-| `work.created` | A work is created in the decomposition hierarchy | (guild-defined) |
-| `piece.ready` | A piece is ready for planning | (guild-defined) |
-| `job.ready` | A job is ready for dispatch | (guild-defined) |
-| `job.completed` | A job completes successfully | (guild-defined) |
-| `stroke.recorded` | A stroke is planned or completed | (guild-defined) |
+| `commission.completed` | Commission completed (mandate finished) | (guild-defined) |
+| `commission.failed` | Commission failed | (guild-defined) |
+| `mandate.ready` | Mandate writ is ready for dispatch | `summon: artificer` |
+| `mandate.completed` | Mandate writ completed | `run: workshop-merge` |
+| `<type>.ready` | A writ of guild-defined type is ready | (guild-defined) |
+| `<type>.completed` | A writ of guild-defined type completed | (guild-defined) |
+| `<type>.failed` | A writ of guild-defined type failed | (guild-defined) |
 | `session.started` | Any session begins | (guild-defined) |
 | `session.ended` | Any session ends (with metrics) | (guild-defined) |
 | `standing-order.failed` | A standing order execution failed | (guild-defined) |
@@ -391,13 +398,15 @@ Example `guild.json` configuration:
       }
     },
     "standingOrders": [
-      { "on": "commission.posted",         "run": "workshop-prepare" },
-      { "on": "commission.ready",          "summon": "artificer" },
-      { "on": "commission.session.ended",  "run": "workshop-merge" },
-      { "on": "commission.failed",         "brief": "steward" },
-      { "on": "code.reviewed",             "brief": "steward" }
+      { "on": "commission.posted",   "run": "workshop-prepare" },
+      { "on": "mandate.ready",      "summon": "artificer",
+        "prompt": "You have been assigned a commission.\n\n{{writ.title}}\n\n{{writ.description}}" },
+      { "on": "mandate.completed",   "run": "workshop-merge" },
+      { "on": "commission.failed",   "brief": "steward" },
+      { "on": "code.reviewed",       "brief": "steward" }
     ]
-  }
+  },
+  "writTypes": {}
 }
 ```
 
@@ -587,14 +596,6 @@ The primary interface is the `nsg` command, organized by noun groups:
 | `nsg tool install <source>` | Install a tool or bundle |
 | `nsg tool remove <name>` | Remove an installed tool |
 | `nsg tool list` | List installed tools |
-
-### Work Decomposition
-| Command | Purpose |
-|---------|---------|
-| `nsg work create/list/show/update` | Manage works |
-| `nsg piece create/list/show/update` | Manage pieces |
-| `nsg job create/list/show/update` | Manage jobs |
-| `nsg stroke create/list/show/update` | Manage strokes |
 
 ### Clockworks
 | Command | Purpose |

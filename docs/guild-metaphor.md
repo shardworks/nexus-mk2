@@ -1,5 +1,7 @@
 # The Guild Metaphor
 
+> **Tone guidance for authors:** This document describes the guild as a *guild* — from the perspective of its members, its patron, and its traditions. Write as though explaining how a craftsman's guild operates, not how a software system is architected. Technical details (database schemas, API contracts, status enums) belong in the reference docs under `docs/reference/`. If you find yourself writing implementation specifics, you're in the wrong register.
+
 The guild metaphor is the organizing model for Nexus Mk 2.1. It maps the structure and operations of a craftsman's guild onto a multi-agent AI system — not as decoration, but as a conceptual framework that makes the system's architecture legible to both humans and agents.
 
 ## Core Entities
@@ -55,8 +57,8 @@ A guild might have planners and builders, or architects and developers, or a sin
 
 | Role | Function |
 |------|----------|
-| **Artificer** | Executes jobs. Receives planned work and builds the thing. |
-| **Sage** | Plans work. Decomposes commissions, refines vague instructions into concrete jobs with acceptance criteria. |
+| **Artificer** | Executes tasks. Receives planned work and builds the thing. |
+| **Sage** | Plans work. Decomposes commissions, refines vague instructions into concrete writs with acceptance criteria. |
 | **Master Sage** | Senior sage. Reviews incoming commissions, determines scope, and may convene a Council of Sages for complex cases. |
 
 These are one guild's organizational model — not requirements. Other roles (Guildmaster, Coinmaster, Oracle, Instructor, and others) are anticipated but not yet defined.
@@ -71,29 +73,26 @@ A commission describes **origin** — it is the patron's request, the thing that
 
 ### The Shape of Labor
 
-The guild organizes labor into four levels, each with a distinct character:
+When the guild receives a commission, it issues a **writ** — a formal written obligation. A writ names what must be done, and the guild tracks it until the obligation is fulfilled or withdrawn.
 
-**Work** — A large undertaking that must be broken into pieces before the guild can plan it. When a commission arrives and the scope is too broad for anyone to plan directly, the guild recognizes it as a work and looks for the natural seams — the independently-plannable chunks. Not every commission becomes a work; many are small enough to plan or execute directly.
+Writs are how the guild organizes labor at every scale. A writ might describe a broad undertaking or a narrow task. The guild chooses its own vocabulary for the kinds of writs it issues — *feature*, *task*, *step*, *bug*, or whatever fits the craft. The vocabulary is the guild's; the framework imposes no fixed hierarchy.
 
-**Piece** — A plannable portion of a work. A piece is coherent enough that someone can sit down and figure out exactly what jobs need doing. Multiple pieces of the same work can be planned and worked in parallel — the event pipeline and the delivery service don't need to wait for each other.
+A writ may be broken into smaller writs, which may be broken further still, forming a tree of obligations. An artificer working a large writ might issue child writs for its constituent parts, each tracked independently. When all the children are fulfilled, the parent obligation is satisfied — the guild handles this bookkeeping automatically so the animas can focus on their craft.
 
-**Job** — An assignment for one anima. The thing that gets handed off: here's what needs building, go build it. One anima owns a job from start to finish — they may take breaks (sessions end, new ones begin), but the job is theirs until it's done or they signal for help.
+Two kinds of writs are built into the guild's operations:
 
-**Stroke** — A single deliberate action within a job. One cut of the chisel, one brush mark, one test written. The smallest unit the guild tracks — where progress becomes visible, where continuity is maintained between sessions, and where the record shows exactly how far along a job has come. An anima plans their strokes, records them as they go, and marks them complete. The stroke record is the job's living checklist.
+- **Mandate** — the root writ created when a commission arrives. The mandate *is* the commission's obligation expressed as trackable labor. Fulfilling the mandate fulfills the commission.
+- **Summon** — a bookkeeping writ the guild synthesizes when an anima is called to work outside the normal commission pipeline. Every session of work has a writ; the summon ensures this is true even for ad hoc calls.
 
-An additional aspirational level, the **opus**, sits above and outside the operational hierarchy. The opus is the patron's long-term vision — the full body of work across months or years. It exists as a north star for decision-making but is not tracked as an operational entity. Think of it as the guild's understanding of what the patron is ultimately building.
-
-See [Work Decomposition](work-decomposition.md) for the design rationale behind these levels — why a named hierarchy over a generic tree, how the levels interact with staged sessions and capability tiering, and how the framework-vs-guild-policy boundary works.
+See [Writs](architecture/writs.md) for the full technical design — lifecycle, completion rollup, prompt templates, and status transitions.
 
 ### Works
 
 The guild's output — what crosses the threshold to the patron. Works are intentionally vague: running software, usable tools, deployed services, solved problems. The patron judges works by using them. What counts as a work is defined by what the patron can touch, run, or interact with.
 
-"Works" (the guild's delivered output) and "work" (a level in the labor hierarchy) are related but distinct. A bug fix is part of the guild's works — it crosses the threshold — but in the hierarchy it's probably just a job, not a work. See [Work Decomposition](work-decomposition.md) for this distinction.
-
 ## Workshops
 
-A repository where the guild does its work. Workshops are guild space — the patron assigns them but does not enter them during normal operation. An anima working a job does their craft inside a workshop; the patron judges the result by the works it produces, not by reading the code on the workbench.
+A repository where the guild does its work. Workshops are guild space — the patron assigns them but does not enter them during normal operation. An anima working a writ does their craft inside a workshop; the patron judges the result by the works it produces, not by reading the code on the workbench.
 
 Some workshops produce works for the patron (applications, services, tools). Others are purely guild infrastructure — tools, training materials, databases. These aren't built for the patron; they are how the guild operates. Both kinds are guild space.
 
@@ -151,10 +150,6 @@ A tool an anima actively wields during work. Tools are the guild's toolkit — i
 
 Distinct from engines: tools are wielded by animas during work; engines run automatically without anima involvement.
 
-### Ledger
-
-The guild's book of work — one of the guild's core Books. The Ledger tracks commissions, assignments, and the shape of labor in progress. It answers: what has been asked for, who's doing it, and how far along is it? See [The Books](#the-books) for the full model.
-
 ### Relic
 
 An artifact the guild depends on but does not maintain or fully understand. Load-bearing and sacred, not deprecated — a relic is respected for what it carries. Relics are a natural lifecycle stage for tools built fast during periods of rapid growth.
@@ -173,7 +168,7 @@ The membership roll. Who exists and what they're made of. The Register records e
 
 ### Ledger
 
-The book of work. What has been commissioned and how labor is organized. The Ledger records commissions, assignments, and the shape of labor in progress — works, pieces, jobs, strokes. It is the guild's transaction record: what was asked for, who is doing it, and how far along it has come.
+The book of work. What has been commissioned and how labor is organized. The Ledger records commissions, assignments, and writs — the guild's tracked work items. It is the guild's transaction record: what was asked for, who is doing it, and how far along it has come.
 
 ### Daybook
 

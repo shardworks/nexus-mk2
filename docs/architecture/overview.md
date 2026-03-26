@@ -6,13 +6,13 @@ The guild system is a framework for running an autonomous AI workforce. **Nexus*
 
 The guild is an autonomous workforce. The patron gives it work; it delivers results. Five pillars define the system:
 
-### 1. The Commission Pipeline & Work Decomposition
+### 1. The Commission Pipeline & Writs
 
-The guild receives work as commissions and organizes the resulting labor through a structured decomposition hierarchy: works break into pieces, pieces into jobs, jobs into strokes. Each level has a distinct operational role — decomposition, planning, dispatch, and progress tracking — and the clockworks routes work through the appropriate phases based on the guild's standing orders.
+The guild receives work as commissions and organizes the resulting labor through **writs** — typed, tree-structured work items. When a commission is posted, the framework creates a **mandate** writ (the root obligation). The guild decomposes that mandate into child writs as needed, using whatever types fit its workflow — `task`, `feature`, `step`, `bug`, or any guild-defined vocabulary. Writs can nest to arbitrary depth; completion rolls up automatically from children to parents.
 
-The pipeline is not a fixed sequence; it's a framework for composing phases as the guild's sophistication grows. Guilds decide which roles handle which levels: one guild might have sages who plan and artificers who build; another might use a single generalist role. The framework provides the hierarchy, the lifecycle management, and the event-driven routing; the guild provides the organizational structure.
+The pipeline is not a fixed sequence; it's a framework for composing phases as the guild's sophistication grows. Guilds decide which roles handle which writ types: one guild might have sages who plan and artificers who build; another might use a single generalist role. The framework provides the writ lifecycle, completion rollup, and event-driven routing; the guild provides the organizational structure.
 
-See [Work Decomposition](../work-decomposition.md) for the full theory and design rationale behind the hierarchy.
+See [Writs](writs.md) for the full design — lifecycle, completion rollup, prompt templates, and writ types.
 
 ### 2. Tools & Engines
 
@@ -55,7 +55,7 @@ Nexus is the runtime that makes the guild system operational. It provides the ba
 - `tool-remove` — remove a tool or engine from the guild
 - `anima-create` — create animas from curriculum + temperament
 - `signal` — signal custom guild events for the Clockworks
-- Plus CRUD tools for all entity types: anima, workshop, commission, work, piece, job, stroke, clock
+- Plus CRUD tools for all entity types: anima, workshop, commission, writ, clock
 
 **Database schema** — the base migrations that define the guild's Books and Clockworks tables.
 
@@ -201,6 +201,7 @@ Operational state — queryable, relational, runtime data — organized into the
 
 **Ledger** (what work is happening):
 - **Commission metadata** — content, timestamps, assigned animas, status, state transitions
+- **Writs** — typed work items with tree structure, status lifecycle, and session binding
 - **Anima self-recorded memory and notes** — written via tool, not direct database access
 - **Edict history** *(v2)* — active edicts and lifecycle
 
@@ -255,33 +256,33 @@ No per-anima markdown files on the filesystem. The anima's identity is the *comb
 
 ---
 
-## Commissions, Work Decomposition, and Workshops
+## Commissions, Writs, and Workshops
 
-All commission and work-tracking infrastructure lives in the guildhall — the pipeline, the engines, the dispatch logic, the Ledger tables that track works, pieces, jobs, and strokes. When a commission is posted, it specifies a **target workshop**: the repo where animas will do the work. Animas are manifested and launched into worktrees of that target workshop, but the work lifecycle (posting, decomposition, tracking, status transitions) is managed centrally through the guildhall's tools and engines.
+All commission and work-tracking infrastructure lives in the guildhall — the pipeline, the engines, the dispatch logic, the Ledger tables that track commissions and writs. When a commission is posted, it specifies a **target workshop**: the repo where animas will do the work. Animas are manifested and launched into worktrees of that target workshop, but the work lifecycle (posting, decomposition, tracking, status transitions) is managed centrally through the guildhall's tools and engines.
 
-### The Decomposition Hierarchy
+### Writs
 
-The framework provides a four-level hierarchy for organizing labor. Each level has distinct operational semantics:
+The framework provides **writs** — typed, tree-structured work items — for organizing labor. A writ has a type, a title, a status, and optionally a parent and children. The guild defines its own writ types (`task`, `feature`, `bug`, etc.) to match its workflow vocabulary. Two types are built in:
 
-| Level | Operational Role | Framework Behavior |
-|-------|-----------------|-------------------|
-| **Work** | Decomposition boundary | Tracked in the Ledger. Too large to plan directly — must be decomposed into pieces. |
-| **Piece** | Planning boundary | Tracked in the Ledger. Independently plannable. Produces concrete jobs. May run in parallel with other pieces. |
-| **Job** | Dispatch boundary | Tracked in the Ledger. Assigned to one anima. Dispatched by the clockworks. Owned from start to finish. |
-| **Stroke** | Progress boundary | Tracked in the Ledger. Recorded by the executing anima via tool. Provides granular progress, context bridging between sessions, and crash recovery. |
+- **mandate** — created automatically when a commission is posted. The mandate is the root writ for the commission; completing it completes the commission.
+- **summon** — synthesized for non-writ-driven sessions (e.g. `nsg consult`). Ensures every session has a trackable work item.
 
-A **commission** is the patron's request — it describes origin, not scope. The guild receives a commission and determines where it maps in the hierarchy: a large commission becomes a work; a moderate one might be a single piece; a small one might be dispatched directly as a job.
+Writs form trees of arbitrary depth. A mandate might have `task` children, which might have `step` children. Completion rolls up automatically: when all children complete, the parent transitions from `pending` → `ready` (if a standing order exists for that type) or auto-completes (if not).
 
-### Roles and the Hierarchy
+A **commission** is the patron's request — it describes origin, not scope. The guild receives a commission and determines how to decompose the mandate: a simple commission might be worked directly; a complex one might be broken into many child writs dispatched to different animas.
 
-The framework provides infrastructure for roles — registration in `guild.json`, role-based tool gating, role resolution in standing orders — but does not prescribe which roles a guild must have. The decomposition hierarchy defines **what operations occur** at each level (decomposition, planning, dispatch, tracking); the guild's roles and standing orders define **who performs them**.
+See [Writs](writs.md) for the full design: status lifecycle, completion model, dispatch integration, prompt templates, and the commission→mandate bridge.
+
+### Roles and Writs
+
+The framework provides infrastructure for roles — registration in `guild.json`, role-based tool gating, role resolution in standing orders — but does not prescribe which roles a guild must have. The guild's standing orders define which roles handle which writ types.
 
 For example, the guild-starter-kit maps:
 - **Scope triage** → Master Sage (reviews incoming commissions)
-- **Work decomposition & piece planning** → Sage (breaks works into pieces, pieces into jobs)
-- **Job execution** → Artificer (receives a job, plans strokes, builds the thing)
+- **Planning** → Sage (decomposes mandates into concrete writs with acceptance criteria)
+- **Execution** → Artificer (receives a writ, builds the thing, calls `complete-session`)
 
-Other guilds can use different role structures while using the same hierarchy.
+Other guilds can use different role structures and writ type vocabularies.
 
 ### Workshops
 
@@ -298,7 +299,7 @@ When an anima is manifested for a session, its instructions are assembled by the
 ### Delivery
 
 - **System prompt**: Anima-specific instructions — codex, curriculum, temperament, tool instructions. Everything that defines *who this anima is and how they operate*. Frozen at manifest time. *(v2 adds oaths and edicts.)*
-- **Initial prompt**: Work context — the job specification, any planning advice, clarification thread, work-specific instructions. Everything about *what to do right now*.
+- **Initial prompt**: Work context — the writ specification, any planning advice, work-specific instructions. Everything about *what to do right now*.
 
 ### What reaches an anima
 
@@ -328,8 +329,8 @@ SYSTEM PROMPT (identity + environment):
 
 INITIAL PROMPT (task):
 ┌─────────────────────────────────────┐
-│  7. Work context                    │  Job spec, planning advice,
-│     (when commissioned)             │  clarification thread, stroke record
+│  7. Work context                    │  Writ spec, planning advice,
+│     (when commissioned)             │  writ description and context
 └─────────────────────────────────────┘
 ```
 
@@ -359,7 +360,7 @@ The Books are guild infrastructure — owned by the institution, maintained by f
 
 ## Vocabulary
 
-This document uses the guild vocabulary defined in [`guild-metaphor.md`](../guild-metaphor.md), the work decomposition hierarchy in [`work-decomposition.md`](../work-decomposition.md), and the project philosophy in [`philosophy.md`](../philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, work, piece, job, stroke, works, workshop, threshold, codex, curriculum, temperament, oath *(v2)*, edict *(v2)*, engine, tool, relic, guildhall, the Books (register, ledger, daybook), clockworks, standing order.
+This document uses the guild vocabulary defined in [`guild-metaphor.md`](../guild-metaphor.md), the writ design in [`writs.md`](writs.md), and the project philosophy in [`philosophy.md`](../philosophy.md). Key metaphor concepts used throughout: guild, patron, anima, commission, writ, mandate, works, workshop, threshold, codex, curriculum, temperament, oath *(v2)*, edict *(v2)*, engine, tool, relic, guildhall, the Books (register, ledger, daybook), clockworks, standing order.
 
 One term is specific to this architecture and not defined in the metaphor:
 

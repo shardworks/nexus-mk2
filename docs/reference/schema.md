@@ -46,40 +46,17 @@ The guild's Books database (``.nexus/nexus.db``) — SQLite, WAL mode, foreign k
 
 
    ┌─────────────────────┐
-   │       works         │
+   │       writs         │
    │─────────────────────│
-   │ id (w-)             │
-   │ commission_id ──────│──→ commissions (optional)
-   │ title, description  │
+   │ id (wrt-)           │
+   │ type, title         │
    │ status              │
-   └──────┬──────────────┘
-          │
-   ┌──────┴──────────────┐
-   │      pieces         │
-   │─────────────────────│
-   │ id (p-)             │
-   │ work_id ────────────│──→ works (optional)
-   │ title, description  │
-   │ status              │
-   └──────┬──────────────┘
-          │
-   ┌──────┴──────────────┐
-   │       jobs          │
-   │─────────────────────│
-   │ id (j-)             │
-   │ piece_id ───────────│──→ pieces (optional)
-   │ title, description  │
-   │ status, assignee    │
-   └──────┬──────────────┘
-          │
-   ┌──────┴──────────────┐
-   │     strokes         │
-   │─────────────────────│
-   │ id (s-)             │
-   │ job_id ─────────────│──→ jobs (required)
-   │ kind, content       │
-   │ status              │
+   │ parent_id ──────────│──→ writs (self-ref, optional)
+   │ session_id          │
    └─────────────────────┘
+        ↑                    ↑
+        │                    │
+   commissions.writ_id   sessions.writ_id
 
 
    ┌─────────────────────┐          ┌──────────────────────┐
@@ -157,6 +134,7 @@ Patron-posted work orders.
 | `status` | TEXT | NOT NULL, CHECK | One of: `posted`, `assigned`, `in_progress`, `completed`, `failed` |
 | `workshop` | TEXT | NOT NULL | Target workshop name |
 | `status_reason` | TEXT | | Human-readable reason for current status |
+| `writ_id` | TEXT | FK → writs | The commission's mandate writ (set on posting) |
 | `created_at` | TEXT | NOT NULL, DEFAULT now | |
 | `updated_at` | TEXT | NOT NULL, DEFAULT now | |
 
@@ -173,62 +151,25 @@ Join table — which animas are assigned to which commissions.
 
 UNIQUE constraint on `(commission_id, anima_id)`.
 
-### `works`
+### `writs`
 
-Top-level work decomposition units.
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (w-) |
-| `commission_id` | TEXT | FK → commissions | Optional — works can be standalone |
-| `title` | TEXT | NOT NULL | |
-| `description` | TEXT | | |
-| `status` | TEXT | NOT NULL, DEFAULT 'open', CHECK | One of: `open`, `active`, `completed`, `cancelled` |
-| `created_at` | TEXT | NOT NULL, DEFAULT now | |
-| `updated_at` | TEXT | NOT NULL, DEFAULT now | |
-
-### `pieces`
-
-Subdivisions of work, grouping related jobs.
+Tracked work items — the Ledger's core table. Writs are typed, tree-structured obligations that replace the earlier four-level hierarchy (works, pieces, jobs, strokes).
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (p-) |
-| `work_id` | TEXT | FK → works | Optional |
-| `title` | TEXT | NOT NULL | |
-| `description` | TEXT | | |
-| `status` | TEXT | NOT NULL, DEFAULT 'open', CHECK | One of: `open`, `active`, `completed`, `cancelled` |
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (wrt-) |
+| `type` | TEXT | NOT NULL | Writ type — guild-defined (e.g. `task`, `feature`) or built-in (`mandate`, `summon`) |
+| `title` | TEXT | NOT NULL | Human-readable summary |
+| `description` | TEXT | | Full description, acceptance criteria, etc. |
+| `status` | TEXT | NOT NULL, DEFAULT 'ready', CHECK | One of: `ready`, `active`, `pending`, `completed`, `failed`, `cancelled` |
+| `parent_id` | TEXT | FK → writs | Parent writ (null for root writs) |
+| `session_id` | TEXT | | Currently bound session (cleared on completion/interruption) |
 | `created_at` | TEXT | NOT NULL, DEFAULT now | |
 | `updated_at` | TEXT | NOT NULL, DEFAULT now | |
 
-### `jobs`
+Indexes: `idx_writs_parent`, `idx_writs_status`, `idx_writs_type_status`.
 
-Assignable work units belonging to a piece.
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (j-) |
-| `piece_id` | TEXT | FK → pieces | Optional |
-| `title` | TEXT | NOT NULL | |
-| `description` | TEXT | | |
-| `status` | TEXT | NOT NULL, DEFAULT 'open', CHECK | One of: `open`, `active`, `completed`, `failed`, `cancelled` |
-| `assignee` | TEXT | | Anima name or identifier |
-| `created_at` | TEXT | NOT NULL, DEFAULT now | |
-| `updated_at` | TEXT | NOT NULL, DEFAULT now | |
-
-### `strokes`
-
-Atomic records of work performed against a job.
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (s-) |
-| `job_id` | TEXT | NOT NULL, FK → jobs | Required — every stroke belongs to a job |
-| `kind` | TEXT | NOT NULL | Type of work (e.g. "commit", "review", "test") |
-| `content` | TEXT | | Details of the work performed |
-| `status` | TEXT | NOT NULL, DEFAULT 'pending', CHECK | One of: `pending`, `complete`, `failed` |
-| `created_at` | TEXT | NOT NULL, DEFAULT now | |
-| `updated_at` | TEXT | NOT NULL, DEFAULT now | |
+**Cross-references:** `commissions.writ_id` points to the commission's mandate writ. `sessions.writ_id` points to the writ the session is working on.
 
 ### `audit_log`
 
@@ -238,8 +179,8 @@ The Daybook audit trail — records of all significant actions.
 |--------|------|-------------|-------------|
 | `id` | TEXT | PRIMARY KEY | Prefixed hex ID (aud-) |
 | `actor` | TEXT | NOT NULL | Who did it: `patron`, `operator`, `framework`, `instantiate`, anima name |
-| `action` | TEXT | NOT NULL | What happened: `commission_posted`, `anima_updated`, `job_created`, etc. |
-| `target_type` | TEXT | | Entity type: `commission`, `anima`, `work`, `piece`, `job`, `stroke` |
+| `action` | TEXT | NOT NULL | What happened: `commission_posted`, `anima_updated`, `writ_created`, etc. |
+| `target_type` | TEXT | | Entity type: `commission`, `anima`, `writ`, `session`, `conversation` |
 | `target_id` | TEXT | | Entity ID |
 | `detail` | TEXT | | JSON-encoded additional context |
 | `timestamp` | TEXT | NOT NULL, DEFAULT now | |
@@ -305,7 +246,7 @@ Session records — every session launched through the funnel.
 | `record_path` | TEXT | | Path to the SessionRecord JSON file (relative to guild root) |
 | `conversation_id` | TEXT | FK → conversations | Conversation this turn belongs to (null for standalone sessions) |
 | `turn_number` | INTEGER | | Position within the conversation (1-indexed) |
-| `writ_id` | TEXT | FK → writs | Bound writ (set by clockworks for writ-driven sessions) |
+| `writ_id` | TEXT | FK → writs | Bound writ (set by clockworks for writ-driven sessions; null for conversations) |
 
 ### `conversations`
 
@@ -379,46 +320,28 @@ posted → assigned → in_progress → completed
                                 → failed
 ```
 
-- **posted** — created by patron, waiting for dispatch
+- **posted** — created by patron, waiting for dispatch. A mandate writ is created and linked.
 - **assigned** — (manual transition) an anima has been assigned
 - **in_progress** — the Clockworks has summoned an anima (automatic on `summon` dispatch)
-- **completed** — all works finished (`completeCommissionIfReady()`)
+- **completed** — the mandate writ is fulfilled
 - **failed** — manually set when the commission cannot be completed
 
-### Work
+### Writ
 
 ```
-open → active → completed
-              → cancelled
+ready → active → completed
+               → failed → cancelled (cascade)
+               → pending → ready (when children complete)
+                         → completed (auto, if no standing order)
+ready → cancelled
 ```
 
-- **open** — created, no work started
-- **active** — work in progress
-- **completed** — all pieces done, or manually set
-- **cancelled** — abandoned
-
-### Piece
-
-```
-open → active → completed
-              → cancelled
-```
-
-Same as work. **Policy:** a piece with failed jobs stays `active` — it does not auto-complete until all jobs are completed/cancelled with none failed.
-
-### Job
-
-```
-open → active → completed
-              → failed
-              → cancelled
-```
-
-- **open** — created, not yet assigned or started
-- **active** — work in progress (signals `job.ready`)
-- **completed** — all strokes done, none failed
-- **failed** — at least one stroke failed (set by `completeJobIfReady()`)
-- **cancelled** — abandoned
+- **ready** — available for dispatch. Signals `{type}.ready` (e.g. `mandate.ready`, `task.ready`)
+- **active** — an anima is working on it (session bound)
+- **pending** — the anima called `complete-session` but child writs are still incomplete. Automatically transitions back to `ready` (or auto-completes) when all children finish.
+- **completed** — obligation fulfilled. Signals `{type}.completed`. Triggers completion rollup on parent.
+- **failed** — unrecoverable failure. Signals `{type}.failed`. Cascades cancellation to incomplete children.
+- **cancelled** — withdrawn, either directly or by cascade from a failed parent.
 
 ### Conversation
 
@@ -430,17 +353,6 @@ active → concluded
 - **active** — conversation is in progress, turns can be taken
 - **concluded** — conversation ended normally (turn limit reached or explicitly concluded)
 - **abandoned** — conversation ended abnormally (browser disconnect, timeout)
-
-### Stroke
-
-```
-pending → complete
-        → failed
-```
-
-- **pending** — recorded, awaiting outcome
-- **complete** — work succeeded
-- **failed** — work failed
 
 ---
 
@@ -456,10 +368,7 @@ All entity IDs use the format `{prefix}-{8 hex chars}` where the hex is generate
 | `cpart-` | Conversation participant | `cpart-5e6f7a8b` |
 | `evt-` | Event | `evt-1a2b3c4d` |
 | `ses-` | Session | `ses-deadbeef` |
-| `w-` | Work | `w-12345678` |
-| `p-` | Piece | `p-abcdef01` |
-| `j-` | Job | `j-fedcba98` |
-| `s-` | Stroke | `s-11223344` |
+| `wrt-` | Writ | `wrt-12345678` |
 | `aud-` | Audit log entry | `aud-aabbccdd` |
 | `ed-` | Event dispatch | `ed-55667788` |
 | `r-` | Roster entry | `r-99aabbcc` |

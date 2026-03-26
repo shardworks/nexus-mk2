@@ -6,7 +6,7 @@ The Clockworks event system — every framework event, custom event rules, and s
 
 ## Framework Events
 
-Framework events are signaled by core modules and the Clockworks runner. They use reserved namespaces (`commission.`, `session.`, `work.`, `piece.`, `job.`, `stroke.`, `standing-order.`) and **cannot** be signaled by animas or operators.
+Framework events are signaled by core modules and the Clockworks runner. They use reserved namespaces (`commission.`, `session.`, `standing-order.`) and **cannot** be signaled by animas or operators.
 
 ### Commission Events
 
@@ -16,11 +16,11 @@ Framework events are signaled by core modules and the Clockworks runner. They us
 | `commission.session.ended` | `{ commissionId, workshop?, exitCode }` | `framework` | A session launched for a commission completes (success or failure) |
 | `commission.completed` | `{ commissionId }` | `framework` | `completeCommissionIfReady()` transitions status to `completed` |
 
-**`commission.posted`** is the primary entry point for the commission pipeline. Standing orders typically wire this to summon an anima (e.g. `{ on: "commission.posted", summon: "artificer" }`).
+**`commission.posted`** is the primary entry point for the commission pipeline. The framework creates a `mandate` writ and signals `mandate.ready` — standing orders typically wire that to summon an anima (e.g. `{ on: "mandate.ready", summon: "artificer" }`).
 
 **`commission.session.ended`** fires when any session associated with a commission finishes. Useful for post-session automation (merge worktrees, check completion, notify).
 
-**`commission.completed`** fires when the auto-completion rollup determines all works are done. This is a terminal event — no further work expected.
+**`commission.completed`** fires when the commission's mandate writ is fulfilled. This is a terminal event — no further work expected.
 
 ### Session Events
 
@@ -34,24 +34,30 @@ Framework events are signaled by core modules and the Clockworks runner. They us
 
 **`session.record-failed`** is a diagnostic event. The `phase` field indicates where the failure occurred: `"insert"` (initial row), `"write-record"` (JSON to disk), or `"update-row"` (final metrics).
 
-### Work Decomposition Events
+### Writ Lifecycle Events
 
-| Event | Payload | Emitter | When |
-|-------|---------|---------|------|
-| `work.created` | `{ workId, commissionId }` | `framework` | `createWork()` |
-| `work.completed` | `{ workId }` | `framework` | `updateWork()` with status `"completed"` OR `completeWorkIfReady()` transitions |
-| `piece.created` | `{ pieceId, workId }` | `framework` | `createPiece()` |
-| `piece.ready` | `{ pieceId }` | `framework` | `updatePiece()` with status `"active"` |
-| `piece.completed` | `{ pieceId }` | `framework` | `updatePiece()` with status `"completed"` OR `completePieceIfReady()` transitions |
-| `job.created` | `{ jobId, pieceId }` | `framework` | `createJob()` |
-| `job.ready` | `{ jobId }` | `framework` | `updateJob()` with status `"active"` |
-| `job.completed` | `{ jobId }` | `framework` | `updateJob()` with status `"completed"` OR `completeJobIfReady()` transitions |
-| `job.failed` | `{ jobId }` | `framework` | `updateJob()` with status `"failed"` OR `completeJobIfReady()` when any stroke failed |
-| `stroke.recorded` | `{ strokeId, jobId }` | `framework` | `createStroke()` |
+Writ lifecycle events use the writ's **type** as the event namespace. For example, a writ of type `mandate` emits `mandate.ready`, `mandate.completed`, etc. A guild-defined type like `task` emits `task.ready`, `task.completed`, etc.
 
-**`piece.ready`** and **`job.ready`** fire on status transition to `"active"`. These are the "work is available" signals — standing orders can wire them to summon animas for dispatch.
+| Event Pattern | Payload | Emitter | When |
+|---------------|---------|---------|------|
+| `{type}.ready` | `{ writId, parentId?, commissionId? }` | `framework` | Writ transitions to `ready` — available for dispatch |
+| `{type}.completed` | `{ writId, parentId?, commissionId? }` | `framework` | Writ transitions to `completed` |
+| `{type}.failed` | `{ writId, parentId?, commissionId? }` | `framework` | Writ transitions to `failed` |
 
-**Completion rollup pattern:** `session.ended` → engine calls `completeJobIfReady()` → if job completes, engine calls `completePieceIfReady()` → if piece completes, engine calls `completeWorkIfReady()` → and so on up the hierarchy.
+**`{type}.ready`** is the primary dispatch signal. Standing orders wire these to summon animas (e.g. `{ on: "mandate.ready", summon: "artificer" }`). When a commission is posted, the framework creates a `mandate` writ and signals `mandate.ready`.
+
+**Completion rollup:** When all children of a writ complete, the parent transitions from `pending` to `ready` (if a standing order exists for `{type}.ready`) or auto-completes (if not). This cascades upward through the tree — child completion can ripple up to fulfill the root mandate and complete the commission.
+
+**Failure cascade:** When a writ fails, all its incomplete children are cancelled.
+
+#### Event namespace and validation
+
+Writ lifecycle events are **framework-emitted** but use **guild-defined type names** as their namespace. A guild with a `task` writ type gets `task.ready` events — these aren't in the reserved framework namespaces, and they aren't declared in `clockworks.events` either. This is intentional:
+
+- The framework emits them freely (it calls `signalEvent()` directly, bypassing validation).
+- An anima calling `signal('task.ready')` will be **rejected** by `validateCustomEvent()` — the event isn't declared in `clockworks.events`, and animas can't spoof writ state transitions.
+
+This asymmetry is a feature: the framework controls writ lifecycle events; animas cannot forge them.
 
 ### Clockworks Events
 
@@ -68,16 +74,14 @@ The following namespaces are reserved for framework events. Animas cannot signal
 ```
 anima.
 commission.
-work.
-piece.
-job.
-stroke.
 tool.
 migration.
 guild.
 standing-order.
 session.
 ```
+
+**Note:** Writ lifecycle events (e.g. `mandate.ready`, `task.completed`) use guild-defined type names as namespaces, which are *not* in this reserved list. They are still framework-only — see [Writ Lifecycle Events](#writ-lifecycle-events) for how validation handles this.
 
 ---
 
@@ -191,88 +195,57 @@ If no session provider is registered (e.g. during testing or CLI-only operation)
 
 Common patterns for wiring events to actions.
 
-### Commission Pipeline
+### Standard Commission Pipeline
 
-The standard commission flow: patron posts → anima dispatched → session runs.
+The default commission flow: patron posts → workshop prepared → mandate dispatched → session runs → workshop merged.
 
 ```json
 {
   "clockworks": {
     "standingOrders": [
-      { "on": "commission.posted", "summon": "artificer" }
+      { "on": "commission.posted", "run": "workshop-prepare" },
+      { "on": "mandate.ready", "summon": "artificer", "prompt": "You have been assigned a commission.\n\n{{writ.title}}\n\n{{writ.description}}" },
+      { "on": "mandate.completed", "run": "workshop-merge" }
     ]
   }
 }
 ```
 
-### Session End → Job Completion Rollup
+When a commission is posted, the framework creates a `mandate` writ and signals `mandate.ready`. The standing order summons an artificer. When the artificer calls `complete-session`, the mandate completes (or enters `pending` if child writs exist), and `mandate.completed` triggers the merge engine.
 
-When a session ends, check if the job's strokes are all done and roll up completion through the hierarchy.
+### Multi-Level Writ Decomposition
 
-```json
-{
-  "clockworks": {
-    "standingOrders": [
-      { "on": "session.ended", "run": "completion-rollup" }
-    ],
-    "events": {}
-  }
-}
-```
-
-The `completion-rollup` engine would:
-
-```typescript
-import { engine, checkJobCompletion, completeJobIfReady,
-         completePieceIfReady, completeWorkIfReady,
-         completeCommissionIfReady } from '@shardworks/nexus-core';
-
-export default engine({
-  name: 'completion-rollup',
-  handler: async (event, { home }) => {
-    // Find the job associated with this session's work...
-    // Then roll up:
-    const jobResult = completeJobIfReady(home, jobId);
-    if (jobResult.changed && jobResult.newStatus === 'completed') {
-      const pieceResult = completePieceIfReady(home, pieceId);
-      if (pieceResult.changed) {
-        const workResult = completeWorkIfReady(home, workId);
-        if (workResult.changed) {
-          completeCommissionIfReady(home, commissionId);
-        }
-      }
-    }
-  }
-});
-```
-
-### When Job Completes → Roll Up Piece Status
-
-React specifically to job completion events:
+An artificer can decompose a mandate into child writs, each dispatched independently:
 
 ```json
 {
   "clockworks": {
     "standingOrders": [
-      { "on": "job.completed", "run": "piece-rollup" }
+      { "on": "commission.posted", "run": "workshop-prepare" },
+      { "on": "mandate.ready", "summon": "sage", "prompt": "Plan this commission.\n\n{{writ.title}}\n\n{{writ.description}}" },
+      { "on": "task.ready", "summon": "artificer", "prompt": "{{writ.title}}\n\n{{writ.description}}" },
+      { "on": "mandate.completed", "run": "workshop-merge" }
     ]
   }
 }
 ```
 
-### When Commission Posts → Auto-Assign to Workshop
+The sage receives the mandate, creates `task` child writs, and calls `complete-session`. The mandate enters `pending`. Each `task.ready` event summons an artificer. When all tasks complete, the mandate auto-transitions to `ready` → completes → triggers the merge.
 
-A custom engine that sets up worktrees and dispatches work:
+### Custom Writ Types
+
+Guilds declare custom writ types in `guild.json` to match their workflow vocabulary:
 
 ```json
 {
-  "clockworks": {
-    "standingOrders": [
-      { "on": "commission.posted", "run": "commission-dispatcher" },
-      { "on": "commission.posted", "summon": "artificer" }
-    ]
+  "writTypes": {
+    "task": { "description": "A concrete unit of work" },
+    "feature": { "description": "A user-facing capability" },
+    "bug": { "description": "A defect to fix" }
   }
 }
 ```
+
+Each type gets its own lifecycle events (`task.ready`, `feature.completed`, `bug.failed`) and can be wired to different standing orders.
 
 Multiple standing orders can match the same event — they execute in declaration order.

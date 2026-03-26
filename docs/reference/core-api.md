@@ -85,7 +85,7 @@ Signal an event — persist it to the Clockworks events table. Does **not** proc
 
 ### `isFrameworkEvent(name): boolean`
 
-Check if an event name is in a reserved framework namespace. Reserved namespaces: `anima.`, `commission.`, `work.`, `piece.`, `job.`, `stroke.`, `tool.`, `migration.`, `guild.`, `standing-order.`, `session.`.
+Check if an event name is in a reserved framework namespace. Reserved namespaces: `anima.`, `commission.`, `tool.`, `migration.`, `guild.`, `standing-order.`, `session.`. Note: writ lifecycle events (e.g. `mandate.ready`, `task.completed`) are framework-emitted but use guild-defined type names — they are not in this list. See [Event Catalog](event-catalog.md#writ-lifecycle-events).
 
 ### `validateCustomEvent(home, name): void`
 
@@ -249,13 +249,13 @@ The main entry point for session preparation. Reads composition, resolves tools,
 
 ## Ledger
 
-Commission lifecycle and work decomposition CRUD. The hierarchy is: **Commission → Work → Piece → Job → Stroke**. All entities are historical records — no deletes, only status transitions.
+Commission lifecycle and writ CRUD. All entities are historical records — no deletes, only status transitions.
 
 ### Commissions
 
 #### `commission(opts): CommissionResult`
 
-Post a commission to the guild. Creates a record with status `"posted"` and signals `commission.posted`. Validates that the workshop exists in guild.json.
+Post a commission to the guild. Creates a record with status `"posted"`, creates a mandate writ linked to the commission, and signals `commission.posted`. Validates that the workshop exists in guild.json.
 
 **Options (`CommissionOptions`):** `{ home, spec, workshop }`
 
@@ -265,7 +265,7 @@ Post a commission to the guild. Creates a record with status `"posted"` and sign
 
 List commissions. Filter by `status` and/or `workshop`.
 
-#### `readCommission(home, commissionId): { id, content, status, workshop, statusReason } | null`
+#### `readCommission(home, commissionId): { id, content, status, workshop, statusReason, writId } | null`
 
 Read a commission record (basic fields only).
 
@@ -277,101 +277,33 @@ Extended commission view including assignments (anima ID, name, assigned-at) and
 
 Update a commission's status and reason.
 
-#### `checkCommissionCompletion(home, commissionId): CompletionCheck`
+### Writs
 
-Count child works. Returns `{ complete, total, done, pending, failed }`. `complete` is `true` when all works are completed/cancelled (none pending, none failed).
+#### `createWrit(home, opts): WritRecord`
 
-#### `completeCommissionIfReady(home, commissionId): CompletionResult`
+Create a writ. Signals `{type}.ready`. Options: `{ type, title, description?, parentId? }`. The type must be a built-in type (`mandate`, `summon`) or declared in `guild.json` `writTypes`.
 
-If all works are completed/cancelled, set commission to `"completed"` and signal `commission.completed`. Returns `{ changed, newStatus }`.
+#### `listWrits(home, opts?): WritRecord[]`
 
-### Works
+Filter by `status`, `type`, and/or `parentId`.
 
-#### `createWork(home, opts): WorkRecord`
+#### `showWrit(home, writId): WritRecord | null`
 
-Create a work. Signals `work.created`. Options: `{ title, description?, commissionId? }`.
+#### `updateWritStatus(home, writId, status): WritRecord`
 
-#### `listWorks(home, opts?): WorkRecord[]`
+Transition a writ's status. Signals `{type}.completed` on completion, `{type}.failed` on failure. Failure cascades cancellation to incomplete children.
 
-Filter by `status` and/or `commissionId`.
+#### `completeWrit(home, writId): CompletionResult`
 
-#### `showWork(home, workId): WorkRecord | null`
+Mark a writ as completed. If the writ has incomplete children, transitions to `pending` instead. When all children complete, auto-transitions to `ready` (if a standing order exists for `{type}.ready`) or `completed` (if not). Returns `{ changed, newStatus }`.
 
-#### `updateWork(home, workId, opts): WorkRecord`
+#### `failWrit(home, writId, reason): void`
 
-Update title, description, and/or status. Signals `work.completed` when status set to `"completed"`.
+Mark a writ as failed. Cascades cancellation to all incomplete children. Signals `{type}.failed`.
 
-#### `checkWorkCompletion(home, workId): CompletionCheck`
+#### `getWritProgress(home, writId): WritProgress`
 
-Count child pieces.
-
-#### `completeWorkIfReady(home, workId): CompletionResult`
-
-If all pieces completed/cancelled → set to `"completed"`, signal `work.completed`.
-
-### Pieces
-
-#### `createPiece(home, opts): PieceRecord`
-
-Create a piece. Signals `piece.created`. Options: `{ title, description?, workId? }`.
-
-#### `listPieces(home, opts?): PieceRecord[]`
-
-Filter by `status` and/or `workId`.
-
-#### `showPiece(home, pieceId): PieceRecord | null`
-
-#### `updatePiece(home, pieceId, opts): PieceRecord`
-
-Update title, description, and/or status. Signals `piece.ready` on status `"active"`, `piece.completed` on status `"completed"`.
-
-#### `checkPieceCompletion(home, pieceId): CompletionCheck`
-
-Count child jobs. **Policy:** a piece with failed jobs stays `active` — `complete` is only `true` when all jobs are completed/cancelled and **none** failed.
-
-#### `completePieceIfReady(home, pieceId): CompletionResult`
-
-If all jobs completed/cancelled (none failed) → set to `"completed"`, signal `piece.completed`.
-
-### Jobs
-
-#### `createJob(home, opts): JobRecord`
-
-Create a job. Signals `job.created`. Options: `{ title, description?, pieceId?, assignee? }`.
-
-#### `listJobs(home, opts?): JobRecord[]`
-
-Filter by `status`, `pieceId`, and/or `assignee`.
-
-#### `showJob(home, jobId): JobRecord | null`
-
-#### `updateJob(home, jobId, opts): JobRecord`
-
-Update title, description, status, and/or assignee. Signals `job.ready` on status `"active"`, `job.completed` on status `"completed"`, `job.failed` on status `"failed"`.
-
-#### `checkJobCompletion(home, jobId): CompletionCheck`
-
-Count child strokes. `complete` is `true` when no strokes are pending (failed strokes don't block).
-
-#### `completeJobIfReady(home, jobId): CompletionResult`
-
-If no strokes pending → set to `"completed"` (or `"failed"` if any stroke failed). Signals `job.completed` or `job.failed`.
-
-### Strokes
-
-#### `createStroke(home, opts): StrokeRecord`
-
-Create a stroke. Signals `stroke.recorded`. Options: `{ jobId, kind, content? }`.
-
-#### `listStrokes(home, opts?): StrokeRecord[]`
-
-Filter by `jobId` and/or `status`.
-
-#### `showStroke(home, strokeId): StrokeRecord | null`
-
-#### `updateStroke(home, strokeId, opts): StrokeRecord`
-
-Update status and/or content.
+Returns `{ total, completed, failed, cancelled, pending, active, ready }` — counts of child writs by status.
 
 ### Shared Types
 
@@ -429,7 +361,7 @@ List audit log entries, newest first.
 **Options (`ListAuditLogOptions`):**
 - `actor?: string` — e.g. `"patron"`, `"operator"`, `"framework"`, `"instantiate"`
 - `action?: string` — e.g. `"commission_posted"`, `"anima_updated"`
-- `targetType?: string` — e.g. `"commission"`, `"anima"`, `"job"`
+- `targetType?: string` — e.g. `"commission"`, `"anima"`, `"writ"`
 - `targetId?: string`
 - `limit?: number`
 
@@ -658,10 +590,7 @@ Generate a prefixed hex ID: `{prefix}-{8 hex chars}`.
 | `cpart-` | conversation participant |
 | `evt-` | event |
 | `ses-` | session |
-| `w-` | work |
-| `p-` | piece |
-| `j-` | job |
-| `s-` | stroke |
+| `wrt-` | writ |
 
 Additional prefixes used internally: `aud-` (audit log), `ed-` (event dispatch), `r-` (roster), `ac-` (anima composition), `ca-` (commission assignment).
 

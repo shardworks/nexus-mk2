@@ -240,7 +240,7 @@ The core library provides utilities that tool handlers commonly need. Common imp
 | `listSessions(home, opts?)` | Query sessions from the Daybook |
 | `listAuditLog(home, opts?)` | Query audit trail |
 
-For the full API surface — including work decomposition CRUD, hierarchy rollup, event queries, workshops, and more — see the [Core API Reference](../reference/core-api.md).
+For the full API surface — including writ CRUD, event queries, workshops, and more — see the [Core API Reference](../reference/core-api.md).
 
 For the event system, standing orders, and event-driven automation, see the [Event Catalog](../reference/event-catalog.md).
 

@@ -258,7 +258,7 @@ Tools are registered in `guild.json` and assigned to roles:
     },
     "artificer": {
       "seats": null,
-      "tools": ["commission-show", "job-update", "stroke-create", "stroke-update", "signal"],
+      "tools": ["commission-show", "complete-session", "fail-writ", "create-writ", "list-writs", "show-writ", "signal"],
       "instructions": "roles/artificer.md"
     }
   },
@@ -295,7 +295,7 @@ Anima "Valdris" has roles: [artificer, steward]
   signal           — roles: [artificer, steward] → both match ✓
   commission-create — roles: [steward]      → steward matches ✓
   tool-install     — roles: [steward]       → steward matches ✓
-  work-create      — roles: [sage]          → no match       ✗
+  create-writ      — roles: [sage]          → no match       ✗
 
   Valdris gets: [nexus-version, commission-show, signal, commission-create, tool-install]
 ```
