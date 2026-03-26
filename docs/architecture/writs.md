@@ -150,7 +150,7 @@ A writ can cycle through `pending → ready → active → pending` multiple tim
 
 ## Dispatch Integration
 
-When the clockworks matches a summon standing order, the dispatch process is:
+When the clockworks matches a summon standing order, the summon-engine handles the dispatch:
 
 ### 1. Bind or synthesize a writ
 
@@ -176,7 +176,7 @@ Missing values resolve to empty string. No deeper traversal — if a standing or
 
 ### 3. Inject session protocol
 
-The clockworks injects the writ session protocol into the system prompt appendix, telling the anima it must call `complete-session` or `fail-writ` before its session ends. Without this, animas wouldn't know they're bound to a writ.
+The summon-engine injects the writ session protocol into the system prompt appendix, telling the anima it must call `complete-session` or `fail-writ` before its session ends. Without this, animas wouldn't know they're bound to a writ.
 
 ### 4. Manifest and launch
 
@@ -302,8 +302,22 @@ Every operational summon produces a `"summon"` writ automatically — durable re
 
 ---
 
+## Circuit Breaker
+
+The summon-engine includes a built-in circuit breaker to prevent infinite re-dispatch loops. When a writ keeps cycling (interrupted → ready → summoned → interrupted → ...) without converging, the circuit breaker fails it after a configurable number of session attempts.
+
+**Default:** 10 sessions per writ. Override per standing order:
+
+```json
+{ "on": "mandate.ready", "summon": "artificer", "prompt": "...", "maxSessions": 5 }
+```
+
+Set `"maxSessions": 0` to disable the circuit breaker for a specific standing order (not recommended).
+
+When the circuit breaker fires, the writ transitions to **failed** and emits `<type>.failed`. Downstream standing orders (e.g. alerting the steward) handle the failure like any other.
+
+---
+
 ## Open Questions
 
-1. **Re-summon limits.** Need a max-retries or circuit-breaker mechanism for writs that keep cycling without converging. Configurable per writ or standing order.
-
-2. **Other relationship types.** Backlog: blocks/blocked-by, related-to. Not for v1.
+1. **Other relationship types.** Backlog: blocks/blocked-by, related-to. Not for v1.

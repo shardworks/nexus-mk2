@@ -377,15 +377,18 @@ Two kinds:
 
 A standing order is a registered response to an event — guild policy that says "when X happens, do Y." Standing orders live in `guild.json` under `clockworks.standingOrders`.
 
-Three verbs:
+Two verbs:
 
 | Verb | What it does |
 |------|-------------|
-| **`run`** | Invokes a clockwork engine. No AI involved — deterministic automation. |
-| **`summon`** | Manifests an anima (by role) and delivers the event as urgent context. The anima is expected to act. |
-| **`brief`** | Manifests an anima (by role) and delivers the event as informational context. The anima decides whether to act. |
+| **`run`** | Invokes a clockwork engine. Any extra keys on the standing order are passed as params to the engine. |
+| **`summon`** | Shorthand for invoking the **summon-engine** — manifests an anima (by role) and delivers the event as context. The anima is expected to act. |
+
+The `summon` verb is syntactic sugar: `{ "summon": "artificer" }` desugars to `{ "run": "summon-engine", "role": "artificer" }`. Any additional keys (like `prompt` or `maxSessions`) pass through as engine params.
 
 Standing orders target **roles**, not named animas — durable across anima turnover.
+
+**Circuit breaker:** The summon-engine will fail a writ after 10 session attempts by default. Override with `"maxSessions": 5` on the standing order.
 
 Example `guild.json` configuration:
 
@@ -402,8 +405,8 @@ Example `guild.json` configuration:
       { "on": "mandate.ready",      "summon": "artificer",
         "prompt": "You have been assigned a commission.\n\n{{writ.title}}\n\n{{writ.description}}" },
       { "on": "mandate.completed",   "run": "workshop-merge" },
-      { "on": "commission.failed",   "brief": "steward" },
-      { "on": "code.reviewed",       "brief": "steward" }
+      { "on": "commission.failed",   "summon": "steward" },
+      { "on": "code.reviewed",       "summon": "steward" }
     ]
   },
   "writTypes": {}
@@ -493,7 +496,7 @@ Since there are no standing orders, the event is marked as processed with no dis
 {
   "clockworks": {
     "standingOrders": [
-      { "on": "hello.world", "brief": "steward" }
+      { "on": "hello.world", "summon": "steward" }
     ]
   }
 }

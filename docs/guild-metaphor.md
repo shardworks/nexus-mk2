@@ -142,7 +142,7 @@ The guild's nervous system — an event-driven layer that connects things that h
 
 ### Standing Order
 
-A registered response to an event, defined in `guild.json`. A standing order says: *whenever this event is signaled, do this*. Two types: engine orders (`run`) invoke a clockwork engine; anima orders (`summon` or `brief`) manifest an anima in the named role and deliver the event as their context. Standing orders are guild policy — they live in configuration, not in engine code.
+A registered response to an event, defined in `guild.json`. A standing order says: *whenever this event is signaled, do this*. All standing orders invoke clockwork engines via the `run` verb. The `summon` verb is syntactic sugar — it invokes the **summon-engine**, which manifests an anima in the named role and delivers the event as their context. Standing orders may carry additional params (like `maxSessions` for the circuit breaker) that configure the engine's behavior. Standing orders are guild policy — they live in configuration, not in engine code.
 
 ### Tool
 

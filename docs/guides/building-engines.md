@@ -29,9 +29,10 @@ import { engine } from '@shardworks/nexus-core';
 
 export default engine({
   name: 'my-engine',
-  handler: async (event, { home }) => {
-    // event — the GuildEvent that triggered this engine (or null for direct invocation)
-    // home  — absolute path to the guild root
+  handler: async (event, { home, params }) => {
+    // event  — the GuildEvent that triggered this engine (or null for direct invocation)
+    // home   — absolute path to the guild root
+    // params — extra keys from the standing order that invoked this engine
 
     if (!event) return; // nothing to do without an event
 
@@ -49,6 +50,7 @@ export default engine({
 3. **Event may be null.** When invoked directly (not via a standing order), `event` is `null`. Guard accordingly.
 4. **Throw for errors.** If the handler throws, the Clockworks runner catches the error, records a failed dispatch, and signals `standing-order.failed`.
 5. **Use `home` for everything.** The guild root is your entry point to all guild state — database, config, file system.
+6. **Params are untyped.** `params` is `Record<string, unknown>` — cast to expected types in your handler. Provide sensible defaults.
 
 ### `nexus-engine.json`
 
@@ -99,6 +101,25 @@ Engines are connected to events through standing orders in `guild.json`:
 ```
 
 An engine can respond to multiple events. Multiple engines can respond to the same event — they execute in declaration order.
+
+### Passing params to engines
+
+Any key on a standing order that isn't `on` or `run` is passed to the engine as a param:
+
+```json
+{ "on": "deploy.requested", "run": "deploy", "environment": "staging", "dryRun": true }
+```
+
+The engine receives these in `params`:
+
+```typescript
+handler: async (event, { home, params }) => {
+  const environment = (params.environment as string) ?? 'production';
+  const dryRun = (params.dryRun as boolean) ?? false;
+}
+```
+
+This lets the same engine serve multiple standing orders with different configurations. Params default to `{}` when no extra keys are present.
 
 The engine must also be registered in guild.json's `engines` registry:
 
@@ -266,7 +287,7 @@ describe('my-engine', () => {
         emitter: 'framework',
         firedAt: new Date().toISOString(),
       },
-      { home }
+      { home, params: {} }
     );
 
     // Verify the result

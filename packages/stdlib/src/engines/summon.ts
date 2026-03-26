@@ -17,7 +17,7 @@
  * Standing order params:
  *   - `role` (required) — the role to summon (set automatically by desugar)
  *   - `prompt` — prompt template with {{writ.title}}, {{writ.description}} etc.
- *   - `maxSessions` — circuit breaker: max session attempts per writ before auto-fail
+ *   - `maxSessions` — circuit breaker: max session attempts per writ before auto-fail (default: 10)
  */
 import Database from 'better-sqlite3';
 import {
@@ -59,7 +59,7 @@ export default engine({
     }
 
     const promptTemplate = params.prompt as string | undefined;
-    const maxSessions = params.maxSessions as number | undefined;
+    const maxSessions = (params.maxSessions as number | undefined) ?? 10;
 
     // Require a session provider
     if (!getSessionProvider()) {
@@ -88,7 +88,7 @@ export default engine({
     }
 
     // Step 3: Circuit breaker — check session count for this writ
-    if (maxSessions != null && maxSessions > 0) {
+    if (maxSessions > 0) {
       const db = new Database(booksPath(home));
       db.pragma('foreign_keys = ON');
       try {

@@ -78,50 +78,67 @@ Animas signal custom events using the `signal` tool. The tool validates the even
 
 A standing order is a registered response to an event. Standing orders are **guild policy** — they live in `guild.json` under the `clockworks` key, not in engine descriptors. The guild decides what fires when; an engine is a capability, not a policy.
 
+#### Canonical form
+
+Every standing order has one canonical form: `{ on, run, ...params }`. The `on` key names the event to respond to. The `run` key names the engine to invoke. Any additional keys are **params** passed to the engine via `EngineContext.params`.
+
 ```json
 {
   "clockworks": {
     "standingOrders": [
       { "on": "commission.sealed",  "run": "cleanup-worktree" },
-      { "on": "commission.failed",  "summon": "steward" },
-      { "on": "tool.installed",     "brief": "guildmaster" },
-      { "on": "code.reviewed",      "run": "notify-patron" }
+      { "on": "mandate.ready",      "summon": "artificer", "prompt": "..." },
+      { "on": "code.reviewed",      "run": "notify-patron" },
+      { "on": "deploy.requested",   "run": "deploy", "environment": "staging", "dryRun": true }
     ]
   }
 }
 ```
 
-Two types:
+#### The `summon` verb (syntactic sugar)
 
-#### Engine orders
-
-```json
-{ "on": "commission.sealed", "run": "cleanup-worktree" }
-```
-
-Invokes a clockwork engine. The engine receives the event as its input and runs deterministically. No AI involved; no judgment exercised. The Clockworks fires it and moves on.
-
-See [Engine Contract](#engine-contract) below for how event delivery works.
-
-#### Anima orders
+The `summon` key is shorthand for invoking the **summon-engine** — the stdlib engine that handles anima session dispatch. The Clockworks desugars `summon` orders at dispatch time:
 
 ```json
-{ "on": "commission.failed", "summon": "steward" }
-{ "on": "tool.installed",    "brief": "guildmaster" }
+// What the operator writes:
+{ "on": "mandate.ready", "summon": "artificer", "prompt": "...", "maxSessions": 5 }
+
+// What the Clockworks dispatches:
+{ "on": "mandate.ready", "run": "summon-engine", "role": "artificer", "prompt": "...", "maxSessions": 5 }
 ```
 
-Manifests an anima and delivers the event as their context. The anima exercises judgment and may take action, dispatch further work, or do nothing.
+The `summon` value becomes the `role` param. All other keys pass through as engine params. This means anima dispatch is handled by a regular engine — replaceable, upgradeable, configurable — not baked into the framework.
 
-The target is a **role**, not a named anima. The Clockworks runner resolves which active anima currently fills that role at the time the event fires. This makes standing orders durable — they don't break when a specific anima retires and is replaced; they target the institutional position, not the individual.
+The **summon-engine** resolves the role to an active anima, binds or synthesizes a writ, manifests the anima, hydrates the prompt template, launches a session, and handles post-session writ lifecycle. See [Dispatch Integration](writs.md#dispatch-integration) for the full sequence.
 
-Two notice types, same underlying machinery:
+**Summon-engine params:**
 
-- **`summon`** — the anima is expected to act. The framing conveys urgency and intent: *you are summoned to attend to this*.
-- **`brief`** — the anima receives information and decides whether to act. The framing is informational: *you are being briefed on this*.
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `role` | string | *(required)* | Role to summon (set automatically from `summon` value) |
+| `prompt` | string | — | Prompt template with `{{writ.title}}`, `{{writ.description}}`, etc. |
+| `maxSessions` | number | 10 | Circuit breaker: max session attempts per writ before auto-fail |
 
-The distinction is in the framing delivered to the anima, not in the execution path. Role instructions should document how to interpret each notice type. The dispatch is recorded in the Clockworks' `event_dispatches` table.
+**Circuit breaker:** By default, the summon-engine will fail a writ after 10 session attempts. This prevents infinite re-dispatch loops when a writ keeps getting interrupted without making progress. Override per standing order with `"maxSessions": 20` or disable with `"maxSessions": 0`.
 
-**Role resolution:** If no active anima fills the named role, the standing order fails and signals `standing-order.failed`. If multiple animas fill the role (roles can have multiple seats), each is notified — one dispatch per anima.
+**Role resolution:** If no active anima fills the named role, the engine throws and the Clockworks signals `standing-order.failed`.
+
+#### Engine params
+
+Any key on a standing order that isn't `on` or `run` (or `summon`/`brief` for sugar forms) is extracted as a param and passed to the engine:
+
+```typescript
+export default engine({
+  name: 'deploy',
+  handler: async (event, { home, params }) => {
+    const environment = (params.environment as string) ?? 'production';
+    const dryRun = (params.dryRun as boolean) ?? false;
+    // ...
+  }
+});
+```
+
+Params default to `{}` when no extra keys are present. Existing engines that destructure only `{ home }` from context are unaffected.
 
 ---
 
@@ -153,7 +170,7 @@ A background daemon that polls the event queue and processes events automaticall
 
 The daemon spawns as a detached child process. It writes a PID file at `<home>/.nexus/clock.pid` and logs to `<home>/.nexus/clock.log` (append mode). Only event-processing cycles are logged; idle polls are silent.
 
-The daemon registers the session provider at startup, enabling it to dispatch anima sessions (summon/brief standing orders) autonomously.
+The daemon registers the session provider at startup, enabling the summon-engine to dispatch anima sessions autonomously.
 
 Phase 1 commands (`list`, `tick`, `run`) continue to work alongside the daemon. If the daemon is running, `tick` and `run` print a warning but still execute — SQLite handles concurrent access safely.
 
@@ -222,7 +239,6 @@ Animas cannot signal framework events (`anima.*`, `commission.*`, `tool.*`, `ses
       { "on": "commission.sealed",     "run": "cleanup-worktree" },
       { "on": "commission.failed",     "run": "notify-patron" },
       { "on": "commission.failed",     "summon": "steward" },
-      { "on": "tool.installed",        "brief": "guildmaster" },
       { "on": "code.reviewed",         "run": "post-review-summary" },
       { "on": "standing-order.failed", "summon": "steward" }
     ]
@@ -252,7 +268,7 @@ CREATE TABLE event_dispatches (
   handler_type TEXT NOT NULL,          -- 'engine' or 'anima'
   handler_name TEXT NOT NULL,          -- engine name or resolved anima name
   target_role  TEXT,                   -- role name (anima orders only; handler_name is the resolved anima)
-  notice_type  TEXT,                   -- 'summon' | 'brief' | null (anima orders only)
+  notice_type  TEXT,                   -- 'summon' | null (historical; present on summon-engine dispatches)
   started_at   DATETIME,
   ended_at     DATETIME,
   status       TEXT,                   -- 'success' | 'error'
@@ -284,14 +300,15 @@ A new SDK export from `nexus-core`, parallel to `tool()`:
 import { engine } from '@shardworks/nexus-core';
 
 export default engine({
-  handler: async (event: GuildEvent | null, { home }) => {
-    // event is the triggering GuildEvent when invoked by a standing order
-    // event is null when invoked directly (CLI, import)
+  handler: async (event: GuildEvent | null, { home, params }) => {
+    // event  — the triggering GuildEvent when invoked by a standing order (null for direct invocation)
+    // home   — absolute path to the guild root
+    // params — extra keys from the standing order (empty object when none)
   }
 });
 ```
 
-The Clockworks runner calls `module.default.handler(event, { home })`. This is the only contract the runner needs to know.
+The Clockworks runner calls `module.default.handler(event, { home, params })`. This is the only contract the runner needs to know. Params are extracted from the standing order at dispatch time — any key that isn't `on` or `run` becomes a param.
 
 Clockwork engines can be named in `run:` standing orders. Static engines cannot — attempting to do so is a configuration error caught at validation time.
 
@@ -309,7 +326,7 @@ No new fields needed. The descriptor's `entry` field already points to the modul
 
 **The Books** — the Clockworks owns its event/dispatch tables as internal operational state, separate from the guild's Books (Register, Ledger, Daybook). Writs live in the Ledger — see the architecture overview.
 
-**The Manifest Engine** — invoked by anima standing orders (summon/brief). Receives event context rather than a patron-posted commission brief. Minor extension to handle event-triggered manifestation.
+**The Manifest Engine** — invoked by the summon-engine when dispatching anima sessions. Receives event context rather than a patron-posted commission brief.
 
 **Bundles** — may ship default standing orders and custom event declarations, merged into `guild.json` on installation. Same delivery mechanism as other bundle-provided config.
 
