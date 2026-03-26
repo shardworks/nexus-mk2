@@ -410,7 +410,7 @@ describe('full init sequence', () => {
     assert.ok(config.clockworks.events['craft.debt'].schema.workshop, 'craft.debt missing workshop in schema');
     assert.equal(config.clockworks.standingOrders.length, 3, 'should have 3 commission lifecycle standing orders');
     assert.deepEqual(config.clockworks.standingOrders[0], { on: 'commission.posted', run: 'workshop-prepare' });
-    assert.deepEqual(config.clockworks.standingOrders[1], { on: 'commission.ready', summon: 'artificer' });
-    assert.deepEqual(config.clockworks.standingOrders[2], { on: 'commission.session.ended', run: 'workshop-merge' });
+    assert.deepEqual(config.clockworks.standingOrders[1], { on: 'mandate.ready', summon: 'artificer', prompt: 'You have been assigned a commission.\n\n{{writ.title}}\n\n{{writ.description}}' });
+    assert.deepEqual(config.clockworks.standingOrders[2], { on: 'mandate.completed', run: 'workshop-merge' });
   });
 });

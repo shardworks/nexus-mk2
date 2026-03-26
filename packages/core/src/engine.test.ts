@@ -27,7 +27,7 @@ describe('engine SDK', () => {
     });
 
     const testEvent = {
-      id: 1,
+      id: '1',
       name: 'test.event',
       payload: { key: 'value' },
       emitter: 'test',
