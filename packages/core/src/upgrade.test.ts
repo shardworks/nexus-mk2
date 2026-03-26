@@ -260,6 +260,48 @@ describe('planUpgrade', () => {
     assert.equal(plan.migrations.length, 0);
     assert.equal(plan.contentUpdates.length, 0);
   });
+
+  it('detects new tools missing from the guild', () => {
+    const home = createTestGuild(tmpDir);
+
+    // Create a bundle that declares a tool not in the guild
+    const bundleDir = path.join(tmpDir, 'bundle-with-tools');
+    fs.mkdirSync(bundleDir, { recursive: true });
+    fs.writeFileSync(path.join(bundleDir, 'package.json'), JSON.stringify({
+      name: '@test/starter-kit',
+      version: '2.0.0',
+    }));
+
+    // Same migration as v1 (no new ones)
+    const migrationsDir = path.join(bundleDir, 'migrations');
+    fs.mkdirSync(migrationsDir, { recursive: true });
+    fs.writeFileSync(path.join(migrationsDir, '001-initial.sql'),
+      `CREATE TABLE things (id TEXT PRIMARY KEY, name TEXT NOT NULL);`);
+
+    fs.writeFileSync(path.join(bundleDir, 'nexus-bundle.json'), JSON.stringify({
+      description: 'Test bundle with tools',
+      tools: [
+        { package: '@test/stdlib@0.x', name: 'existing-tool' },
+        { package: '@test/stdlib@0.x', name: 'new-tool', roles: ['steward'] },
+        { package: '@test/stdlib@0.x', name: 'shared-tool', roles: ['steward', 'artificer'] },
+      ],
+      migrations: [{ path: 'migrations/001-initial.sql' }],
+    }));
+
+    // Register 'existing-tool' in guild.json so only new-tool and shared-tool are detected
+    const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
+    config.tools['existing-tool'] = { upstream: null, installedAt: new Date().toISOString(), package: '@test/stdlib' };
+    fs.writeFileSync(path.join(home, 'guild.json'), JSON.stringify(config, null, 2));
+
+    const plan = planUpgrade(home, bundleDir);
+
+    assert.equal(plan.newTools.length, 2);
+    assert.equal(plan.newTools[0]!.name, 'new-tool');
+    assert.deepEqual(plan.newTools[0]!.roles, ['steward']);
+    assert.equal(plan.newTools[1]!.name, 'shared-tool');
+    assert.deepEqual(plan.newTools[1]!.roles, ['steward', 'artificer']);
+    assert.equal(plan.isEmpty, false);
+  });
 });
 
 describe('applyUpgrade', () => {
@@ -309,6 +351,46 @@ describe('applyUpgrade', () => {
     // so it can stamp even when the bundle plan is empty (npm-only upgrade).
     const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
     assert.equal(config.nexus, versionBefore, 'version should be unchanged by applyUpgrade');
+  });
+
+  it('registers new tools and assigns them to roles', () => {
+    const home = createTestGuild(tmpDir);
+
+    // Create a bundle with new tools
+    const bundleDir = path.join(tmpDir, 'bundle-tools-apply');
+    fs.mkdirSync(bundleDir, { recursive: true });
+    fs.writeFileSync(path.join(bundleDir, 'package.json'), JSON.stringify({
+      name: '@test/starter-kit',
+      version: '2.0.0',
+    }));
+    const migrationsDir = path.join(bundleDir, 'migrations');
+    fs.mkdirSync(migrationsDir, { recursive: true });
+    fs.writeFileSync(path.join(migrationsDir, '001-initial.sql'),
+      `CREATE TABLE things (id TEXT PRIMARY KEY, name TEXT NOT NULL);`);
+    fs.writeFileSync(path.join(bundleDir, 'nexus-bundle.json'), JSON.stringify({
+      tools: [
+        { package: '@test/stdlib@0.x', name: 'new-shiny-tool', roles: ['steward', 'artificer'] },
+      ],
+      migrations: [{ path: 'migrations/001-initial.sql' }],
+    }));
+
+    const plan = planUpgrade(home, bundleDir);
+    assert.equal(plan.newTools.length, 1);
+
+    const result = applyUpgrade(home, bundleDir, plan);
+    assert.equal(result.toolsRegistered.length, 1);
+    assert.equal(result.toolsRegistered[0], 'tools/new-shiny-tool');
+
+    // Verify guild.json
+    const config = JSON.parse(fs.readFileSync(path.join(home, 'guild.json'), 'utf-8'));
+    assert.ok(config.tools['new-shiny-tool'], 'tool should be registered');
+    assert.equal(config.tools['new-shiny-tool'].package, '@test/stdlib');
+    assert.ok(config.roles.steward.tools.includes('new-shiny-tool'), 'steward should have tool');
+    assert.ok(config.roles.artificer.tools.includes('new-shiny-tool'), 'artificer should have tool');
+
+    // Verify idempotency — second plan should find nothing
+    const plan2 = planUpgrade(home, bundleDir);
+    assert.equal(plan2.newTools.length, 0);
   });
 
   it('is idempotent — second run finds nothing to do', () => {

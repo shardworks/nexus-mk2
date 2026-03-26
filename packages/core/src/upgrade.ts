@@ -5,6 +5,7 @@
  * guild-starter-kit at a newer version) and produces a plan describing:
  *
  * - New database migrations to apply
+ * - New tools and engines to register (with role assignments)
  * - Updated curricula and temperaments
  * - Stale anima compositions (using outdated training content)
  *
@@ -51,6 +52,18 @@ export interface ContentUpdateEntry {
   bundlePath: string;
 }
 
+/** A tool or engine that the bundle declares but the guild doesn't have. */
+export interface ToolPlanEntry {
+  /** Category: 'tools' or 'engines'. */
+  category: 'tools' | 'engines';
+  /** Artifact name in the guild. */
+  name: string;
+  /** npm package that provides this tool. */
+  package: string;
+  /** Roles this tool should be assigned to (from the bundle manifest). */
+  roles: string[];
+}
+
 /** An anima whose composition references an outdated curriculum or temperament. */
 export interface StaleAnimaEntry {
   /** Anima ID. */
@@ -73,6 +86,8 @@ export interface UpgradePlan {
   migrations: MigrationPlanEntry[];
   /** Content artifacts with newer versions available. */
   contentUpdates: ContentUpdateEntry[];
+  /** Tools and engines the bundle declares but the guild doesn't have. */
+  newTools: ToolPlanEntry[];
   /** Animas running on outdated compositions. */
   staleAnimas: StaleAnimaEntry[];
   /** Whether there is anything to do. */
@@ -91,6 +106,8 @@ export interface UpgradeResult {
   migrationsApplied: string[];
   /** Content artifacts that were updated. */
   contentUpdated: string[];
+  /** Tools and engines that were registered. */
+  toolsRegistered: string[];
   /** Number of stale animas (reported, not changed). */
   staleAnimaCount: number;
   /** Animas that were recomposed (retired + recreated). */
@@ -173,6 +190,7 @@ export function planUpgrade(
     bundleSource,
     migrations: [],
     contentUpdates: [],
+    newTools: [],
     staleAnimas: [],
     isEmpty: true,
   };
@@ -180,6 +198,11 @@ export function planUpgrade(
   // ── Migration diff ──────────────────────────────────────────────────
 
   planMigrations(home, bundleDir, manifest, bundleSource, plan);
+
+  // ── Tool/engine diff ───────────────────────────────────────────────
+
+  planNewTools(home, manifest, 'tools', plan);
+  planNewTools(home, manifest, 'engines', plan);
 
   // ── Content diff ────────────────────────────────────────────────────
 
@@ -194,6 +217,7 @@ export function planUpgrade(
   detectStaleAnimas(home, plan);
 
   plan.isEmpty = plan.migrations.length === 0
+    && plan.newTools.length === 0
     && plan.contentUpdates.length === 0
     && plan.staleAnimas.length === 0;
 
@@ -300,6 +324,37 @@ function planMigrations(
         guildFilename,
       });
     }
+  }
+}
+
+/**
+ * Diff bundle tools/engines against what the guild already has registered.
+ *
+ * Any tool declared in the bundle but missing from guild.json is planned
+ * for installation, along with its role assignments.
+ */
+function planNewTools(
+  home: string,
+  manifest: BundleManifest,
+  category: 'tools' | 'engines',
+  plan: UpgradePlan,
+): void {
+  const entries = manifest[category];
+  if (!entries) return;
+
+  const config = readGuildConfig(home);
+  const registered = config[category];
+
+  for (const entry of entries) {
+    const name = entry.name || entry.package;
+    if (registered[name]) continue; // Already registered
+
+    plan.newTools.push({
+      category,
+      name,
+      package: entry.package,
+      roles: entry.roles ?? [],
+    });
   }
 }
 
@@ -459,6 +514,7 @@ export function applyUpgrade(
   const result: UpgradeResult = {
     migrationsApplied: [],
     contentUpdated: [],
+    toolsRegistered: [],
     staleAnimaCount: plan.staleAnimas.length,
     recomposedAnimas: [],
   };
@@ -523,6 +579,35 @@ export function applyUpgrade(
     writeGuildConfig(home, config);
 
     result.contentUpdated.push(`${update.category}/${update.name}`);
+  }
+
+  // ── Register new tools/engines ──────────────────────────────────────
+
+  if (plan.newTools.length > 0) {
+    const config = readGuildConfig(home);
+    const now = new Date().toISOString();
+
+    for (const tool of plan.newTools) {
+      // Register in the guild's tool/engine catalog
+      config[tool.category][tool.name] = {
+        upstream: null,
+        installedAt: now,
+        package: tool.package.replace(/@[^@/]+$/, ''), // strip version from specifier
+        ...(plan.bundleSource ? { bundle: plan.bundleSource } : {}),
+      };
+
+      // Add to each declared role's tool list
+      for (const roleName of tool.roles) {
+        const role = config.roles[roleName];
+        if (role && !role.tools.includes(tool.name)) {
+          role.tools.push(tool.name);
+        }
+      }
+
+      result.toolsRegistered.push(`${tool.category}/${tool.name}`);
+    }
+
+    writeGuildConfig(home, config);
   }
 
   // ── Recompose stale animas ─────────────────────────────────────────

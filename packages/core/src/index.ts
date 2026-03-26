@@ -206,6 +206,7 @@ export {
   type ApplyUpgradeOptions,
   type MigrationPlanEntry,
   type ContentUpdateEntry,
+  type ToolPlanEntry,
   type StaleAnimaEntry,
   planUpgrade,
   applyUpgrade,

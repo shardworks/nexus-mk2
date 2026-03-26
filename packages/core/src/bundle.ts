@@ -31,6 +31,8 @@ export interface BundlePackageEntry {
   package: string;
   /** Override the artifact name in the guild. */
   name?: string;
+  /** Roles this tool should be assigned to (used during upgrade to add missing tools to roles). */
+  roles?: string[];
 }
 
 /** A content artifact entry (curricula and temperaments). */

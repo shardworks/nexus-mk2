@@ -134,6 +134,16 @@ export function makeUpgradeCommand() {
           console.log();
         }
 
+        // New tools/engines
+        if (plan.newTools.length > 0) {
+          console.log(`  New tools/engines (${plan.newTools.length}):`);
+          for (const t of plan.newTools) {
+            const roleLabel = t.roles.length > 0 ? ` → ${t.roles.join(', ')}` : '';
+            console.log(`    + ${t.category}/${t.name}${roleLabel}`);
+          }
+          console.log();
+        }
+
         // Content updates
         if (plan.contentUpdates.length > 0) {
           console.log(`  Content updates (${plan.contentUpdates.length}):`);
@@ -194,6 +204,9 @@ export function makeUpgradeCommand() {
 
           if (result.migrationsApplied.length > 0) {
             console.log(`  ✓ Applied ${result.migrationsApplied.length} migration(s)`);
+          }
+          if (result.toolsRegistered.length > 0) {
+            console.log(`  ✓ Registered ${result.toolsRegistered.length} tool(s)/engine(s)`);
           }
           if (result.contentUpdated.length > 0) {
             console.log(`  ✓ Updated ${result.contentUpdated.length} content artifact(s)`);
