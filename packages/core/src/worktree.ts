@@ -106,8 +106,8 @@ export function teardownWorktree(home: string, workshop: string, commissionId: s
     );
   }
 
-  // Remove the worktree
-  git(['worktree', 'remove', worktreeDir], bareRepo);
+  // Remove the worktree (--force handles untracked/modified files left by agents)
+  git(['worktree', 'remove', '--force', worktreeDir], bareRepo);
 
   // Clean up the workshop worktree directory if empty
   const workshopDir = path.join(worktreesPath(home), workshop);

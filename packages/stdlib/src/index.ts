@@ -33,6 +33,11 @@ export { default as conversationList } from './tools/conversation-list.ts';
 export { default as conversationShow } from './tools/conversation-show.ts';
 export { default as conversationEnd } from './tools/conversation-end.ts';
 export { default as convene } from './tools/convene.ts';
+export { default as sessionList } from './tools/session-list.ts';
+export { default as sessionShow } from './tools/session-show.ts';
+export { default as eventList } from './tools/event-list.ts';
+export { default as eventShow } from './tools/event-show.ts';
+export { default as updateWrit } from './tools/update-writ.ts';
 
 // ── Engines ────────────────────────────────────────────────────────────
 export { default as workshopPrepare } from './engines/workshop-prepare.ts';
@@ -74,6 +79,11 @@ import conversationListTool from './tools/conversation-list.ts';
 import conversationShowTool from './tools/conversation-show.ts';
 import conversationEndTool from './tools/conversation-end.ts';
 import conveneTool from './tools/convene.ts';
+import sessionListTool from './tools/session-list.ts';
+import sessionShowTool from './tools/session-show.ts';
+import eventListTool from './tools/event-list.ts';
+import eventShowTool from './tools/event-show.ts';
+import updateWritTool from './tools/update-writ.ts';
 import workshopPrepare from './engines/workshop-prepare.ts';
 import workshopMerge from './engines/workshop-merge.ts';
 import summonEngine from './engines/summon.ts';
@@ -85,7 +95,8 @@ export default [
   toolInstall, toolRemove, toolList,
   clockList, clockTick, clockRun, clockStatus, clockStartTool, clockStopTool,
   signal, nexusVersion,
-  createWritTool, listWritsTool, showWritTool, completeSessionTool, failWritTool,
+  createWritTool, listWritsTool, showWritTool, completeSessionTool, failWritTool, updateWritTool,
   conversationListTool, conversationShowTool, conversationEndTool, conveneTool,
+  sessionListTool, sessionShowTool, eventListTool, eventShowTool,
   workshopPrepare, workshopMerge, summonEngine,
 ];

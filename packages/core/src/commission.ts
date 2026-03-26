@@ -10,7 +10,7 @@ import { booksPath } from './nexus-home.ts';
 import { readGuildConfig } from './guild-config.ts';
 import { signalEvent } from './events.ts';
 import { generateId } from './id.ts';
-import { createWrit } from './writ.ts';
+import { createWrit, failWrit } from './writ.ts';
 
 export interface CommissionOptions {
   /** Absolute path to the guild root. */
@@ -42,8 +42,27 @@ export function updateCommissionStatus(
     db.prepare(
       `UPDATE commissions SET status = ?, status_reason = ?, updated_at = datetime('now') WHERE id = ?`,
     ).run(status, reason, commissionId);
+
+    // When a commission fails, cascade failure to its mandate writ.
+    // Mirror of completeMandateCommission() in writ.ts — the failure bridge.
+    if (status === 'failed') {
+      const row = db.prepare(
+        `SELECT writ_id FROM commissions WHERE id = ?`,
+      ).get(commissionId) as { writ_id: string | null } | undefined;
+
+      if (row?.writ_id) {
+        // Close db before calling failWrit (it opens its own connection)
+        db.close();
+        try {
+          failWrit(home, row.writ_id);
+        } catch {
+          // Writ may already be in a terminal state — that's fine
+        }
+        return;
+      }
+    }
   } finally {
-    db.close();
+    try { db.close(); } catch { /* already closed in failure cascade path */ }
   }
 }
 
