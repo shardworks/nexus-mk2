@@ -54,3 +54,13 @@ This trades one hard problem (getting agents to understand existing code) for a 
 
 - X002 results (baseline for iterative approach)
 - X004 results (to compare: is context-enhanced iteration good enough to make this unnecessary?)
+
+## Observations
+
+### 2026-03-27 — Commission removal (c702eb2)
+
+Indirect data point. The artificer's commission-removal commit was a large, largely greenfield task: implement a new system (writ-centric) while tearing down the old one (commissions). The spec was detailed and the artificer implemented it faithfully, file by file.
+
+The bugs that appeared (see X012 for detail) were precisely the ones X005 predicts: the individual pieces were built correctly, but the assembled system had broken edges — event chains with missing links, inheritance behavior that caused downstream errors in adjacent components. Exactly the "assembly problem" X005 hypothesizes.
+
+Notably, the spec described the dynamic event chains (writ.posted → workshop-prepare → writ.workspace-ready → summon) but did not spell out the failure mode if a link was missing. The artificer treated each handler as a standalone component and didn't reason about what would happen if the chain broke — consistent with greenfield instinct applied to a component that is, in fact, embedded in a larger flow.

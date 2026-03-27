@@ -44,3 +44,19 @@ Conversely, some human-oriented principles probably still hold: consistent namin
 
 - Multiple commissions' worth of agent work on the nexus-core codebase (to observe which patterns cause friction)
 - X007 / X005 session data (for examples of agents navigating abstractions vs. self-contained code)
+
+## Observations
+
+### 2026-03-27 — Commission removal (c702eb2 + follow-up fixes e0fa64d)
+
+The artificer successfully removed commissions and enriched writs across 36 files in a single commit. Static structure was handled well: schema migration, type definitions, CRUD functions, CLI commands, tool changes, doc updates. All cleanly done.
+
+Three bugs required follow-up fixes:
+
+1. **Workshopless writs never dispatched** — `workshop-prepare` returned silently for null-workshop writs without firing `writ.workspace-ready`, leaving knowledge/planning writs stuck forever. The event routing spec described the dynamic chain; the artificer implemented each node correctly but missed the missing edge.
+
+2. **`writ.completed` triggered merge for child writs** — child writs inherit `workshop` from parent, so `workshop-merge` ran on every child completion and errored trying to merge a branch that doesn't exist. Again: each piece correct in isolation, interaction broken.
+
+3. **`sourceId` stored wrong value** — `NEXUS_WRIT_ID` (a writ ID) stored under `sourceType: 'anima'` instead of an anima ID. A shallow read of the spec's intent without checking what env vars actually carry.
+
+**Pattern**: the artificer read the spec and implemented what was described, node by node. What it missed were emergent properties of the system — what fires when, what's downstream of what, what a field actually means at runtime. This is consistent with X005's greenfield instinct: build what the spec says, don't model the whole. Whether this is a spec quality problem (specs should be more explicit about the dynamic chain) or an agent capability problem (agents should trace event flows before implementing) is an open question for this experiment.
