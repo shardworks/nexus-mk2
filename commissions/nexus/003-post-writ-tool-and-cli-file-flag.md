@@ -1,6 +1,4 @@
-## Title
-
-Add `post-writ` tool for steward and `--file` flag to `nsg writ post` CLI
+# Add `post-writ` tool for steward and `--file` flag to `nsg writ post` CLI
 
 ## Description
 

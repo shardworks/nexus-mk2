@@ -1,8 +1,4 @@
-# Commission: Replace writ.posted with writ.ready as the dispatch trigger
-
-## Title
-
-Remove writ.posted from CLI; make writ.ready the universal dispatch signal
+# Remove writ.posted from CLI; make writ.ready the universal dispatch signal
 
 ## Description
 
@@ -47,7 +43,3 @@ In `guild-starter-kit` default config (and the shardworks guild):
 - [ ] `guild.json` in shardworks updated to use `writ.ready`
 - [ ] `guild-operations` curriculum updated — `writ.posted` removed or demoted
 - [ ] Existing dispatch tests updated; new tests for child-writ and interrupted-writ dispatch paths
-
-## Workshop
-
-nexus
