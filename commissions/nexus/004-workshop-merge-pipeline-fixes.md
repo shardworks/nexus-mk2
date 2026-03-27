@@ -2,7 +2,7 @@
 
 ## Title
 
-Fix three workshop-merge pipeline bugs: duplicate events, worktree race, stale bare clone
+Fix workshop-merge pipeline: duplicate events, worktree race, stale bare clones
 
 ## Description
 
@@ -35,6 +35,12 @@ The bare clone's `main` is behind the remote. The merge engine merges the writ b
 
 If the fetch + merge results in a conflict (concurrent work merged to main after this writ branched), the engine should fail the writ with a clear `writ.merge-failed` reason explaining the conflict, rather than leaving it in a silent error state.
 
+### Also: fetch before creating worktrees (workshop-prepare)
+
+`workshop-prepare` should also fetch the bare clone before creating the writ branch. This ensures the branch starts from the freshest available `main`, minimising divergence between the writ's work and anything that lands on main while the artificer is running.
+
+Note: this is hygiene, not a race-condition fix. A commit can still land on remote between prepare and merge — fetch-before-merge (Bug 3 above) is what makes the push work. Fetch-before-create shrinks the divergence window and reduces the chance of conflicts at merge time. Both fetches are needed for their own reasons.
+
 ## Acceptance Criteria
 
 - [ ] `workshop-merge` checks whether the writ branch is already merged before attempting — idempotent on duplicate `writ.completed` events
@@ -42,7 +48,8 @@ If the fetch + merge results in a conflict (concurrent work merged to main after
 - [ ] `workshop-merge` operates on the bare clone directly — no dependency on worktree existence
 - [ ] `workshop-merge` fetches the bare clone from remote before merge/push
 - [ ] If the post-fetch merge conflicts, engine signals `writ.merge-failed` with a clear reason
-- [ ] Existing merge tests still pass; new test covering the duplicate-event idempotency case
+- [ ] `workshop-prepare` fetches the bare clone before creating the writ branch
+- [ ] Existing merge/prepare tests still pass; new test covering the duplicate-event idempotency case
 
 ## Workshop
 
