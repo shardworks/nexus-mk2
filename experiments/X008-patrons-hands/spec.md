@@ -85,3 +85,17 @@ When autonomous agents come online, actively observe:
 - **Novelty confound:** The transition to autonomous agents coincides with the system being new. Discomfort might be about unfamiliarity with the commission system, not about losing the tight loop.
 - **Sample size of one:** This is a case study of one patron. The findings are suggestive, not generalizable — but that's fine for the published narrative.
 - **Observer effect:** Knowing this is being studied might make Sean more self-aware about the transition, which could dampen the effect or amplify it.
+
+## Observations
+
+### Session 2026-03-27 (second session)
+
+**Mixed mode is now the natural operating state.** The session divided cleanly between two modes without deliberation: Coco handled fast collaborative work (training file syncs, role edits, version bumps, standing order config, commission drafting) while autonomous animas handled spec'd implementation (pipeline rewrites, new tool features). Neither mode felt like a substitute for the other — they were filling genuinely different roles.
+
+**Coco as commission author — a new pattern.** A distinct new role emerged: Coco drafts the commission spec as part of the design conversation, then Sean dispatches it. Coco is now the interface between the conversation and the queue. This means Coco is doing patron-adjacent work (specifying what should be built) rather than implementation work. Relevant to H2: the granularity question isn't just "how big is the task" but "who is the right agent for this kind of reasoning?"
+
+**H1 signal — the tight loop may be self-loosening.** *"You're too helpful... I already dispatched it as written."* Sean dispatched a commission before Coco finished annotating it with additional detail. This suggests Sean is gaining confidence in posting incomplete specs to autonomous agents and trusting them to fill the details — which is exactly the transition away from the tight loop. The mountain-spec pattern (patron points at direction, agent fills details) may be emerging as a natural handoff mechanism.
+
+**H3 signal — Coco as process visibility layer.** Sean asked Coco to review the artificer's recent commits. This is a middle path between full process visibility and pure output evaluation: the patron isn't watching work happen in real time, but uses the interactive agent to evaluate finished outputs with context. Neither pure tight-loop nor pure black-box. Worth tracking whether this becomes a stable pattern or whether Sean shifts toward trusting output without the review step.
+
+**H2 signal — granularity split is self-organizing.** No deliberation occurred about which mode to use for which task. Small surgical changes (role terminology, config edits) flowed naturally to Coco. Larger features with spec-level complexity (workshop-prepare idempotency, update-writ actions, sortable table) flowed to commissions. This is consistent with H2: work shape is structurally different, not just faster or slower.
