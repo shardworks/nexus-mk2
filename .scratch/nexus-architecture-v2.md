@@ -4,6 +4,19 @@ Concepts and features that are part of the architecture's future but not needed 
 
 ---
 
+## Standing vs. Commissioned Animas
+
+The meaningful distinction among active animas is not named vs. unnamed (all animas are named) but **standing** vs. **commissioned**:
+
+- **Standing** — available indefinitely, called on by name. A standing anima persists on the roster across commissions. They are always there, always available.
+- **Commissioned** — instantiated for a specific commission. A commissioned anima's roster membership lasts only as long as the commission it was created for. A fresh anima is created (or an existing one is commissioned) for each commission, and their tenure ends when the commission completes.
+
+Concretely, standing and commissioned animas are the same thing: entries in the register with names, instructions, and history. The difference is tenure, not nature.
+
+**Status:** Not currently implemented. All animas are currently treated as standing members. The commissioned tenure model is anticipated once multi-commission parallelism and per-commission anima instantiation are built out.
+
+---
+
 ## Escapement
 
 The apparatus that runs what the Walker sets in motion. Currently mentioned in the metaphor doc only as a footnote distinguishing it from the Walker: *"The Walker sets engines in motion; the Escapement runs them."* The Walker is architectural — it decides what runs and when. The Escapement is operational — it executes, manages concurrency, enforces limits, handles retries.
