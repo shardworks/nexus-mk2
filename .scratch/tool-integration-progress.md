@@ -8,7 +8,7 @@ Tracking the work to get MCP tools working in anima sessions launched via the An
 
 **Decision:** `callableFrom` → `callableBy` rename. Caller types change from transport-based (`mcp`, `cli`, `import`) to identity-based (`anima`, `cli`, `library`). The Loom always passes `caller: 'anima'` as a constant — no channel parameter needed on `WeaveRequest`.
 
-**Decision:** Guild runtime approach A — MCP server process boots its own guild instance. Simple, proven pattern, clean isolation.
+**Decision (revised):** In-process HTTP transport. MCP server runs in the Animator's process via Streamable HTTP on an ephemeral localhost port, rather than as a stdio child process. Eliminates duplicate guild boot, SQLite contention, permissions serialization, and the need for a runnable entry point script. Claude connects via `--mcp-config` with `type: "http"`. Provider owns server lifecycle (start before session, stop after exit).
 
 ---
 
@@ -119,24 +119,34 @@ Instrumentarium pre-loads `instructionsFile` at registration time, mutating the 
 
 ---
 
-## Phase 3: Provider Integration 🔲
+## Phase 3: Provider Integration ✅
 
-Make claude-code actually launch sessions with tools.
+Make claude-code actually launch sessions with tools via in-process HTTP MCP server.
 
-### 3a. Wire `--mcp-config` into provider
+### 3a. `startMcpHttpServer()` — in-process HTTP server ✅
 
-- [ ] `prepareSession()` detects `config.tools` presence
-- [ ] Writes MCP server process config JSON to temp dir
-- [ ] Writes `--mcp-config` JSON (mcpServers block) to temp dir
-- [ ] Adds `--mcp-config <path>` and `--strict-mcp-config` to CLI args
-- [ ] Consider switching to `--bare` mode when tools are attached
+- [x] Add `startMcpHttpServer(tools)` → `{ url, close }` to `mcp-server.ts`
+- [x] Uses `StreamableHTTPServerTransport` in stateless mode (one session per server)
+- [x] Binds to `127.0.0.1:0` (ephemeral port, localhost only)
+- [x] Returns `McpHttpHandle` with URL and `close()` for cleanup
+- [x] `close()` shuts down transport + HTTP server
+- [x] Remove dead code: `startMcpServer()`, `McpServerProcessConfig`, `StdioServerTransport` import
+- [x] Update barrel exports (remove `McpServerProcessConfig`)
+- [x] Tests for start/close lifecycle, tool availability via HTTP
 
-### 3b. MCP server process entry point
+### 3b. Wire `--mcp-config` into provider ✅
 
-- [ ] Add `@shardworks/nexus-arbor` as runtime dependency (or verify co-installation is sufficient)
-- [ ] Add `"./mcp-server"` entry point to package.json exports (or bin entry)
-- [ ] Test end-to-end: provider writes config → Claude spawns MCP server → tools are available
-- [ ] Verify tool handlers can access guild() and call apparatus APIs
+- [x] `prepareSession()` returns optional `cleanup` function (for MCP server shutdown)
+- [x] When `config.tools` has entries: start MCP HTTP server, write `--mcp-config` JSON, add args
+- [x] `--strict-mcp-config` added (only guild tools, no ambient MCP)
+- [x] `launch()` calls `cleanup()` after session exits (same finally block as tmpDir removal)
+- [x] Tests for prepareSession with tools, arg assembly, cleanup ordering
+
+**Files changed (nexus repo):**
+- `packages/plugins/claude-code/src/mcp-server.ts` — removed `startMcpServer()`, `McpServerProcessConfig`, `StdioServerTransport`; added `startMcpHttpServer()`, `McpHttpHandle`
+- `packages/plugins/claude-code/src/mcp-server.test.ts` — added 6 tests for `startMcpHttpServer()` (lifecycle, port, HTTP connectivity, concurrency, close, empty tools)
+- `packages/plugins/claude-code/src/index.ts` — `prepareSession()` now async, starts MCP HTTP server when tools present, writes `--mcp-config` JSON; `launch()` bridges async prep with sync return; barrel exports updated
+- `docs/architecture/apparatus/claude-code.md` — rewrote MCP Tool Server section (HTTP transport, lifecycle, config format, concurrency); added Future: Server Reuse section; removed resolved open questions
 
 ---
 
@@ -156,10 +166,12 @@ Make claude-code actually launch sessions with tools.
 
 ## Open Questions
 
-1. **SQLite concurrency** — main process and MCP server process both access `.nexus/nexus.db`. SQLite handles concurrent readers fine, but concurrent writers could contend (WAL mode helps). Need to verify behavior under load.
+1. ~~**SQLite concurrency**~~ — resolved by HTTP transport. MCP server runs in-process; single guild instance, no concurrent-writer concern.
 
-2. **`--bare` mode transition** — when should we switch from `--setting-sources user` to `--bare`? Probably when Loom produces real system prompts AND MCP is attached (full session control). Need to test that `--bare` + `--mcp-config` + `--system-prompt-file` gives complete control with no ambient leakage.
+2. ~~**`--bare` mode transition**~~ — resolved. `--bare` is incompatible with OAuth authentication; `--setting-sources user` is already in place and is the best available isolation without breaking auth.
 
-3. **MCP server startup time** — guild boot adds latency to MCP server readiness. Is this acceptable? Claude's runtime waits for the MCP server handshake before starting the session. Measure in practice.
+3. ~~**MCP server startup time**~~ — resolved by HTTP transport. No guild boot; HTTP server starts in milliseconds.
 
-4. **Tool instructions delivery** — the Instrumentarium arch doc mentions per-tool `instructions.md` delivered via the Loom to the system prompt. This is orthogonal to MCP tool serving but part of the full tool experience. Track separately.
+4. ~~**Tool instructions delivery**~~ — resolved for tool integration scope. Phase 2d implemented `instructionsFile` pre-loading at Instrumentarium registration time. Tool definitions carry pre-loaded `instructions` text on `ResolvedTool`. The remaining work — the Loom weaving those instructions into the system prompt — is a prompt composition concern tracked under the Loom's full composition milestone, not the tool integration track.
+
+5. **Server reuse** — currently each session gets its own HTTP server. A future optimization could pool servers by tool-set hash, reference-count active sessions, and close on idle timeout. Not implemented; revisit if launch latency matters.
