@@ -4,7 +4,9 @@ Tracking the work to get MCP tools working in anima sessions launched via the An
 
 **Goal:** When `summon()` is called with a role, the session should have an MCP tool server attached with the role's permission-gated tool set.
 
-**Decision:** Option 1 — Animator resolves tools (matches existing arch spec). The Loom resolves role → permissions; the Animator calls the Instrumentarium; the provider attaches the MCP server.
+**Decision (revised):** Loom resolves tools. The Loom resolves role → permissions → tools (via Instrumentarium) and returns `tools: ResolvedTool[]` on the AnimaWeave. The Animator receives the resolved tool set and handles MCP server lifecycle. This keeps tool resolution and system prompt composition together — the Loom needs to know which tools are selected to weave their instructions into the prompt.
+
+**Decision:** `callableFrom` → `callableBy` rename. Caller types change from transport-based (`mcp`, `cli`, `import`) to identity-based (`anima`, `cli`, `library`). The Loom always passes `caller: 'anima'` as a constant — no channel parameter needed on `WeaveRequest`.
 
 **Decision:** Guild runtime approach A — MCP server process boots its own guild instance. Simple, proven pattern, clean isolation.
 
@@ -37,27 +39,83 @@ Establish the clean interfaces before wiring them together.
 
 ---
 
-## Phase 2: Plumbing 🔲
+## Phase 2: Plumbing ✅
 
-Wire the tool resolution into the session lifecycle.
+Wire tool resolution into the session lifecycle. The Loom resolves tools; the Animator passes them through.
 
-### 2a. Add `tools` to `SessionProviderConfig`
+### 2a. Rename `callableFrom` → `callableBy` ✅
 
-- [ ] Add optional `tools?: ToolDefinition[]` to `SessionProviderConfig` in animator types.ts
-- [ ] Update arch doc for Animator (Future: Tool-Equipped Sessions → current)
+- [x] Rename `ToolCaller` values: `'mcp'` → `'anima'`, `'import'` → `'library'`, keep `'cli'`
+- [x] Rename `callableFrom` → `callableBy` in `ToolConfig`, `ToolDefinition`, `tool()` factory
+- [x] Rename `channel` → `caller` in `ResolveOptions` and `instrumentarium.resolve()`
+- [x] Update `createMcpServer` filter: `callableFrom: 'mcp'` → `callableBy: 'anima'`
+- [x] Update `summon` tool: `callableFrom: 'cli'` → `callableBy: 'cli'`
+- [x] Update all tests (instrumentarium, mcp-server, tool, CLI)
+- [x] Update all CLI framework commands (`init`, `plugin`, `status`, `version`, `upgrade`)
+- [x] Update `startMcpServer` inline API type and call (`channel: 'mcp'` → `caller: 'anima'`)
+- [x] Update arch docs: Instrumentarium, Animator, Claude Code, Loom
+- [x] Update READMEs: tools, animator, cli, root
+- [x] 169 tests pass, typecheck clean across all affected packages
 
-### 2b. Extend `AnimaWeave` with permissions
+**Files changed (nexus repo):**
+- `packages/plugins/tools/src/tool.ts` — `ToolCaller` type, `callableFrom` → `callableBy`
+- `packages/plugins/tools/src/instrumentarium.ts` — `channel` → `caller`, comments
+- `packages/plugins/tools/src/tool.test.ts` — updated test names and values
+- `packages/plugins/tools/src/instrumentarium.test.ts` — updated test helper, test cases
+- `packages/plugins/claude-code/src/mcp-server.ts` — filter and inline API type
+- `packages/plugins/claude-code/src/mcp-server.test.ts` — updated helper and test cases
+- `packages/plugins/animator/src/tools/summon.ts` — `callableBy: 'cli'`
+- `packages/framework/cli/src/` — all command files, program.ts, cli.ts, all test files
 
-- [ ] Add `permissions?: string[]` to `AnimaWeave` in loom types
-- [ ] Loom `weave()` resolves role → permissions from `guild.json["loom"]["roles"]`
-- [ ] Update Loom arch doc
+### 2b. Loom resolves tools ✅
 
-### 2c. Animator resolves tools
+- [x] Add `tools` to Loom's `requires: ['tools']`
+- [x] Add `@shardworks/tools-apparatus` and `zod` to Loom package.json dependencies
+- [x] Add `LoomConfig` and `RoleDefinition` types
+- [x] Add GuildConfig module augmentation for typed `guild().guildConfig().loom`
+- [x] Loom `start()` reads config from `guild().guildConfig().loom`
+- [x] Loom `weave()` resolves role → permissions from config roles
+- [x] Loom calls `instrumentarium.resolve({ permissions, strict, caller: 'anima' })`
+- [x] Return `tools?: ResolvedTool[]` on `AnimaWeave`
+- [x] Added `LoomConfig`, `RoleDefinition` to barrel exports
+- [x] Rewrote Loom tests: 13 tests covering tool resolution with mock Instrumentarium
+- [x] 13 tests pass, typecheck clean
 
-- [ ] Add `tools` to Animator's `requires` (or `recommends`)
-- [ ] In `animate()`: if weave has permissions, call `instrumentarium.resolve({ permissions, channel: 'mcp' })`
-- [ ] Pass resolved `ToolDefinition[]` to provider via `SessionProviderConfig.tools`
-- [ ] Update Animator arch doc
+**Files changed (nexus repo):**
+- `packages/plugins/loom/src/loom.ts` — rewritten with tool resolution
+- `packages/plugins/loom/src/index.ts` — barrel + GuildConfig augmentation
+- `packages/plugins/loom/src/loom.test.ts` — rewritten with guild mock + mock Instrumentarium
+- `packages/plugins/loom/package.json` — added tools-apparatus and zod dependencies
+
+### 2c. Add `tools` to `SessionProviderConfig` ✅
+
+- [x] Add optional `tools?: ResolvedTool[]` to `SessionProviderConfig` in animator types.ts
+- [x] Import `ResolvedTool` from tools-apparatus
+- [x] `buildProviderConfig()` passes `context.tools` through from AnimaWeave
+- [x] Fixed Animator test setup ordering: `setGuild()` before Loom `start()` (Loom now reads config in start)
+- [x] 40 animator tests pass (28 + 12 session tools), typecheck clean
+
+**Files changed (nexus repo):**
+- `packages/plugins/animator/src/types.ts` — `tools` field on `SessionProviderConfig`
+- `packages/plugins/animator/src/animator.ts` — `buildProviderConfig` passes tools through
+- `packages/plugins/animator/src/animator.test.ts` — reordered setup to setGuild before Loom start
+
+### 2d. Tool instruction pre-loading ✅
+
+Instrumentarium pre-loads `instructionsFile` at registration time, mutating the stored ToolDefinition so `instructions` is always text (single source of truth).
+
+- [x] In `register()`: for tools with `instructionsFile`, resolve path from `{guildRoot}/node_modules/{packageName}/{instructionsFile}`
+- [x] Read file, set `instructions` to content, clear `instructionsFile`
+- [x] Warn on missing file, don't block registration
+- [x] Tools with inline `instructions` are unchanged
+- [x] Tools with neither field are unchanged
+- [x] Update Instrumentarium arch doc ✅
+- [x] 4 new tests: pre-load from file, preserve inline, missing file warns, no instructions unchanged
+- [x] 173 tests pass across all affected packages
+
+**Files changed (nexus repo):**
+- `packages/plugins/tools/src/instrumentarium.ts` — `preloadInstructions()`, `setHome()`, updated `register()`/`registerToolsFromKit()` signatures
+- `packages/plugins/tools/src/instrumentarium.test.ts` — 4 new tests with real temp files, `home` param on helpers
 
 ---
 
@@ -82,15 +140,7 @@ Make claude-code actually launch sessions with tools.
 
 ---
 
-## Phase 4: Loom Permissions 🔲
-
-The Loom resolves roles into permission grants.
-
-- [ ] Implement role config reading from `guild.json["loom"]["roles"]`
-- [ ] `weave({ role })` resolves role → permissions array
-- [ ] Include permissions in returned `AnimaWeave`
-- [ ] Add `tools` to Loom's `requires` (for future: tool instructions)
-- [ ] Update Loom arch doc — move Role Ownership section from Future to current
+## Phase 4: (Absorbed into Phase 2d)
 
 ---
 
@@ -100,7 +150,7 @@ The Loom resolves roles into permission grants.
 - [ ] `nsg summon --role artificer "do something"` → session has tools
 - [ ] Verify tool invocation works (anima calls a tool, handler executes, result returned)
 - [ ] Verify permission gating (role without write permission can't use write tools)
-- [ ] Verify `callableFrom: ['cli']` tools don't appear in MCP
+- [ ] Verify `callableBy: ['cli']` tools don't appear in anima sessions
 
 ---
 
