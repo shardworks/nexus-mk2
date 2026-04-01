@@ -13,13 +13,12 @@ Tracked limitations and missing features in the Nexus framework.
 
 **Workaround:** Manually update `roles/*.md` in the guild repo after framework upgrades.
 
-## MCP server module orphaned in claude-code-apparatus
+## MCP server module not yet wired into session lifecycle
 
 **Added:** 2026-04-01
-**Context:** `packages/plugins/claude-code/src/mcp-server.ts` was absorbed from the former `engine-mcp-server` package but never wired into the apparatus model. It exports `createMcpServer`, `main`, `ToolSpec`, and `McpServerConfig` — but nothing imports them. The barrel (`index.ts`) doesn't re-export it, `package.json` doesn't expose it as a secondary entry point, and no other package references it. The module compiles to `dist/mcp-server.js` but is unreachable through the package's public API.
+**Updated:** 2026-04-01 — modernized API and exported from barrel
+**Context:** `packages/plugins/claude-code/src/mcp-server.ts` has been modernized: `createMcpServer()` now accepts `ToolDefinition[]` directly (no more module-path-based loading), the legacy `ToolSpec`/`McpServerConfig`/`loadTool`/`resolveToolFromExport` code has been removed, `startMcpServer()` is the new process entry point that boots a guild and resolves tools via the Instrumentarium, and `createMcpServer` is exported from the barrel.
 
-**Impact:** The MCP server is effectively dead code. Its dependencies (`@modelcontextprotocol/sdk`, `zod`, `@shardworks/tools-apparatus`) are carried in `package.json` solely for this module. The module also contains two `as any` type hacks (context stub and handler call) that should be resolved when it's modernized.
+**Impact:** The MCP server module is functional and tested, but not yet wired into the session lifecycle. The claude-code provider's `prepareSession()` does not write `--mcp-config` arguments. Tool-equipped sessions require additional plumbing in The Animator (Instrumentarium integration), The Loom (permission resolution), and the provider (MCP config generation).
 
-**What's needed:** The module needs to be modernized to use the guild runtime and the apparatus model — the context stub currently throws on `config()`, `guildConfig()`, and `apparatus()`. Once modernized: export it from the barrel or as a secondary entry point (`"./mcp-server"`), resolve the type hacks with a proper `McpToolContext` interface, and add unit tests for `createMcpServer` and `loadTool`.
-
-**Related findings:** Code review sweep 2026-04-01 — findings #2 (orphaned module), #5/#6 (type hacks), #8 (barrel export gap), #9 (stale TODO), #10 (dead dependencies).
+**What's needed:** See `.scratch/tool-integration-progress.md` for the phased integration plan. Remaining work: Animator gains tool resolution (Phase 2), provider writes `--mcp-config` (Phase 3), Loom resolves permissions from roles (Phase 4).
