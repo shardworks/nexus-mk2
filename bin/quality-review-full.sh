@@ -15,7 +15,8 @@
 #   --spec-file <path>   Path to the commission spec (needed for aware mode)
 #
 # Options:
-#   --commit <sha>       Specific commit (passed through to both runs)
+#   --commit <sha>       End commit (passed through to both runs)
+#   --base-commit <sha>  Start of commit range (passed through to both runs)
 #   --runs <n>           Runs per mode (default: 3). Total API calls = 2 × n.
 #   --prompt-version <v> Prompt version (default: v1)
 #   --instrument-dir <p> Instrument dir (passed through)
@@ -47,6 +48,7 @@ COMMISSION=""
 REPO=""
 SPEC_FILE=""
 COMMIT=""
+BASE_COMMIT=""
 RUNS=""
 PROMPT_VERSION=""
 INSTRUMENT_DIR=""
@@ -67,6 +69,7 @@ Required:
 
 Options:
   --commit <sha>       Commit to review (auto-detected if omitted)
+  --base-commit <sha>  Start of commit range (parent of first commission commit)
   --runs <n>           Runs per mode (default: 3, total = 2×n)
   --prompt-version <v> Prompt version (default: v1)
   --instrument-dir <p> Instrument dir
@@ -82,6 +85,7 @@ while [[ $# -gt 0 ]]; do
     --repo)           REPO="$2"; shift 2 ;;
     --spec-file)      SPEC_FILE="$2"; shift 2 ;;
     --commit)         COMMIT="$2"; shift 2 ;;
+    --base-commit)    BASE_COMMIT="$2"; shift 2 ;;
     --runs)           RUNS="$2"; shift 2 ;;
     --prompt-version) PROMPT_VERSION="$2"; shift 2 ;;
     --instrument-dir) INSTRUMENT_DIR="$2"; shift 2 ;;
@@ -113,6 +117,7 @@ fi
 
 COMMON_ARGS=(--commission "$COMMISSION" --repo "$REPO")
 [[ -n "$COMMIT" ]]         && COMMON_ARGS+=(--commit "$COMMIT")
+[[ -n "$BASE_COMMIT" ]]    && COMMON_ARGS+=(--base-commit "$BASE_COMMIT")
 [[ -n "$RUNS" ]]           && COMMON_ARGS+=(--runs "$RUNS")
 [[ -n "$PROMPT_VERSION" ]] && COMMON_ARGS+=(--prompt-version "$PROMPT_VERSION")
 [[ -n "$INSTRUMENT_DIR" ]] && COMMON_ARGS+=(--instrument-dir "$INSTRUMENT_DIR")

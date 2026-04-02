@@ -14,9 +14,11 @@
 #   --repo <path>       Path to the git repo where the commission's work landed.
 #
 # Options:
-#   --commit <sha>       Specific commit to review. If omitted, attempts
-#                        to identify the commission's commit(s) from the
-#                        writ record or git log.
+#   --commit <sha>       End commit (head of range) to review. If omitted,
+#                        attempts to auto-detect from git log.
+#   --base-commit <sha>  Start of range (parent of first commission commit).
+#                        When set, diffs base-commit..commit. When omitted,
+#                        diffs commit~1..commit (single commit mode).
 #   --runs <n>           Number of independent review runs (default: 3)
 #   --mode <mode>        "blind" or "aware". In aware mode,
 #                        --spec-file is required. (default: blind)
@@ -63,6 +65,7 @@ trap cleanup EXIT
 COMMISSION=""
 REPO=""
 COMMIT=""
+BASE_COMMIT=""
 RUNS=3
 MODE="blind"
 SPEC_FILE=""
@@ -84,7 +87,9 @@ Required:
   --repo <path>       Git repo path where the work landed
 
 Options:
-  --commit <sha>       Commit to review (auto-detected if omitted)
+  --commit <sha>       Commit (or end of range) to review (auto-detected if omitted)
+  --base-commit <sha>  Start of commit range (parent of first commission commit).
+                       When provided, diffs base-commit..commit instead of commit~1..commit.
   --runs <n>           Number of runs (default: 3)
   --mode <mode>        "blind" or "aware" (default: blind)
   --spec-file <path>   Commission spec path (required for aware mode)
@@ -101,6 +106,7 @@ while [[ $# -gt 0 ]]; do
     --commission)   COMMISSION="$2"; shift 2 ;;
     --repo)        REPO="$2"; shift 2 ;;
     --commit)       COMMIT="$2"; shift 2 ;;
+    --base-commit)  BASE_COMMIT="$2"; shift 2 ;;
     --runs)         RUNS="$2"; shift 2 ;;
     --mode)         MODE="$2"; shift 2 ;;
     --spec-file)    SPEC_FILE="$2"; shift 2 ;;
@@ -198,14 +204,22 @@ if [[ -z "$COMMIT" ]]; then
   echo "  Auto-detected commit: ${COMMIT:0:8}"
 fi
 
+# Determine the diff range
+if [[ -n "$BASE_COMMIT" ]]; then
+  DIFF_RANGE="${BASE_COMMIT}..${COMMIT}"
+  echo "  Range:   $DIFF_RANGE"
+else
+  DIFF_RANGE="${COMMIT}~1..${COMMIT}"
+fi
+
 # Extract the diff
-DIFF=$(git -C "$REPO_PATH" show "$COMMIT" --stat --patch) || {
-  echo "Error: failed to extract diff for commit $COMMIT" >&2
+DIFF=$(git -C "$REPO_PATH" diff "$DIFF_RANGE" --stat --patch) || {
+  echo "Error: failed to extract diff for range $DIFF_RANGE" >&2
   exit 2
 }
 
 # Get list of files touched
-CHANGED_FILES=$(git -C "$REPO_PATH" diff-tree --no-commit-id --name-only -r "$COMMIT")
+CHANGED_FILES=$(git -C "$REPO_PATH" diff --name-only "$DIFF_RANGE")
 
 # Extract full file contents for context
 FULL_FILES=""
@@ -266,14 +280,18 @@ done
 # Since the reviewer has no filesystem access, we resolve these
 # references and append them to the user message.
 #
-# We pull from COMMIT~1 (the parent commit) because the commission
-# itself may have modified the referenced files. The agent worked
-# from the pre-commission state.
+# We pull from the base commit (pre-commission state) because the
+# commission itself may have modified the referenced files. The agent
+# worked from the pre-commission state.
 
 REFERENCED_FILES=""
 MAX_REFERENCED_FILES=10
 if [[ "$MODE" == "aware" && -f "$SPEC_FILE" ]]; then
-  PARENT_COMMIT=$(git -C "$REPO_PATH" rev-parse "${COMMIT}~1" 2>/dev/null || echo "")
+  if [[ -n "$BASE_COMMIT" ]]; then
+    PARENT_COMMIT="$BASE_COMMIT"
+  else
+    PARENT_COMMIT=$(git -C "$REPO_PATH" rev-parse "${COMMIT}~1" 2>/dev/null || echo "")
+  fi
 
   if [[ -n "$PARENT_COMMIT" ]]; then
     # Scan the spec file for paths that look like repo files.
@@ -546,6 +564,10 @@ for i in $(seq 1 "$RUNS"); do
   else
     RUN_COMPOSITES+=("$(awk "BEGIN {printf \"%.2f\", ($tq + $cs + $eh + $cc) / 4}")")
   fi
+
+  # Extract notes (multi-line YAML block scalar after "notes: |")
+  local_notes=$(awk '/^notes:/{found=1; next} found && /^[^ ]/{exit} found{print}' "$RUN_FILE" | sed 's/^  //')
+  RUN_NOTES+=("${local_notes:-"(no notes)"}")
 done
 
 N=${#TQ_SCORES[@]}
@@ -668,6 +690,11 @@ EOF
     if [[ "$MODE" == "aware" && ${#RC_SCORES[@]} -gt $i ]]; then
       echo "    requirement_coverage: ${RC_SCORES[$i]}"
     fi
+    # Write notes as YAML block scalar
+    echo "    notes: |"
+    while IFS= read -r line; do
+      echo "      $line"
+    done <<< "${RUN_NOTES[$i]}"
   done
 
 } > "$ARTIFACT_FILE"
@@ -684,6 +711,8 @@ echo "    codebase_consistency: $CC_MEAN (sd: $CC_SD)"
 if [[ "$MODE" == "aware" && ${#RC_SCORES[@]} -gt 0 ]]; then
   echo "    requirement_coverage: $RC_MEAN (sd: $RC_SD)"
 fi
+echo ""
+echo "  Notes (run 1): ${RUN_NOTES[0]}"
 echo ""
 echo "  Artifact: $ARTIFACT_FILE"
 
