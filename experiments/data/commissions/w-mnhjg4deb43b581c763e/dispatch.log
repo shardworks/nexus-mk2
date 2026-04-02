@@ -1,0 +1,42 @@
+2026-04-02T13:56:33Z [inscribe] Starting inscription cycle
+2026-04-02T13:56:33Z [inscribe]   guild=/workspace/vibers codex=nexus role=artificer
+2026-04-02T13:56:33Z [inscribe]   title=Normalize ID Formats Across Apparatus
+2026-04-02T13:56:33Z [inscribe]   score=true bare-clone=/workspace/vibers/.nexus/codexes/nexus.git
+2026-04-02T13:56:33Z [inscribe] Posting commission...
+2026-04-02T13:56:33Z [inscribe] Commission posted: w-mnhjg4deb43b581c763e
+2026-04-02T13:56:33Z [inscribe] Wrote /workspace/nexus-mk2/experiments/data/commissions/w-mnhjg4deb43b581c763e/commission.md
+2026-04-02T13:56:33Z [inscribe] Base commit: f535cec8caf8
+2026-04-02T13:56:33Z [inscribe] Dispatching (role=artificer)... this may take a while.
+2026-04-02T13:56:33Z [inscribe] --- anima session output ---
+2026-04-02T13:59:47Z [anima] Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+2026-04-02T13:59:47Z [anima] Now let me read the relevant files before making changes.Now I have everything I need. The plan:
+2026-04-02T13:59:47Z [anima] 
+2026-04-02T13:59:47Z [anima] 1. Create `packages/framework/core/src/id.ts` with a shared `generateId` utility
+2026-04-02T13:59:47Z [anima] 2. Export it from `nexus-core/src/index.ts`
+2026-04-02T13:59:47Z [anima] 3. Update Codexes, Animator, and Parlour to use the shared utility
+2026-04-02T13:59:47Z [anima] 
+2026-04-02T13:59:47Z [anima] Let me make all the changes:Now update Codexes — remove local `generateDraftId`, import `generateId` from nexus-core, and fix the branch name generation:Now replace the three usages of `generateDraftId()` in scriptorium-core.ts:Now update Animator:Now update Parlour:Now update the turn ID calls to use more bytes (high-volume type):Now let me verify the remaining `generateId('conv')` and `generateId('part')` calls in parlour.ts still work (they'll use the default 6 bytes from nexus-core):Line 360 still has `generateId('turn')` without the explicit byte count — let me fix it:Now verify there are no remaining issues and commit:All local ID generation functions are gone from Codexes, Animator, and Parlour. Only Clerk retains its own (which was the reference implementation and isn't listed in the writ's proposed changes). Now commit:Done. Here's what was changed:
+2026-04-02T13:59:47Z [anima] 
+2026-04-02T13:59:47Z [anima] **`packages/framework/core/src/id.ts`** (new) — shared `generateId(prefix, randomByteCount = 6)` producing `{prefix}-{base36_ts}{hex_random}`
+2026-04-02T13:59:47Z [anima] 
+2026-04-02T13:59:47Z [anima] **`packages/framework/core/src/index.ts`** — exports `generateId`
+2026-04-02T13:59:47Z [anima] 
+2026-04-02T13:59:47Z [anima] **`packages/plugins/codexes/src/scriptorium-core.ts`** — removed local `generateDraftId()` and `crypto` import; draft IDs and branch names now use `generateId('draft', 4)` (gained `draft-` prefix)
+2026-04-02T13:59:47Z [anima] 
+2026-04-02T13:59:47Z [anima] **`packages/plugins/animator/src/animator.ts`** — removed local `generateSessionId()` and `crypto` import; session IDs now use `generateId('ses', 4)` (gained timestamp)
+2026-04-02T13:59:47Z [anima] 
+2026-04-02T13:59:47Z [anima] **`packages/plugins/parlour/src/parlour.ts`** — removed local `generateId()` and `crypto` import; conv/part IDs use `generateId('conv'/'part')` (6 bytes, gained timestamp); turn IDs use `generateId('turn', 6)` explicitly (high-volume, gained timestamp)
+2026-04-02T13:59:47Z [inscribe] --- end session output ---
+2026-04-02T13:59:47Z [inscribe] Dispatch complete: outcome=completed session=ses-834a464c
+2026-04-02T13:59:47Z [inscribe] Wrote /workspace/nexus-mk2/experiments/data/commissions/w-mnhjg4deb43b581c763e/session.json
+2026-04-02T13:59:47Z [inscribe] Scaffolded commission-log entry for w-mnhjg4deb43b581c763e
+2026-04-02T13:59:47Z [inscribe] Head commit: 5efe7670eeff
+2026-04-02T13:59:47Z [inscribe] Running quality scoring...
+2026-04-02T14:00:17Z [inscribe] Quality scoring complete
+2026-04-02T14:00:17Z [inscribe] 
+2026-04-02T14:00:17Z [inscribe] ✓ Inscription cycle complete
+2026-04-02T14:00:17Z [inscribe]   writ=w-mnhjg4deb43b581c763e
+2026-04-02T14:00:17Z [inscribe]   session=ses-834a464c
+2026-04-02T14:00:17Z [inscribe]   outcome=completed
+2026-04-02T14:00:17Z [inscribe]   artifacts=/workspace/nexus-mk2/experiments/data/commissions/w-mnhjg4deb43b581c763e
+2026-04-02T14:00:17Z [inscribe]   commits=f535cec8caf8..5efe7670eeff

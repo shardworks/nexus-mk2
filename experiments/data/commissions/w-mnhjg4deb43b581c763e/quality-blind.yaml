@@ -1,0 +1,56 @@
+# Quality Review: w-mnhjg4deb43b581c763e
+# Generated: 2026-04-02T13:59:47Z
+# Prompt version: v1
+# Mode: blind
+# Runs: 3 successful of 3 attempted
+
+commission: "w-mnhjg4deb43b581c763e"
+repo: "/workspace/vibers/.nexus/codexes/nexus.git"
+commit: "5efe7670eeff3658a64b1079c367054e52e73138"
+reviewed_at: "2026-04-02T13:59:47Z"
+prompt_version: "v1"
+mode: "blind"
+
+aggregate:
+  composite: 2.00
+  composite_sd: 0.00
+  n: 3
+  dimensions:
+    test_quality:
+      mean: 1.00
+      sd: 0.00
+    code_structure:
+      mean: 3.00
+      sd: 0.00
+    error_handling:
+      mean: 2.00
+      sd: 0.00
+    codebase_consistency:
+      mean: 2.00
+      sd: 0.00
+
+runs:
+  - run: 1
+    test_quality: 1
+    code_structure: 3
+    error_handling: 2
+    codebase_consistency: 2
+    composite: 2.00
+    notes: |
+      Clean extraction of duplicated ID generation into a shared utility with good documentation. No tests were added for `generateId` despite existing test patterns in the codebase (e.g. `resolve-package.test.ts`). Existing tests in animator break — the test asserts `assert.match(result.id, /^ses-[a-f0-9]{8}$/)` but the new format includes a base36 timestamp prefix, producing IDs like `ses-{base36ts}{hex}`. The `randomByteCount` default (6) differs from parlour's original (4 bytes), but call sites explicitly pass 6 to match, which is fine. The branch-name usage in scriptorium (`generateId('draft', 4)` as a branch name) now produces `draft-{timestamp}{hex}` instead of `draft-{timestamp}{hex}` without the prefix, subtly changing branch naming semantics.
+  - run: 2
+    test_quality: 1
+    code_structure: 3
+    error_handling: 2
+    codebase_consistency: 2
+    composite: 2.00
+    notes: |
+      Clean extraction of duplicated ID generation into a shared utility with good documentation. No tests were added for `generateId` itself despite it being new code in core. The existing tests have assertions that will now fail — e.g., `animator.test.ts` asserts `result.id` matches `/^ses-[a-f0-9]{8}$/` but the new format includes a base36 timestamp prefix, producing `ses-{base36ts}{hex}`. The `scriptorium-core.ts` change also introduces a semantic shift: `openDraft` branch names change from `draft-{ts}{hex}` (no prefix dash) to `draft-{prefix}-{ts}{hex}`, and draft IDs gain a `draft-` prefix they didn't have before. The parlour's original `generateId('turn')` used 4 random bytes; the replacement uses 6, which is fine but worth noting as a subtle behavioral change.
+  - run: 3
+    test_quality: 1
+    code_structure: 3
+    error_handling: 2
+    codebase_consistency: 2
+    composite: 2.00
+    notes: |
+      Clean extraction of duplicated ID generation into a shared utility with good documentation. No tests were added for `generateId` despite existing test conventions in the codebase (e.g., `resolve-package.test.ts`). The format change in codexes is a behavioral break: `generateDraftId` produced `{ts}{rand}` while `generateId('draft', 4)` produces `draft-{ts}{rand}`, affecting branch names (now `draft-draft-...` when used as fallback branch in `openDraft`). The existing animator test (`assert.match(result.id, /^ses-[a-f0-9]{8}$/)`) will now fail since the new format includes a base36 timestamp component.

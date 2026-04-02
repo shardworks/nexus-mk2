@@ -1,0 +1,58 @@
+2026-04-02T13:40:20Z [inscribe] Starting inscription cycle
+2026-04-02T13:40:20Z [inscribe]   guild=/workspace/vibers codex=nexus role=artificer
+2026-04-02T13:40:20Z [inscribe]   title=Normalize ID Formats Across Apparatus
+2026-04-02T13:40:20Z [inscribe]   score=true bare-clone=/workspace/vibers/.nexus/codexes/nexus.git
+2026-04-02T13:40:20Z [inscribe] Posting commission...
+2026-04-02T13:40:20Z [inscribe] Commission posted: w-mnhiv9lbbccc525bf153
+2026-04-02T13:40:20Z [inscribe] Wrote /workspace/nexus-mk2/experiments/data/commissions/w-mnhiv9lbbccc525bf153/commission.md
+2026-04-02T13:40:20Z [inscribe] Base commit: db85fee2cab9
+2026-04-02T13:40:20Z [inscribe] Dispatching (role=artificer)... this may take a while.
+2026-04-02T13:40:20Z [inscribe] --- anima session output ---
+2026-04-02T13:43:06Z [anima] Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+2026-04-02T13:43:06Z [anima] Let me read the relevant files before making changes.Now let me check for tests on these functions and how Clerk uses `generateWritId` for reference.Now I have everything I need. Let me implement all the changes.
+2026-04-02T13:43:06Z [anima] 
+2026-04-02T13:43:06Z [anima] **Plan:**
+2026-04-02T13:43:06Z [anima] 1. Create `generate-id.ts` in `nexus-core`
+2026-04-02T13:43:06Z [anima] 2. Export it from `nexus-core/src/index.ts`
+2026-04-02T13:43:06Z [anima] 3. Update Codexes, Animator, and Parlour to use the shared utilityNow update Codexes — add `draft-` prefix and remove local `crypto` import if it's only used for ID generation:All three only use `crypto` for ID generation — we can remove those imports. Now apply all three changes:Now update Parlour's local `generateId` — use 6 bytes for turns, and remove the local function entirely by calling the shared one directly at the call sites:Now update the call sites in `parlour.ts` to use the prefixes directly with `generateId` (imported from nexus-core), giving turns 6 bytes:The `generateId('conv')`, `generateId('part')`, and `generateId('turn')` calls are already using the right string - they'll now call the imported `generateId` from nexus-core. But I need to update the `turn` calls to use 6 bytes:Let me find the exact lines with the `generateId('turn')` calls:Now let's also update the Clerk to use the shared utility. Let me check what it imports from nexus-core:Now let's verify the final state of all changed files:Everything looks correct. Let me do a final check on the `nexus-core` index to confirm the export is clean:All changes are complete. Here's a summary of what was done:
+2026-04-02T13:43:06Z [anima] 
+2026-04-02T13:43:06Z [anima] ## Changes
+2026-04-02T13:43:06Z [anima] 
+2026-04-02T13:43:06Z [anima] **`packages/framework/core/src/generate-id.ts`** (new)
+2026-04-02T13:43:06Z [anima] - Shared `generateId(prefix, bytes?)` utility using `{prefix}-{base36_ts}{hex_random}` convention
+2026-04-02T13:43:06Z [anima] - Default 4 random bytes; caller can override for higher-volume types
+2026-04-02T13:43:06Z [anima] 
+2026-04-02T13:43:06Z [anima] **`packages/framework/core/src/index.ts`**
+2026-04-02T13:43:06Z [anima] - Exports `generateId` from the new module
+2026-04-02T13:43:06Z [anima] 
+2026-04-02T13:43:06Z [anima] **`packages/plugins/clerk/src/clerk.ts`**
+2026-04-02T13:43:06Z [anima] - `generateWritId()` delegates to `generateId('w', 6)` — same output as before, no behavior change
+2026-04-02T13:43:06Z [anima] - Removes local `crypto` import
+2026-04-02T13:43:06Z [anima] 
+2026-04-02T13:43:06Z [anima] **`packages/plugins/codexes/src/scriptorium-core.ts`**
+2026-04-02T13:43:06Z [anima] - `generateDraftId()` now returns `draft-{ts}{rand}` instead of bare `{ts}{rand}`
+2026-04-02T13:43:06Z [anima] - Removes local `crypto` import
+2026-04-02T13:43:06Z [anima] 
+2026-04-02T13:43:06Z [anima] **`packages/plugins/animator/src/animator.ts`**
+2026-04-02T13:43:06Z [anima] - `generateSessionId()` now returns `ses-{ts}{rand}` instead of `ses-{rand}` (adds timestamp)
+2026-04-02T13:43:06Z [anima] - Removes local `crypto` import
+2026-04-02T13:43:06Z [anima] 
+2026-04-02T13:43:06Z [anima] **`packages/plugins/parlour/src/parlour.ts`**
+2026-04-02T13:43:06Z [anima] - Removes local `generateId` function; uses the shared one from nexus-core
+2026-04-02T13:43:06Z [anima] - `conv-` and `part-` IDs now include timestamp (4 bytes)
+2026-04-02T13:43:06Z [anima] - `turn-` IDs now include timestamp with 6 bytes for lower collision risk
+2026-04-02T13:43:06Z [anima] - Removes local `crypto` import
+2026-04-02T13:43:06Z [inscribe] --- end session output ---
+2026-04-02T13:43:06Z [inscribe] Dispatch complete: outcome=completed session=ses-b010548a
+2026-04-02T13:43:06Z [inscribe] Wrote /workspace/nexus-mk2/experiments/data/commissions/w-mnhiv9lbbccc525bf153/session.json
+2026-04-02T13:43:06Z [inscribe] Scaffolded commission-log entry for w-mnhiv9lbbccc525bf153
+2026-04-02T13:43:06Z [inscribe] Head commit: f535cec8caf8
+2026-04-02T13:43:06Z [inscribe] Running quality scoring...
+2026-04-02T13:43:19Z [inscribe] Warning: quality scoring failed (commission itself succeeded)
+2026-04-02T13:43:19Z [inscribe] 
+2026-04-02T13:43:19Z [inscribe] ✓ Inscription cycle complete
+2026-04-02T13:43:19Z [inscribe]   writ=w-mnhiv9lbbccc525bf153
+2026-04-02T13:43:19Z [inscribe]   session=ses-b010548a
+2026-04-02T13:43:19Z [inscribe]   outcome=completed
+2026-04-02T13:43:19Z [inscribe]   artifacts=/workspace/nexus-mk2/experiments/data/commissions/w-mnhiv9lbbccc525bf153
+2026-04-02T13:43:19Z [inscribe]   commits=db85fee2cab9..f535cec8caf8
