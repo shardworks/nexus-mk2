@@ -308,7 +308,7 @@ if [[ "$MODE" == "aware" && -f "$SPEC_FILE" ]]; then
     # use a manually flattened --spec-file for unusual cases.
     candidate_paths=$(grep -oE '[a-zA-Z0-9_./-]+\.[a-zA-Z]{1,5}' "$SPEC_FILE" \
       | grep '/' \
-      | sort -u)
+      | sort -u || true)
 
     if [[ -n "$candidate_paths" ]]; then
       # First pass: resolve candidates, get sizes, filter dupes with

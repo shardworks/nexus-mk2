@@ -187,6 +187,16 @@ if [[ -z "$TITLE" ]]; then
   exit 1
 fi
 
+# ── Append commit instruction ────────────────────────────────
+# Until role instructions handle this, ensure the anima knows to commit.
+# This is appended to the writ body so it travels with the commission.
+
+BODY="$BODY
+
+---
+
+**Important:** When you are finished, commit all changes in a single commit with a clear, descriptive message. Do not leave uncommitted changes — they will be lost when the session closes."
+
 # ── Resolve bare clone path (for scoring) ────────────────────
 
 BARE_CLONE="$GUILD_PATH/.nexus/codexes/$CODEX.git"
@@ -204,14 +214,18 @@ log() {
   local ts
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   echo "[inscribe] $*"
-  [[ -n "$DISPATCH_LOG" ]] && echo "$ts [inscribe] $*" >> "$DISPATCH_LOG"
+  if [[ -n "$DISPATCH_LOG" ]]; then
+    echo "$ts [inscribe] $*" >> "$DISPATCH_LOG"
+  fi
 }
 
 err() {
   local ts
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   echo "[inscribe] ERROR: $*" >&2
-  [[ -n "$DISPATCH_LOG" ]] && echo "$ts [inscribe] ERROR: $*" >> "$DISPATCH_LOG"
+  if [[ -n "$DISPATCH_LOG" ]]; then
+    echo "$ts [inscribe] ERROR: $*" >> "$DISPATCH_LOG"
+  fi
 }
 
 nsg() {
@@ -228,7 +242,7 @@ log "  score=$SCORE bare-clone=$BARE_CLONE"
 # ── Phase 1: Post commission ─────────────────────────────────
 
 log "Posting commission..."
-POST_RESULT=$(nsg commission post \
+POST_RESULT=$(nsg commission-post \
   --title "$TITLE" \
   --body "$BODY" \
   --codex "$CODEX") || {
@@ -281,7 +295,7 @@ log "--- anima session output ---"
 
 # Dispatch captures stdout (JSON result) while teeing stderr (anima
 # session output from the Animator) to both the terminal and the log.
-DISPATCH_RESULT=$(nsg dispatch next --role "$ROLE" \
+DISPATCH_RESULT=$(nsg dispatch-next --role "$ROLE" \
   2> >(tee >(awk '{print strftime("%Y-%m-%dT%H:%M:%SZ") " [anima] " $0; fflush()}' \
     >> "$DISPATCH_LOG") >&2) \
 ) || {
