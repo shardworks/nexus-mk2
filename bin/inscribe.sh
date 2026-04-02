@@ -277,10 +277,19 @@ fi
 # ── Phase 3: Dispatch ───────────────────────────────────────
 
 log "Dispatching (role=$ROLE)... this may take a while."
-DISPATCH_RESULT=$(nsg dispatch next --role "$ROLE") || {
+log "--- anima session output ---"
+
+# Dispatch captures stdout (JSON result) while teeing stderr (anima
+# session output from the Animator) to both the terminal and the log.
+DISPATCH_RESULT=$(nsg dispatch next --role "$ROLE" \
+  2> >(tee >(awk '{print strftime("%Y-%m-%dT%H:%M:%SZ") " [anima] " $0; fflush()}' \
+    >> "$DISPATCH_LOG") >&2) \
+) || {
   err "Dispatch command failed"
   exit 3
 }
+
+log "--- end session output ---"
 
 # Parse dispatch result
 OUTCOME=$(echo "$DISPATCH_RESULT" | node -e "
