@@ -1,118 +1,70 @@
-# The Walker — Static Rig MVP
+# The Walker — API Contract
 
-## Context
+Status: **Draft — MVP**
 
-The Dispatch apparatus is the guild's current work runner: one writ, one session, hope for the best. It was designed as disposable scaffolding for the full rigging system. We're now ready to replace it with the real thing — or at least, the first real slice of it.
+Package: `@shardworks/walker-apparatus` · Plugin id: `walker`
 
-This spec defines a Walker apparatus that runs a static rig graph: `draft → implement → review → revise → seal`. Every commission gets the same graph. The Walker advances the rig one step at a time via a `walk()` function, which examines guild state and does the single most important next thing.
+> **⚠️ MVP scope.** This spec covers a static rig graph: every commission gets the same five-engine pipeline (`draft → implement → review → revise → seal`). No origination, no dynamic extension, no capability resolution. The Walker runs engines directly — the Executor earns its independence later. See [What This Spec Does NOT Cover](#what-this-spec-does-not-cover) for the full list.
 
-### Terminology note
+---
 
-> The existing rigging architecture uses "yield" for engine output. This clashes with JavaScript's `yield` keyword (generators/iterators) and will cause confusion in implementation. **This term needs a replacement before implementation begins.** This spec uses `output` as a placeholder. Candidates to brainstorm: `product`, `result`, `cargo`, `payload`, `harvest`, `return`. The chosen term should apply consistently across the rigging system — engine outputs, rig data model, Walker APIs.
+## Purpose
 
-### Design decisions made (in conversation, 2026-04-02)
+The Walker is the spine of the guild's rigging system. It replaces the Dispatch apparatus, which ran one writ in one session with no review. The Walker runs a structured engine pipeline for each commission, advancing the rig one step at a time via a `walk()` step function.
 
-- **No Dispatch-level MVP.** A review loop bolted onto Dispatch is throwaway work that doesn't advance the rig system. Build the real thing, just keep it simple.
-- **Static rig graph.** No origination, no dynamic extension. Every commission gets the same five-engine pipeline. The graph is a data structure, not hardcoded imperative calls — so it grows naturally when we're ready.
-- **Engines are a real plugin API.** Engine designs are kit contributions resolved at runtime by `designId`. The graph is static, but the engines are pluggable. This means future capability resolution doesn't need to retrofit a plugin boundary — engines are already kit contributions with a standard interface.
-- **The Fabricator owns engine designs.** The Walker does not build its own engine registry. A minimal Fabricator apparatus holds engine designs and exposes a `getEngineDesign(id)` lookup. For the MVP, the Fabricator is hardcoded — no kit scanning, just the five static engines. The seam between Walker and Fabricator is the point: the Walker asks "give me the engine for this designId," and doesn't care where it came from. When capability resolution arrives, it extends the Fabricator. The Walker doesn't change.
-- **Single review pass, not a retry loop.** `draft → implement → review → revise → seal`. No conditional branching, no retry counting. The revise anima exits fast if review finds nothing. Avoids dynamic graph manipulation and complex Walker failure handling.
-- **Anima-in-the-loop review.** The review engine is a quick engine (anima session), not just mechanical checks. An anima reading the spec against the diff catches the partial-completion failure mode that dominates our commission log. Mechanical checks (build, test) are part of the review anima's instructions, not a separate engine.
-- **`walk()` is a step function.** Each call examines state, picks the highest-priority action, does it, returns. The Walker itself is stateless between calls — all state lives in the Stacks.
-- **Priority: run > extend > spawn.** Finish work in progress before starting new work. Run a ready engine before extending a rig, extend a rig before spawning a new one. (For the static rig, "extend" doesn't apply yet — just run and spawn.)
-- **Walker is a new package** (`@shardworks/walker-apparatus`), not a Dispatch rename. Dispatch is decommissioned — Sean will delete it once the Walker is live.
-- **Persistent walk loop.** The Walker exports a `start-walking` tool that runs `walk()` in a polling loop (~5s interval). It picks up writs posted via out-of-band CLI invocations (e.g. `nsg commission-post`). No event subscription needed — just poll, check state, act.
-- **Implementer role from Walker config.** The role to summon for `implement` and `revise` engines is a Walker configuration value (e.g. `{ role: 'artificer' }`). Temporary — the Fabricator takes over role selection eventually.
-- **Dedicated `reviewer` role.** New named role with a blank identity (like artificer today). Gets a review-mode prompt assembled by the engine. Curriculum and temperament can evolve independently.
-- **CDC for rig→writ lifecycle.** The Walker uses a CDC handler on its own `rigs` book: when a rig transitions to a terminal state (completed/failed), the handler calls the Clerk API to transition the corresponding writ. This keeps the Walker's engine execution logic decoupled from writ lifecycle management.
-- **Polling for session completion.** Quick engines store their `sessionId` on the engine instance in the Stacks. The Walker's "collect completed engines" step reads the session record by ID to check status. No CDC on the sessions book — all state is in the Stacks, restart-safe, no mapping table needed.
+The Walker owns the rig's structural lifecycle — spawn, traverse, complete — and delegates everything else. Engine designs come from the Fabricator. Sessions come from the Animator. Draft bindings come from the Scriptorium. Writ transitions are handled by a CDC handler, not inline. The Walker itself is stateless between `walk()` calls; all state lives in the Stacks.
+
+> **Design history:** The design decisions behind this spec are documented in `/workspace/nexus-mk2/docs/archive/design-sessions/walker-static-rig.md`.
+
+---
+
+## Dependencies
+
+```
+requires: ['fabricator', 'clerk', 'stacks']
+```
+
+- **The Fabricator** — resolves engine designs by `designId`.
+- **The Clerk** — queries ready writs; receives writ transitions via CDC.
+- **The Stacks** — persists rigs book, reads sessions book, hosts CDC handler on rigs book.
+
+Engines pull their own apparatus dependencies (Scriptorium, Animator, Loom) via the `guild()` singleton — these are not Walker dependencies.
 
 ### Reference docs
 
-- `/workspace/nexus/docs/architecture/rigging.md` — the full rigging system design (Walker, Fabricator, Executor, Manifester). This spec implements a subset.
-- `/workspace/nexus/docs/architecture/apparatus/dispatch.md` — current Dispatch spec, being decommissioned.
-- `/workspace/nexus/docs/architecture/apparatus/review-loop.md` — review loop design (generated by prior commission). Background context; this spec supersedes its MVP section.
-- `/workspace/nexus/docs/architecture/apparatus/scriptorium.md` — draft binding API (`openDraft`, `seal`, `abandonDraft`).
-- `/workspace/nexus/docs/architecture/apparatus/animator.md` — session API (`summon`, `animate`), `AnimateHandle`, `SessionResult`.
-- `/workspace/nexus/docs/architecture/apparatus/clerk.md` — writ lifecycle API.
-- `/workspace/nexus/docs/architecture/apparatus/stacks.md` — CDC phases, cascade vs notification, `watch()` API.
+- [The Rigging System](/workspace/nexus/docs/architecture/rigging.md) — full rigging architecture (Walker, Fabricator, Executor, Manifester). This spec implements a subset.
+- [The Fabricator](/workspace/nexus/docs/architecture/apparatus/fabricator.md) — engine design registry and `EngineDesign` type definitions.
+- [The Scriptorium](/workspace/nexus/docs/architecture/apparatus/scriptorium.md) — draft binding API (`openDraft`, `seal`, `abandonDraft`).
+- [The Animator](/workspace/nexus/docs/architecture/apparatus/animator.md) — session API (`summon`, `animate`), `AnimateHandle`, `SessionResult`.
+- [The Clerk](/workspace/nexus/docs/architecture/apparatus/clerk.md) — writ lifecycle API.
+- [The Stacks](/workspace/nexus/docs/architecture/apparatus/stacks.md) — CDC phases, cascade vs notification, `watch()` API.
 
 ---
 
 ## The Engine Interface
 
-Engines are the unit of work in a rig. Each engine implements a standard interface and is contributed to the guild via a kit. The Walker resolves engine designs by `designId` from installed kits at runtime.
+Engines are the unit of work in a rig. Each engine implements a standard interface defined by the Fabricator apparatus (`@shardworks/fabricator-apparatus`). The `EngineDesign`, `EngineRunContext`, and `EngineRunResult` types are owned and exported by the Fabricator — see the [Fabricator spec](/workspace/nexus/docs/architecture/apparatus/fabricator.md) for full type definitions. Engines pull their own apparatus dependencies via `guild().apparatus(...)` — same pattern as tool handlers.
+
+The Walker resolves engine designs by `designId` from the Fabricator at runtime: `fabricator.getEngineDesign(id)`.
+
+### Kit contribution
+
+The Walker contributes its five engine designs via its support kit:
 
 ```typescript
-interface EngineDesign {
-  /** Unique identifier for this engine design (e.g. 'draft', 'implement', 'review'). */
-  id: string
-
-  /** Clockwork engines run synchronously; quick engines launch async sessions. */
-  kind: 'clockwork' | 'quick'
-
-  /**
-   * Execute this engine.
-   *
-   * For clockwork engines: runs to completion and returns the output.
-   * For quick engines: launches a session and returns a handle. The Walker
-   * stores the sessionId and polls for completion on subsequent walk() calls.
-   *
-   * The context provides everything the engine needs: the writ, upstream
-   * engine outputs, guild apparatus references, and configuration.
-   */
-  run(context: EngineContext): Promise<EngineRunResult>
-}
-
-interface EngineContext {
-  rig: Rig
-  engine: EngineInstance
-  writ: Writ                          // the commission writ from the Clerk
-  upstreamOutputs: Record<string, unknown>  // outputs from completed upstream engines, keyed by engine id
-  config: WalkerConfig                // Walker plugin configuration
-  apparatus: {                        // apparatus references the engine may need
-    scriptorium: ScriptoriumApi
-    animator: AnimatorApi
-    stacks: StacksApi
-  }
-}
-
-type EngineRunResult =
-  | { status: 'completed'; output: unknown }                    // clockwork: done, here's the output
-  | { status: 'launched'; sessionId: string }                   // quick: session launched, Walker will poll
+// In walker-apparatus plugin
+supportKit: {
+  engines: {
+    draft:     draftEngine,
+    implement: implementEngine,
+    review:    reviewEngine,
+    revise:    reviseEngine,
+    seal:      sealEngine,
+  },
+},
 ```
 
-### The Fabricator
-
-The Fabricator apparatus owns the guild's engine design registry. The Walker never looks up engine designs itself — it calls `fabricator.getEngineDesign(designId)`.
-
-```typescript
-interface FabricatorApi {
-  /** Look up an engine design by ID. Returns undefined if no design is registered. */
-  getEngineDesign(id: string): EngineDesign | undefined
-}
-```
-
-For the static rig MVP, the Fabricator is hardcoded — it registers the five Walker engines at startup and serves them on request. No kit scanning, no dynamic contribution. The implementation is trivially simple:
-
-```typescript
-// fabricator-apparatus plugin
-const engines = new Map<string, EngineDesign>([
-  ['draft',     draftEngine],
-  ['implement', implementEngine],
-  ['review',    reviewEngine],
-  ['revise',    reviseEngine],
-  ['seal',      sealEngine],
-])
-
-const fabricator: FabricatorApi = {
-  getEngineDesign: (id) => engines.get(id),
-}
-```
-
-The value isn't in the complexity — it's in the seam. The Walker depends on `FabricatorApi`, not on a `Map` it built itself. When capability resolution arrives, the Fabricator grows to support kit-contributed designs, need-based queries, and chain composition. The Walker's call site doesn't change.
-
-Future: the Fabricator is expected to grow into the guild's general capability catalog — holding engine designs, tool designs, and potentially other kit-contributed capability types. See `.scratch/todo/unify-capability-registries.md`.
+The Fabricator scans kit `engines` contributions at startup (same pattern as the Instrumentarium scanning tools). The Walker contributes its engines like any other kit — no special registration path.
 
 ---
 
@@ -131,15 +83,15 @@ interface WalkerApi {
 
 type WalkResult =
   | { action: 'engine-completed'; rigId: string; engineId: string }
-  | { action: 'engine-started'; rigId: string; engineId: string; engineKind: 'clockwork' | 'quick' }
+  | { action: 'engine-started'; rigId: string; engineId: string }
   | { action: 'rig-spawned'; rigId: string; writId: string }
   | { action: 'rig-completed'; rigId: string; writId: string; outcome: 'completed' | 'failed' }
 ```
 
 Each `walk()` call does exactly one thing. The priority ordering:
 
-1. **Collect completed engines.** Scan all active rigs for engines with `status === 'running'`. For each, read the session record from the sessions book by `engine.sessionId`. If the session has reached a terminal status (`completed` or `failed`), update the engine: set its status, populate its output, and propagate rig failure if needed. This is the first priority because it unblocks downstream engines.
-2. **Run a ready engine.** An engine is ready when `status === 'pending'` and its upstream engine has `status === 'completed'`. Look up the `EngineDesign` by `designId` from the Fabricator. Call `design.run(context)`. For clockwork engines (`status: 'completed'` result): write the output to the engine instance and mark it completed, all within the walk call. For quick engines (`status: 'launched'` result): store the `sessionId`, mark the engine `running`, and return. Completion is collected on subsequent walk calls via step 1.
+1. **Collect completed engines.** Scan all active rigs for engines with `status === 'running'`. For each, read the session record from the sessions book by `engine.sessionId`. If the session has reached a terminal status (`completed` or `failed`), update the engine: set its status, populate its yields, and propagate rig failure if needed. This is the first priority because it unblocks downstream engines.
+2. **Run a ready engine.** An engine is ready when `status === 'pending'` and its upstream engine has `status === 'completed'`. Look up the `EngineDesign` by `designId` from the Fabricator. Assemble givens (givensSpec + upstream yields) and context, then call `design.run(givens, context)`. For clockwork engines (`status: 'completed'` result): store the yields on the engine instance and mark it completed, all within the walk call. For quick engines (`status: 'launched'` result): store the `sessionId`, mark the engine `running`, and return. Completion is collected on subsequent walk calls via step 1.
 3. **Spawn a rig.** If there's a ready writ with no rig, spawn the static graph.
 
 If nothing qualifies at any level, return null (the guild is idle or all work is blocked on running quick engines).
@@ -177,13 +129,13 @@ Stored in the Stacks `rigs` book. One rig per writ. The Walker reads and updates
 ```typescript
 interface EngineInstance {
   id: string               // unique within the rig, e.g. 'draft', 'implement', 'review', 'revise', 'seal'
-  designId: string         // engine design id — resolved from the kit registry
-  kind: 'clockwork' | 'quick'
+  designId: string         // engine design id — resolved from the Fabricator
   status: 'pending' | 'running' | 'completed' | 'failed'
   upstream: string | null  // id of the engine that must complete first (null = first engine)
-  output: unknown          // set on completion — the engine's output (see Output Types below)
+  givensSpec: Record<string, unknown>  // givens specification — literal values now, templates later
+  yields: unknown          // set on completion — the engine's yields (see Yield Types below)
   error?: string           // set on failure
-  sessionId?: string       // for quick engines: the Animator session ID (set when launched)
+  sessionId?: string       // set when run() returns 'launched' — Walker polls for completion
   startedAt?: string       // ISO-8601, set when engine begins running (enables future timeout detection)
   completedAt?: string     // ISO-8601, set when engine reaches terminal status
 }
@@ -196,42 +148,66 @@ An engine is **ready** when: `status === 'pending'` and its upstream engine (if 
 Every spawned rig gets this engine list:
 
 ```typescript
-[
-  { id: 'draft',     designId: 'draft',     kind: 'clockwork', status: 'pending', upstream: null,        output: null },
-  { id: 'implement', designId: 'implement', kind: 'quick',     status: 'pending', upstream: 'draft',     output: null },
-  { id: 'review',    designId: 'review',    kind: 'quick',     status: 'pending', upstream: 'implement', output: null },
-  { id: 'revise',    designId: 'revise',    kind: 'quick',     status: 'pending', upstream: 'review',    output: null },
-  { id: 'seal',      designId: 'seal',      kind: 'clockwork', status: 'pending', upstream: 'revise',    output: null },
-]
+function spawnStaticRig(writ: Writ, config: WalkerConfig): EngineInstance[] {
+  return [
+    { id: 'draft',     designId: 'draft',     status: 'pending', upstream: null,
+      givensSpec: { writ }, yields: null },
+    { id: 'implement', designId: 'implement', status: 'pending', upstream: 'draft',
+      givensSpec: { writ, role: config.role }, yields: null },
+    { id: 'review',    designId: 'review',    status: 'pending', upstream: 'implement',
+      givensSpec: { writ, buildCommand: config.buildCommand, testCommand: config.testCommand }, yields: null },
+    { id: 'revise',    designId: 'revise',    status: 'pending', upstream: 'review',
+      givensSpec: { writ, role: config.role }, yields: null },
+    { id: 'seal',      designId: 'seal',      status: 'pending', upstream: 'revise',
+      givensSpec: {}, yields: null },
+  ]
+}
 ```
+
+The `givensSpec` is populated from the Walker's config at rig spawn time. The rig is self-contained after spawning — no runtime config lookups needed. The `writ` is passed as a given to engines that need it (most do; `seal` doesn't). Future: `givensSpec` will also hold template expressions (e.g. `${draft.worktreePath}`) that resolve dynamic values from upstream yields.
 
 The rig is **completed** when the terminal engine (`seal`) has `status === 'completed'`. The rig is **failed** when any engine has `status === 'failed'`.
 
 ---
 
-## Output Types and Data Flow
+## Yield Types and Data Flow
 
-> **Scaffolding note:** The data flow between engines is intentionally simple for the static rig. Upstream outputs are collected into a `Record<string, unknown>` map keyed by engine id, and each engine casts what it needs. This is adequate for a fixed five-engine pipeline where every engine knows exactly what's upstream. The needs/planning system will introduce typed contracts between engines — this scaffolding gets replaced, not extended.
+> **Scaffolding note:** For the static rig, the Walker merges all upstream yields into givens by engine id, alongside the givensSpec values set at spawn time. Each engine casts what it needs. This is adequate for a fixed five-engine pipeline where every engine knows exactly what's upstream. Future: a `needs` declaration on the engine design controls which upstream yields are included and how they're mapped — potentially via a template language like `${draft.worktreePath}`. This scaffolding gets replaced, not extended.
 
-Each engine produces a typed output that downstream engines consume. The output is stored on the `EngineInstance.output` field in the Stacks. The Walker collects upstream outputs before running each engine:
+Each engine produces typed yields that downstream engines consume as givens. The yields are stored on the `EngineInstance.yields` field in the Stacks. When the Walker runs an engine, it assembles the givens by merging the givensSpec (set at rig spawn time) with upstream yields:
 
 ```typescript
-function getUpstreamOutputs(rig: Rig, engine: EngineInstance): Record<string, unknown> {
-  const outputs: Record<string, unknown> = {}
+function assembleGivensAndContext(rig: Rig, engine: EngineInstance) {
+  // Collect all upstream yields (for the escape hatch and for merging)
+  const upstream: Record<string, unknown> = {}
   let current = engine
   while (current.upstream) {
-    const upstream = rig.engines.find(e => e.id === current.upstream)!
-    outputs[upstream.id] = upstream.output
-    current = upstream
+    const up = rig.engines.find(e => e.id === current.upstream)!
+    upstream[up.id] = up.yields
+    current = up
   }
-  return outputs
+
+  // Givens = givensSpec (literal values) + upstream yields, merged into one bag.
+  // For the static rig, all upstream yields are included by engine id.
+  // Future: givensSpec includes templates (e.g. ${draft.worktreePath}) that
+  // resolve specific values from upstream yields into typed givens.
+  const givens = { ...engine.givensSpec, ...upstream }
+
+  const context: EngineRunContext = {
+    engineId: engine.id,
+    upstream,
+  }
+
+  return { givens, context }
 }
 ```
 
-### `DraftOutput`
+For the static rig, all upstream yields are merged into givens by engine id. This means the `implement` engine sees `givens.writ` (from givensSpec) and `givens.draft` (upstream yields from the draft engine) in the same bag. Future: the givensSpec includes template expressions that resolve specific upstream values, replacing the blunt "merge everything" approach.
+
+### `DraftYields`
 
 ```typescript
-interface DraftOutput {
+interface DraftYields {
   worktreePath: string    // absolute path to the draft worktree
   draftBranch: string     // git branch name for the draft
   codexId: string         // which codex this draft is on
@@ -242,10 +218,10 @@ interface DraftOutput {
 **Produced by:** `draft` engine
 **Consumed by:** all downstream engines. Establishes the physical workspace.
 
-### `ImplementOutput`
+### `ImplementYields`
 
 ```typescript
-interface ImplementOutput {
+interface ImplementYields {
   sessionId: string
   sessionStatus: 'completed' | 'failed'
 }
@@ -254,10 +230,10 @@ interface ImplementOutput {
 **Produced by:** `implement` engine (set by Walker's collect step when session completes)
 **Consumed by:** `review` (needs to know the session completed)
 
-### `ReviewOutput`
+### `ReviewYields`
 
 ```typescript
-interface ReviewOutput {
+interface ReviewYields {
   sessionId: string
   passed: boolean                      // reviewer's overall assessment
   findings: string                     // structured markdown: what passed, what's missing, what's wrong
@@ -279,10 +255,10 @@ The `mechanicalChecks` are run by the engine *before* launching the reviewer ses
 
 The review engine also writes `findings` to the commission data directory: `experiments/data/commissions/<writ-id>/review-findings.md`.
 
-### `ReviseOutput`
+### `ReviseYields`
 
 ```typescript
-interface ReviseOutput {
+interface ReviseYields {
   sessionId: string
   sessionStatus: 'completed' | 'failed'
   wasNoOp: boolean    // true if the revise anima exited without making changes (review passed clean)
@@ -294,10 +270,10 @@ interface ReviseOutput {
 
 `wasNoOp` is determined by checking whether any new commits were made during the session. Useful for observability/cost analysis.
 
-### `SealOutput`
+### `SealYields`
 
 ```typescript
-interface SealOutput {
+interface SealYields {
   mergedSha: string     // the commit SHA after sealing (fast-forward merge to main)
   pushed: boolean       // whether the push to upstream succeeded
 }
@@ -310,21 +286,22 @@ interface SealOutput {
 
 ## Engine Implementations
 
-Each engine is an `EngineDesign` contributed by the Walker's support kit. The engine's `run()` method receives an `EngineContext` and returns an `EngineRunResult`.
+Each engine is an `EngineDesign` contributed by the Walker's support kit. The engine's `run()` method receives assembled givens and a thin context, and returns an `EngineRunResult`. Engines pull apparatus dependencies via `guild().apparatus(...)`.
 
 ### `draft` (clockwork)
 
 Opens a draft binding on the commission's target codex.
 
 ```typescript
-async run(ctx: EngineContext): Promise<EngineRunResult> {
-  const { codexId } = ctx.writ
-  const draft = await ctx.apparatus.scriptorium.openDraft({ codexId, writId: ctx.writ.id })
+async run(givens: Record<string, unknown>, { engineId }: EngineRunContext): Promise<EngineRunResult> {
+  const scriptorium = guild().apparatus<ScriptoriumApi>('scriptorium')
+  const writ = givens.writ as Writ
+  const draft = await scriptorium.openDraft({ codexId: writ.codexId, writId: writ.id })
   const baseSha = await getHeadSha(draft.worktreePath)
 
   return {
     status: 'completed',
-    output: { worktreePath: draft.worktreePath, draftBranch: draft.branch, codexId, baseSha } satisfies DraftOutput,
+    yields: { worktreePath: draft.worktreePath, draftBranch: draft.branch, codexId: writ.codexId, baseSha } satisfies DraftYields,
   }
 }
 ```
@@ -334,39 +311,35 @@ async run(ctx: EngineContext): Promise<EngineRunResult> {
 Summons an anima to do the commissioned work.
 
 ```typescript
-async run(ctx: EngineContext): Promise<EngineRunResult> {
-  const draft = ctx.upstreamOutputs.draft as DraftOutput
+async run(givens: Record<string, unknown>, { engineId }: EngineRunContext): Promise<EngineRunResult> {
+  const animator = guild().apparatus<AnimatorApi>('animator')
+  const writ = givens.writ as Writ
+  const draft = givens.draft as DraftYields
 
-  const handle = ctx.apparatus.animator.summon({
-    role: ctx.config.role,
-    prompt: ctx.writ.body,
+  const handle = animator.summon({
+    role: givens.role as string,
+    prompt: writ.body,
     cwd: draft.worktreePath,
-    environment: { GIT_AUTHOR_EMAIL: `${ctx.writ.id}@nexus.local` },
-    metadata: { rigId: ctx.rig.id, engineId: ctx.engine.id, writId: ctx.writ.id },
+    environment: { GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local` },
+    metadata: { engineId, writId: writ.id },
   })
 
-  // summon() returns synchronously — the session is now running
-  // We need the sessionId, which is available once the result resolves,
-  // but we can also read it from the Animator's session creation.
-  // Implementation detail: either await briefly for the session record
-  // to appear in Stacks, or have the Animator return it on the handle.
   const sessionId = await getSessionIdFromHandle(handle)
-
   return { status: 'launched', sessionId }
 }
 ```
 
 The writ body is passed directly as the prompt. The `dispatch.sh` script appends the "commit your work" instruction to the writ body before posting — a stopgap that stays in `dispatch.sh`.
 
-**Collect step (Walker, not engine):** When the Walker's collect step detects the session has completed, it builds the output:
+**Collect step (Walker, not engine):** When the Walker's collect step detects the session has completed, it builds the yields:
 
 ```typescript
 // In Walker's collect step
 const session = await stacks.get('sessions', engine.sessionId)
-engine.output = {
+engine.yields = {
   sessionId: session.id,
   sessionStatus: session.status,
-} satisfies ImplementOutput
+} satisfies ImplementYields
 ```
 
 ### `review` (quick)
@@ -374,16 +347,18 @@ engine.output = {
 Runs mechanical checks, then summons a reviewer anima to assess the implementation.
 
 ```typescript
-async run(ctx: EngineContext): Promise<EngineRunResult> {
-  const draft = ctx.upstreamOutputs.draft as DraftOutput
+async run(givens: Record<string, unknown>, { engineId }: EngineRunContext): Promise<EngineRunResult> {
+  const animator = guild().apparatus<AnimatorApi>('animator')
+  const writ = givens.writ as Writ
+  const draft = givens.draft as DraftYields
 
   // 1. Run mechanical checks synchronously
   const checks: MechanicalCheck[] = []
-  if (ctx.config.buildCommand) {
-    checks.push(await runCheck('build', ctx.config.buildCommand, draft.worktreePath))
+  if (givens.buildCommand) {
+    checks.push(await runCheck('build', givens.buildCommand as string, draft.worktreePath))
   }
-  if (ctx.config.testCommand) {
-    checks.push(await runCheck('test', ctx.config.testCommand, draft.worktreePath))
+  if (givens.testCommand) {
+    checks.push(await runCheck('test', givens.testCommand as string, draft.worktreePath))
   }
 
   // 2. Compute diff since draft opened
@@ -391,18 +366,17 @@ async run(ctx: EngineContext): Promise<EngineRunResult> {
   const status = await gitStatus(draft.worktreePath)
 
   // 3. Assemble review prompt
-  const prompt = assembleReviewPrompt(ctx.writ, diff, status, checks)
+  const prompt = assembleReviewPrompt(writ, diff, status, checks)
 
   // 4. Launch reviewer session
-  const handle = ctx.apparatus.animator.summon({
+  const handle = animator.summon({
     role: 'reviewer',
     prompt,
     cwd: draft.worktreePath,
     metadata: {
-      rigId: ctx.rig.id,
-      engineId: ctx.engine.id,
-      writId: ctx.writ.id,
-      mechanicalChecks: checks,  // stash for collect step to include in output
+      engineId,
+      writId: writ.id,
+      mechanicalChecks: checks,  // stash for collect step to include in yields
     },
   })
 
@@ -472,7 +446,7 @@ Numbered list of specific changes needed, in priority order.
 Commit your findings before ending your session.
 ```
 
-**Collect step:** The Walker reads the review findings file from the worktree, extracts `passed` from the "Overall: PASS/FAIL" line, and builds the output:
+**Collect step:** The Walker reads the review findings file from the worktree, extracts `passed` from the "Overall: PASS/FAIL" line, and builds the yields:
 
 ```typescript
 // In Walker's collect step
@@ -481,7 +455,7 @@ const findings = await readFile(path.join(draft.worktreePath, 'review-findings.m
 const passed = /^###\s*Overall:\s*PASS/mi.test(findings)
 const checks = session.metadata?.mechanicalChecks ?? []
 
-engine.output = { sessionId: session.id, passed, findings, mechanicalChecks: checks } satisfies ReviewOutput
+engine.yields = { sessionId: session.id, passed, findings, mechanicalChecks: checks } satisfies ReviewYields
 
 // Also write to commission data directory
 await writeFile(`${commissionDir}/review-findings.md`, findings)
@@ -492,20 +466,22 @@ await writeFile(`${commissionDir}/review-findings.md`, findings)
 Summons an anima to address review findings.
 
 ```typescript
-async run(ctx: EngineContext): Promise<EngineRunResult> {
-  const draft = ctx.upstreamOutputs.draft as DraftOutput
-  const review = ctx.upstreamOutputs.review as ReviewOutput
+async run(givens: Record<string, unknown>, { engineId }: EngineRunContext): Promise<EngineRunResult> {
+  const animator = guild().apparatus<AnimatorApi>('animator')
+  const writ = givens.writ as Writ
+  const draft = givens.draft as DraftYields
+  const review = givens.review as ReviewYields
 
   const status = await gitStatus(draft.worktreePath)
   const diff = await gitDiffUncommitted(draft.worktreePath)
-  const prompt = assembleRevisionPrompt(ctx.writ, review, status, diff)
+  const prompt = assembleRevisionPrompt(writ, review, status, diff)
 
-  const handle = ctx.apparatus.animator.summon({
-    role: ctx.config.role,
+  const handle = animator.summon({
+    role: givens.role as string,
     prompt,
     cwd: draft.worktreePath,
-    environment: { GIT_AUTHOR_EMAIL: `${ctx.writ.id}@nexus.local` },
-    metadata: { rigId: ctx.rig.id, engineId: ctx.engine.id, writId: ctx.writ.id },
+    environment: { GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local` },
+    metadata: { engineId, writId: writ.id },
   })
 
   const sessionId = await getSessionIdFromHandle(handle)
@@ -558,7 +534,7 @@ const session = await stacks.get('sessions', engine.sessionId)
 const currentSha = await getHeadSha(draft.worktreePath)
 const wasNoOp = currentSha === preRevisionSha  // compare to SHA before revise session
 
-engine.output = { sessionId: session.id, sessionStatus: session.status, wasNoOp } satisfies ReviseOutput
+engine.yields = { sessionId: session.id, sessionStatus: session.status, wasNoOp } satisfies ReviseYields
 ```
 
 ### `seal` (clockwork)
@@ -566,17 +542,18 @@ engine.output = { sessionId: session.id, sessionStatus: session.status, wasNoOp 
 Seals the draft binding.
 
 ```typescript
-async run(ctx: EngineContext): Promise<EngineRunResult> {
-  const draft = ctx.upstreamOutputs.draft as DraftOutput
+async run(givens: Record<string, unknown>, context: EngineRunContext): Promise<EngineRunResult> {
+  const scriptorium = guild().apparatus<ScriptoriumApi>('scriptorium')
+  const draft = givens.draft as DraftYields
 
-  const result = await ctx.apparatus.scriptorium.seal({
+  const result = await scriptorium.seal({
     codexId: draft.codexId,
     branch: draft.draftBranch,
   })
 
   return {
     status: 'completed',
-    output: { mergedSha: result.mergedSha, pushed: result.pushed } satisfies SealOutput,
+    yields: { mergedSha: result.mergedSha, pushed: result.pushed } satisfies SealYields,
   }
 }
 ```
@@ -606,9 +583,9 @@ stacks.watch('rigs', async (event) => {
   if (rig.status !== 'completed' && rig.status !== 'failed') return
 
   if (rig.status === 'completed') {
-    const sealOutput = rig.engines.find(e => e.id === 'seal')?.output as SealOutput
+    const sealYields = rig.engines.find(e => e.id === 'seal')?.yields as SealYields
     await clerk.transition(rig.writId, 'completed', {
-      resolution: `Sealed at ${sealOutput.mergedSha}. Pushed: ${sealOutput.pushed}.`,
+      resolution: `Sealed at ${sealYields.mergedSha}. Pushed: ${sealYields.pushed}.`,
     })
   } else {
     const failedEngine = rig.engines.find(e => e.status === 'failed')
@@ -644,10 +621,12 @@ Quick engine "failure" definition: if the Animator session completes with `statu
 Walker
   ├── Fabricator  (resolve engine designs by designId)
   ├── Clerk       (query ready writs, transition writ state via CDC)
-  ├── Scriptorium (open drafts, seal)
-  ├── Animator    (summon animas for quick engines)
-  ├── Loom        (via Animator's summon — context composition)
-  └── Stacks      (persist rigs book, read sessions book, CDC handler on rigs book)
+  ├── Stacks      (persist rigs book, read sessions book, CDC handler on rigs book)
+  │
+  Engines (via guild() singleton, not Walker dependencies)
+  ├── Scriptorium (draft, seal engines — open drafts, seal)
+  ├── Animator    (implement, review, revise engines — summon animas)
+  └── Loom        (via Animator's summon — context composition)
 ```
 
 ---
@@ -674,7 +653,7 @@ The review engine writes `review-findings.md` to the commission data directory. 
 - **Reviewer role curriculum/temperament.** The `reviewer` role exists with a blank identity. The review engine assembles the prompt. Loom content for the reviewer is a separate concern.
 - **Framework sync.** `dispatch.sh` currently syncs `/workspace/nexus/` before dispatch. This is a dev environment concern, not the Walker's responsibility. Stays in operational tooling.
 - **The "commit your work" instruction.** Stays in `dispatch.sh` as a stopgap appended to the writ body. Not promoted to the Walker. Fixed properly when the Loom gains role instructions.
-- **Typed engine contracts.** The `Record<string, unknown>` upstream outputs map with type assertions is scaffolding. The needs/planning system will introduce typed contracts between engines — defining what each engine requires and provides. This scaffolding gets replaced, not extended.
+- **Typed engine contracts.** The `Record<string, unknown>` givens map with type assertions is scaffolding. The needs/planning system will introduce typed contracts between engines — defining what each engine requires and provides. This scaffolding gets replaced, not extended.
 
 ---
 
@@ -699,7 +678,7 @@ All fields optional. `role` defaults to `"artificer"`. `pollIntervalMs` defaults
 
 This is a large piece of work. Recommended decomposition:
 
-1. **Walker core + Fabricator + engine interface + static graph + clockwork engines (draft, seal) + CDC handler.** The Walker can spawn rigs, resolve engine designs from the Fabricator, walk the graph, run clockwork engines, and manage rig→writ lifecycle via CDC. The Fabricator is a minimal apparatus with hardcoded engine designs and a `getEngineDesign(id)` lookup — shipped in the same increment. Quick engines are stubs that immediately return `{ status: 'completed', output: mockOutput }`. Validates: Walker→Fabricator seam, engine plugin API, rig data model, priority logic, engine readiness, graph traversal, output storage and retrieval, failure propagation, rig→writ CDC transition. Tests should cover the full lifecycle with stubbed quick engines.
+1. **Walker core + Fabricator + engine interface + static graph + clockwork engines (draft, seal) + CDC handler.** The Walker can spawn rigs, resolve engine designs from the Fabricator, walk the graph, run clockwork engines, and manage rig→writ lifecycle via CDC. The Fabricator scans kit `engines` contributions and exposes `getEngineDesign(id)` — shipped in the same increment. Quick engines are stubs that immediately return `{ status: 'completed', output: mockOutput }`. Validates: Walker→Fabricator seam, engine plugin API, rig data model, priority logic, engine readiness, graph traversal, yields storage and retrieval, failure propagation, rig→writ CDC transition. Tests should cover the full lifecycle with stubbed quick engines.
 
 2. **Quick engine execution (implement).** Wire up the Animator integration — launching sessions, storing sessionId, polling for completion in the collect step. The Walker can now run `draft → implement → seal` as a working pipeline — functional parity with Dispatch, on the new architecture. Review and revise engines are still stubs.
 
