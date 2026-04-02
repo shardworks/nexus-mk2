@@ -296,8 +296,9 @@ log "--- anima session output ---"
 # Dispatch captures stdout (JSON result) while teeing stderr (anima
 # session output from the Animator) to both the terminal and the log.
 DISPATCH_RESULT=$(nsg dispatch-next --role "$ROLE" \
-  2> >(tee >(awk '{print strftime("%Y-%m-%dT%H:%M:%SZ") " [anima] " $0; fflush()}' \
-    >> "$DISPATCH_LOG") >&2) \
+  2> >(tee >(while IFS= read -r line; do
+    printf '%(%Y-%m-%dT%H:%M:%SZ)T [anima] %s\n' -1 "$line"
+  done >> "$DISPATCH_LOG") >&2) \
 ) || {
   err "Dispatch command failed"
   exit 3
