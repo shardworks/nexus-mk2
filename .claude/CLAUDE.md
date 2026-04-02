@@ -23,10 +23,9 @@ nexus-mk2/  (the sanctum)
 │   └── archive/                 #   Completed commissions, deprecated docs
 ├── bin/                         # Shell scripts for operations
 │   ├── coco.sh                  #   Launch Coco session
-│   ├── dispatch.sh              #   Dispatch autonomous agents (auditor, builder, scribe, etc.)
-│   ├── build.sh                 #   Run the builder
+│   ├── inscribe.sh              #   Full inscription cycle: draft → summon → seal → push
 │   ├── commission.sh            #   Post a commission to the live guild
-│   └── ...                      #   Other operational scripts
+│   └── ...                      #   Other operational scripts (some legacy Mk 2.0)
 ├── .claude/                     # Claude Code agent configuration
 │   ├── CLAUDE.md                #   THIS FILE — shared instructions for all agents
 │   ├── agents/                  #   Agent-specific instructions (coco.md, ethnographer.md)
