@@ -33,6 +33,17 @@ independent of task complexity. A well-written spec — clear scope
 boundaries, explicit event flows, unambiguous acceptance criteria —
 produces better outcomes regardless of task complexity.
 
+Output quality is measured on two axes:
+
+- **Requirement satisfaction** (`outcome`) — did the commission meet
+  its requirements? Measured as success / partial / wrong / abandoned.
+- **Code quality** (`code_quality_agent`) — is the code well-written
+  independent of requirements? Measured by the autonomous quality
+  scorer (see Data Collection — Quality Scorer). This is a composite
+  score (1.0–3.0) averaged across multiple independent reviewer runs,
+  covering test quality, code structure, error handling, and codebase
+  consistency.
+
 Spec quality is defined against objective, agent-independent criteria
 (see Data Collection). The same spec may produce different results
 with different agents; that variation is agent deficiency, not spec
@@ -210,6 +221,9 @@ manually or automatically.
 | `failure_mode` | patron | spec_ambiguous / requirement_wrong / execution_error / complexity_overrun | optional; best guess at root cause |
 | `notes` | patron | string | optional; what failed, what surprised |
 | `reviewed_by_ethnographer` | ethnographer | boolean | mark after ethnographer has probed this case |
+| `code_quality_agent` | quality scorer | 1.0–3.0 | composite score from autonomous reviewer; see Quality Scorer |
+| `code_quality_variance` | quality scorer | float | SD of composite across runs; high = ambiguous quality |
+| `code_quality_n` | quality scorer | integer | number of review runs |
 
 **Outcome criteria:**
 - *Success* — did what was asked, shippable with minimal or no fixes
@@ -245,7 +259,15 @@ and `spec_quality_pre` at dispatch. At outcome review, Sean fills in
 Phase 2 eliminates the two most friction-prone manual steps at outcome
 review and ensures `revision_required` is structurally reliable.
 
-**Phase 3 — Parallel signals (after spec scorer ships)**
+**Phase 3 — Code quality scoring (operational now)**
+
+- `code_quality_agent`, `code_quality_variance`, and `code_quality_n`
+  are populated by the autonomous quality scorer
+  (`bin/quality-review.sh`). Runs post-commission, after seal and
+  before patron review. Independent of patron assessment and not
+  subject to timing contamination. Backfillable on existing entries.
+
+**Phase 4 — Parallel signals (after spec scorer ships)**
 
 - `spec_quality_anima` and `complexity_anima` are auto-populated by the
   spec scorer anima running against the commission spec text. These
@@ -283,6 +305,54 @@ When a commission is selected for probing, the interview questions are:
 - Was there a moment where you could tell what went wrong (or right)?
 - What would have made the spec stronger?
 - Would you have dispatched this differently knowing what you know now?
+
+### Quality Scorer (Autonomous Code Review)
+
+The quality scorer is an autonomous agent that reviews commission
+output against a fixed rubric. It provides the `code_quality_agent`
+signal — an independent, reproducible measure of code quality that
+is not subject to the patron's retrospective bias.
+
+**Why this exists:** The `outcome` field measures requirement
+satisfaction (did the commission do what was asked?), not code quality
+(is the code well-written?). Two commissions can both succeed while
+producing wildly different code. Without a quality signal beyond
+pass/fail, H1's claim about "output quality" reduces to a weaker
+claim about requirement fulfillment. The quality scorer closes this
+gap.
+
+**Instrument design:** See
+`instruments/anima-quality-scorer/proposal.md` for full motivation
+and design rationale. Key properties:
+
+- **Four dimensions, 3-point scale:** test quality, code structure,
+  error handling, codebase consistency. Composite score 1.0–3.0.
+- **Multi-run averaging:** 3 independent runs per review (increase
+  to 5 if inter-run SD > 0.5). Treats the LLM as a noisy sensor.
+- **Spec-blind mode** (experimental instrument): reviewer sees only
+  the code, not the commission spec. Produces a quality score
+  orthogonal to requirement satisfaction.
+- **Spec-aware mode** (operational acceptance tool): reviewer also
+  sees the spec and scores a fifth dimension — requirement coverage.
+  Useful for commission acceptance independent of the experiment.
+- **Versioned prompt:** The complete prompt (system prompt + rubric +
+  user template) is versioned as a unit. Each review artifact records
+  which version produced it. Prompt changes require a new version.
+- **Isolated execution:** Reviewer runs with all tools disabled, in
+  an empty directory, with no access to project configuration. All
+  context is in the prompt. Pure text-in/text-out instrument.
+- **Backfillable:** Code quality is a property of the artifact, not
+  the moment. Existing commissions can be scored retroactively.
+
+**Operational tooling:**
+
+- `bin/quality-review.sh` — run a single-mode review (blind or aware)
+- `bin/quality-review-full.sh` — run both modes in parallel
+- Artifacts land at `artifacts/reviews/quality/<commission-id>/`
+
+**Commission log fields:** `code_quality_agent` (composite),
+`code_quality_variance` (SD), `code_quality_n` (run count). Per-
+dimension detail lives in the review artifact, not the log.
 
 ### Revision Rate Tracking
 
@@ -333,6 +403,15 @@ points are not.
   system-populated rather than manually entered in the log. See
   commission spec.
 
+### Operational (built, ready to run)
+
+- **Quality scorer** — autonomous code quality reviewer. Rubric,
+  prompts, and runner script at
+  `instruments/anima-quality-scorer/`. Produces `code_quality_agent`
+  field for the commission log. Strengthens H1 by providing a code
+  quality signal independent of requirement satisfaction. See
+  Data Collection — Quality Scorer.
+
 ### Potential (would strengthen the experiment; not required)
 
 - **Spec scorer anima** — reads commission spec text and produces
@@ -369,10 +448,12 @@ points are not.
   as hypotheses to revisit as N grows.
 
 - **Scope creep.** This experiment generates data that could answer
-  many questions. Keep analysis focused on the four hypotheses. The
-  `failure_mode` field is the one addition beyond the original scope —
-  it has a specific purpose (fourth failure cause in H4). Resist adding
-  further fields without a hypothesis to test.
+  many questions. Keep analysis focused on the four hypotheses. Two
+  additions beyond the original scope have specific purposes:
+  `failure_mode` (fourth failure cause in H4) and
+  `code_quality_agent` (strengthens H1 by measuring code quality
+  independent of requirement satisfaction). Resist adding further
+  fields without a hypothesis to test.
 
 ## Future Work
 
