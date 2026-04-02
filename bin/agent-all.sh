@@ -155,11 +155,10 @@ for pkg in "${PACKAGES[@]}"; do
 
   echo "▸ Launching: ${pkg#"$NEXUS_ROOT/"}"
 
-  claude -p \
+  echo "$prompt" | claude -p \
     --agent "$AGENT" \
     --system-prompt-file "$SYSTEM_PROMPT_FILE" \
     --add-dir "$pkg" \
-    "$prompt" \
     > /dev/null 2>&1 &
 
   PIDS+=($!)
