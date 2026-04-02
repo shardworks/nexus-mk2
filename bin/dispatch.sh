@@ -211,6 +211,26 @@ nsg() {
   "${NSG_CMD[@]}" --guild-root "$GUILD_PATH" "$@"
 }
 
+# Sync the framework source repo before dispatch. The guild's plugins
+# are linked to /workspace/nexus/ via file:/link: deps. After a
+# Scriptorium seal+push, the remote is ahead but this working tree
+# isn't — causing dispatches to run stale code.
+sync_framework() {
+  local fw_dir="/workspace/nexus"
+  if [[ ! -d "$fw_dir/.git" ]]; then
+    return 0
+  fi
+  local stashed=false
+  if ! git -C "$fw_dir" diff --quiet HEAD 2>/dev/null || \
+     ! git -C "$fw_dir" diff --cached --quiet HEAD 2>/dev/null; then
+    git -C "$fw_dir" stash push -m "dispatch-sync-$(date -u +%s)" --quiet 2>/dev/null && stashed=true
+  fi
+  git -C "$fw_dir" pull --rebase --quiet 2>/dev/null || true
+  if $stashed; then
+    git -C "$fw_dir" stash pop --quiet 2>/dev/null || true
+  fi
+}
+
 # ── Execute ──────────────────────────────────────────────────
 
 log "Starting dispatch"
@@ -270,6 +290,15 @@ DISPATCH_LOG="$COMMISSION_DIR/dispatch.log"
   echo "$ts [dispatch]   title=$TITLE"
   echo "$ts [dispatch] Commission posted: $WRIT_ID"
 } > "$DISPATCH_LOG"
+
+# ── Phase 1.5: Sync framework source ────────────────────────
+# Pull the framework repo so Arbor loads the latest plugin code.
+# Without this, seal+push from a prior dispatch updates the remote
+# but the local working tree stays stale.
+
+log "Syncing framework source..."
+sync_framework
+log "Framework synced."
 
 # ── Phase 2: Dispatch ───────────────────────────────────────
 # dispatch-next picks up the ready writ, runs the full session
