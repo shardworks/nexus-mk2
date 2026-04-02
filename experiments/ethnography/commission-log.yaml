@@ -13,5 +13,124 @@
 # Spec quality: strong | adequate | weak
 # Outcome: success | partial | wrong | abandoned
 # Failure mode: spec_ambiguous | requirement_wrong | execution_error | complexity_overrun
+#
+# IDs are session IDs from the Animator (ses-*), linking commissions to
+# session records for cost tracking and analysis. Commissions that were
+# never dispatched have no session ID.
+#
+# Artifacts (prompts, spec snapshots) are stashed at:
+#   experiments/X013-commission-outcomes/artifacts/commissions/<id>/
 
-commissions: []
+commissions:
+  - id: ses-93ad1c4c
+    title: "Implement Clerk apparatus (MVP)"
+    dispatched_at: "2026-04-02"
+    codex: nexus
+    role: artificer
+    complexity: 5
+    spec_quality_pre: strong
+    spec_note: >
+      Full API contract spec at docs/architecture/apparatus/clerk.md.
+      Prompt included summary of key spec elements (types, status machine,
+      tool definitions, permissions, implementation notes) in addition to
+      referencing the spec document directly.
+    outcome: abandoned
+    revision_required: null
+    spec_quality_post: null
+    failure_mode: execution_error
+    artifacts: experiments/X013-commission-outcomes/artifacts/commissions/ses-93ad1c4c/
+    notes: >
+      Anima completed session (49 tests passing, $1.65) but never committed
+      its work. Seal was a no-op, push failed (remote had diverged). Root
+      cause: prompt didn't include commit instructions, and Loom doesn't
+      compose system prompt yet so artificer role instructions were never
+      seen. Re-dispatched as ses-19194146 with explicit commit instructions.
+
+  - id: C002
+    title: "Implement Dispatch apparatus"
+    dispatched_at: null
+    codex: nexus
+    role: artificer
+    complexity: 3
+    spec_quality_pre: strong
+    spec_note: >
+      Full API contract spec at docs/architecture/apparatus/dispatch.md.
+      Prompt included summary of key spec elements (lifecycle, dependencies,
+      prompt assembly, error handling). Small surface area — one tool, one
+      API method, pure orchestration with no state.
+    outcome: null
+    revision_required: null
+    spec_quality_post: null
+    failure_mode: null
+    notes: >
+      Never dispatched. Held pending Clerk completion, then renumbered
+      to ses-0334962d for actual dispatch.
+
+  - id: ses-19194146
+    title: "Implement Clerk apparatus (MVP) — re-dispatch"
+    dispatched_at: "2026-04-02"
+    codex: nexus
+    role: artificer
+    complexity: 5
+    spec_quality_pre: strong
+    spec_note: >
+      Same spec as ses-93ad1c4c. Prompt updated with explicit commit
+      instructions since Loom does not yet compose system prompts from
+      role instructions.
+    outcome: success
+    revision_required: null
+    spec_quality_post: null
+    failure_mode: null
+    artifacts: experiments/X013-commission-outcomes/artifacts/commissions/ses-19194146/
+    notes: >
+      Session completed: 39 tests, $2.00, ~12 min. Commit guard passed (1 commit).
+      Sealed as ff, commit 081d468 (rebased onto origin/main after push failed
+      due to sync bug). Push required manual intervention — fetched with
+      explicit refspec, rebased, pushed from temp worktree.
+
+  - id: ses-0334962d
+    title: "Implement Dispatch apparatus"
+    dispatched_at: "2026-04-02"
+    codex: nexus
+    role: artificer
+    complexity: 3
+    spec_quality_pre: strong
+    spec_note: >
+      Full API contract spec at docs/architecture/apparatus/dispatch.md.
+      Prompt included summary of key spec elements (lifecycle, dependencies,
+      prompt assembly, error handling). Small surface area — one tool, one
+      API method, pure orchestration with no state.
+    outcome: success
+    revision_required: null
+    spec_quality_post: null
+    failure_mode: null
+    artifacts: experiments/X013-commission-outcomes/artifacts/commissions/ses-0334962d/
+    notes: >
+      Dispatched concurrently with ses-2149b518 as a concurrency test.
+      Session completed: 17 tests, $1.94, ~11 min. Commit 385a159.
+      Sealed as ff (first to finish). Push clean.
+
+  - id: ses-2149b518
+    title: "Scriptorium seal/push sync hardening"
+    dispatched_at: "2026-04-02"
+    codex: nexus
+    role: artificer
+    complexity: 2
+    spec_quality_pre: strong
+    spec_note: >
+      Clear problem statement, specific acceptance criteria including
+      spec/README updates, and pointers to relevant source files.
+    outcome: success
+    revision_required: null
+    spec_quality_post: null
+    failure_mode: null
+    artifacts: experiments/X013-commission-outcomes/artifacts/commissions/ses-2149b518/
+    notes: >
+      Dispatched concurrently with ses-0334962d as a concurrency test.
+      Session completed: 3 commits, $3.45, ~26 min. Commit 8deedff.
+      Sealed via rebase (ses-0334962d had sealed first) with 1 retry —
+      contention handling validated end-to-end. Confirmed root cause:
+      bare clone fetch without explicit refspec only updates FETCH_HEAD.
+      Fixed with +refs/heads/*:refs/remotes/origin/* and selective
+      advanceToRemote(). Added inscriptionsSealed to SealResult.
+      Updated spec and README.
