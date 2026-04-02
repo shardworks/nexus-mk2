@@ -13,22 +13,23 @@ This spec defines a Walker apparatus that runs a static rig graph: `draft → im
 ### Design decisions made (in conversation, 2026-04-02)
 
 - **No Dispatch-level MVP.** A review loop bolted onto Dispatch is throwaway work that doesn't advance the rig system. Build the real thing, just keep it simple.
-- **Static rig graph.** No Formulary, no origination, no dynamic extension. Every commission gets the same five-engine pipeline. The graph is a data structure, not hardcoded imperative calls — so it grows naturally when we're ready.
-- **Engines are a real plugin API.** Engine designs are kit contributions — the Walker contributes its five engines via its own support kit. The Walker resolves engines by `designId` from installed kits at runtime. The graph is static, but the engines are pluggable. This means when the Formulary arrives, it doesn't need to retrofit a plugin boundary — engines are already kit contributions with a standard interface.
+- **Static rig graph.** No origination, no dynamic extension. Every commission gets the same five-engine pipeline. The graph is a data structure, not hardcoded imperative calls — so it grows naturally when we're ready.
+- **Engines are a real plugin API.** Engine designs are kit contributions resolved at runtime by `designId`. The graph is static, but the engines are pluggable. This means future capability resolution doesn't need to retrofit a plugin boundary — engines are already kit contributions with a standard interface.
+- **The Fabricator owns engine designs.** The Walker does not build its own engine registry. A minimal Fabricator apparatus holds engine designs and exposes a `getEngineDesign(id)` lookup. For the MVP, the Fabricator is hardcoded — no kit scanning, just the five static engines. The seam between Walker and Fabricator is the point: the Walker asks "give me the engine for this designId," and doesn't care where it came from. When capability resolution arrives, it extends the Fabricator. The Walker doesn't change.
 - **Single review pass, not a retry loop.** `draft → implement → review → revise → seal`. No conditional branching, no retry counting. The revise anima exits fast if review finds nothing. Avoids dynamic graph manipulation and complex Walker failure handling.
 - **Anima-in-the-loop review.** The review engine is a quick engine (anima session), not just mechanical checks. An anima reading the spec against the diff catches the partial-completion failure mode that dominates our commission log. Mechanical checks (build, test) are part of the review anima's instructions, not a separate engine.
 - **`walk()` is a step function.** Each call examines state, picks the highest-priority action, does it, returns. The Walker itself is stateless between calls — all state lives in the Stacks.
 - **Priority: run > extend > spawn.** Finish work in progress before starting new work. Run a ready engine before extending a rig, extend a rig before spawning a new one. (For the static rig, "extend" doesn't apply yet — just run and spawn.)
 - **Walker is a new package** (`@shardworks/walker-apparatus`), not a Dispatch rename. Dispatch is decommissioned — Sean will delete it once the Walker is live.
 - **Persistent walk loop.** The Walker exports a `start-walking` tool that runs `walk()` in a polling loop (~5s interval). It picks up writs posted via out-of-band CLI invocations (e.g. `nsg commission-post`). No event subscription needed — just poll, check state, act.
-- **Implementer role from Walker config.** The role to summon for `implement` and `revise` engines is a Walker configuration value (e.g. `{ role: 'artificer' }`). Temporary — the Formulary takes over role selection eventually.
+- **Implementer role from Walker config.** The role to summon for `implement` and `revise` engines is a Walker configuration value (e.g. `{ role: 'artificer' }`). Temporary — the Fabricator takes over role selection eventually.
 - **Dedicated `reviewer` role.** New named role with a blank identity (like artificer today). Gets a review-mode prompt assembled by the engine. Curriculum and temperament can evolve independently.
 - **CDC for rig→writ lifecycle.** The Walker uses a CDC handler on its own `rigs` book: when a rig transitions to a terminal state (completed/failed), the handler calls the Clerk API to transition the corresponding writ. This keeps the Walker's engine execution logic decoupled from writ lifecycle management.
 - **Polling for session completion.** Quick engines store their `sessionId` on the engine instance in the Stacks. The Walker's "collect completed engines" step reads the session record by ID to check status. No CDC on the sessions book — all state is in the Stacks, restart-safe, no mapping table needed.
 
 ### Reference docs
 
-- `/workspace/nexus/docs/architecture/rigging.md` — the full rigging system design (Walker, Formulary, Executor, Manifester). This spec implements a subset.
+- `/workspace/nexus/docs/architecture/rigging.md` — the full rigging system design (Walker, Fabricator, Executor, Manifester). This spec implements a subset.
 - `/workspace/nexus/docs/architecture/apparatus/dispatch.md` — current Dispatch spec, being decommissioned.
 - `/workspace/nexus/docs/architecture/apparatus/review-loop.md` — review loop design (generated by prior commission). Background context; this spec supersedes its MVP section.
 - `/workspace/nexus/docs/architecture/apparatus/scriptorium.md` — draft binding API (`openDraft`, `seal`, `abandonDraft`).
@@ -81,26 +82,37 @@ type EngineRunResult =
   | { status: 'launched'; sessionId: string }                   // quick: session launched, Walker will poll
 ```
 
-### Kit contribution
+### The Fabricator
 
-The Walker contributes its engine designs via its support kit:
+The Fabricator apparatus owns the guild's engine design registry. The Walker never looks up engine designs itself — it calls `fabricator.getEngineDesign(designId)`.
 
 ```typescript
-// In walker-apparatus plugin
-supportKit: {
-  engines: {
-    draft:     draftEngine,
-    implement: implementEngine,
-    review:    reviewEngine,
-    revise:    reviseEngine,
-    seal:      sealEngine,
-  },
-},
+interface FabricatorApi {
+  /** Look up an engine design by ID. Returns undefined if no design is registered. */
+  getEngineDesign(id: string): EngineDesign | undefined
+}
 ```
 
-The Walker scans installed kits for `engines` contributions at startup and builds a registry: `Map<string, EngineDesign>`. When the walk function needs to run an engine, it looks up `engine.designId` in the registry.
+For the static rig MVP, the Fabricator is hardcoded — it registers the five Walker engines at startup and serves them on request. No kit scanning, no dynamic contribution. The implementation is trivially simple:
 
-For the static rig, all five engine designs come from the Walker's own support kit. Future kits can contribute additional engine designs (e.g. a `deploy` engine, a `lint` engine) without changing the Walker — the Formulary will select from whatever's installed.
+```typescript
+// fabricator-apparatus plugin
+const engines = new Map<string, EngineDesign>([
+  ['draft',     draftEngine],
+  ['implement', implementEngine],
+  ['review',    reviewEngine],
+  ['revise',    reviseEngine],
+  ['seal',      sealEngine],
+])
+
+const fabricator: FabricatorApi = {
+  getEngineDesign: (id) => engines.get(id),
+}
+```
+
+The value isn't in the complexity — it's in the seam. The Walker depends on `FabricatorApi`, not on a `Map` it built itself. When capability resolution arrives, the Fabricator grows to support kit-contributed designs, need-based queries, and chain composition. The Walker's call site doesn't change.
+
+Future: the Fabricator is expected to grow into the guild's general capability catalog — holding engine designs, tool designs, and potentially other kit-contributed capability types. See `.scratch/todo/unify-capability-registries.md`.
 
 ---
 
@@ -127,7 +139,7 @@ type WalkResult =
 Each `walk()` call does exactly one thing. The priority ordering:
 
 1. **Collect completed engines.** Scan all active rigs for engines with `status === 'running'`. For each, read the session record from the sessions book by `engine.sessionId`. If the session has reached a terminal status (`completed` or `failed`), update the engine: set its status, populate its output, and propagate rig failure if needed. This is the first priority because it unblocks downstream engines.
-2. **Run a ready engine.** An engine is ready when `status === 'pending'` and its upstream engine has `status === 'completed'`. Look up the `EngineDesign` by `designId` from the kit registry. Call `design.run(context)`. For clockwork engines (`status: 'completed'` result): write the output to the engine instance and mark it completed, all within the walk call. For quick engines (`status: 'launched'` result): store the `sessionId`, mark the engine `running`, and return. Completion is collected on subsequent walk calls via step 1.
+2. **Run a ready engine.** An engine is ready when `status === 'pending'` and its upstream engine has `status === 'completed'`. Look up the `EngineDesign` by `designId` from the Fabricator. Call `design.run(context)`. For clockwork engines (`status: 'completed'` result): write the output to the engine instance and mark it completed, all within the walk call. For quick engines (`status: 'launched'` result): store the `sessionId`, mark the engine `running`, and return. Completion is collected on subsequent walk calls via step 1.
 3. **Spawn a rig.** If there's a ready writ with no rig, spawn the static graph.
 
 If nothing qualifies at any level, return null (the guild is idle or all work is blocked on running quick engines).
@@ -630,6 +642,7 @@ Quick engine "failure" definition: if the Animator session completes with `statu
 
 ```
 Walker
+  ├── Fabricator  (resolve engine designs by designId)
   ├── Clerk       (query ready writs, transition writ state via CDC)
   ├── Scriptorium (open drafts, seal)
   ├── Animator    (summon animas for quick engines)
@@ -653,7 +666,7 @@ The review engine writes `review-findings.md` to the commission data directory. 
 
 ## What This Spec Does NOT Cover
 
-- **Dynamic rig extension.** The Formulary, capability resolution, and rig growth at runtime. Future work.
+- **Dynamic rig extension.** Capability resolution (via the Fabricator) and rig growth at runtime. Future work.
 - **Origination.** Commission → rig mapping is hardcoded (static graph). Future work.
 - **The Executor as a separate apparatus.** For now, the Walker runs engines directly — clockwork engines inline, quick engines via the Animator. The Executor earns its independence when substrate switching (Docker, remote VM) is needed.
 - **Concurrent rigs.** The priority system supports multiple rigs in principle, but the polling loop + single-guild model means we process one commission at a time in practice. Concurrency comes naturally when the Walker processes multiple ready engines across rigs.
@@ -686,7 +699,7 @@ All fields optional. `role` defaults to `"artificer"`. `pollIntervalMs` defaults
 
 This is a large piece of work. Recommended decomposition:
 
-1. **Walker core + engine interface + static graph + clockwork engines (draft, seal) + CDC handler.** The Walker can spawn rigs, resolve engine designs from kit contributions, walk the graph, run clockwork engines, and manage rig→writ lifecycle via CDC. Quick engines are stubs that immediately return `{ status: 'completed', output: mockOutput }`. Validates: engine plugin API, rig data model, priority logic, engine readiness, graph traversal, output storage and retrieval, failure propagation, rig→writ CDC transition. Tests should cover the full lifecycle with stubbed quick engines.
+1. **Walker core + Fabricator + engine interface + static graph + clockwork engines (draft, seal) + CDC handler.** The Walker can spawn rigs, resolve engine designs from the Fabricator, walk the graph, run clockwork engines, and manage rig→writ lifecycle via CDC. The Fabricator is a minimal apparatus with hardcoded engine designs and a `getEngineDesign(id)` lookup — shipped in the same increment. Quick engines are stubs that immediately return `{ status: 'completed', output: mockOutput }`. Validates: Walker→Fabricator seam, engine plugin API, rig data model, priority logic, engine readiness, graph traversal, output storage and retrieval, failure propagation, rig→writ CDC transition. Tests should cover the full lifecycle with stubbed quick engines.
 
 2. **Quick engine execution (implement).** Wire up the Animator integration — launching sessions, storing sessionId, polling for completion in the collect step. The Walker can now run `draft → implement → seal` as a working pipeline — functional parity with Dispatch, on the new architecture. Review and revise engines are still stubs.
 
