@@ -176,7 +176,7 @@ fi
 # ── Resolve repo path ────────────────────────────────────────
 
 REPO_PATH="$REPO"
-if [[ ! -d "$REPO_PATH/.git" ]]; then
+if ! git -C "$REPO_PATH" rev-parse --git-dir &>/dev/null; then
   echo "Error: not a git repository: $REPO_PATH" >&2
   exit 1
 fi
