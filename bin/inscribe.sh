@@ -52,7 +52,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DATA_DIR="$PROJECT_ROOT/experiments/data/commissions"
-LOG_FILE="$PROJECT_ROOT/experiments/ethnography/commission-log.yaml"
+LOG_FILE="$PROJECT_ROOT/experiments/data/commission-log.yaml"
 
 # nsg CLI invocation (TypeScript source, needs experimental flags)
 NSG_CMD=(node --disable-warning=ExperimentalWarning --experimental-transform-types

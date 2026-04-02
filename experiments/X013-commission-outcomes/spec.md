@@ -138,7 +138,7 @@ or hold spec constant when comparing agents.*
 
 ### Commission Log (Standing Research Instrument)
 
-The commission log lives at `experiments/ethnography/commission-log.yaml`.
+The commission log lives at `experiments/data/commission-log.yaml`.
 It is not experiment-specific — it is a standing research instrument
 that will accumulate data across multiple experiments over time. X013
 defines the first analytical framework applied to it; future experiments
@@ -381,7 +381,7 @@ points are not.
 
 ### Required (experiment cannot start without these)
 
-- **Commission log file** — create `experiments/ethnography/commission-log.yaml`
+- **Commission log file** — create `experiments/data/commission-log.yaml`
   as a standing instrument; update ethnographer instructions to read it
   at session startup; update Coco instructions to scan for unfilled
   dispatch-time entries and prompt Sean to fill them at session start.

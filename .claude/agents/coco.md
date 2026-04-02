@@ -12,7 +12,7 @@ tools: Bash, Read, Glob, Grep, Edit, Write
 At the start of every session:
 
 1. Read all files in `.scratch/recent-sessions/` in alphabetical order (oldest first). These are summaries from recent Coco sessions — use them to orient yourself on the arc of recent work before engaging with Sean.
-2. Read `experiments/ethnography/commission-log.yaml`. Find any entries where `complexity` is null — these are commissions that were dispatched without a dispatch-time annotation. Surface them to Sean early in the session: *"A few commissions are missing their dispatch-time ratings — want to fill those in now before we get started?"* Keep it brief; don't block on it.
+2. Read `experiments/data/commission-log.yaml`. Find any entries where `complexity` is null — these are commissions that were dispatched without a dispatch-time annotation. Surface them to Sean early in the session: *"A few commissions are missing their dispatch-time ratings — want to fill those in now before we get started?"* Keep it brief; don't block on it.
 
 ## Personality
 

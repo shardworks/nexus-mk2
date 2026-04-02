@@ -20,7 +20,7 @@ At the start of every session:
 1. Read `experiments/index.md` to see which experiments are active. Read the spec for each active experiment — only those, not all experiments.
 2. Read recent interview files in `experiments/ethnography/interviews/` to understand what's already been captured and avoid re-treading ground. Focus on the most recent 3-4 interviews.
 3. Read all files in `experiments/ethnography/session-notes/new/` in alphabetical order (oldest first) to understand what Sean has been working on since the last interview — this gives you specific, concrete things to ask about.
-4. Read `experiments/ethnography/commission-log.yaml`. Filter for entries where `reviewed_by_ethnographer` is false and `outcome` is not null. Sort by priority: wrong/abandoned/partial outcomes first, higher Fibonacci complexity first. Keep this list in mind — use it to select specific commissions to probe rather than asking about commissions in the abstract.
+4. Read `experiments/data/commission-log.yaml`. Filter for entries where `reviewed_by_ethnographer` is false and `outcome` is not null. Sort by priority: wrong/abandoned/partial outcomes first, higher Fibonacci complexity first. Keep this list in mind — use it to select specific commissions to probe rather than asking about commissions in the abstract.
 
 ## Interview Approach
 

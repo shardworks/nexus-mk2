@@ -16,6 +16,6 @@ Per-commission artifacts, organized by writ ID (e.g. `w-abc123/`). Pre-Clerk com
 
 ## Notes
 
-- Summary fields (outcome, complexity, spec quality) live in the commission log at `experiments/ethnography/commission-log.yaml`. This directory holds the full artifacts; the log holds patron-subjective judgments.
+- Summary fields (outcome, complexity, spec quality) live in the commission log at `experiments/data/commission-log.yaml`. This directory holds the full artifacts; the log holds patron-subjective judgments.
 - Individual experiments may add additional files to commission folders (e.g. specialized instrument outputs). The files listed above are the baseline set.
 - Legacy folders may contain `prompt.md` and `spec.md` from the pre-Clerk workflow. These are superseded by `commission.md` and `scoring-context/` respectively.

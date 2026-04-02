@@ -17,7 +17,7 @@ fill in dispatch-time fields immediately after posting.
   patron-sourced writs — i.e., writs where `sourceType === 'patron'`
   or the writ has no parent (top-level commissions only; not child writs)
 - When triggered, append a stub entry to
-  `experiments/ethnography/commission-log.yaml` in the nexus-mk2
+  `experiments/data/commission-log.yaml` in the nexus-mk2
   sanctum with the following fields populated:
   - `writ_id` — from the writ record
   - `date_posted` — current timestamp
@@ -30,7 +30,7 @@ fill in dispatch-time fields immediately after posting.
 
 - The commission log lives in the nexus-mk2 sanctum repo, not in
   shardworks. The engine needs write access to
-  `/workspace/nexus-mk2/experiments/ethnography/commission-log.yaml`.
+  `/workspace/nexus-mk2/experiments/data/commission-log.yaml`.
   Confirm this is accessible from the guild environment before
   proceeding; if not, surface the constraint and propose an alternative
   (e.g., a stub file in shardworks that Coco syncs).
