@@ -1,37 +1,31 @@
-# Next Session — Review Pipeline Catchup
+# Next Session
 
-Picking up from the 2026-04-02 session where we debugged the Laboratory
-singleton bug, got dispatch.sh working end-to-end, and discovered that
-the anima git identity feature wasn't active during dispatch (framework
-source was stale — now fixed with auto-sync in dispatch.sh).
+Picking up from the 2026-04-02 review session where we assessed both
+outstanding commissions, ran quality scorers, and filled in reviews +
+commission log entries.
 
-## Commissions to Review
+## Completed This Session
 
-### w-mnhq6gpv-a979fbca3213 — Anima Git Identity — Test Coverage
-- **Status:** completed, awaiting review
-- **Anima output:** 10 new tests across loom, animator, dispatch (all pass)
-- **Known issue:** Commits authored as `seatec@dogoodstuff.net` (not writ-scoped
-  identity) because the framework source was stale at dispatch time. Now fixed.
-- [ ] **(a) Run quality scorer manually** — the automatic trigger found no
-  commits (wrong author email). Run `bin/quality-review-full.sh` with
-  `--commit` and `--base-commit` overrides pointing at `2c2377b` directly.
-- [ ] **(b) Review scorer results** — check quality-blind.yaml and
-  quality-aware.yaml once generated. Compare blind vs aware scores.
-- [ ] **(c) Patron review** — fill in `review.md` and update commission log
-  with outcome, spec quality, revision assessment.
+- **w-mnhq6gpv-a979fbca3213** — Anima Git Identity Test Coverage
+  - Outcome: success, no revision, spec quality strong
+  - Scorer: 2.75 blind / 2.80 aware, zero variance
+- **w-mnhq8v8z-0b0f4f13e815** — Plugin Install link: Protocol
+  - Outcome: success, no revision, spec quality adequate (test-depth gaps in spec)
+  - Scorer: 2.50 blind / 2.80 aware, zero variance
+  - Blind/aware split on test_quality worth noting for X013
 
-### w-mnhq8v8z-0b0f4f13e815 — Plugin Install link: Protocol
-- **Status:** completed, awaiting review
-- **Anima output:** commit `55a185c` — package manager detection + link: protocol
-- **Same identity issue** as above (seatec@ author, not writ-scoped).
-- [ ] **(a) Run quality scorer manually** — same approach, `--commit 55a185c`
-- [ ] **(b) Review scorer results**
-- [ ] **(c) Patron review**
+## Outstanding
 
-## Also
+- **Uncommitted sanctum changes** — review.md files, commission log updates,
+  quality scorer artifacts, dispatch logs. Should commit and push.
+- **dispatch.sh framework sync** — added last session, untested in anger.
+  Next dispatch will be the first live test.
+- **next.md itself** — delete or replace once next work is identified.
 
-- **Commission log** — both commissions have `spec_quality_pre: strong` filled
-  in (Sean updated during session). Outcomes and post-review fields still null.
-- **Experiment index** — no new experiments created this session, index is current.
-- **dispatch.sh** — now syncs `/workspace/nexus/` before dispatch (stash/pull/pop).
-  Untested in anger — next dispatch will be the first live test of the sync.
+## Potential Next Work
+
+- Clean out completed specs from `.scratch/specs/`
+- Commission new work (backlog in `docs/future/`)
+- Revisit scorer blind/aware divergence as X013 data point — the remove
+  test weakness pattern (spec says "assert X is gone", blind reviewer
+  wants proof the tool was invoked) is a recurring spec authoring gap
