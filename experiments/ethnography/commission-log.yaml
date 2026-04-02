@@ -79,19 +79,31 @@ commissions:
       Same spec as ses-93ad1c4c. Prompt updated with explicit commit
       instructions since Loom does not yet compose system prompts from
       role instructions.
-    outcome: success
-    revision_required: null
-    spec_quality_post: null
+    outcome: partial
+    revision_required: true
+    spec_quality_post: adequate
     failure_mode: null
-    code_quality_agent: null
-    code_quality_variance: null
-    code_quality_n: null
+    code_quality_blind: 2.75
+    code_quality_aware: 2.20
+    code_quality_n: 3
     artifacts: experiments/X013-commission-outcomes/artifacts/commissions/ses-19194146/
     notes: >
-      Session completed: 39 tests, $2.00, ~12 min. Commit guard passed (1 commit).
-      Sealed as ff, commit 081d468 (rebased onto origin/main after push failed
-      due to sync bug). Push required manual intervention — fetched with
-      explicit refspec, rebased, pushed from temp worktree.
+      Session completed: 39 tests, $2.00, ~12 min. Commit 081d468.
+
+      Patron review: Code quality strong (clean structure, good tests,
+      idiomatic patterns), but significant spec deviations. Missing codex
+      field on WritDoc (breaks codex-aware dispatch). Missing resolution
+      field — replaced with failReason (only captures failures, not
+      completion/cancellation summaries). Added assignee despite spec
+      deferral. Timestamp naming differs (postedAt/closedAt vs
+      createdAt/resolvedAt). API uses named methods instead of spec's
+      single transition() choke point. Tools missing resolution params
+      on complete/cancel. count() method absent.
+
+      Scorer notes: blind mode scored 2.75 (test 3, structure 3, errors 2,
+      consistency 3). Aware mode 2.20 — requirement_coverage 1.33 drove
+      the drop, correctly identifying spec deviations as major gaps.
+      Error handling dinged for plain Error instances vs typed errors.
 
   - id: ses-0334962d
     title: "Implement Dispatch apparatus"
@@ -106,17 +118,29 @@ commissions:
       prompt assembly, error handling). Small surface area — one tool, one
       API method, pure orchestration with no state.
     outcome: success
-    revision_required: null
-    spec_quality_post: null
+    revision_required: false
+    spec_quality_post: strong
     failure_mode: null
-    code_quality_agent: null
-    code_quality_variance: null
-    code_quality_n: null
+    code_quality_blind: 2.75
+    code_quality_aware: 2.60
+    code_quality_n: 3
     artifacts: experiments/X013-commission-outcomes/artifacts/commissions/ses-0334962d/
     notes: >
       Dispatched concurrently with ses-2149b518 as a concurrency test.
       Session completed: 17 tests, $1.94, ~11 min. Commit 385a159.
       Sealed as ff (first to finish). Push clean.
+
+      Patron review: Faithful to spec. Prompt assembly, error handling
+      strategy (seal failure preserves draft, session failure abandons),
+      and lifecycle flow all match. Reads writs book directly via
+      stacks.readBook() instead of clerk.list() — crosses apparatus
+      boundary but acceptable for disposable shim. Codex-aware dispatch
+      path is dead code because Clerk's WritDoc lacks codex field.
+
+      Scorer notes: Stable scores across both runs (blind 2.75, aware
+      2.60). Test quality 2 in both — correctly identifies untestable
+      codex path as a gap. Error handling 3 — each failure mode handled
+      with contextual resolution strings.
 
   - id: ses-2149b518
     title: "Scriptorium seal/push sync hardening"
@@ -129,19 +153,30 @@ commissions:
       Clear problem statement, specific acceptance criteria including
       spec/README updates, and pointers to relevant source files.
     outcome: success
-    revision_required: null
-    spec_quality_post: null
+    revision_required: false
+    spec_quality_post: strong
     failure_mode: null
-    code_quality_agent: null
-    code_quality_variance: null
-    code_quality_n: null
+    code_quality_blind: 2.75
+    code_quality_aware: 2.80
+    code_quality_n: 3
     artifacts: experiments/X013-commission-outcomes/artifacts/commissions/ses-2149b518/
     notes: >
       Dispatched concurrently with ses-0334962d as a concurrency test.
       Session completed: 3 commits, $3.45, ~26 min. Commit 8deedff.
       Sealed via rebase (ses-0334962d had sealed first) with 1 retry —
-      contention handling validated end-to-end. Confirmed root cause:
-      bare clone fetch without explicit refspec only updates FETCH_HEAD.
-      Fixed with +refs/heads/*:refs/remotes/origin/* and selective
-      advanceToRemote(). Added inscriptionsSealed to SealResult.
-      Updated spec and README.
+      contention handling validated end-to-end.
+
+      Patron review: Strongest output of the three. Root cause correctly
+      identified (bare clone fetch without explicit refspec only updates
+      FETCH_HEAD). Fix is clean — explicit refspec into refs/remotes/origin/*,
+      new advanceToRemote() with merge-base logic, inscriptionsSealed on
+      SealResult. Tests comprehensive — diverged remote scenarios, push
+      after seal, inscription counting. Docs updated across spec, README,
+      and types.ts. One minor gap: silent catch in advanceToRemote()
+      swallows all errors, not just "ref not found."
+
+      Scorer notes: Highest aware-mode score (2.80). All dimensions 3
+      except error handling (2) — consistently flags the silent catch.
+      Zero variance across all runs in both modes. Initial scorer run
+      was buggy (only saw final commit, scored 1.60 aware) — fixed by
+      passing full 3-commit range.

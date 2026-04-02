@@ -1,0 +1,62 @@
+# Quality Review: ses-19194146
+# Generated: 2026-04-02T06:44:58Z
+# Prompt version: v1
+# Mode: aware
+# Runs: 3 successful of 3 attempted
+
+commission: "ses-19194146"
+repo: "/workspace/nexus"
+commit: "081d468"
+reviewed_at: "2026-04-02T06:44:58Z"
+prompt_version: "v1"
+mode: "aware"
+
+aggregate:
+  composite: 2.20
+  composite_sd: 0.16
+  n: 3
+  dimensions:
+    test_quality:
+      mean: 2.67
+      sd: 0.47
+    code_structure:
+      mean: 3.00
+      sd: 0.00
+    error_handling:
+      mean: 2.00
+      sd: 0.00
+    codebase_consistency:
+      mean: 2.00
+      sd: 0.00
+    requirement_coverage:
+      mean: 1.33
+      sd: 0.47
+
+runs:
+  - run: 1
+    test_quality: 3
+    code_structure: 3
+    error_handling: 2
+    codebase_consistency: 2
+    composite: 2.40
+    requirement_coverage: 2
+    notes: |
+      Tests are comprehensive — covering all status transitions, invalid transitions from every state, filters, config validation, and full lifecycle paths. Code structure is clean with a well-isolated transition() choke point and clear separation of types/tools/core. However, the implementation deviates from the spec in several ways: WritDoc uses different field names (postedAt/closedAt/failReason vs spec's createdAt/updatedAt/resolvedAt/resolution), show() returns null instead of throwing as spec requires, the API uses named methods (accept/complete/fail/cancel) instead of the spec's single transition() method on ClerkApi, adds non-spec fields (assignee) and built-in types (summon), uses writTypes as a Record instead of string array, and writ-complete/writ-cancel tools are missing the resolution parameter the spec requires. The spec's count() method is also absent from ClerkApi.
+  - run: 2
+    test_quality: 2
+    code_structure: 3
+    error_handling: 2
+    codebase_consistency: 2
+    composite: 2.00
+    requirement_coverage: 1
+    notes: |
+      Significant spec deviations: WritDoc fields diverge substantially (postedAt/closedAt/failReason/assignee vs spec's createdAt/updatedAt/resolvedAt/resolution/codex), `show()` returns null instead of throwing, `count()` is missing from ClerkApi, `writ-complete` and `writ-fail` tools lack the required `resolution` parameter, and the API exposes separate methods instead of the spec's `transition()` choke-point pattern. The `codex` field is absent entirely. Built-in type "summon" and object-shaped writTypes config are inventions not in the spec. Code structure is clean with good separation (transition helper, tools, types), and tests are comprehensive for the implemented behavior but validate a different contract than specified.
+  - run: 3
+    test_quality: 3
+    code_structure: 3
+    error_handling: 2
+    codebase_consistency: 2
+    composite: 2.20
+    requirement_coverage: 1
+    notes: |
+      Tests are comprehensive with good coverage of all transitions, invalid transitions, filters, and config validation. Code structure is clean with a well-factored `transition()` choke point and clear separation of tools/types/core. However, the implementation significantly deviates from the spec: WritDoc fields differ (postedAt/closedAt/failReason/assignee vs createdAt/updatedAt/resolvedAt/resolution/codex), `show()` returns null instead of throwing, `commission-post` makes `body` optional (spec: required) and adds `assignee` while dropping `codex`, `writ-complete`/`writ-fail` drop the required `resolution` parameter, `count()` and the public `transition()` API method are missing, config uses `Record<string, object>` instead of `string[]` for writTypes, and built-in type "summon" is invented. These are not minor gaps — they represent a different API contract than what was specified.
