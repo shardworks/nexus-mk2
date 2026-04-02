@@ -2,7 +2,7 @@
 
 Design sessions: 2026-04-02
 
-These are the key design decisions made during the Walker and Fabricator design sessions. The authoritative spec is at `.scratch/specs/walker-static-rig.md` (Walker) and `/workspace/nexus/docs/architecture/apparatus/fabricator.md` (Fabricator).
+These are the key design decisions made during the Walker and Fabricator design sessions. The authoritative specs are in the framework repo at `docs/architecture/apparatus/walker.md` (Walker) and `docs/architecture/apparatus/fabricator.md` (Fabricator).
 
 ---
 
@@ -28,7 +28,7 @@ The review engine is a quick engine (anima session), not just mechanical checks.
 
 Sean's insight: "the Walker's central API is a 'walk' function which does the next _one_ thing." Each call examines guild state, picks the single highest-priority action, does it, returns. The Walker is stateless between calls — all state lives in the Stacks. This makes the Walker restart-safe and easy to reason about.
 
-## Priority ordering: run > extend > spawn
+## Priority ordering: collect > run > spawn
 
 Finish work in progress before starting new work. The priority:
 1. Collect completed engines (unblocks downstream)
@@ -86,3 +86,11 @@ A new named role (`reviewer`) with a blank identity (like the artificer today). 
 ## Walker is a new package
 
 `@shardworks/walker-apparatus`, not a Dispatch rename. Dispatch is decommissioned — deleted manually once the Walker is live. The Walker has a different dependency set, different data model, and different operational model. A rename would carry unnecessary baggage.
+
+## Laboratory observability — no changes needed
+
+The Laboratory does **not** need to watch the `rigs` book. Its existing observation points are sufficient:
+
+- **Writ created** (existing CDC on writs book) → creates commission data dir, `commission.md`, `review.md` template, commission log skeleton. Unchanged.
+- **Session started/ended** (existing CDC on sessions book) → writes per-session YAML records under `experiments/data/commissions/<writ-id>/sessions/`. With the Walker, a single commission now produces up to three sessions (implement, review, revise). The Laboratory already writes session records keyed by session ID, so multiple sessions per commission just means multiple files. No Laboratory changes needed.
+- **Writ completed/failed** (existing CDC on writs book) → triggers quality scoring. Unchanged — the trigger is the writ transition, not the rig.
