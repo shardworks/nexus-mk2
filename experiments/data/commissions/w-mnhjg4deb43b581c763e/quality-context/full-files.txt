@@ -1,0 +1,1771 @@
+
+=== FILE: packages/framework/core/src/id.ts ===
+import crypto from 'node:crypto';
+
+/**
+ * Generate a sortable, prefixed ID.
+ *
+ * Format: `{prefix}-{base36_timestamp}{hex_random}`
+ *
+ * The timestamp component (Date.now() in base36) gives lexicographic sort
+ * order by creation time. The random suffix prevents collisions without
+ * coordination.
+ *
+ * @param prefix     Short, type-identifying string (e.g. `w`, `ses`, `turn`)
+ * @param randomByteCount  Number of random bytes; produces 2× hex digits (default 6 → 12 hex chars)
+ */
+export function generateId(prefix: string, randomByteCount: number = 6): string {
+  const ts = Date.now().toString(36);
+  const rand = crypto.randomBytes(randomByteCount).toString('hex');
+  return `${prefix}-${ts}${rand}`;
+}
+
+=== FILE: packages/framework/core/src/index.ts ===
+// @shardworks/nexus-core — public SDK surface
+
+import { createRequire } from 'node:module';
+
+const _require = createRequire(import.meta.url);
+const _pkg = _require('../package.json');
+export const VERSION: string = _pkg.version;
+
+// ── Promoted modules — canonical source lives here at top-level ────────
+
+export {
+  // Plugin/Kit/Apparatus model
+  type Kit,
+  type Apparatus,
+  type Plugin,
+  type LoadedKit,
+  type LoadedApparatus,
+  type LoadedPlugin,
+  type StartupContext,
+  isKit,
+  isApparatus,
+  isLoadedKit,
+  isLoadedApparatus,
+} from './plugin.ts';
+
+// Guild — the process-level singleton for accessing guild infrastructure.
+export {
+  type Guild,
+  guild,
+  setGuild,
+  clearGuild,
+} from './guild.ts';
+
+export {
+  findGuildRoot,
+  nexusDir,
+  worktreesPath,
+  clockPidPath,
+  clockLogPath,
+} from './nexus-home.ts';
+
+export {
+  derivePluginId,
+  readGuildPackageJson,
+  resolvePackageNameForPluginId,
+  resolveGuildPackageEntry,
+} from './resolve-package.ts';
+
+export {
+  type GuildConfig,
+  createInitialGuildConfig,
+  readGuildConfig,
+  writeGuildConfig,
+  type EventDeclaration,
+  type StandingOrder,
+  type ClockworksConfig,
+  type GuildSettings,
+  guildConfigPath,
+} from './guild-config.ts';
+
+export { generateId } from './id.ts';
+
+=== FILE: packages/plugins/animator/src/animator.ts ===
+/**
+ * The Animator — session launch and telemetry recording apparatus.
+ *
+ * Two API levels:
+ * - summon() — high-level: composes context via The Loom, then launches.
+ * - animate() — low-level: takes a pre-composed AnimaWeave + prompt.
+ *
+ * See: docs/specification.md (animator)
+ */
+
+import type { Plugin, StartupContext } from '@shardworks/nexus-core';
+import { guild, generateId } from '@shardworks/nexus-core';
+import type { StacksApi, Book } from '@shardworks/stacks-apparatus';
+
+import type { LoomApi } from '@shardworks/loom-apparatus';
+
+import type {
+  AnimatorApi,
+  AnimateHandle,
+  AnimatorConfig,
+  AnimateRequest,
+  SummonRequest,
+  SessionResult,
+  SessionChunk,
+  SessionDoc,
+  AnimatorSessionProvider,
+  SessionProviderConfig,
+  SessionProviderResult,
+} from './types.ts';
+
+import { sessionList, sessionShow, summon as summonTool } from './tools/index.ts';
+
+// ── Core logic ───────────────────────────────────────────────────────
+
+/**
+ * Resolve the session provider apparatus.
+ *
+ * Looks up the provider by plugin id from guild config. The provider is
+ * an apparatus whose `provides` implements AnimatorSessionProvider.
+ * Arbor throws immediately if the plugin isn't loaded or has no provides.
+ */
+function resolveProvider(config: AnimatorConfig): AnimatorSessionProvider {
+  const pluginId = config.sessionProvider ?? 'claude-code';
+  return guild().apparatus<AnimatorSessionProvider>(pluginId);
+}
+
+/**
+ * Resolve the model from guild settings.
+ */
+function resolveModel(): string {
+  const g = guild();
+  const guildConfig = g.guildConfig();
+  return guildConfig.settings?.model ?? 'sonnet';
+}
+
+/**
+ * Build the provider config from an AnimateRequest.
+ *
+ * The system prompt comes from the AnimaWeave (composed by The Loom).
+ * The work prompt comes from the request directly (bypasses The Loom).
+ * The streaming flag is passed through for the provider to honor (or ignore).
+ */
+function buildProviderConfig(
+  request: AnimateRequest,
+  model: string,
+): SessionProviderConfig {
+  return {
+    systemPrompt: request.context.systemPrompt,
+    initialPrompt: request.prompt,
+    model,
+    conversationId: request.conversationId,
+    cwd: request.cwd,
+    streaming: request.streaming,
+    tools: request.context.tools,
+  };
+}
+
+/**
+ * Build a SessionResult from provider output and session metadata.
+ */
+function buildSessionResult(
+  id: string,
+  startedAt: string,
+  providerName: string,
+  providerResult: SessionProviderResult,
+  request: AnimateRequest,
+): SessionResult {
+  const endedAt = new Date().toISOString();
+  const durationMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+
+  return {
+    id,
+    status: providerResult.status,
+    startedAt,
+    endedAt,
+    durationMs,
+    provider: providerName,
+    exitCode: providerResult.exitCode,
+    error: providerResult.error,
+    conversationId: request.conversationId,
+    providerSessionId: providerResult.providerSessionId,
+    tokenUsage: providerResult.tokenUsage,
+    costUsd: providerResult.costUsd,
+    metadata: request.metadata,
+  };
+}
+
+/**
+ * Build a failed SessionResult when the provider throws.
+ */
+function buildFailedResult(
+  id: string,
+  startedAt: string,
+  providerName: string,
+  error: unknown,
+  request: AnimateRequest,
+): SessionResult {
+  const endedAt = new Date().toISOString();
+  const durationMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+  const errorMessage = error instanceof Error ? error.message : String(error);
+
+  return {
+    id,
+    status: 'failed',
+    startedAt,
+    endedAt,
+    durationMs,
+    provider: providerName,
+    exitCode: 1,
+    error: errorMessage,
+    conversationId: request.conversationId,
+    metadata: request.metadata,
+  };
+}
+
+/**
+ * Convert a SessionResult to a SessionDoc for Stacks storage.
+ */
+function toSessionDoc(result: SessionResult): SessionDoc {
+  return {
+    id: result.id,
+    status: result.status,
+    startedAt: result.startedAt,
+    endedAt: result.endedAt,
+    durationMs: result.durationMs,
+    provider: result.provider,
+    exitCode: result.exitCode,
+    error: result.error,
+    conversationId: result.conversationId,
+    providerSessionId: result.providerSessionId,
+    tokenUsage: result.tokenUsage,
+    costUsd: result.costUsd,
+    metadata: result.metadata,
+  };
+}
+
+/**
+ * Record a session result to The Stacks.
+ *
+ * Errors are logged but never propagated — session data loss is
+ * preferable to masking the original failure. See § Error Handling Contract.
+ */
+async function recordSession(
+  sessions: Book<SessionDoc>,
+  result: SessionResult,
+): Promise<void> {
+  try {
+    await sessions.put(toSessionDoc(result));
+  } catch (err) {
+    console.warn(
+      `[animator] Failed to record session ${result.id}: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
+/**
+ * Write the initial 'running' session record to The Stacks.
+ */
+async function recordRunning(
+  sessions: Book<SessionDoc>,
+  id: string,
+  startedAt: string,
+  providerName: string,
+  request: AnimateRequest,
+): Promise<void> {
+  try {
+    await sessions.put({
+      id,
+      status: 'running',
+      startedAt,
+      provider: providerName,
+      conversationId: request.conversationId,
+      metadata: request.metadata,
+    });
+  } catch (err) {
+    console.warn(
+      `[animator] Failed to write initial session record ${id}: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
+// ── Apparatus factory ────────────────────────────────────────────────
+
+/**
+ * Create the Animator apparatus plugin.
+ *
+ * Returns a Plugin with:
+ * - `requires: ['stacks']` — records session results
+ * - `provides: AnimatorApi` — the session launch API
+ * - `supportKit` — contributes `sessions` book + inspection tools
+ */
+export function createAnimator(): Plugin {
+  let config: AnimatorConfig = {};
+  let sessions: Book<SessionDoc>;
+
+  const api: AnimatorApi = {
+    summon(request: SummonRequest): AnimateHandle {
+      // Resolve The Loom at call time — not a startup dependency.
+      // This allows the Animator to start without the Loom installed;
+      // only summon() requires it.
+      let loom: LoomApi;
+      try {
+        loom = guild().apparatus<LoomApi>('loom');
+      } catch {
+        throw new Error(
+          'summon() requires The Loom apparatus to be installed. ' +
+          'Use animate() directly if you want to provide a pre-composed AnimaWeave.',
+        );
+      }
+
+      // We need to weave context before we can animate, but summon()
+      // must return synchronously. Wrap the async Loom call and the
+      // animate delegation into a single deferred flow.
+      const deferred = (async () => {
+        // Compose identity context via The Loom.
+        // The Loom owns system prompt composition — it produces the system
+        // prompt from the anima's identity layers (role instructions,
+        // curriculum, temperament, charter). MVP: returns empty (no
+        // systemPrompt); the session runs without one until the Loom
+        // gains composition logic. The work prompt bypasses the Loom.
+        const context = await loom.weave({
+          role: request.role,
+        });
+
+        // Merge caller metadata with auto-generated summon metadata
+        const metadata: Record<string, unknown> = {
+          trigger: 'summon',
+          ...(request.role ? { role: request.role } : {}),
+          ...request.metadata,
+        };
+
+        // Delegate to the standard animate path.
+        // The work prompt goes directly on the request — it is not
+        // a composition concern.
+        return this.animate({
+          context,
+          prompt: request.prompt,
+          cwd: request.cwd,
+          conversationId: request.conversationId,
+          metadata,
+          streaming: request.streaming,
+        });
+      })();
+
+      // Pipe chunks through — can't get them until the Loom weave resolves.
+      // Works for both streaming and non-streaming: non-streaming providers
+      // return empty chunks, so the generator yields nothing and completes.
+      async function* pipeChunks(): AsyncIterable<SessionChunk> {
+        const handle = await deferred;
+        yield* handle.chunks;
+      }
+
+      return {
+        chunks: pipeChunks(),
+        result: deferred.then((handle) => handle.result),
+      };
+    },
+
+    animate(request: AnimateRequest): AnimateHandle {
+      const provider = resolveProvider(config);
+      const model = resolveModel();
+      const providerConfig = buildProviderConfig(request, model);
+
+      // Step 1: generate session id, capture startedAt
+      const id = generateId('ses', 4);
+      const startedAt = new Date().toISOString();
+
+      // Single path — the provider returns { chunks, result } regardless
+      // of whether streaming is enabled. Providers that don't support
+      // streaming return empty chunks; the Animator doesn't branch.
+      const { chunks, result: providerResultPromise } = provider.launch(providerConfig);
+
+      // Write initial record (fire and forget — don't block streaming)
+      const initPromise = recordRunning(sessions, id, startedAt, provider.name, request);
+
+      const result = (async () => {
+        await initPromise;
+
+        let sessionResult: SessionResult;
+        try {
+          const providerResult = await providerResultPromise;
+          sessionResult = buildSessionResult(id, startedAt, provider.name, providerResult, request);
+        } catch (err) {
+          sessionResult = buildFailedResult(id, startedAt, provider.name, err, request);
+          await recordSession(sessions, sessionResult);
+          throw err;
+        }
+
+        await recordSession(sessions, sessionResult);
+        return sessionResult;
+      })();
+
+      return { chunks, result };
+    },
+  };
+
+  return {
+    apparatus: {
+      requires: ['stacks'],
+      recommends: ['loom'],
+
+      supportKit: {
+        books: {
+          sessions: {
+            indexes: ['startedAt', 'status', 'conversationId', 'provider'],
+          },
+        },
+        tools: [sessionList, sessionShow, summonTool],
+      },
+
+      provides: api,
+
+      start(_ctx: StartupContext): void {
+        const g = guild();
+        config = g.guildConfig().animator ?? {};
+
+        const stacks = g.apparatus<StacksApi>('stacks');
+        sessions = stacks.book<SessionDoc>('animator', 'sessions');
+      },
+    },
+  };
+}
+
+=== FILE: packages/plugins/codexes/src/scriptorium-core.ts ===
+/**
+ * The Scriptorium — core logic.
+ *
+ * Manages the codex registry (bare clones), draft binding lifecycle
+ * (worktrees), and sealing (ff-only merge or rebase+ff). All git
+ * operations go through the git helper for safety.
+ *
+ * Draft tracking is in-memory — drafts are reconstructed from
+ * filesystem state at startup and maintained in memory during the
+ * process lifetime.
+ *
+ * See: docs/architecture/apparatus/scriptorium.md
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { guild, generateId } from '@shardworks/nexus-core';
+
+import { git, resolveDefaultBranch, resolveRef, commitsAhead, GitError } from './git.ts';
+
+import type {
+  CodexRecord,
+  CodexDetail,
+  DraftRecord,
+  OpenDraftRequest,
+  AbandonDraftRequest,
+  SealRequest,
+  SealResult,
+  PushRequest,
+  CodexesConfig,
+  CodexConfigEntry,
+  ScriptoriumApi,
+} from './types.ts';
+
+// ── Internal state ──────────────────────────────────────────────────
+
+interface CodexState {
+  name: string
+  remoteUrl: string
+  cloneStatus: 'ready' | 'cloning' | 'error'
+  lastFetched: string | null
+  /** Promise that resolves when the bare clone is ready (for background clones). */
+  clonePromise?: Promise<void>
+}
+
+// ── Core class ──────────────────────────────────────────────────────
+
+export class ScriptoriumCore {
+  private codexes = new Map<string, CodexState>();
+  private drafts = new Map<string, DraftRecord>(); // keyed by `${codexName}/${branch}`
+
+  private maxMergeRetries: number = 3;
+  private draftRoot: string = '.nexus/worktrees';
+
+  // ── Paths ───────────────────────────────────────────────────────
+
+  private get home(): string {
+    return guild().home;
+  }
+
+  private codexesDir(): string {
+    return path.join(this.home, '.nexus', 'codexes');
+  }
+
+  private bareClonePath(name: string): string {
+    return path.join(this.codexesDir(), `${name}.git`);
+  }
+
+  private draftWorktreePath(codexName: string, branch: string): string {
+    return path.join(this.home, this.draftRoot, codexName, branch);
+  }
+
+  // ── Startup ─────────────────────────────────────────────────────
+
+  start(): void {
+    const config = guild().config<CodexesConfig>('codexes');
+
+    // Apply settings
+    this.maxMergeRetries = config.settings?.maxMergeRetries ?? 3;
+    this.draftRoot = config.settings?.draftRoot ?? '.nexus/worktrees';
+
+    // Ensure infrastructure directories exist
+    fs.mkdirSync(this.codexesDir(), { recursive: true });
+
+    // Load registered codexes from config
+    const registered = config.registered ?? {};
+    for (const [name, entry] of Object.entries(registered)) {
+      this.loadCodex(name, entry);
+    }
+
+    // Reconcile drafts from filesystem
+    this.reconcileDrafts();
+  }
+
+  /**
+   * Load a codex from config. Checks for existing bare clone;
+   * initiates background clone if missing.
+   */
+  private loadCodex(name: string, entry: CodexConfigEntry): void {
+    const clonePath = this.bareClonePath(name);
+    const exists = fs.existsSync(clonePath);
+
+    const state: CodexState = {
+      name,
+      remoteUrl: entry.remoteUrl,
+      cloneStatus: exists ? 'ready' : 'cloning',
+      lastFetched: null,
+    };
+
+    if (!exists) {
+      // Background clone — doesn't block startup
+      state.clonePromise = this.performClone(name, entry.remoteUrl)
+        .then(() => { state.cloneStatus = 'ready'; })
+        .catch((err) => {
+          state.cloneStatus = 'error';
+          console.warn(`[scriptorium] Background clone of "${name}" failed: ${err instanceof Error ? err.message : err}`);
+        });
+    }
+
+    this.codexes.set(name, state);
+  }
+
+  /**
+   * Reconcile in-memory draft tracking with filesystem state.
+   * Scans the worktree directories and rebuilds the draft map.
+   */
+  private reconcileDrafts(): void {
+    const worktreeRoot = path.join(this.home, this.draftRoot);
+    if (!fs.existsSync(worktreeRoot)) return;
+
+    for (const codexDir of fs.readdirSync(worktreeRoot, { withFileTypes: true })) {
+      if (!codexDir.isDirectory()) continue;
+      const codexName = codexDir.name;
+
+      // Only reconcile drafts for known codexes
+      if (!this.codexes.has(codexName)) continue;
+
+      const codexWorktreeDir = path.join(worktreeRoot, codexName);
+      for (const draftDir of fs.readdirSync(codexWorktreeDir, { withFileTypes: true })) {
+        if (!draftDir.isDirectory()) continue;
+        const branch = draftDir.name;
+        const draftPath = path.join(codexWorktreeDir, branch);
+
+        // Verify it's actually a git worktree (has .git file)
+        if (!fs.existsSync(path.join(draftPath, '.git'))) continue;
+
+        const key = `${codexName}/${branch}`;
+        if (!this.drafts.has(key)) {
+          this.drafts.set(key, {
+            id: generateId('draft', 4),
+            codexName,
+            branch,
+            path: draftPath,
+            createdAt: new Date().toISOString(), // approximate — we don't know the real time
+          });
+        }
+      }
+    }
+  }
+
+  // ── Clone readiness ─────────────────────────────────────────────
+
+  /**
+   * Ensure a codex's bare clone is ready. Blocks if a background
+   * clone is in progress. Throws if the codex is unknown or clone failed.
+   */
+  private async ensureReady(name: string): Promise<CodexState> {
+    const state = this.codexes.get(name);
+    if (!state) {
+      throw new Error(`Codex "${name}" is not registered. Use codex-add to register it.`);
+    }
+
+    if (state.clonePromise) {
+      await state.clonePromise;
+      state.clonePromise = undefined;
+    }
+
+    if (state.cloneStatus === 'error') {
+      throw new Error(
+        `Codex "${name}" bare clone failed. Remove and re-add the codex, or check the remote URL.`,
+      );
+    }
+
+    return state;
+  }
+
+  // ── Git operations ──────────────────────────────────────────────
+
+  private async performClone(name: string, remoteUrl: string): Promise<void> {
+    const clonePath = this.bareClonePath(name);
+    fs.mkdirSync(path.dirname(clonePath), { recursive: true });
+    await git(['clone', '--bare', remoteUrl, clonePath]);
+  }
+
+  /**
+   * Advance refs/heads/<branch> to the remote's position if the remote is
+   * strictly ahead of the local sealed binding.
+   *
+   * This handles commits pushed to the remote outside the Scriptorium:
+   * if the remote has advanced past the local sealed binding, sealing must
+   * rebase the draft onto the remote position — not the stale local one.
+   *
+   * If the local sealed binding is already ahead of (or equal to) the remote
+   * (e.g. contains unpushed seals from contention scenarios), it is kept.
+   */
+  private async advanceToRemote(codexName: string, branch: string): Promise<void> {
+    const clonePath = this.bareClonePath(codexName);
+    let remoteRef: string;
+    try {
+      remoteRef = await resolveRef(clonePath, `refs/remotes/origin/${branch}`);
+    } catch {
+      return; // No remote tracking ref (branch may not exist on remote yet)
+    }
+    const localRef = await resolveRef(clonePath, branch);
+    if (remoteRef === localRef) return;
+
+    const { stdout: mergeBase } = await git(
+      ['merge-base', localRef, remoteRef],
+      clonePath,
+    );
+    if (mergeBase === localRef) {
+      // Local is an ancestor of remote → remote is ahead → advance local
+      await git(['update-ref', `refs/heads/${branch}`, remoteRef], clonePath);
+    }
+    // If local is ahead of or diverged from remote: keep the local sealed binding
+  }
+
+  private async performFetch(name: string): Promise<void> {
+    const clonePath = this.bareClonePath(name);
+    // Explicit refspec is required: git clone --bare does not configure a
+    // fetch refspec, so plain `git fetch origin` only updates FETCH_HEAD and
+    // leaves refs/heads/* stale.
+    //
+    // We fetch into refs/remotes/origin/* rather than refs/heads/* for two
+    // reasons:
+    //   1. It avoids force-overwriting local draft branches (which live in
+    //      refs/heads/* but do not exist on the remote).
+    //   2. It separates the "remote position" (refs/remotes/origin/*) from
+    //      the "local sealed binding" (refs/heads/*), letting seal() advance
+    //      refs/heads/* only when the remote is strictly ahead.
+    await git(['fetch', '--prune', 'origin', '+refs/heads/*:refs/remotes/origin/*'], clonePath);
+
+    const state = this.codexes.get(name);
+    if (state) {
+      state.lastFetched = new Date().toISOString();
+    }
+  }
+
+  // ── API Implementation ────────────────────────────────────────
+
+  createApi(): ScriptoriumApi {
+    return {
+      add: (name, remoteUrl) => this.add(name, remoteUrl),
+      list: () => this.list(),
+      show: (name) => this.show(name),
+      remove: (name) => this.remove(name),
+      fetch: (name) => this.fetchCodex(name),
+      push: (request) => this.push(request),
+      openDraft: (request) => this.openDraft(request),
+      listDrafts: (codexName?) => this.listDrafts(codexName),
+      abandonDraft: (request) => this.abandonDraft(request),
+      seal: (request) => this.seal(request),
+    };
+  }
+
+  // ── Codex Registry ──────────────────────────────────────────────
+
+  async add(name: string, remoteUrl: string): Promise<CodexRecord> {
+    if (this.codexes.has(name)) {
+      throw new Error(`Codex "${name}" is already registered.`);
+    }
+
+    // Clone bare repo (blocking)
+    const state: CodexState = {
+      name,
+      remoteUrl,
+      cloneStatus: 'cloning',
+      lastFetched: null,
+    };
+    this.codexes.set(name, state);
+
+    try {
+      await this.performClone(name, remoteUrl);
+      state.cloneStatus = 'ready';
+    } catch (err) {
+      state.cloneStatus = 'error';
+      this.codexes.delete(name);
+      throw new Error(
+        `Failed to clone "${remoteUrl}" for codex "${name}": ${err instanceof Error ? err.message : err}`,
+      );
+    }
+
+    // Persist to guild.json
+    const config = guild().config<CodexesConfig>('codexes');
+    const registered = config.registered ?? {};
+    registered[name] = { remoteUrl };
+    guild().writeConfig('codexes', { ...config, registered });
+
+    return this.toCodexRecord(state);
+  }
+
+  async list(): Promise<CodexRecord[]> {
+    const records: CodexRecord[] = [];
+    for (const state of this.codexes.values()) {
+      records.push(this.toCodexRecord(state));
+    }
+    return records;
+  }
+
+  async show(name: string): Promise<CodexDetail> {
+    const state = await this.ensureReady(name);
+    const clonePath = this.bareClonePath(name);
+    const defaultBranch = await resolveDefaultBranch(clonePath);
+    const drafts = this.draftsForCodex(name);
+
+    return {
+      name: state.name,
+      remoteUrl: state.remoteUrl,
+      cloneStatus: state.cloneStatus,
+      activeDrafts: drafts.length,
+      defaultBranch,
+      lastFetched: state.lastFetched,
+      drafts,
+    };
+  }
+
+  async remove(name: string): Promise<void> {
+    const state = this.codexes.get(name);
+    if (!state) {
+      throw new Error(`Codex "${name}" is not registered.`);
+    }
+
+    // Abandon all drafts for this codex
+    const drafts = this.draftsForCodex(name);
+    for (const draft of drafts) {
+      await this.abandonDraft({ codexName: name, branch: draft.branch, force: true });
+    }
+
+    // Remove bare clone
+    const clonePath = this.bareClonePath(name);
+    if (fs.existsSync(clonePath)) {
+      fs.rmSync(clonePath, { recursive: true, force: true });
+    }
+
+    // Remove from in-memory state
+    this.codexes.delete(name);
+
+    // Remove from guild.json
+    const config = guild().config<CodexesConfig>('codexes');
+    const registered = { ...(config.registered ?? {}) };
+    delete registered[name];
+    guild().writeConfig('codexes', { ...config, registered });
+  }
+
+  async fetchCodex(name: string): Promise<void> {
+    await this.ensureReady(name);
+    await this.performFetch(name);
+  }
+
+  async push(request: PushRequest): Promise<void> {
+    const state = await this.ensureReady(request.codexName);
+    const clonePath = this.bareClonePath(state.name);
+    const branch = request.branch ?? await resolveDefaultBranch(clonePath);
+
+    await git(['push', 'origin', branch], clonePath);
+  }
+
+  // ── Draft Binding Lifecycle ─────────────────────────────────────
+
+  async openDraft(request: OpenDraftRequest): Promise<DraftRecord> {
+    const state = await this.ensureReady(request.codexName);
+    const clonePath = this.bareClonePath(state.name);
+
+    // Fetch before branching for freshness
+    await this.performFetch(state.name);
+
+    const branch = request.branch ?? generateId('draft', 4);
+    const key = `${request.codexName}/${branch}`;
+
+    // Reject if draft already exists
+    if (this.drafts.has(key)) {
+      throw new Error(
+        `Draft with branch "${branch}" already exists for codex "${request.codexName}". ` +
+        `Choose a different branch name or abandon the existing draft.`,
+      );
+    }
+
+    const defaultBranch = await resolveDefaultBranch(clonePath);
+    const startPoint = request.startPoint ?? defaultBranch;
+
+    // Advance the start-point branch to the remote position if the remote
+    // has moved ahead. Ensures the draft branches from the latest state.
+    await this.advanceToRemote(state.name, startPoint);
+
+    const worktreePath = this.draftWorktreePath(request.codexName, branch);
+    fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+
+    // Create worktree with new branch from start point
+    await git(
+      ['worktree', 'add', worktreePath, '-b', branch, startPoint],
+      clonePath,
+    );
+
+    const draft: DraftRecord = {
+      id: generateId('draft', 4),
+      codexName: request.codexName,
+      branch,
+      path: worktreePath,
+      createdAt: new Date().toISOString(),
+      associatedWith: request.associatedWith,
+    };
+
+    this.drafts.set(key, draft);
+    return draft;
+  }
+
+  async listDrafts(codexName?: string): Promise<DraftRecord[]> {
+    if (codexName) {
+      return this.draftsForCodex(codexName);
+    }
+    return [...this.drafts.values()];
+  }
+
+  async abandonDraft(request: AbandonDraftRequest): Promise<void> {
+    const key = `${request.codexName}/${request.branch}`;
+    const draft = this.drafts.get(key);
+
+    if (!draft) {
+      throw new Error(
+        `No active draft with branch "${request.branch}" for codex "${request.codexName}".`,
+      );
+    }
+
+    // Check for unsealed inscriptions (commits ahead of the sealed binding)
+    if (!request.force) {
+      const state = await this.ensureReady(request.codexName);
+      const clonePath = this.bareClonePath(state.name);
+
+      try {
+        const defaultBranch = await resolveDefaultBranch(clonePath);
+        const ahead = await commitsAhead(clonePath, request.branch, defaultBranch);
+
+        if (ahead > 0) {
+          throw new Error(
+            `Draft "${request.branch}" has ${ahead} unsealed inscription(s). ` +
+            `Use force: true to abandon anyway, or seal the draft first.`,
+          );
+        }
+      } catch (err) {
+        // If the branch doesn't exist in the bare clone (already cleaned up),
+        // that's fine — proceed with cleanup
+        if (err instanceof GitError && err.stderr.includes('unknown revision')) {
+          // Branch already gone — proceed with cleanup
+        } else if (err instanceof Error && err.message.includes('unsealed inscription')) {
+          throw err;
+        }
+        // Other git errors during the check are non-fatal — proceed with cleanup
+      }
+    }
+
+    // Remove worktree
+    const clonePath = this.bareClonePath(request.codexName);
+    try {
+      await git(['worktree', 'remove', '--force', draft.path], clonePath);
+    } catch {
+      // If worktree removal fails (e.g. already gone), try manual cleanup
+      if (fs.existsSync(draft.path)) {
+        fs.rmSync(draft.path, { recursive: true, force: true });
+      }
+      // Prune stale worktree references
+      try {
+        await git(['worktree', 'prune'], clonePath);
+      } catch { /* best effort */ }
+    }
+
+    // Delete the branch from the bare clone
+    try {
+      await git(['branch', '-D', request.branch], clonePath);
+    } catch {
+      // Branch may already be gone — that's fine
+    }
+
+    // Remove from in-memory tracking
+    this.drafts.delete(key);
+  }
+
+  async seal(request: SealRequest): Promise<SealResult> {
+    const state = await this.ensureReady(request.codexName);
+    const clonePath = this.bareClonePath(state.name);
+    const maxRetries = request.maxRetries ?? this.maxMergeRetries;
+
+    const defaultBranch = await resolveDefaultBranch(clonePath);
+    const targetBranch = request.targetBranch ?? defaultBranch;
+
+    let strategy: 'fast-forward' | 'rebase' = 'fast-forward';
+    let retries = 0;
+
+    // Fetch before sealing for freshness
+    await this.performFetch(state.name);
+
+    // Advance the local sealed binding to the remote position if the remote
+    // has moved ahead (e.g. commits pushed outside the Scriptorium).
+    // This ensures seal compares against the latest remote ref, not a
+    // potentially stale local one — preventing push failures.
+    await this.advanceToRemote(state.name, targetBranch);
+
+    // Attempt ff-only merge, with rebase retry loop
+    while (retries <= maxRetries) {
+      try {
+        // Try fast-forward merge: update the target branch ref to point at the source
+        // In a bare repo, we use `git merge --ff-only` with the branch checked out,
+        // but bare repos don't have a checkout. Instead, we verify ancestry and
+        // update the ref directly.
+        const targetRef = await resolveRef(clonePath, targetBranch);
+        const sourceRef = await resolveRef(clonePath, request.sourceBranch);
+
+        // Check if source is already at target (nothing to seal)
+        if (targetRef === sourceRef) {
+          // Clean up draft unless keepDraft
+          if (!request.keepDraft) {
+            await this.abandonDraft({
+              codexName: request.codexName,
+              branch: request.sourceBranch,
+              force: true,
+            });
+          }
+          return { success: true, strategy, retries, sealedCommit: targetRef, inscriptionsSealed: 0 };
+        }
+
+        // Check if target is an ancestor of source (ff is possible)
+        const { stdout: mergeBase } = await git(
+          ['merge-base', targetBranch, request.sourceBranch],
+          clonePath,
+        );
+
+        if (mergeBase === targetRef) {
+          // Fast-forward is possible — count and incorporate inscriptions
+          const inscriptionsSealed = await commitsAhead(
+            clonePath,
+            request.sourceBranch,
+            targetBranch,
+          );
+
+          await git(
+            ['update-ref', `refs/heads/${targetBranch}`, sourceRef],
+            clonePath,
+          );
+
+          // Clean up draft unless keepDraft
+          if (!request.keepDraft) {
+            await this.abandonDraft({
+              codexName: request.codexName,
+              branch: request.sourceBranch,
+              force: true,
+            });
+          }
+
+          return { success: true, strategy, retries, sealedCommit: sourceRef, inscriptionsSealed };
+        }
+
+        // FF not possible — rebase the source branch onto the target
+        strategy = 'rebase';
+
+        // Rebase needs a worktree (can't rebase in a bare repo).
+        // Use the draft's existing worktree.
+        const key = `${request.codexName}/${request.sourceBranch}`;
+        const draft = this.drafts.get(key);
+        if (!draft) {
+          throw new Error(
+            `Cannot rebase: no active draft for branch "${request.sourceBranch}". ` +
+            `The draft worktree is needed for rebase operations.`,
+          );
+        }
+
+        try {
+          await git(['rebase', targetBranch], draft.path);
+        } catch (err) {
+          // Rebase conflict — abort and fail
+          try {
+            await git(['rebase', '--abort'], draft.path);
+          } catch { /* best effort */ }
+
+          throw new Error(
+            `Sealing seized: rebase of "${request.sourceBranch}" onto "${targetBranch}" ` +
+            `produced conflicts. Manual reconciliation is needed.`,
+          );
+        }
+
+        // Rebase succeeded — re-fetch and retry the ff merge
+        retries++;
+        await this.performFetch(state.name);
+        continue;
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('Sealing seized')) {
+          throw err;
+        }
+        if (err instanceof Error && err.message.includes('Cannot rebase')) {
+          throw err;
+        }
+        // Unexpected error — don't retry
+        throw err;
+      }
+    }
+
+    throw new Error(
+      `Sealing failed after ${maxRetries} retries. Codex "${request.codexName}", ` +
+      `branch "${request.sourceBranch}" → "${targetBranch}".`,
+    );
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────
+
+  private draftsForCodex(codexName: string): DraftRecord[] {
+    return [...this.drafts.values()].filter((d) => d.codexName === codexName);
+  }
+
+  private toCodexRecord(state: CodexState): CodexRecord {
+    return {
+      name: state.name,
+      remoteUrl: state.remoteUrl,
+      cloneStatus: state.cloneStatus,
+      activeDrafts: this.draftsForCodex(state.name).length,
+    };
+  }
+}
+
+=== FILE: packages/plugins/parlour/src/parlour.ts ===
+/**
+ * The Parlour — multi-turn conversation management apparatus.
+ *
+ * Manages two kinds of conversation:
+ * - consult: a human talks to an anima
+ * - convene: multiple animas hold a structured dialogue
+ *
+ * The Parlour orchestrates turns — it decides when and for whom to call
+ * The Animator, and tracks conversation state in The Stacks. It does not
+ * launch sessions itself (delegates to The Animator) or assemble prompts
+ * (delegates to The Loom).
+ *
+ * See: docs/architecture/apparatus/parlour.md
+ */
+
+import type { Plugin, StartupContext } from '@shardworks/nexus-core';
+import { guild, generateId } from '@shardworks/nexus-core';
+import type { StacksApi, Book, ReadOnlyBook, WhereCondition } from '@shardworks/stacks-apparatus';
+import type { AnimatorApi, SessionResult, SessionChunk, SessionDoc } from '@shardworks/animator-apparatus';
+import type { LoomApi } from '@shardworks/loom-apparatus';
+
+import type {
+  ParlourApi,
+  ConversationDoc,
+  TurnDoc,
+  ParticipantRecord,
+  Participant,
+  CreateConversationRequest,
+  CreateConversationResult,
+  TakeTurnRequest,
+  TurnResult,
+  ConversationChunk,
+  ConversationSummary,
+  ConversationDetail,
+  TurnSummary,
+  ListConversationsOptions,
+} from './types.ts';
+
+import { conversationList, conversationShow, conversationEnd } from './tools/index.ts';
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Count anima turns in the conversation (for turn limit enforcement).
+ * Human turns do not count toward the turn limit.
+ */
+async function countAnimaTurns(
+  turns: ReadOnlyBook<TurnDoc>,
+  conversationId: string,
+): Promise<number> {
+  return turns.count([
+    ['conversationId', '=', conversationId],
+    ['participantKind', '=', 'anima'],
+  ]);
+}
+
+/**
+ * Count all turns in the conversation (for turnNumber assignment).
+ */
+async function countAllTurns(
+  turns: ReadOnlyBook<TurnDoc>,
+  conversationId: string,
+): Promise<number> {
+  return turns.count([
+    ['conversationId', '=', conversationId],
+  ]);
+}
+
+/**
+ * Get the most recent turn for a specific participant.
+ */
+async function getLastTurnForParticipant(
+  turns: ReadOnlyBook<TurnDoc>,
+  conversationId: string,
+  participantId: string,
+): Promise<TurnDoc | null> {
+  const results = await turns.find({
+    where: [
+      ['conversationId', '=', conversationId],
+      ['participantId', '=', participantId],
+    ],
+    orderBy: ['turnNumber', 'desc'],
+    limit: 1,
+  });
+  return results[0] ?? null;
+}
+
+/**
+ * Get turns since a given turn number (exclusive), ordered ascending.
+ */
+async function getTurnsSince(
+  turns: ReadOnlyBook<TurnDoc>,
+  conversationId: string,
+  afterTurnNumber: number,
+): Promise<TurnDoc[]> {
+  return turns.find({
+    where: [
+      ['conversationId', '=', conversationId],
+      ['turnNumber', '>', afterTurnNumber],
+    ],
+    orderBy: ['turnNumber', 'asc'],
+  });
+}
+
+/**
+ * Get all turns for a conversation, ordered by turnNumber ascending.
+ */
+async function getAllTurns(
+  turns: ReadOnlyBook<TurnDoc>,
+  conversationId: string,
+): Promise<TurnDoc[]> {
+  return turns.find({
+    where: [
+      ['conversationId', '=', conversationId],
+    ],
+    orderBy: ['turnNumber', 'asc'],
+  });
+}
+
+/**
+ * Map ParticipantRecord[] to Participant[] (public projection).
+ */
+function toParticipants(records: ParticipantRecord[]): Participant[] {
+  return records.map((r) => ({
+    id: r.id,
+    name: r.name,
+    kind: r.kind,
+  }));
+}
+
+/**
+ * Assemble the inter-turn message for a consult conversation.
+ *
+ * For consult, the pattern is simple: the human's message from the
+ * TakeTurnRequest is passed directly as the prompt. If no message
+ * is provided, the conversation topic is used as fallback (first turn).
+ */
+function assembleConsultMessage(
+  request: TakeTurnRequest,
+  conversation: ConversationDoc,
+  isFirstTurn: boolean,
+): string | undefined {
+  if (request.message) return request.message;
+  if (isFirstTurn && conversation.topic) return conversation.topic;
+  return undefined;
+}
+
+/**
+ * Assemble the inter-turn message for a convene conversation.
+ *
+ * For convene, each participant needs to see what other participants said
+ * since their last turn. This requires reading session transcripts, which
+ * depends on session record artifacts that the Animator MVP does not produce.
+ *
+ * At MVP, this uses the human-readable messages stored in turn records,
+ * which are adequate for human turns but cannot capture anima responses
+ * (the Animator does not expose transcript text). Anima contributions
+ * fall back to a placeholder.
+ *
+ * See: parlour-implementation-tracker.md § Gap #1
+ */
+async function assembleConveneMessage(
+  turns: ReadOnlyBook<TurnDoc>,
+  conversation: ConversationDoc,
+  participantId: string,
+  isFirstTurn: boolean,
+): Promise<string | undefined> {
+  if (isFirstTurn && conversation.topic) return conversation.topic;
+
+  // Get this participant's last turn to find intervening turns
+  const lastTurn = await getLastTurnForParticipant(
+    turns,
+    conversation.id,
+    participantId,
+  );
+
+  if (!lastTurn) {
+    // Never taken a turn — use topic
+    return conversation.topic ?? undefined;
+  }
+
+  // Get all turns since this participant's last turn
+  const intervening = await getTurnsSince(
+    turns,
+    conversation.id,
+    lastTurn.turnNumber,
+  );
+
+  if (intervening.length === 0) return undefined;
+
+  // Assemble messages from other participants
+  const lines: string[] = [];
+  for (const turn of intervening) {
+    if (turn.participantId === participantId) continue;
+    if (turn.participantKind === 'human' && turn.message) {
+      lines.push(`[${turn.participantName}]: ${turn.message}`);
+    } else if (turn.participantKind === 'anima') {
+      // Cannot extract anima response — Animator MVP has no transcript text.
+      // Placeholder until session record artifacts or response capture is available.
+      lines.push(`[${turn.participantName}]: [response not available]`);
+    }
+  }
+
+  return lines.length > 0 ? lines.join('\n\n') : undefined;
+}
+
+// ── Apparatus factory ────────────────────────────────────────────────
+
+/**
+ * Create the Parlour apparatus plugin.
+ *
+ * Returns a Plugin with:
+ * - `requires: ['stacks', 'animator', 'loom']` — conversation orchestration
+ * - `provides: ParlourApi` — the conversation management API
+ * - `supportKit` — contributes `conversations` + `turns` books + management tools
+ */
+export function createParlour(): Plugin {
+  let conversations: Book<ConversationDoc>;
+  let turns: Book<TurnDoc>;
+  let sessions: ReadOnlyBook<SessionDoc>;
+
+  const api: ParlourApi = {
+    async create(request: CreateConversationRequest): Promise<CreateConversationResult> {
+      const conversationId = generateId('conv');
+
+      // Build participant records
+      const participants: ParticipantRecord[] = request.participants.map((decl) => ({
+        id: generateId('part'),
+        kind: decl.kind,
+        name: decl.name,
+        animaId: null, // No Roster yet — leave null at MVP
+        providerSessionId: null,
+      }));
+
+      // Write conversation document
+      const doc: ConversationDoc = {
+        id: conversationId,
+        status: 'active',
+        kind: request.kind,
+        topic: request.topic ?? null,
+        turnLimit: request.turnLimit ?? null,
+        createdAt: new Date().toISOString(),
+        endedAt: null,
+        eventId: request.eventId ?? null,
+        participants,
+        cwd: request.cwd,
+      };
+
+      await conversations.put(doc);
+
+      return {
+        conversationId,
+        participants: toParticipants(participants),
+      };
+    },
+
+    async takeTurn(request: TakeTurnRequest): Promise<TurnResult> {
+      // 1. Read conversation state
+      const conv = await conversations.get(request.conversationId);
+      if (!conv) {
+        throw new Error(`Conversation "${request.conversationId}" not found.`);
+      }
+      if (conv.status !== 'active') {
+        throw new Error(
+          `Conversation "${request.conversationId}" is ${conv.status}, not active.`,
+        );
+      }
+
+      // Find the participant
+      const participant = conv.participants.find((p) => p.id === request.participantId);
+      if (!participant) {
+        throw new Error(
+          `Participant "${request.participantId}" not found in conversation "${request.conversationId}".`,
+        );
+      }
+
+      // 2. Determine turn number
+      const totalTurns = await countAllTurns(turns, conv.id);
+      const turnNumber = totalTurns + 1;
+
+      // 3. Check turn limit (anima turns only)
+      if (participant.kind === 'anima' && conv.turnLimit !== null) {
+        const animaTurns = await countAnimaTurns(turns, conv.id);
+        if (animaTurns >= conv.turnLimit) {
+          throw new Error(
+            `Conversation "${conv.id}" has reached its turn limit of ${conv.turnLimit}.`,
+          );
+        }
+      }
+
+      const startedAt = new Date().toISOString();
+
+      if (participant.kind === 'human') {
+        // Human turn — record the message, no session launched
+        const turnId = generateId('turn', 6);
+        await turns.put({
+          id: turnId,
+          conversationId: conv.id,
+          turnNumber,
+          participantId: participant.id,
+          participantName: participant.name,
+          participantKind: 'human',
+          message: request.message ?? null,
+          sessionId: null,
+          startedAt,
+          endedAt: new Date().toISOString(),
+        });
+
+        return {
+          sessionResult: null,
+          turnNumber,
+          conversationActive: true,
+        };
+      }
+
+      // Anima turn — weave context and call the Animator
+      const loom = guild().apparatus<LoomApi>('loom');
+      const animator = guild().apparatus<AnimatorApi>('animator');
+
+      // Determine if this is the participant's first turn
+      const lastTurn = await getLastTurnForParticipant(turns, conv.id, participant.id);
+      const isFirstTurn = lastTurn === null;
+
+      // Assemble the message for this turn
+      let message: string | undefined;
+      if (conv.kind === 'consult') {
+        message = assembleConsultMessage(request, conv, isFirstTurn);
+      } else {
+        message = await assembleConveneMessage(turns, conv, participant.id, isFirstTurn);
+      }
+
+      // Weave anima context via The Loom
+      const context = await loom.weave({ role: undefined });
+
+      // Call The Animator
+      const { result: resultPromise } = animator.animate({
+        context,
+        prompt: message,
+        cwd: conv.cwd,
+        conversationId: participant.providerSessionId ?? undefined,
+        metadata: {
+          trigger: 'parlour',
+          conversationId: conv.id,
+          turnNumber,
+          participantId: participant.id,
+        },
+      });
+
+      const sessionResult = await resultPromise;
+
+      // Update participant's providerSessionId for --resume
+      const updatedParticipants = conv.participants.map((p) =>
+        p.id === participant.id
+          ? { ...p, providerSessionId: sessionResult.providerSessionId ?? p.providerSessionId }
+          : p,
+      );
+      await conversations.patch(conv.id, { participants: updatedParticipants });
+
+      // Record the turn
+      const turnId = generateId('turn', 6);
+      await turns.put({
+        id: turnId,
+        conversationId: conv.id,
+        turnNumber,
+        participantId: participant.id,
+        participantName: participant.name,
+        participantKind: 'anima',
+        message: message ?? null,
+        sessionId: sessionResult.id,
+        startedAt,
+        endedAt: new Date().toISOString(),
+      });
+
+      // Check if turn limit reached → auto-conclude
+      let conversationActive = true;
+      if (conv.turnLimit !== null) {
+        const animaTurns = await countAnimaTurns(turns, conv.id);
+        if (animaTurns >= conv.turnLimit) {
+          await this.end(conv.id, 'concluded');
+          conversationActive = false;
+        }
+      }
+
+      return {
+        sessionResult,
+        turnNumber,
+        conversationActive,
+      };
+    },
+
+    takeTurnStreaming(request: TakeTurnRequest): {
+      chunks: AsyncIterable<ConversationChunk>;
+      result: Promise<TurnResult>;
+    } {
+      type HumanResolved = { kind: 'human'; turnResult: TurnResult };
+      type AnimaResolved = {
+        kind: 'anima';
+        animatorChunks: AsyncIterable<SessionChunk>;
+        animatorResult: Promise<SessionResult>;
+        conv: ConversationDoc;
+        participant: ParticipantRecord;
+        turnNumber: number;
+        startedAt: string;
+        message: string | undefined;
+      };
+      type StreamResolved = HumanResolved | AnimaResolved;
+
+      // Read conversation state and launch the turn.
+      // We need to return synchronously, so wrap the async flow.
+      const deferred: Promise<StreamResolved> = (async (): Promise<StreamResolved> => {
+        // 1. Read conversation state
+        const conv = await conversations.get(request.conversationId);
+        if (!conv) {
+          throw new Error(`Conversation "${request.conversationId}" not found.`);
+        }
+        if (conv.status !== 'active') {
+          throw new Error(
+            `Conversation "${request.conversationId}" is ${conv.status}, not active.`,
+          );
+        }
+
+        // Find the participant
+        const participant = conv.participants.find((p) => p.id === request.participantId);
+        if (!participant) {
+          throw new Error(
+            `Participant "${request.participantId}" not found in conversation "${request.conversationId}".`,
+          );
+        }
+
+        // Human turns don't stream — delegate to non-streaming path
+        if (participant.kind === 'human') {
+          const turnResult = await this.takeTurn(request);
+          return { kind: 'human', turnResult };
+        }
+
+        // 2. Determine turn number
+        const totalTurns = await countAllTurns(turns, conv.id);
+        const turnNumber = totalTurns + 1;
+
+        // 3. Check turn limit
+        if (conv.turnLimit !== null) {
+          const animaTurns = await countAnimaTurns(turns, conv.id);
+          if (animaTurns >= conv.turnLimit) {
+            throw new Error(
+              `Conversation "${conv.id}" has reached its turn limit of ${conv.turnLimit}.`,
+            );
+          }
+        }
+
+        const startedAt = new Date().toISOString();
+
+        const loom = guild().apparatus<LoomApi>('loom');
+        const animator = guild().apparatus<AnimatorApi>('animator');
+
+        // Determine if first turn
+        const lastTurn = await getLastTurnForParticipant(turns, conv.id, participant.id);
+        const isFirstTurn = lastTurn === null;
+
+        // Assemble message
+        let message: string | undefined;
+        if (conv.kind === 'consult') {
+          message = assembleConsultMessage(request, conv, isFirstTurn);
+        } else {
+          message = await assembleConveneMessage(turns, conv, participant.id, isFirstTurn);
+        }
+
+        // Weave + animate with streaming
+        const context = await loom.weave({ role: undefined });
+        const handle = animator.animate({
+          context,
+          prompt: message,
+          cwd: conv.cwd,
+          conversationId: participant.providerSessionId ?? undefined,
+          metadata: {
+            trigger: 'parlour',
+            conversationId: conv.id,
+            turnNumber,
+            participantId: participant.id,
+          },
+          streaming: true,
+        });
+
+        return {
+          kind: 'anima',
+          animatorChunks: handle.chunks,
+          animatorResult: handle.result,
+          conv,
+          participant,
+          turnNumber,
+          startedAt,
+          message,
+        };
+      })();
+
+      async function* streamChunks(): AsyncIterable<ConversationChunk> {
+        const resolved = await deferred;
+        // Human turn — no chunks
+        if (resolved.kind === 'human') return;
+
+        const { animatorChunks, animatorResult } = resolved;
+
+        // Pipe through Animator chunks
+        yield* animatorChunks;
+
+        // Wait for final result to emit turn_complete
+        const sessionResult = await animatorResult;
+        yield {
+          type: 'turn_complete' as const,
+          turnNumber: resolved.turnNumber,
+          costUsd: sessionResult.costUsd,
+        };
+      }
+
+      const result = (async (): Promise<TurnResult> => {
+        const resolved = await deferred;
+
+        // Human turn — already handled
+        if (resolved.kind === 'human') return resolved.turnResult;
+
+        const { animatorResult, conv, participant, turnNumber, startedAt, message } = resolved;
+        const sessionResult = await animatorResult;
+
+        // Update providerSessionId
+        const updatedParticipants = conv.participants.map((p) =>
+          p.id === participant.id
+            ? { ...p, providerSessionId: sessionResult.providerSessionId ?? p.providerSessionId }
+            : p,
+        );
+        await conversations.patch(conv.id, { participants: updatedParticipants });
+
+        // Record turn
+        const turnId = generateId('turn', 6);
+        await turns.put({
+          id: turnId,
+          conversationId: conv.id,
+          turnNumber,
+          participantId: participant.id,
+          participantName: participant.name,
+          participantKind: 'anima',
+          message: message ?? null,
+          sessionId: sessionResult.id,
+          startedAt,
+          endedAt: new Date().toISOString(),
+        });
+
+        // Check turn limit
+        let conversationActive = true;
+        if (conv.turnLimit !== null) {
+          const animaTurns = await countAnimaTurns(turns, conv.id);
+          if (animaTurns >= conv.turnLimit) {
+            await api.end(conv.id, 'concluded');
+            conversationActive = false;
+          }
+        }
+
+        return { sessionResult, turnNumber, conversationActive };
+      })();
+
+      return { chunks: streamChunks(), result };
+    },
+
+    async nextParticipant(conversationId: string): Promise<Participant | null> {
+      const conv = await conversations.get(conversationId);
+      if (!conv || conv.status !== 'active') return null;
+
+      // Check turn limit
+      if (conv.turnLimit !== null) {
+        const animaTurns = await countAnimaTurns(turns, conv.id);
+        if (animaTurns >= conv.turnLimit) return null;
+      }
+
+      if (conv.kind === 'consult') {
+        // For consult: always return the anima participant
+        const anima = conv.participants.find((p) => p.kind === 'anima');
+        if (!anima) return null;
+        return { id: anima.id, name: anima.name, kind: anima.kind };
+      }
+
+      // For convene: round-robin among all participants
+      const totalTurns = await countAllTurns(turns, conv.id);
+      const nextIndex = totalTurns % conv.participants.length;
+      const next = conv.participants[nextIndex];
+      return { id: next.id, name: next.name, kind: next.kind };
+    },
+
+    async end(conversationId: string, reason?: 'concluded' | 'abandoned'): Promise<void> {
+      const conv = await conversations.get(conversationId);
+      if (!conv) {
+        throw new Error(`Conversation "${conversationId}" not found.`);
+      }
+      // Idempotent — no error if already ended
+      if (conv.status !== 'active') return;
+
+      await conversations.patch(conversationId, {
+        status: reason ?? 'concluded',
+        endedAt: new Date().toISOString(),
+      });
+    },
+
+    async list(options?: ListConversationsOptions): Promise<ConversationSummary[]> {
+      const where: WhereCondition[] = [];
+      if (options?.status) where.push(['status', '=', options.status]);
+      if (options?.kind) where.push(['kind', '=', options.kind]);
+
+      const convs = await conversations.find({
+        where: where.length > 0 ? where : undefined,
+        orderBy: ['createdAt', 'desc'],
+        limit: options?.limit ?? 20,
+      });
+
+      // Build summaries with turn counts and cost aggregation
+      const summaries: ConversationSummary[] = [];
+      for (const conv of convs) {
+        const convTurns = await getAllTurns(turns, conv.id);
+        const sessionIds = convTurns
+          .map((t) => t.sessionId)
+          .filter((id): id is string => id !== null);
+
+        // Aggregate cost from session records
+        let totalCostUsd = 0;
+        for (const sessionId of sessionIds) {
+          const session = await sessions.get(sessionId);
+          if (session?.costUsd) totalCostUsd += session.costUsd;
+        }
+
+        summaries.push({
+          id: conv.id,
+          status: conv.status,
+          kind: conv.kind,
+          topic: conv.topic,
+          turnLimit: conv.turnLimit,
+          createdAt: conv.createdAt,
+          endedAt: conv.endedAt,
+          participants: toParticipants(conv.participants),
+          turnCount: convTurns.length,
+          totalCostUsd,
+        });
+      }
+
+      return summaries;
+    },
+
+    async show(conversationId: string): Promise<ConversationDetail | null> {
+      const conv = await conversations.get(conversationId);
+      if (!conv) return null;
+
+      const convTurns = await getAllTurns(turns, conv.id);
+      const sessionIds = convTurns
+        .map((t) => t.sessionId)
+        .filter((id): id is string => id !== null);
+
+      // Aggregate cost
+      let totalCostUsd = 0;
+      for (const sessionId of sessionIds) {
+        const session = await sessions.get(sessionId);
+        if (session?.costUsd) totalCostUsd += session.costUsd;
+      }
+
+      // Build turn summaries
+      const turnSummaries: TurnSummary[] = convTurns.map((t) => ({
+        sessionId: t.sessionId,
+        turnNumber: t.turnNumber,
+        participant: t.participantName,
+        message: t.message,
+        startedAt: t.startedAt,
+        endedAt: t.endedAt,
+      }));
+
+      return {
+        id: conv.id,
+        status: conv.status,
+        kind: conv.kind,
+        topic: conv.topic,
+        turnLimit: conv.turnLimit,
+        createdAt: conv.createdAt,
+        endedAt: conv.endedAt,
+        participants: toParticipants(conv.participants),
+        turnCount: convTurns.length,
+        totalCostUsd,
+        turns: turnSummaries,
+      };
+    },
+  };
+
+  return {
+    apparatus: {
+      requires: ['stacks', 'animator', 'loom'],
+
+      supportKit: {
+        books: {
+          conversations: {
+            indexes: ['status', 'kind', 'createdAt'],
+          },
+          turns: {
+            indexes: ['conversationId', 'turnNumber', 'participantId', 'participantKind'],
+          },
+        },
+        tools: [conversationList, conversationShow, conversationEnd],
+      },
+
+      provides: api,
+
+      start(_ctx: StartupContext): void {
+        const g = guild();
+        const stacks = g.apparatus<StacksApi>('stacks');
+        conversations = stacks.book<ConversationDoc>('parlour', 'conversations');
+        turns = stacks.book<TurnDoc>('parlour', 'turns');
+        sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      },
+    },
+  };
+}
+

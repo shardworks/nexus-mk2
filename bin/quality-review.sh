@@ -448,6 +448,31 @@ assemble_user_message() {
 
 assemble_user_message "$USER_TEMPLATE_FILE" "$USER_MESSAGE_FILE"
 
+# ── Persist quality context ──────────────────────────────────
+# Store the assembled inputs so reviews are fully reproducible.
+# Runs before dry-run check so --dry-run can backfill context
+# without burning API calls.
+
+CONTEXT_DIR="$OUTPUT_DIR/${COMMISSION}/quality-context"
+mkdir -p "$CONTEXT_DIR"
+
+# Shared context — identical for both modes; idempotent writes so
+# parallel blind+aware runs from quality-review-full.sh don't conflict.
+echo "$DIFF"          > "$CONTEXT_DIR/diff.patch"
+echo "$FULL_FILES"    > "$CONTEXT_DIR/full-files.txt"
+echo "$CONTEXT_FILES" > "$CONTEXT_DIR/context-files.txt"
+echo "$FILE_TREE"     > "$CONTEXT_DIR/file-tree.txt"
+echo "$CHANGED_FILES" > "$CONTEXT_DIR/changed-files.txt"
+
+# Mode-specific context — filenames include mode to avoid collisions.
+cp "$SYSTEM_PROMPT_FILE" "$CONTEXT_DIR/system-prompt-${MODE}.md"
+cp "$USER_MESSAGE_FILE"  "$CONTEXT_DIR/user-message-${MODE}.md"
+if [[ -n "$REFERENCED_FILES" ]]; then
+  echo "$REFERENCED_FILES" > "$CONTEXT_DIR/referenced-files-${MODE}.txt"
+fi
+
+echo "  Context saved to: $CONTEXT_DIR"
+
 if $DRY_RUN; then
   echo "── DRY RUN ──"
   echo ""

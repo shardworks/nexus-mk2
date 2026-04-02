@@ -1,0 +1,135 @@
+ packages/framework/cli/src/commands/plugin.test.ts | 49 +++++++++++++++++++++-
+ packages/framework/cli/src/commands/plugin.ts      | 31 ++++++++++++--
+ 2 files changed, 76 insertions(+), 4 deletions(-)
+
+diff --git a/packages/framework/cli/src/commands/plugin.test.ts b/packages/framework/cli/src/commands/plugin.test.ts
+index 1586df1..e1114ab 100644
+--- a/packages/framework/cli/src/commands/plugin.test.ts
++++ b/packages/framework/cli/src/commands/plugin.test.ts
+@@ -20,7 +20,7 @@ import { describe, it, afterEach } from 'node:test';
+ import assert from 'node:assert/strict';
+ import fs from 'node:fs';
+ import path from 'node:path';
+-import { pluginList, pluginInstall, pluginRemove, pluginUpgrade } from './plugin.ts';
++import { pluginList, pluginInstall, pluginRemove, pluginUpgrade, detectPackageManager } from './plugin.ts';
+ import { setupGuildAccessor, makeTmpDir, makeGuild, makeGuildPackageJson, cleanupTestState } from './test-helpers.ts';
+ 
+ /**
+@@ -227,6 +227,39 @@ describe('plugin-install handler — link mode', () => {
+     const config = JSON.parse(fs.readFileSync(path.join(tmp, 'guild.json'), 'utf-8'));
+     assert.ok(config.plugins.includes('relative-detect'));
+   });
++
++  it('uses link: protocol when guild has pnpm-lock.yaml', async () => {
++    const tmp = makeTmpDir('plugin');
++    makeGuild(tmp);
++    fs.writeFileSync(path.join(tmp, 'pnpm-lock.yaml'), '');
++    const pluginDir = makeFakePlugin(tmp, 'pnpm-fake-plugin');
++
++    setupGuildAccessor(tmp);
++    await pluginInstall.handler({ source: pluginDir, type: 'link' });
++
++    const pkgJson = JSON.parse(fs.readFileSync(path.join(tmp, 'package.json'), 'utf-8'));
++    const depValue: string = pkgJson.dependencies['pnpm-fake-plugin'];
++    assert.ok(depValue.startsWith('link:'), `Expected link: protocol, got: ${depValue}`);
++
++    const config = JSON.parse(fs.readFileSync(path.join(tmp, 'guild.json'), 'utf-8'));
++    assert.ok(config.plugins.includes('pnpm-fake'));
++  });
++
++  it('uses file: protocol when guild has no pnpm-lock.yaml', async () => {
++    const tmp = makeTmpDir('plugin');
++    makeGuild(tmp);
++    const pluginDir = makeFakePlugin(tmp, 'npm-fake-plugin');
++
++    setupGuildAccessor(tmp);
++    await pluginInstall.handler({ source: pluginDir, type: 'link' });
++
++    const pkgJson = JSON.parse(fs.readFileSync(path.join(tmp, 'package.json'), 'utf-8'));
++    const depValue: string = pkgJson.dependencies['npm-fake-plugin'];
++    assert.ok(depValue.startsWith('file:'), `Expected file: protocol, got: ${depValue}`);
++
++    const config = JSON.parse(fs.readFileSync(path.join(tmp, 'guild.json'), 'utf-8'));
++    assert.ok(config.plugins.includes('npm-fake'));
++  });
+ });
+ 
+ // ── plugin-remove ─��──────────────���───────────────────────────────────────
+@@ -293,6 +326,20 @@ describe('plugin-remove handler', () => {
+       /not installed/,
+     );
+   });
++
++  it('calls pnpm remove when guild has pnpm-lock.yaml', async () => {
++    const tmp = makeTmpDir('plugin');
++    // Install the plugin first via pnpm so it exists in node_modules
++    makeGuild(tmp, { plugins: ['nexus-stdlib'] });
++    fs.writeFileSync(path.join(tmp, 'pnpm-lock.yaml'), '');
++    makeGuildPackageJson(tmp, { '@shardworks/nexus-stdlib': '^1.0.0' });
++
++    setupGuildAccessor(tmp);
++    await pluginRemove.handler({ name: 'nexus-stdlib' });
++
++    const config = JSON.parse(fs.readFileSync(path.join(tmp, 'guild.json'), 'utf-8'));
++    assert.ok(!config.plugins.includes('nexus-stdlib'));
++  });
+ });
+ 
+ // ── plugin-upgrade ───────────────────────────────────────────────────────
+diff --git a/packages/framework/cli/src/commands/plugin.ts b/packages/framework/cli/src/commands/plugin.ts
+index c76abc7..14f8260 100644
+--- a/packages/framework/cli/src/commands/plugin.ts
++++ b/packages/framework/cli/src/commands/plugin.ts
+@@ -28,6 +28,21 @@ function npm(args: string[], cwd: string): string {
+   return execFileSync('npm', args, { cwd, stdio: 'pipe', encoding: 'utf-8' });
+ }
+ 
++function pnpm(args: string[], cwd: string): string {
++  return execFileSync('pnpm', args, { cwd, stdio: 'pipe', encoding: 'utf-8' });
++}
++
++/**
++ * Detect the package manager used by the guild.
++ *
++ * Checks for lockfiles in order of specificity. Falls back to 'npm'
++ * when no lockfile is present (e.g. fresh guilds before first install).
++ */
++export function detectPackageManager(guildRoot: string): 'npm' | 'pnpm' {
++  if (fs.existsSync(path.join(guildRoot, 'pnpm-lock.yaml'))) return 'pnpm';
++  return 'npm';
++}
++
+ /**
+  * Parse a source specifier to extract the npm package name.
+  * e.g. "@shardworks/nexus-stdlib@1.0" → "@shardworks/nexus-stdlib"
+@@ -128,7 +143,12 @@ export const pluginInstall = tool({
+       }
+       const pkgJson = JSON.parse(fs.readFileSync(path.join(sourceDir, 'package.json'), 'utf-8')) as Record<string, unknown>;
+       packageName = pkgJson.name as string;
+-      npm(['install', '--save', `file:${sourceDir}`], home);
++      const pm = detectPackageManager(home);
++      if (pm === 'pnpm') {
++        pnpm(['add', `link:${sourceDir}`], home);
++      } else {
++        npm(['install', '--save', `file:${sourceDir}`], home);
++      }
+     } else {
+       npm(['install', '--save', source], home);
+       packageName = parsePackageName(source) ?? detectInstalledPackage(home);
+@@ -176,9 +196,14 @@ export const pluginRemove = tool({
+     const packageName = resolvePackageNameForPluginId(home, targetId);
+     if (packageName) {
+       try {
+-        npm(['uninstall', packageName], home);
++        const pm = detectPackageManager(home);
++        if (pm === 'pnpm') {
++          pnpm(['remove', packageName], home);
++        } else {
++          npm(['uninstall', packageName], home);
++        }
+       } catch {
+-        // Don't fail if npm uninstall fails — guild.json is already updated
++        // Don't fail if uninstall fails — guild.json is already updated
+       }
+     }
+ 

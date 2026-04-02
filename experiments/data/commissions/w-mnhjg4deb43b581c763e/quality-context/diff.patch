@@ -1,0 +1,194 @@
+ packages/framework/core/src/id.ts                | 19 +++++++++++++++++++
+ packages/framework/core/src/index.ts             |  2 ++
+ packages/plugins/animator/src/animator.ts        | 12 ++----------
+ packages/plugins/codexes/src/scriptorium-core.ts | 18 ++++--------------
+ packages/plugins/parlour/src/parlour.ts          | 16 ++++------------
+ 5 files changed, 31 insertions(+), 36 deletions(-)
+
+diff --git a/packages/framework/core/src/id.ts b/packages/framework/core/src/id.ts
+new file mode 100644
+index 0000000..ea8d13f
+--- /dev/null
++++ b/packages/framework/core/src/id.ts
+@@ -0,0 +1,19 @@
++import crypto from 'node:crypto';
++
++/**
++ * Generate a sortable, prefixed ID.
++ *
++ * Format: `{prefix}-{base36_timestamp}{hex_random}`
++ *
++ * The timestamp component (Date.now() in base36) gives lexicographic sort
++ * order by creation time. The random suffix prevents collisions without
++ * coordination.
++ *
++ * @param prefix     Short, type-identifying string (e.g. `w`, `ses`, `turn`)
++ * @param randomByteCount  Number of random bytes; produces 2× hex digits (default 6 → 12 hex chars)
++ */
++export function generateId(prefix: string, randomByteCount: number = 6): string {
++  const ts = Date.now().toString(36);
++  const rand = crypto.randomBytes(randomByteCount).toString('hex');
++  return `${prefix}-${ts}${rand}`;
++}
+diff --git a/packages/framework/core/src/index.ts b/packages/framework/core/src/index.ts
+index d166f6f..5824ad8 100644
+--- a/packages/framework/core/src/index.ts
++++ b/packages/framework/core/src/index.ts
+@@ -57,3 +57,5 @@ export {
+   type GuildSettings,
+   guildConfigPath,
+ } from './guild-config.ts';
++
++export { generateId } from './id.ts';
+diff --git a/packages/plugins/animator/src/animator.ts b/packages/plugins/animator/src/animator.ts
+index 5f65268..7811eb0 100644
+--- a/packages/plugins/animator/src/animator.ts
++++ b/packages/plugins/animator/src/animator.ts
+@@ -8,10 +8,8 @@
+  * See: docs/specification.md (animator)
+  */
+ 
+-import crypto from 'node:crypto';
+-
+ import type { Plugin, StartupContext } from '@shardworks/nexus-core';
+-import { guild } from '@shardworks/nexus-core';
++import { guild, generateId } from '@shardworks/nexus-core';
+ import type { StacksApi, Book } from '@shardworks/stacks-apparatus';
+ 
+ import type { LoomApi } from '@shardworks/loom-apparatus';
+@@ -32,12 +30,6 @@ import type {
+ 
+ import { sessionList, sessionShow, summon as summonTool } from './tools/index.ts';
+ 
+-// ── ID generation ────────────────────────────────────────────────────
+-
+-function generateSessionId(): string {
+-  return `ses-${crypto.randomBytes(4).toString('hex')}`;
+-}
+-
+ // ── Core logic ───────────────────────────────────────────────────────
+ 
+ /**
+@@ -290,7 +282,7 @@ export function createAnimator(): Plugin {
+       const providerConfig = buildProviderConfig(request, model);
+ 
+       // Step 1: generate session id, capture startedAt
+-      const id = generateSessionId();
++      const id = generateId('ses', 4);
+       const startedAt = new Date().toISOString();
+ 
+       // Single path — the provider returns { chunks, result } regardless
+diff --git a/packages/plugins/codexes/src/scriptorium-core.ts b/packages/plugins/codexes/src/scriptorium-core.ts
+index d94168b..2715966 100644
+--- a/packages/plugins/codexes/src/scriptorium-core.ts
++++ b/packages/plugins/codexes/src/scriptorium-core.ts
+@@ -14,9 +14,8 @@
+ 
+ import fs from 'node:fs';
+ import path from 'node:path';
+-import crypto from 'node:crypto';
+ 
+-import { guild } from '@shardworks/nexus-core';
++import { guild, generateId } from '@shardworks/nexus-core';
+ 
+ import { git, resolveDefaultBranch, resolveRef, commitsAhead, GitError } from './git.ts';
+ 
+@@ -45,15 +44,6 @@ interface CodexState {
+   clonePromise?: Promise<void>
+ }
+ 
+-// ── ULID-like ID generation ─────────────────────────────────────────
+-
+-function generateDraftId(): string {
+-  // Timestamp prefix (ms, base36) + random suffix for uniqueness.
+-  const ts = Date.now().toString(36);
+-  const rand = crypto.randomBytes(4).toString('hex');
+-  return `${ts}${rand}`;
+-}
+-
+ // ── Core class ──────────────────────────────────────────────────────
+ 
+ export class ScriptoriumCore {
+@@ -158,7 +148,7 @@ export class ScriptoriumCore {
+         const key = `${codexName}/${branch}`;
+         if (!this.drafts.has(key)) {
+           this.drafts.set(key, {
+-            id: generateDraftId(),
++            id: generateId('draft', 4),
+             codexName,
+             branch,
+             path: draftPath,
+@@ -385,7 +375,7 @@ export class ScriptoriumCore {
+     // Fetch before branching for freshness
+     await this.performFetch(state.name);
+ 
+-    const branch = request.branch ?? `draft-${generateDraftId()}`;
++    const branch = request.branch ?? generateId('draft', 4);
+     const key = `${request.codexName}/${branch}`;
+ 
+     // Reject if draft already exists
+@@ -413,7 +403,7 @@ export class ScriptoriumCore {
+     );
+ 
+     const draft: DraftRecord = {
+-      id: generateDraftId(),
++      id: generateId('draft', 4),
+       codexName: request.codexName,
+       branch,
+       path: worktreePath,
+diff --git a/packages/plugins/parlour/src/parlour.ts b/packages/plugins/parlour/src/parlour.ts
+index 8708e54..ffd2d75 100644
+--- a/packages/plugins/parlour/src/parlour.ts
++++ b/packages/plugins/parlour/src/parlour.ts
+@@ -13,10 +13,8 @@
+  * See: docs/architecture/apparatus/parlour.md
+  */
+ 
+-import crypto from 'node:crypto';
+-
+ import type { Plugin, StartupContext } from '@shardworks/nexus-core';
+-import { guild } from '@shardworks/nexus-core';
++import { guild, generateId } from '@shardworks/nexus-core';
+ import type { StacksApi, Book, ReadOnlyBook, WhereCondition } from '@shardworks/stacks-apparatus';
+ import type { AnimatorApi, SessionResult, SessionChunk, SessionDoc } from '@shardworks/animator-apparatus';
+ import type { LoomApi } from '@shardworks/loom-apparatus';
+@@ -40,12 +38,6 @@ import type {
+ 
+ import { conversationList, conversationShow, conversationEnd } from './tools/index.ts';
+ 
+-// ── ID generation ────────────────────────────────────────────────────
+-
+-function generateId(prefix: string): string {
+-  return `${prefix}-${crypto.randomBytes(4).toString('hex')}`;
+-}
+-
+ // ── Helpers ──────────────────────────────────────────────────────────
+ 
+ /**
+@@ -300,7 +292,7 @@ export function createParlour(): Plugin {
+ 
+       if (participant.kind === 'human') {
+         // Human turn — record the message, no session launched
+-        const turnId = generateId('turn');
++        const turnId = generateId('turn', 6);
+         await turns.put({
+           id: turnId,
+           conversationId: conv.id,
+@@ -365,7 +357,7 @@ export function createParlour(): Plugin {
+       await conversations.patch(conv.id, { participants: updatedParticipants });
+ 
+       // Record the turn
+-      const turnId = generateId('turn');
++      const turnId = generateId('turn', 6);
+       await turns.put({
+         id: turnId,
+         conversationId: conv.id,
+@@ -537,7 +529,7 @@ export function createParlour(): Plugin {
+         await conversations.patch(conv.id, { participants: updatedParticipants });
+ 
+         // Record turn
+-        const turnId = generateId('turn');
++        const turnId = generateId('turn', 6);
+         await turns.put({
+           id: turnId,
+           conversationId: conv.id,

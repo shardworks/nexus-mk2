@@ -1,0 +1,469 @@
+ packages/plugins/animator/src/animator.test.ts     | 95 +++++++++++++++++++++-
+ packages/plugins/animator/src/animator.ts          | 28 ++++++-
+ packages/plugins/animator/src/types.ts             | 33 ++++++++
+ packages/plugins/claude-code/src/index.ts          | 31 +++++++
+ .../plugins/claude-code/src/stream-parser.test.ts  | 90 ++++++++++++++++++++
+ 5 files changed, 271 insertions(+), 6 deletions(-)
+
+diff --git a/packages/plugins/animator/src/animator.test.ts b/packages/plugins/animator/src/animator.test.ts
+index 185370f..234739c 100644
+--- a/packages/plugins/animator/src/animator.test.ts
++++ b/packages/plugins/animator/src/animator.test.ts
+@@ -29,6 +29,7 @@ import type {
+   SessionProviderResult,
+   SessionChunk,
+   SessionDoc,
++  TranscriptDoc,
+ } from './types.ts';
+ 
+ // ── Shared empty chunks iterable ─────────────────────────────────────
+@@ -155,6 +156,7 @@ function createSpyProvider(): {
+ 
+ let stacks: StacksApi;
+ let animator: AnimatorApi;
++let memBackendRef: InstanceType<typeof MemoryBackend>;
+ 
+ /**
+  * Set up the test environment with a guild mock, in-memory Stacks,
+@@ -168,7 +170,8 @@ function setup(
+   sessionProviderPluginId = 'fake-provider',
+   opts: { installLoom?: boolean } = {},
+ ) {
+-  const memBackend = new MemoryBackend();
++  memBackendRef = new MemoryBackend();
++  const memBackend = memBackendRef;
+   const stacksPlugin = createStacksApparatus(memBackend);
+   const animatorPlugin = createAnimator();
+ 
+@@ -225,10 +228,13 @@ function setup(
+   stacks = stacksApparatus.provides as StacksApi;
+   apparatusMap.set('stacks', stacks);
+ 
+-  // Ensure the animator's book is created
++  // Ensure the animator's books are created
+   memBackend.ensureBook({ ownerId: 'animator', book: 'sessions' }, {
+     indexes: ['startedAt', 'status', 'conversationId', 'provider'],
+   });
++  memBackend.ensureBook({ ownerId: 'animator', book: 'transcripts' }, {
++    indexes: ['sessionId'],
++  });
+ 
+   // Start animator
+   const animatorApparatus = (animatorPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+@@ -496,6 +502,91 @@ describe('Animator', () => {
+       const sessionResult = await result;
+       assert.equal(sessionResult.status, 'completed');
+     });
++
++    it('records output from provider result', async () => {
++      const providerWithOutput = createFakeProvider({ output: 'The task is done.' });
++      setup(providerWithOutput);
++
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      assert.equal(result.output, 'The task is done.');
++
++      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
++      const doc = await sessions.get(result.id);
++      assert.equal(doc?.output, 'The task is done.');
++    });
++
++    it('records transcript to transcripts book', async () => {
++      const transcript = [
++        { type: 'assistant', message: { content: [{ type: 'text', text: 'Hello' }] } },
++        { type: 'result', total_cost_usd: 0.01 },
++      ];
++      const providerWithTranscript = createFakeProvider({ transcript, output: 'Hello' });
++      setup(providerWithTranscript);
++
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      const transcripts = stacks.readBook<TranscriptDoc>('animator', 'transcripts');
++      const doc = await transcripts.get(result.id);
++      assert.ok(doc, 'transcript doc should be written');
++      assert.equal(doc.id, result.id);
++      assert.deepEqual(doc.messages, transcript);
++    });
++
++    it('skips transcript write when transcript is undefined', async () => {
++      // Default fake provider has no transcript
++      setup();
++
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      const transcripts = stacks.readBook<TranscriptDoc>('animator', 'transcripts');
++      const doc = await transcripts.get(result.id);
++      assert.ok(!doc, 'no transcript doc should be written when transcript is undefined');
++    });
++
++    it('skips transcript write when transcript is empty', async () => {
++      const providerWithEmptyTranscript = createFakeProvider({ transcript: [] });
++      setup(providerWithEmptyTranscript);
++
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      const transcripts = stacks.readBook<TranscriptDoc>('animator', 'transcripts');
++      const doc = await transcripts.get(result.id);
++      assert.ok(!doc, 'no transcript doc should be written for empty transcript');
++    });
++
++    it('session write failure does not mask transcript write', async () => {
++      // Use a provider with transcript; the session write will fail but we
++      // verify the transcript write still proceeds (both errors are independent).
++      // In this test we just verify the result still resolves — error handling
++      // contract says failures are logged, not propagated.
++      const transcript = [
++        { type: 'assistant', message: { content: [{ type: 'text', text: 'Done' }] } },
++      ];
++      const providerWithTranscript = createFakeProvider({ transcript, output: 'Done' });
++      setup(providerWithTranscript);
++
++      // Should resolve without throwing even if internal writes fail
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      assert.equal(result.status, 'completed');
++      assert.equal(result.output, 'Done');
++    });
+   });
+ 
+   describe('animate({ streaming: true })', () => {
+diff --git a/packages/plugins/animator/src/animator.ts b/packages/plugins/animator/src/animator.ts
+index 45530b8..722f209 100644
+--- a/packages/plugins/animator/src/animator.ts
++++ b/packages/plugins/animator/src/animator.ts
+@@ -23,6 +23,8 @@ import type {
+   SessionResult,
+   SessionChunk,
+   SessionDoc,
++  TranscriptDoc,
++  TranscriptMessage,
+   AnimatorSessionProvider,
+   SessionProviderConfig,
+   SessionProviderResult,
+@@ -103,6 +105,7 @@ function buildSessionResult(
+     tokenUsage: providerResult.tokenUsage,
+     costUsd: providerResult.costUsd,
+     metadata: request.metadata,
++    output: providerResult.output,
+   };
+ }
+ 
+@@ -152,18 +155,21 @@ function toSessionDoc(result: SessionResult): SessionDoc {
+     tokenUsage: result.tokenUsage,
+     costUsd: result.costUsd,
+     metadata: result.metadata,
++    output: result.output,
+   };
+ }
+ 
+ /**
+- * Record a session result to The Stacks.
++ * Record a session result to The Stacks (sessions + transcripts books).
+  *
+  * Errors are logged but never propagated — session data loss is
+  * preferable to masking the original failure. See § Error Handling Contract.
+  */
+ async function recordSession(
+   sessions: Book<SessionDoc>,
++  transcripts: Book<TranscriptDoc>,
+   result: SessionResult,
++  transcript: TranscriptMessage[] | undefined,
+ ): Promise<void> {
+   try {
+     await sessions.put(toSessionDoc(result));
+@@ -172,6 +178,16 @@ async function recordSession(
+       `[animator] Failed to record session ${result.id}: ${err instanceof Error ? err.message : err}`,
+     );
+   }
++
++  if (transcript && transcript.length > 0) {
++    try {
++      await transcripts.put({ id: result.id, messages: transcript });
++    } catch (err) {
++      console.warn(
++        `[animator] Failed to record transcript for ${result.id}: ${err instanceof Error ? err.message : err}`,
++      );
++    }
++  }
+ }
+ 
+ /**
+@@ -213,6 +229,7 @@ async function recordRunning(
+ export function createAnimator(): Plugin {
+   let config: AnimatorConfig = {};
+   let sessions: Book<SessionDoc>;
++  let transcripts: Book<TranscriptDoc>;
+ 
+   const api: AnimatorApi = {
+     summon(request: SummonRequest): AnimateHandle {
+@@ -302,13 +319,12 @@ export function createAnimator(): Plugin {
+         try {
+           const providerResult = await providerResultPromise;
+           sessionResult = buildSessionResult(id, startedAt, provider.name, providerResult, request);
++          await recordSession(sessions, transcripts, sessionResult, providerResult.transcript);
+         } catch (err) {
+           sessionResult = buildFailedResult(id, startedAt, provider.name, err, request);
+-          await recordSession(sessions, sessionResult);
++          await recordSession(sessions, transcripts, sessionResult, undefined);
+           throw err;
+         }
+-
+-        await recordSession(sessions, sessionResult);
+         return sessionResult;
+       })();
+ 
+@@ -326,6 +342,9 @@ export function createAnimator(): Plugin {
+           sessions: {
+             indexes: ['startedAt', 'status', 'conversationId', 'provider'],
+           },
++          transcripts: {
++            indexes: ['sessionId'],
++          },
+         },
+         tools: [sessionList, sessionShow, summonTool],
+       },
+@@ -338,6 +357,7 @@ export function createAnimator(): Plugin {
+ 
+         const stacks = g.apparatus<StacksApi>('stacks');
+         sessions = stacks.book<SessionDoc>('animator', 'sessions');
++        transcripts = stacks.book<TranscriptDoc>('animator', 'transcripts');
+       },
+     },
+   };
+diff --git a/packages/plugins/animator/src/types.ts b/packages/plugins/animator/src/types.ts
+index 4bfa111..032a7e0 100644
+--- a/packages/plugins/animator/src/types.ts
++++ b/packages/plugins/animator/src/types.ts
+@@ -88,6 +88,13 @@ export interface SessionResult {
+   costUsd?: number;
+   /** Caller-supplied metadata, recorded as-is. */
+   metadata?: Record<string, unknown>;
++  /**
++   * The final assistant text from the session.
++   * Extracted by the Animator from the provider's transcript.
++   * Useful for programmatic consumers that need the session's conclusion
++   * without parsing the full transcript (e.g. the Walker's review collect step).
++   */
++  output?: string;
+ }
+ 
+ export interface TokenUsage {
+@@ -263,6 +270,9 @@ export interface SessionProviderConfig {
+   environment?: Record<string, string>;
+ }
+ 
++/** A single message from the NDJSON stream. Untyped — shape varies by provider. */
++export type TranscriptMessage = Record<string, unknown>;
++
+ export interface SessionProviderResult {
+   /** Exit status. */
+   status: 'completed' | 'failed' | 'timeout';
+@@ -276,6 +286,14 @@ export interface SessionProviderResult {
+   tokenUsage?: TokenUsage;
+   /** Cost in USD, if the provider can report it. */
+   costUsd?: number;
++  /** The session's full transcript — array of NDJSON message objects. */
++  transcript?: TranscriptMessage[];
++  /**
++   * The final assistant text from the session.
++   * Extracted from the last assistant message's text content blocks.
++   * Undefined if the session produced no assistant output.
++   */
++  output?: string;
+ }
+ 
+ // ── Stacks document type ─────────────────────────────────────────────
+@@ -305,6 +323,21 @@ export interface SessionDoc {
+   tokenUsage?: TokenUsage;
+   costUsd?: number;
+   metadata?: Record<string, unknown>;
++  /** The final assistant text from the session. */
++  output?: string;
++  /** Index signature required by BookEntry. */
++  [key: string]: unknown;
++}
++
++/**
++ * The transcript document stored in The Stacks' `transcripts` book.
++ * One record per session — 1:1 relationship with SessionDoc.
++ */
++export interface TranscriptDoc {
++  /** Same as the session id. */
++  id: string;
++  /** Full NDJSON transcript from the session. */
++  messages: TranscriptMessage[];
+   /** Index signature required by BookEntry. */
+   [key: string]: unknown;
+ }
+diff --git a/packages/plugins/claude-code/src/index.ts b/packages/plugins/claude-code/src/index.ts
+index fb15fc4..18e4570 100644
+--- a/packages/plugins/claude-code/src/index.ts
++++ b/packages/plugins/claude-code/src/index.ts
+@@ -93,6 +93,35 @@ async function prepareSession(config: SessionProviderConfig): Promise<PreparedSe
+   return { tmpDir, args, mcpHandle };
+ }
+ 
++// ── Output extraction ───────────────────────────────────────────────
++
++/**
++ * Extract the final assistant text from a transcript.
++ *
++ * Walks the transcript backwards to find the last `assistant` message
++ * and concatenates its text content blocks.
++ *
++ * @internal Exported for testing only.
++ */
++export function extractFinalAssistantText(transcript: Record<string, unknown>[]): string | undefined {
++  for (let i = transcript.length - 1; i >= 0; i--) {
++    const msg = transcript[i]!;
++    if (msg.type !== 'assistant') continue;
++
++    const message = msg.message as Record<string, unknown> | undefined;
++    const content = message?.content as Array<Record<string, unknown>> | undefined;
++    if (!content) continue;
++
++    const text = content
++      .filter((block) => block.type === 'text' && typeof block.text === 'string')
++      .map((block) => block.text as string)
++      .join('');
++
++    return text || undefined;
++  }
++  return undefined;
++}
++
+ // ── Result builder ──────────────────────────────────────────────────
+ 
+ function buildResult(raw: StreamJsonResult): SessionProviderResult {
+@@ -104,6 +133,8 @@ function buildResult(raw: StreamJsonResult): SessionProviderResult {
+     costUsd: raw.costUsd,
+     tokenUsage: raw.tokenUsage,
+     providerSessionId: raw.providerSessionId,
++    transcript: raw.transcript,
++    output: extractFinalAssistantText(raw.transcript),
+   };
+ }
+ 
+diff --git a/packages/plugins/claude-code/src/stream-parser.test.ts b/packages/plugins/claude-code/src/stream-parser.test.ts
+index d3f4ea4..419d8e8 100644
+--- a/packages/plugins/claude-code/src/stream-parser.test.ts
++++ b/packages/plugins/claude-code/src/stream-parser.test.ts
+@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
+ import {
+   parseStreamJsonMessage,
+   processNdjsonBuffer,
++  extractFinalAssistantText,
+   type StreamJsonResult,
+ } from './index.ts';
+ 
+@@ -189,6 +190,95 @@ describe('parseStreamJsonMessage()', () => {
+   });
+ });
+ 
++// ── extractFinalAssistantText ───────────────────────────────────────
++
++describe('extractFinalAssistantText()', () => {
++  it('returns undefined for empty transcript', () => {
++    assert.equal(extractFinalAssistantText([]), undefined);
++  });
++
++  it('returns undefined when no assistant messages', () => {
++    const transcript = [
++      { type: 'result', total_cost_usd: 0.01 },
++    ];
++    assert.equal(extractFinalAssistantText(transcript), undefined);
++  });
++
++  it('extracts text from the last assistant message', () => {
++    const transcript = [
++      {
++        type: 'assistant',
++        message: { content: [{ type: 'text', text: 'First response' }] },
++      },
++      {
++        type: 'assistant',
++        message: { content: [{ type: 'text', text: 'Final response' }] },
++      },
++    ];
++    assert.equal(extractFinalAssistantText(transcript), 'Final response');
++  });
++
++  it('concatenates multiple text blocks from the last assistant message', () => {
++    const transcript = [
++      {
++        type: 'assistant',
++        message: {
++          content: [
++            { type: 'text', text: 'Part one. ' },
++            { type: 'tool_use', name: 'bash' },
++            { type: 'text', text: 'Part two.' },
++          ],
++        },
++      },
++    ];
++    assert.equal(extractFinalAssistantText(transcript), 'Part one. Part two.');
++  });
++
++  it('skips non-text content blocks', () => {
++    const transcript = [
++      {
++        type: 'assistant',
++        message: {
++          content: [
++            { type: 'tool_use', name: 'bash' },
++          ],
++        },
++      },
++    ];
++    assert.equal(extractFinalAssistantText(transcript), undefined);
++  });
++
++  it('skips earlier assistant messages and uses the last', () => {
++    const transcript = [
++      {
++        type: 'assistant',
++        message: { content: [{ type: 'text', text: 'Earlier' }] },
++      },
++      { type: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu_1' }] },
++      {
++        type: 'assistant',
++        message: { content: [{ type: 'text', text: 'Later' }] },
++      },
++      { type: 'result', total_cost_usd: 0.05 },
++    ];
++    assert.equal(extractFinalAssistantText(transcript), 'Later');
++  });
++
++  it('returns undefined for assistant message with no content', () => {
++    const transcript = [
++      { type: 'assistant', message: {} },
++    ];
++    assert.equal(extractFinalAssistantText(transcript), undefined);
++  });
++
++  it('returns undefined for assistant message with no message field', () => {
++    const transcript = [
++      { type: 'assistant' },
++    ];
++    assert.equal(extractFinalAssistantText(transcript), undefined);
++  });
++});
++
+ // ── processNdjsonBuffer ─────────────────────────────────────────────
+ 
+ describe('processNdjsonBuffer()', () => {

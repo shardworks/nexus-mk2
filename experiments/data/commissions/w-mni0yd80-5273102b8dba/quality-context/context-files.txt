@@ -1,0 +1,376 @@
+
+=== CONTEXT FILE: packages/plugins/animator/src/index.ts ===
+/**
+ * @shardworks/animator-apparatus — The Animator.
+ *
+ * Session launch and telemetry recording: takes an AnimaWeave from The Loom,
+ * launches an AI process via a session provider, monitors it until exit, and
+ * records the result to The Stacks.
+ *
+ * See: docs/specification.md (animator)
+ */
+
+import { createAnimator } from './animator.ts';
+
+// ── Animator API ─────────────────────────────────────────────────────
+
+export {
+  type AnimatorApi,
+  type AnimateHandle,
+  type AnimateRequest,
+  type SummonRequest,
+  type SessionResult,
+  type SessionChunk,
+  type TokenUsage,
+  type SessionDoc,
+  type AnimatorConfig,
+  // Provider types (for implementors)
+  type AnimatorSessionProvider,
+  type SessionProviderConfig,
+  type SessionProviderResult,
+} from './types.ts';
+
+export { createAnimator } from './animator.ts';
+
+// ── Default export: the apparatus plugin ──────────────────────────────
+
+export default createAnimator();
+
+=== CONTEXT FILE: packages/plugins/animator/src/tools ===
+tree 0f35c751954790dac39509e6233841138d63f516:packages/plugins/animator/src/tools
+
+index.ts
+session-list.ts
+session-show.ts
+session-tools.test.ts
+summon.ts
+
+=== CONTEXT FILE: packages/plugins/claude-code/src/mcp-server.test.ts ===
+/**
+ * Tests for the MCP server module.
+ *
+ * Exercises createMcpServer() with ToolDefinition arrays to verify
+ * tool registration, callableBy filtering, and error handling.
+ * Tests startMcpHttpServer() for HTTP server lifecycle and connectivity.
+ */
+
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { z } from 'zod';
+
+import { tool } from '@shardworks/tools-apparatus';
+
+import { createMcpServer, startMcpHttpServer } from './mcp-server.ts';
+
+// ── Test helpers ────────────────────────────────────────────────────────
+
+function makeTool(overrides: {
+  name?: string;
+  description?: string;
+  permission?: string;
+  callableBy?: ('cli' | 'anima' | 'library')[];
+  handler?: () => unknown;
+} = {}) {
+  return tool({
+    name: overrides.name ?? 'test-tool',
+    description: overrides.description ?? 'A test tool',
+    params: { input: z.string().describe('Test input') },
+    handler: overrides.handler ?? (async () => ({ ok: true })),
+    ...(overrides.permission !== undefined ? { permission: overrides.permission } : {}),
+    ...(overrides.callableBy !== undefined ? { callableBy: overrides.callableBy } : {}),
+  });
+}
+
+// ── createMcpServer ─────────────────────────────────────────────────────
+
+describe('createMcpServer()', () => {
+  it('returns an McpServer instance with no tools', async () => {
+    const server = await createMcpServer([]);
+    assert.ok(server, 'should return a server object');
+  });
+
+  it('accepts an array of ToolDefinitions', async () => {
+    const tools = [
+      makeTool({ name: 'tool-a', description: 'First tool' }),
+      makeTool({ name: 'tool-b', description: 'Second tool' }),
+    ];
+
+    const server = await createMcpServer(tools);
+    assert.ok(server, 'should return a server with tools registered');
+  });
+
+  it('filters out tools not callable by animas', async () => {
+    const tools = [
+      makeTool({ name: 'cli-only', callableBy: ['cli'] }),
+      makeTool({ name: 'anima-ok', callableBy: ['anima'] }),
+      makeTool({ name: 'both', callableBy: ['cli', 'anima'] }),
+      makeTool({ name: 'no-restriction' }), // no callableBy → available to everyone
+    ];
+
+    // createMcpServer filters internally — it should not throw
+    const server = await createMcpServer(tools);
+    assert.ok(server, 'should handle mixed callableBy tools');
+  });
+
+  it('handles tools with permission fields', async () => {
+    const tools = [
+      makeTool({ name: 'read-tool', permission: 'read' }),
+      makeTool({ name: 'write-tool', permission: 'write' }),
+      makeTool({ name: 'no-perm' }),
+    ];
+
+    // Permission is not checked by createMcpServer — it registers all tools.
+    // Permission gating happens upstream in the Instrumentarium.
+    const server = await createMcpServer(tools);
+    assert.ok(server, 'should register tools regardless of permission field');
+  });
+});
+
+// ── startMcpHttpServer ──────────────────────────────────────────────────
+
+describe('startMcpHttpServer()', () => {
+  it('starts an HTTP server and returns a handle with URL and close', async () => {
+    const tools = [makeTool({ name: 'test-tool' })];
+    const handle = await startMcpHttpServer(tools);
+
+    try {
+      assert.ok(handle.url, 'should have a URL');
+      assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/sse$/, 'URL should be localhost with /sse endpoint');
+      assert.equal(typeof handle.close, 'function', 'should have a close function');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('listens on an ephemeral port', async () => {
+    const handle = await startMcpHttpServer([makeTool({ name: 'tool-a' })]);
+
+    try {
+      const port = parseInt(new URL(handle.url).port, 10);
+      assert.ok(port > 0, 'should bind to a real port');
+      assert.ok(port < 65536, 'port should be in valid range');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('responds to HTTP requests on the MCP endpoint', async () => {
+    const tools = [makeTool({ name: 'ping-tool' })];
+    const handle = await startMcpHttpServer(tools);
+
+    try {
+      // Send a basic HTTP request to the MCP endpoint.
+      // The MCP protocol expects JSON-RPC — a plain GET should get a
+      // response (likely 405 or similar) rather than a connection error.
+      const res = await fetch(handle.url, { method: 'GET' });
+      // Any HTTP response means the server is listening and reachable.
+      assert.ok(res.status > 0, 'should get an HTTP response');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('can start multiple servers on different ports', async () => {
+    const handle1 = await startMcpHttpServer([makeTool({ name: 'tool-1' })]);
+    const handle2 = await startMcpHttpServer([makeTool({ name: 'tool-2' })]);
+
+    try {
+      assert.notEqual(handle1.url, handle2.url, 'should bind to different ports');
+    } finally {
+      await handle1.close();
+      await handle2.close();
+    }
+  });
+
+  it('close() shuts down the server', async () => {
+    const handle = await startMcpHttpServer([makeTool({ name: 'tool-a' })]);
+    await handle.close();
+
+    // After close, the server should no longer accept connections.
+    try {
+      await fetch(handle.url, { method: 'GET' });
+      assert.fail('should not be reachable after close');
+    } catch (err) {
+      // Expected — connection refused or similar network error
+      assert.ok(err, 'fetch should throw after server is closed');
+    }
+  });
+
+  it('works with empty tool set', async () => {
+    const handle = await startMcpHttpServer([]);
+    try {
+      assert.ok(handle.url, 'should start even with no tools');
+    } finally {
+      await handle.close();
+    }
+  });
+});
+
+=== CONTEXT FILE: packages/plugins/claude-code/src/mcp-server.ts ===
+/**
+ * MCP Tool Server — serves guild tools as typed MCP tools during anima sessions.
+ *
+ * Two entry points:
+ *
+ * 1. **`createMcpServer(tools)`** — library function. Takes an array of
+ *    ToolDefinitions (already resolved by the Instrumentarium) and returns
+ *    a configured McpServer.
+ *
+ * 2. **`startMcpHttpServer(tools)`** — starts an in-process HTTP server
+ *    serving the MCP tool set via Streamable HTTP on an ephemeral localhost
+ *    port. Returns a handle with the URL (for --mcp-config) and a close()
+ *    function for cleanup.
+ *
+ * The MCP server is one-per-session. The claude-code provider owns the
+ * lifecycle — starts before the Claude process, stops after it exits.
+ *
+ * See: docs/architecture/apparatus/claude-code.md
+ */
+
+import http from 'node:http';
+
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { VERSION } from '@shardworks/nexus-core';
+import type { ToolDefinition } from '@shardworks/tools-apparatus';
+
+// ── Public types ────────────────────────────────────────────────────────
+
+/**
+ * Handle returned by startMcpHttpServer().
+ *
+ * Provides the URL for --mcp-config and a close() function for cleanup.
+ */
+export interface McpHttpHandle {
+  /** URL for --mcp-config (e.g. "http://127.0.0.1:PORT/mcp"). */
+  url: string;
+  /** Shut down the HTTP server and MCP transport. */
+  close(): Promise<void>;
+}
+
+// ── Library API ─────────────────────────────────────────────────────────
+
+/**
+ * Create and configure an MCP server with the given tools.
+ *
+ * Each tool's Zod param schema is registered directly with the MCP SDK
+ * (which handles JSON Schema conversion). The handler is wrapped to
+ * validate params via Zod and format the result as MCP tool output.
+ *
+ * Tools with `callableBy` set that does not include `'anima'` are
+ * filtered out. Tools without `callableBy` are included (available
+ * to all callers by default).
+ */
+export async function createMcpServer(tools: ToolDefinition[]): Promise<McpServer> {
+  const server = new McpServer({
+    name: 'nexus-guild',
+    version: VERSION,
+  });
+
+  for (const def of tools) {
+    // Filter by callableBy — only serve tools callable by animas.
+    // Tools with no callableBy default to all callers (available everywhere).
+    if (def.callableBy && !def.callableBy.includes('anima')) {
+      continue;
+    }
+
+    server.tool(
+      def.name,
+      def.description,
+      def.params.shape,
+      async (params) => {
+        try {
+          const validated = def.params.parse(params);
+          const result = await def.handler(validated);
+
+          return {
+            content: [{
+              type: 'text' as const,
+              text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+            }],
+          };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return {
+            content: [{ type: 'text' as const, text: `Error: ${message}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+  }
+
+  return server;
+}
+
+// ── HTTP Server ─────────────────────────────────────────────────────────
+
+/**
+ * Start an in-process HTTP server serving the MCP tool set via SSE.
+ *
+ * Uses the MCP SDK's SSE transport: the client GETs /sse to establish
+ * the event stream, then POSTs messages to /message. Claude Code's
+ * --mcp-config expects `type: "sse"` for HTTP-based MCP servers.
+ *
+ * The server binds to 127.0.0.1 only — not network-accessible.
+ *
+ * Returns a handle with the URL (for --mcp-config) and a close() function.
+ * The caller is responsible for calling close() after the session exits.
+ *
+ * Each session gets its own server instance. Concurrent sessions get
+ * independent servers on different ports.
+ */
+export async function startMcpHttpServer(tools: ToolDefinition[]): Promise<McpHttpHandle> {
+  const mcpServer = await createMcpServer(tools);
+
+  // SSE transport: the client GETs /sse, the transport tells it to POST
+  // messages to /message. One transport per connection (single-session).
+  let transport: SSEServerTransport | null = null;
+
+  const httpServer = http.createServer(async (req, res) => {
+    try {
+      if (req.method === 'GET' && req.url === '/sse') {
+        // New SSE connection — create transport bound to this response.
+        transport = new SSEServerTransport('/message', res);
+        await mcpServer.connect(transport);
+      } else if (req.method === 'POST' && req.url?.startsWith('/message')) {
+        if (!transport) {
+          res.writeHead(400).end('No active SSE connection');
+          return;
+        }
+        await transport.handlePostMessage(req, res);
+      } else {
+        res.writeHead(404).end('Not found');
+      }
+    } catch {
+      if (!res.headersSent) {
+        res.writeHead(500).end('Internal Server Error');
+      }
+    }
+  });
+
+  // Listen on ephemeral port, localhost only.
+  await new Promise<void>((resolve) => {
+    httpServer.listen(0, '127.0.0.1', resolve);
+  });
+
+  const addr = httpServer.address();
+  if (!addr || typeof addr === 'string') {
+    throw new Error('Failed to get server address');
+  }
+
+  const url = `http://127.0.0.1:${addr.port}/sse`;
+
+  return {
+    url,
+    async close() {
+      if (transport) {
+        await transport.close();
+      }
+      await new Promise<void>((resolve, reject) => {
+        httpServer.close((err) => (err ? reject(err) : resolve()));
+      });
+    },
+  };
+}
+
