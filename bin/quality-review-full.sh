@@ -15,8 +15,8 @@
 #   --spec-file <path>   Path to the commission spec (needed for aware mode)
 #
 # Options:
-#   --commit <sha>       End commit (passed through to both runs)
-#   --base-commit <sha>  Start of commit range (passed through to both runs)
+#   --commit <sha>       Override: end commit (bypasses author-based discovery)
+#   --base-commit <sha>  Override: start of range (use with --commit)
 #   --runs <n>           Runs per mode (default: 3). Total API calls = 2 × n.
 #   --prompt-version <v> Prompt version (default: v1)
 #   --instrument-dir <p> Instrument dir (passed through)

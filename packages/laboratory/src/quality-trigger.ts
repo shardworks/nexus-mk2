@@ -56,11 +56,6 @@ export function triggerQualityReview(
     args.push('--spec-file', specFile);
   }
 
-  // We don't have base/head commits from the CDC event — the writ document
-  // doesn't carry them. The quality review script will auto-detect from
-  // git log. This is less precise than inscribe.sh's explicit tracking,
-  // but works for the common case of single-session commissions.
-
   // Fire and forget
   const child = execFile(reviewScript, args, {
     cwd: config.sanctumHome,

@@ -5,20 +5,27 @@
 # Each run is independent (separate API call, independent sampling).
 # Results are aggregated into a single review artifact.
 #
+# Commit Discovery:
+#   Uses the anima git identity convention to find commits: each writ's
+#   commits are authored with email "{writId}@nexus.local". The script
+#   derives this from --commission and filters git log by author.
+#
+#   For pre-identity commissions (before the git identity feature), pass
+#   --base-commit and --commit explicitly to provide the range manually.
+#
 # Usage:
 #   ./bin/quality-review.sh --commission <id> --repo <path> [options]
 #
 # Required:
-#   --commission <id>    Commission ID (e.g. C003). Used to identify the
-#                        diff and name the output artifact.
+#   --commission <id>    Commission/writ ID. Used to derive author email
+#                        ({id}@nexus.local) for commit discovery.
 #   --repo <path>       Path to the git repo where the commission's work landed.
 #
 # Options:
-#   --commit <sha>       End commit (head of range) to review. If omitted,
-#                        attempts to auto-detect from git log.
-#   --base-commit <sha>  Start of range (parent of first commission commit).
-#                        When set, diffs base-commit..commit. When omitted,
-#                        diffs commit~1..commit (single commit mode).
+#   --commit <sha>       Override: end commit (head of range). Bypasses
+#                        author-based discovery.
+#   --base-commit <sha>  Override: start of range. Use with --commit for
+#                        pre-identity commissions.
 #   --runs <n>           Number of independent review runs (default: 3)
 #   --mode <mode>        "blind" or "aware". In aware mode,
 #                        --spec-file is required. (default: blind)
@@ -37,7 +44,7 @@
 # Exit codes:
 #   0 — review completed
 #   1 — usage error
-#   2 — diff extraction failed
+#   2 — diff extraction failed (no commits found)
 #   3 — one or more review runs failed
 #   4 — aggregation failed
 
@@ -79,17 +86,19 @@ show_help() {
   cat <<'HELP'
 quality-review — execute N independent code quality reviews
 
+Finds commits by author email convention: {commission}@nexus.local.
+For pre-identity commissions, pass --base-commit and --commit explicitly.
+
 Usage:
   quality-review.sh --commission <id> --repo <path> [options]
 
 Required:
-  --commission <id>    Commission ID (e.g. C003)
+  --commission <id>    Commission/writ ID (e.g. w-abc123)
   --repo <path>       Git repo path where the work landed
 
 Options:
-  --commit <sha>       Commit (or end of range) to review (auto-detected if omitted)
-  --base-commit <sha>  Start of commit range (parent of first commission commit).
-                       When provided, diffs base-commit..commit instead of commit~1..commit.
+  --commit <sha>       Override: end commit (bypasses author discovery)
+  --base-commit <sha>  Override: start of range (use with --commit)
   --runs <n>           Number of runs (default: 3)
   --mode <mode>        "blind" or "aware" (default: blind)
   --spec-file <path>   Commission spec path (required for aware mode)
@@ -181,7 +190,7 @@ if ! git -C "$REPO_PATH" rev-parse --git-dir &>/dev/null; then
   exit 1
 fi
 
-# ── Extract diff and context ────────────────────────────────
+# ── Resolve commits and diff range ──────────────────────────
 
 echo "═══ Quality Review: $COMMISSION ═══"
 echo "  Repo:    $REPO_PATH"
@@ -190,26 +199,53 @@ echo "  Runs:    $RUNS"
 echo "  Prompt:  $PROMPT_VERSION"
 echo ""
 
-# Resolve commit if not provided
-if [[ -z "$COMMIT" ]]; then
-  # Search only the main branch (not --all) to avoid matching
-  # unrelated branches. Use the most recent match.
-  COMMIT=$(git -C "$REPO_PATH" log --oneline --grep="$COMMISSION" \
-    --format="%H" -1)
-  if [[ -z "$COMMIT" ]]; then
-    echo "Error: could not auto-detect commit for $COMMISSION." >&2
-    echo "Provide --commit <sha> explicitly." >&2
+# Commit discovery strategy:
+#   1. If --base-commit and --commit are both provided, use them directly
+#      (manual override for pre-identity commissions)
+#   2. Otherwise, find commits by author email convention:
+#      {COMMISSION}@nexus.local — the anima git identity format
+
+if [[ -n "$BASE_COMMIT" && -n "$COMMIT" ]]; then
+  # Manual override — use explicit range
+  DIFF_RANGE="${BASE_COMMIT}..${COMMIT}"
+  echo "  Using explicit range: $DIFF_RANGE"
+else
+  # Author-based discovery
+  AUTHOR_EMAIL="${COMMISSION}@nexus.local"
+  echo "  Looking for commits by: $AUTHOR_EMAIL"
+
+  # Get all commits by this author, oldest first
+  WRIT_COMMITS=$(git -C "$REPO_PATH" log --author="$AUTHOR_EMAIL" \
+    --format="%H" --reverse main 2>/dev/null || true)
+
+  if [[ -z "$WRIT_COMMITS" ]]; then
+    echo "Error: no commits found for author $AUTHOR_EMAIL" >&2
+    echo "For pre-identity commissions, pass --base-commit and --commit explicitly." >&2
     exit 2
   fi
-  echo "  Auto-detected commit: ${COMMIT:0:8}"
-fi
 
-# Determine the diff range
-if [[ -n "$BASE_COMMIT" ]]; then
+  COMMIT_COUNT=$(echo "$WRIT_COMMITS" | wc -l | tr -d ' ')
+  FIRST_COMMIT=$(echo "$WRIT_COMMITS" | head -1)
+  LAST_COMMIT=$(echo "$WRIT_COMMITS" | tail -1)
+
+  # Base is the parent of the first writ commit
+  BASE_COMMIT=$(git -C "$REPO_PATH" rev-parse "${FIRST_COMMIT}~1" 2>/dev/null || true)
+  COMMIT="$LAST_COMMIT"
+
+  if [[ -z "$BASE_COMMIT" ]]; then
+    echo "Error: could not resolve parent of first commit ${FIRST_COMMIT:0:12}" >&2
+    exit 2
+  fi
+
   DIFF_RANGE="${BASE_COMMIT}..${COMMIT}"
-  echo "  Range:   $DIFF_RANGE"
-else
-  DIFF_RANGE="${COMMIT}~1..${COMMIT}"
+  echo "  Found $COMMIT_COUNT commit(s) by $AUTHOR_EMAIL"
+  echo "  Range: ${BASE_COMMIT:0:12}..${COMMIT:0:12}"
+
+  # NOTE: If other authors' commits are interleaved in this range
+  # (concurrent dispatches), they'll appear in the diff. This is rare
+  # in practice and acceptable — the reviewer sees a slightly wider
+  # context. A future improvement could generate per-commit diffs for
+  # only the matched commits.
 fi
 
 # Extract the diff
@@ -287,11 +323,8 @@ done
 REFERENCED_FILES=""
 MAX_REFERENCED_FILES=10
 if [[ "$MODE" == "aware" && -f "$SPEC_FILE" ]]; then
-  if [[ -n "$BASE_COMMIT" ]]; then
-    PARENT_COMMIT="$BASE_COMMIT"
-  else
-    PARENT_COMMIT=$(git -C "$REPO_PATH" rev-parse "${COMMIT}~1" 2>/dev/null || echo "")
-  fi
+  # BASE_COMMIT is always set at this point (either explicit or derived)
+  PARENT_COMMIT="$BASE_COMMIT"
 
   if [[ -n "$PARENT_COMMIT" ]]; then
     # Scan the spec file for paths that look like repo files.
