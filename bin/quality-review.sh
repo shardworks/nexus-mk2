@@ -27,7 +27,7 @@
 #   --instrument-dir <p> Path to instrument definition (prompt versions).
 #                        Default: X013 anima-quality-scorer instrument dir.
 #   --output-dir <path>  Where to write artifacts
-#                        (default: X013 artifacts/reviews/quality)
+#                        (default: experiments/data/commissions)
 #   --dry-run            Print the plan without executing
 #
 # Output:
@@ -70,7 +70,7 @@ RUNS=3
 MODE="blind"
 SPEC_FILE=""
 PROMPT_VERSION="v1"
-OUTPUT_DIR="$PROJECT_ROOT/experiments/X013-commission-outcomes/artifacts/reviews/quality"
+OUTPUT_DIR="$PROJECT_ROOT/experiments/data/commissions"
 DRY_RUN=false
 
 # ── Parse arguments ──────────────────────────────────────────
@@ -95,7 +95,7 @@ Options:
   --spec-file <path>   Commission spec path (required for aware mode)
   --prompt-version <v> Prompt version (default: v1)
   --instrument-dir <p> Instrument dir (default: X013 anima-quality-scorer)
-  --output-dir <path>  Artifact output dir (default: X013 artifacts/reviews/quality)
+  --output-dir <path>  Artifact output dir (default: experiments/data/commissions)
   --dry-run            Print plan, don't execute
   --help               Show this help
 HELP

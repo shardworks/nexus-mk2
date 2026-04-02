@@ -1,45 +1,54 @@
 # Commission Review Tracker
 
-Commissions dispatched 2026-04-02. All need patron review.
+Commissions dispatched 2026-04-02. All reviewed 2026-04-02.
 
 ## Pending Review
 
-### ses-19194146 — Clerk apparatus (MVP)
-- **Commit:** `081d468`
-- **Cost:** $2.00 | **Duration:** ~12 min | **Tests:** 39
-- **Review scope:** New package at `packages/plugins/clerk/` — types, apparatus, 7 tools, tests, README
-- **Known issues:** Push required manual rebase intervention (sync bug, fixed by ses-2149b518)
-- [ ] Code review
-- [ ] Run tests locally
-- [ ] Fill `spec_quality_post` and `revision_required` in commission log
-
-### ses-0334962d — Dispatch apparatus
-- **Commit:** `385a159`
-- **Cost:** $1.94 | **Duration:** ~11 min | **Tests:** 17
-- **Review scope:** New package at `packages/plugins/dispatch/` — types, apparatus, 1 tool, tests, README
-- **Notes:** Anima read the Clerk writs book directly rather than going through ClerkApi.list() — verify this is acceptable or if it should use the Clerk's query API
-- [ ] Code review
-- [ ] Run tests locally
-- [ ] Fill `spec_quality_post` and `revision_required` in commission log
-
-### ses-2149b518 — Scriptorium sync hardening
-- **Commit:** `8deedff`
-- **Cost:** $3.45 | **Duration:** ~26 min | **Tests:** added to existing suite
-- **Review scope:** Changes to `packages/plugins/codexes/` (scriptorium-core.ts, types.ts, tests, README, spec)
-- **Key changes:**
-  - Fixed fetch refspec: `+refs/heads/*:refs/remotes/origin/*` instead of bare fetch
-  - New `advanceToRemote()` — advances sealed binding only when remote is strictly ahead
-  - Added `inscriptionsSealed: number` to `SealResult`
-  - Dropped `--prune` from explicit refspec fetch (would delete draft branches)
-- **Concurrency test result:** Sealed via rebase with 1 retry after ses-0334962d sealed first
-- [ ] Code review (especially advanceToRemote logic)
-- [ ] Run tests locally
-- [ ] Verify spec and README updates are accurate
-- [ ] Fill `spec_quality_post` and `revision_required` in commission log
+_(none — all reviews complete)_
 
 ## Completed Reviews
 
-_(move entries here after review)_
+### ses-2149b518 — Scriptorium sync hardening ✅
+- **Commit:** `385a159..8deedff` (3 commits)
+- **Cost:** $3.45 | **Duration:** ~26 min | **Tests:** added to existing suite (47 total)
+- **Quality scores:** blind 2.75 | aware 2.80
+- **Verdict:** Ship. Strongest output. Clean root-cause fix, comprehensive tests, docs updated.
+- **One minor gap:** silent `catch` in `advanceToRemote()` swallows all errors, not just "ref not found."
+- [x] Code review
+- [x] Run tests locally (47 pass)
+- [x] Verify spec and README updates are accurate
+- [x] Fill commission log fields
+
+### ses-0334962d — Dispatch apparatus ✅
+- **Commit:** `081d468..385a159` (1 commit)
+- **Cost:** $1.94 | **Duration:** ~11 min | **Tests:** 17
+- **Quality scores:** blind 2.75 | aware 2.60
+- **Verdict:** Ship. Faithful to spec, clean error handling.
+- **Notes:** Reads writs book directly via `stacks.readBook()` instead of `clerk.list()` — crosses apparatus boundary, acceptable for disposable shim. Codex-aware dispatch path is dead code (Clerk WritDoc lacks codex field).
+- [x] Code review
+- [x] Run tests locally (17 pass)
+- [x] Fill commission log fields
+
+### ses-19194146 — Clerk apparatus (MVP) ⚠️
+- **Commit:** `9180f77..081d468` (1 commit)
+- **Cost:** $2.00 | **Duration:** ~12 min | **Tests:** 39
+- **Quality scores:** blind 2.75 | aware 2.20
+- **Verdict:** Functional, good code quality, but significant spec deviations need decision.
+- **Spec deviations (require action):**
+  - Missing `codex` field on WritDoc — breaks codex-aware dispatch
+  - Missing `resolution` field — replaced with `failReason` (only failures, not completions/cancellations)
+  - Missing `count()` on ClerkApi
+  - Tools `writ-complete` and `writ-cancel` missing `resolution` parameter
+  - API uses named methods instead of spec's `transition()` choke point
+  - Added `assignee` field despite spec deferral
+  - Timestamp naming: `postedAt`/`closedAt` vs spec's `createdAt`/`resolvedAt`
+  - `body` optional vs spec's required
+  - `commission-post` has `assignee` param instead of `codex`
+  - No compound indexes
+- **Pending decision:** Commission a fix, fix interactively, or adjust spec to match implementation.
+- [x] Code review
+- [x] Run tests locally (39 pass)
+- [x] Fill commission log fields
 
 ## Observations for X013
 
@@ -47,3 +56,11 @@ _(move entries here after review)_
 - C003 vs C001 diff is *only* the commit instruction paragraph — controlled comparison of prompt specificity impact.
 - C004 + C005 concurrent dispatch validated seal contention (rebase path). First real multi-anima concurrency test.
 - Total spend for 3 successful commissions: $7.39. One abandoned: $1.65. Total: $9.04.
+
+### Quality Scorer Observations
+
+- **Instrument bug found and fixed:** Initial runs only examined the final commit of multi-commit commissions. Scriptorium (3 commits) scored 1.60 aware with the bug, 2.80 after fix. Single-commit commissions (Clerk, Dispatch) were unaffected.
+- **Remarkable consistency:** Almost all dimensions at sd 0.00 across 3 runs. The Clerk's test_quality (sd 0.47) and requirement_coverage (sd 0.47) show the only variance — both are genuinely ambiguous calls.
+- **Blind vs aware gap is a meaningful signal:** Scriptorium gap is tiny (2.75 → 2.80), Dispatch small (2.75 → 2.60), Clerk large (2.75 → 2.20). The gap correlates with spec deviation severity — the `requirement_coverage` dimension does real work.
+- **Scorer and patron review converge:** Both identified the same Clerk spec deviations, the same Scriptorium silent-catch gap, and the same Dispatch untestable-codex-path issue. The scorer expresses these as numbers; the patron review adds judgment about which deviations matter and what to do about them.
+- **Notes add essential diagnostic value.** Without notes, a score of 2.0 is opaque. With notes, the scorer cites specific files, methods, and patterns — actionable for both patron review and future commissions.

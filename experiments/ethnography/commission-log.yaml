@@ -1,182 +1,91 @@
 # Commission Log — Standing Research Instrument
 #
-# One entry per patron-sourced commission. Entries are stubbed automatically
-# (or by Coco at session start) and filled in progressively:
+# One entry per patron-sourced commission. Lean summary data only.
+# Narrative, scores, and session records live in per-commission artifacts:
+#   experiments/data/commissions/<id>/
+#     review.md            — spec assessment, patron review, scorer notes
+#     session.json         — session record from the Animator (cost, tokens, timing)
+#     quality-blind.yaml   — quality scorer output (blind mode)
+#     quality-aware.yaml   — quality scorer output (aware mode)
+#     prompt.md            — dispatch prompt
+#     spec.md              — spec snapshot at dispatch time
 #
-#   At dispatch (patron fills):    complexity, spec_quality_pre, spec_note
-#   At outcome review:             outcome (via assess-writ), revision_required
-#                                  (via writ link), spec_quality_post, failure_mode, notes
-#   Quality scorer (post-seal):    code_quality_agent, code_quality_variance, code_quality_n
-#   Anima-populated (if active):   spec_quality_anima, complexity_anima
-#   Ethnographer:                  reviewed_by_ethnographer
+# This log records only the fields that don't exist naturally in another
+# artifact — the patron's subjective assessments and outcome judgments.
 #
-# Complexity scale (Fibonacci): 1 2 3 5 8 13 21
-# Spec quality: strong | adequate | weak
-# Code quality (agent): 1.0–3.0 composite (4 dimensions × 3-point scale, multi-run average)
-# Outcome: success | partial | wrong | abandoned
-# Failure mode: spec_ambiguous | requirement_wrong | execution_error | complexity_overrun
-#
-# IDs are session IDs from the Animator (ses-*), linking commissions to
-# session records for cost tracking and analysis. Commissions that were
-# never dispatched have no session ID.
-#
-# Artifacts (prompts, spec snapshots) are stashed at:
-#   experiments/X013-commission-outcomes/artifacts/commissions/<id>/
+# Scales:
+#   Complexity (Fibonacci): 1 2 3 5 8 13 21
+#   Spec quality: strong | adequate | weak
+#   Outcome: success | partial | wrong | abandoned
+#   Failure mode: spec_ambiguous | requirement_wrong | execution_error | complexity_overrun
 
 commissions:
   - id: ses-93ad1c4c
     title: "Implement Clerk apparatus (MVP)"
-    dispatched_at: "2026-04-02"
     codex: nexus
-    role: artificer
     complexity: 5
     spec_quality_pre: strong
-    spec_note: >
-      Full API contract spec at docs/architecture/apparatus/clerk.md.
-      Prompt included summary of key spec elements (types, status machine,
-      tool definitions, permissions, implementation notes) in addition to
-      referencing the spec document directly.
     outcome: abandoned
     revision_required: null
     spec_quality_post: null
     failure_mode: execution_error
-    artifacts: experiments/X013-commission-outcomes/artifacts/commissions/ses-93ad1c4c/
-    notes: >
-      Anima completed session (49 tests passing, $1.65) but never committed
-      its work. Seal was a no-op, push failed (remote had diverged). Root
-      cause: prompt didn't include commit instructions, and Loom doesn't
-      compose system prompt yet so artificer role instructions were never
-      seen. Re-dispatched as ses-19194146 with explicit commit instructions.
 
   - id: C002
     title: "Implement Dispatch apparatus"
-    dispatched_at: null
     codex: nexus
-    role: artificer
     complexity: 3
     spec_quality_pre: strong
-    spec_note: >
-      Full API contract spec at docs/architecture/apparatus/dispatch.md.
-      Prompt included summary of key spec elements (lifecycle, dependencies,
-      prompt assembly, error handling). Small surface area — one tool, one
-      API method, pure orchestration with no state.
     outcome: null
     revision_required: null
     spec_quality_post: null
     failure_mode: null
-    notes: >
-      Never dispatched. Held pending Clerk completion, then renumbered
-      to ses-0334962d for actual dispatch.
 
   - id: ses-19194146
     title: "Implement Clerk apparatus (MVP) — re-dispatch"
-    dispatched_at: "2026-04-02"
     codex: nexus
-    role: artificer
     complexity: 5
     spec_quality_pre: strong
-    spec_note: >
-      Same spec as ses-93ad1c4c. Prompt updated with explicit commit
-      instructions since Loom does not yet compose system prompts from
-      role instructions.
     outcome: partial
     revision_required: true
     spec_quality_post: adequate
     failure_mode: null
-    code_quality_blind: 2.75
-    code_quality_aware: 2.20
-    code_quality_n: 3
-    artifacts: experiments/X013-commission-outcomes/artifacts/commissions/ses-19194146/
-    notes: >
-      Session completed: 39 tests, $2.00, ~12 min. Commit 081d468.
-
-      Patron review: Code quality strong (clean structure, good tests,
-      idiomatic patterns), but significant spec deviations. Missing codex
-      field on WritDoc (breaks codex-aware dispatch). Missing resolution
-      field — replaced with failReason (only captures failures, not
-      completion/cancellation summaries). Added assignee despite spec
-      deferral. Timestamp naming differs (postedAt/closedAt vs
-      createdAt/resolvedAt). API uses named methods instead of spec's
-      single transition() choke point. Tools missing resolution params
-      on complete/cancel. count() method absent.
-
-      Scorer notes: blind mode scored 2.75 (test 3, structure 3, errors 2,
-      consistency 3). Aware mode 2.20 — requirement_coverage 1.33 drove
-      the drop, correctly identifying spec deviations as major gaps.
-      Error handling dinged for plain Error instances vs typed errors.
 
   - id: ses-0334962d
     title: "Implement Dispatch apparatus"
-    dispatched_at: "2026-04-02"
     codex: nexus
-    role: artificer
     complexity: 3
     spec_quality_pre: strong
-    spec_note: >
-      Full API contract spec at docs/architecture/apparatus/dispatch.md.
-      Prompt included summary of key spec elements (lifecycle, dependencies,
-      prompt assembly, error handling). Small surface area — one tool, one
-      API method, pure orchestration with no state.
     outcome: success
     revision_required: false
     spec_quality_post: strong
     failure_mode: null
-    code_quality_blind: 2.75
-    code_quality_aware: 2.60
-    code_quality_n: 3
-    artifacts: experiments/X013-commission-outcomes/artifacts/commissions/ses-0334962d/
-    notes: >
-      Dispatched concurrently with ses-2149b518 as a concurrency test.
-      Session completed: 17 tests, $1.94, ~11 min. Commit 385a159.
-      Sealed as ff (first to finish). Push clean.
-
-      Patron review: Faithful to spec. Prompt assembly, error handling
-      strategy (seal failure preserves draft, session failure abandons),
-      and lifecycle flow all match. Reads writs book directly via
-      stacks.readBook() instead of clerk.list() — crosses apparatus
-      boundary but acceptable for disposable shim. Codex-aware dispatch
-      path is dead code because Clerk's WritDoc lacks codex field.
-
-      Scorer notes: Stable scores across both runs (blind 2.75, aware
-      2.60). Test quality 2 in both — correctly identifies untestable
-      codex path as a gap. Error handling 3 — each failure mode handled
-      with contextual resolution strings.
 
   - id: ses-2149b518
     title: "Scriptorium seal/push sync hardening"
-    dispatched_at: "2026-04-02"
     codex: nexus
-    role: artificer
     complexity: 2
     spec_quality_pre: strong
-    spec_note: >
-      Clear problem statement, specific acceptance criteria including
-      spec/README updates, and pointers to relevant source files.
     outcome: success
     revision_required: false
     spec_quality_post: strong
     failure_mode: null
-    code_quality_blind: 2.75
-    code_quality_aware: 2.80
-    code_quality_n: 3
-    artifacts: experiments/X013-commission-outcomes/artifacts/commissions/ses-2149b518/
-    notes: >
-      Dispatched concurrently with ses-0334962d as a concurrency test.
-      Session completed: 3 commits, $3.45, ~26 min. Commit 8deedff.
-      Sealed via rebase (ses-0334962d had sealed first) with 1 retry —
-      contention handling validated end-to-end.
 
-      Patron review: Strongest output of the three. Root cause correctly
-      identified (bare clone fetch without explicit refspec only updates
-      FETCH_HEAD). Fix is clean — explicit refspec into refs/remotes/origin/*,
-      new advanceToRemote() with merge-base logic, inscriptionsSealed on
-      SealResult. Tests comprehensive — diverged remote scenarios, push
-      after seal, inscription counting. Docs updated across spec, README,
-      and types.ts. One minor gap: silent catch in advanceToRemote()
-      swallows all errors, not just "ref not found."
+  - id: ses-053770d1
+    title: "Clerk apparatus — align implementation with spec"
+    codex: nexus
+    complexity: 2
+    spec_quality_pre: strong
+    outcome: partial
+    revision_required: true
+    spec_quality_post: strong
+    failure_mode: null
 
-      Scorer notes: Highest aware-mode score (2.80). All dimensions 3
-      except error handling (2) — consistently flags the silent catch.
-      Zero variance across all runs in both modes. Initial scorer run
-      was buggy (only saw final commit, scored 1.60 aware) — fixed by
-      passing full 3-commit range.
+  - id: ses-8cdbbc39
+    title: "Dispatch apparatus — align implementation with spec"
+    codex: nexus
+    complexity: 1
+    spec_quality_pre: strong
+    outcome: success
+    revision_required: false
+    spec_quality_post: strong
+    failure_mode: null
