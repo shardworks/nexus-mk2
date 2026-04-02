@@ -198,8 +198,21 @@ fi
 
 # ── Helpers ──────────────────────────────────────────────────
 
-log() { echo "[inscribe] $*"; }
-err() { echo "[inscribe] ERROR: $*" >&2; }
+DISPATCH_LOG=""
+
+log() {
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  echo "[inscribe] $*"
+  [[ -n "$DISPATCH_LOG" ]] && echo "$ts [inscribe] $*" >> "$DISPATCH_LOG"
+}
+
+err() {
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  echo "[inscribe] ERROR: $*" >&2
+  [[ -n "$DISPATCH_LOG" ]] && echo "$ts [inscribe] ERROR: $*" >> "$DISPATCH_LOG"
+}
 
 nsg() {
   "${NSG_CMD[@]}" --guild-root "$GUILD_PATH" "$@"
@@ -230,6 +243,18 @@ log "Commission posted: $WRIT_ID"
 
 COMMISSION_DIR="$DATA_DIR/$WRIT_ID"
 mkdir -p "$COMMISSION_DIR"
+
+# Initialize dispatch log — replay buffered lines from before we had a folder
+DISPATCH_LOG="$COMMISSION_DIR/dispatch.log"
+{
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  echo "$ts [inscribe] Starting inscription cycle"
+  echo "$ts [inscribe]   guild=$GUILD_PATH codex=$CODEX role=$ROLE"
+  echo "$ts [inscribe]   title=$TITLE"
+  echo "$ts [inscribe]   score=$SCORE bare-clone=$BARE_CLONE"
+  echo "$ts [inscribe] Posting commission..."
+  echo "$ts [inscribe] Commission posted: $WRIT_ID"
+} > "$DISPATCH_LOG"
 
 echo "$BODY" > "$COMMISSION_DIR/commission.md"
 log "Wrote $COMMISSION_DIR/commission.md"

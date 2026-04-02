@@ -12,6 +12,7 @@ Per-commission artifacts, organized by writ ID (e.g. `w-abc123/`). Pre-Clerk com
 | `quality-blind.yaml` | Quality scorer output in blind mode (code-only, no spec comparison). |
 | `quality-aware.yaml` | Quality scorer output in aware mode (spec-aware, includes requirement coverage). |
 | `scoring-context/` | Everything the quality scorer saw: diff, changed files, context files, referenced files. Makes scoring runs reproducible and reviewable. |
+| `dispatch.log` | Timestamped log of the inscribe.sh dispatch cycle: post, dispatch, capture, scoring. |
 
 ## Notes
 
