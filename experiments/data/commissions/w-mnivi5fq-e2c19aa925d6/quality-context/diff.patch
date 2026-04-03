@@ -1,0 +1,2952 @@
+ docs/architecture/_agent-context.md                |  16 +-
+ docs/architecture/apparatus/animator.md            |   2 +-
+ docs/architecture/apparatus/clerk.md               |   8 +-
+ docs/architecture/apparatus/dispatch.md            |   6 +-
+ docs/architecture/apparatus/fabricator.md          |  14 +-
+ docs/architecture/apparatus/review-loop.md         |  34 +--
+ docs/architecture/apparatus/scriptorium.md         |   2 +-
+ .../apparatus/{walker.md => spider.md}             |  72 ++---
+ docs/architecture/index.md                         |  26 +-
+ docs/architecture/kit-components.md                |   6 +-
+ docs/architecture/plugins.md                       |  18 +-
+ docs/architecture/rigging.md                       |  48 ++--
+ docs/guild-metaphor.md                             |  18 +-
+ packages/plugins/animator/src/types.ts             |   2 +-
+ packages/plugins/dashboard/src/dashboard.ts        |   2 +-
+ packages/plugins/dashboard/src/html.ts             |  40 +--
+ packages/plugins/dashboard/src/index.ts            |   2 +-
+ packages/plugins/dashboard/src/rig-types.ts        |   2 +-
+ packages/plugins/dashboard/src/server.ts           |   6 +-
+ packages/plugins/dispatch/README.md                |   2 +-
+ packages/plugins/dispatch/src/dispatch.ts          |   2 +-
+ packages/plugins/dispatch/src/index.ts             |   2 +-
+ packages/plugins/fabricator/src/fabricator.ts      |   8 +-
+ packages/plugins/{walker => spider}/package.json   |   6 +-
+ .../{walker => spider}/src/engines/draft.ts        |   0
+ .../{walker => spider}/src/engines/implement.ts    |   2 +-
+ .../{walker => spider}/src/engines/index.ts        |   0
+ .../{walker => spider}/src/engines/review.ts       |   4 +-
+ .../{walker => spider}/src/engines/revise.ts       |   2 +-
+ .../plugins/{walker => spider}/src/engines/seal.ts |   0
+ packages/plugins/{walker => spider}/src/index.ts   |  14 +-
+ .../walker.test.ts => spider/src/spider.test.ts}   | 292 ++++++++++-----------
+ .../{walker/src/walker.ts => spider/src/spider.ts} |  48 ++--
+ .../src/tools/crawl-continual.ts}                  |  26 +-
+ packages/plugins/spider/src/tools/crawl.ts         |  25 ++
+ packages/plugins/spider/src/tools/index.ts         |   2 +
+ packages/plugins/{walker => spider}/src/types.ts   |  46 ++--
+ packages/plugins/{walker => spider}/tsconfig.json  |   0
+ packages/plugins/walker/src/tools/index.ts         |   2 -
+ packages/plugins/walker/src/tools/walk.ts          |  25 --
+ pnpm-lock.yaml                                     |  60 ++---
+ 41 files changed, 446 insertions(+), 446 deletions(-)
+
+diff --git a/docs/architecture/_agent-context.md b/docs/architecture/_agent-context.md
+index d35798b..6b9c90c 100644
+--- a/docs/architecture/_agent-context.md
++++ b/docs/architecture/_agent-context.md
+@@ -48,7 +48,7 @@ The word "rig" means two completely different things in this codebase:
+ 
+ | Context | Meaning |
+ |---------|---------|
+-| **Guild metaphor / target architecture** | The execution scaffold assembled to fulfill a commission — seeded at commission time, built out by Walker with engines, struck when work is done |
++| **Guild metaphor / target architecture** | The execution scaffold assembled to fulfill a commission — seeded at commission time, built out by Spider with engines, struck when work is done |
+ | **Current code** (`Rig` type in `core/src/rig.ts`, loaded by Arbor) | A package contributing tools, Books declarations, and other capabilities to the guild — basically what the target architecture calls a Kit or Apparatus |
+ 
+ The current code's `Rig` is what we're moving toward calling a **Kit** (or Apparatus, for packages with a lifecycle). This rename is in progress. When reading source code, mentally substitute "plugin" for `Rig`.
+@@ -66,7 +66,7 @@ The architecture docs use "rig" exclusively in the metaphor sense (execution sca
+ | `architecture/plugins.md` | Good | Describes the Kit/Apparatus model with full type signatures. This is aspirational architecture, not fully implemented. |
+ | `architecture/clockworks.md` | Good | Detailed; covers events, standing orders, relays, runner phases, daemon. Generally matches current implementation. |
+ | `architecture/kit-components.md` | Good | Tools, engines, relays — artifact model, descriptors, role gating, installation. Generally accurate. |
+-| `architecture/rigging.md` | Forward-looking | Describes Walker/Fabricator/Executor/Loom/Animator/Clerk as separate apparatus. This is the *target* design; currently much of this logic is either in core or not yet implemented. |
++| `architecture/rigging.md` | Forward-looking | Describes Spider/Fabricator/Executor/Loom/Animator/Clerk as separate apparatus. This is the *target* design; currently much of this logic is either in core or not yet implemented. |
+ | `reference/schema.md` | Good | SQLite schema, ERD, entity ID prefixes. Reflects current database. |
+ | `reference/core-api.md` | Good | Function signatures for `@shardworks/nexus-core`. Generally accurate but some functions are in `legacy/1/` indicating in-flight migration. |
+ | `reference/event-catalog.md` | Not read | Should describe all framework events and payload shapes. |
+@@ -85,7 +85,7 @@ The architecture docs use "rig" exclusively in the metaphor sense (execution sca
+ |-----|-----------------|---------------------|
+ | `anima-composition.md` | kit-components.md | Curricula, temperaments, oaths — composition artifacts |
+ | `writs.md` | multiple places | Writ lifecycle, completion rollup, prompt templates, commission→mandate bridge |
+-| `engine-designs.md` | plugins.md, future/ | WalkerKit engine design specifications |
++| `engine-designs.md` | plugins.md, future/ | SpiderKit engine design specifications |
+ | `anima-lifecycle.md` | future/ | Anima states, instantiation, retirement |
+ 
+ ---
+@@ -114,8 +114,8 @@ The codebase is in active transition from a "rig-centric" model (current) toward
+ - Formal `Plugin` type with explicit Kit/Apparatus discriminant
+ - `Apparatus` with `start`/`stop`/`health`/`supportKit`/`consumes`
+ - `GuildContext` with `ctx.plugin()`, `ctx.kits()`, `ctx.plugins()`
+-- Separate named apparatus: Stacks, Guildhall, Clerk, Loom, Animator, Fabricator, Walker, Executor, Surveyor, Warden
+-- Walker-driven rig execution (the commission → rig → engine chain)
++- Separate named apparatus: Stacks, Guildhall, Clerk, Loom, Animator, Fabricator, Spider, Executor, Surveyor, Warden
++- Spider-driven rig execution (the commission → rig → engine chain)
+ - Fabricator (capability resolution from installed kits)
+ - `plugin:initialized` reactive consumption
+ - Startup validation with `requires` / `consumes` cross-referencing
+@@ -160,7 +160,7 @@ Note: the live guild at `/workspace/shardworks/` is still running the V1 config
+ | The Books | nexus.db / SQLite tables | The Stacks (`books` apparatus) |
+ | Summon relay | built-in clockworks dispatch | summon relay (installed via nexus-stdlib) |
+ | Arbor | Arbor | Arbor |
+-| Walker | (not yet implemented) | The Walker (`walker` apparatus) |
++| Spider | (not yet implemented) | The Spider (`spider` apparatus) |
+ | Fabricator | (not yet implemented) | The Fabricator (`fabricator` apparatus) |
+ 
+ ---
+@@ -169,7 +169,7 @@ Note: the live guild at `/workspace/shardworks/` is still running the V1 config
+ 
+ - **2026-03-31 (session 1):** Initial scaffold session. Wrote §1–4 scaffold + "Standard Guild" bridge section. Created this context doc. Architecture doc is at `docs/architecture/index.md`. Companion detailed docs are already written for clockworks, plugins, kit-components, and rigging — they're good references even if partially aspirational.
+ 
+-- **2026-03-31 (session 2):** Wrote §2 content (intro paragraph, ASCII diagram, narrative subsections). Scoped §2 explicitly as the "standard guild" — blockquote caveat added before the intro paragraph. Established the intended narrative arc: §2 gives the standard-guild mental model → §4 peels it back ("everything in §2 is a plugin, there is no privileged built-in layer") → Standard Guild bridge lists the defaults → detail sections proceed without hedging. **When writing §4**, open with a callback to §2: *"The apparatus described in §2 — Clerk, Walker, Clockworks, and the rest — are all plugins..."* This converts §2 into setup and §4 into the architectural reveal.
++- **2026-03-31 (session 2):** Wrote §2 content (intro paragraph, ASCII diagram, narrative subsections). Scoped §2 explicitly as the "standard guild" — blockquote caveat added before the intro paragraph. Established the intended narrative arc: §2 gives the standard-guild mental model → §4 peels it back ("everything in §2 is a plugin, there is no privileged built-in layer") → Standard Guild bridge lists the defaults → detail sections proceed without hedging. **When writing §4**, open with a callback to §2: *"The apparatus described in §2 — Clerk, Spider, Clockworks, and the rest — are all plugins..."* This converts §2 into setup and §4 into the architectural reveal.
+ 
+ - **2026-03-31 (session 3):** Completed §3 (Guild Root) and §4 (Plugin Architecture). Corrected `guild.json` key names from real V2 type. Documented real `.nexus/` contents. Identified and resolved a plugin configuration specification gap — see design decisions below. Rewrote §4 with the §2 callback opening, corrected Kit/Apparatus examples (new naming convention, correct manifest shape), added Plugin IDs and Configuration subsections, updated GuildContext/HandlerContext interfaces with `config<T>()` and `guildConfig()`. Cleaned up Standard Guild table (dropped Guildhall, dropped layer column, added plugin id column, updated Stacks description). Restructured `guild.json` section to separate framework keys (`name`, `nexus`, `plugins`, `settings`) from plugin config sections (everything else, keyed by plugin id). Updated `plugins.md` spec with Plugin IDs section, Configuration section, and updated context interfaces.
+ 
+@@ -234,7 +234,7 @@ CDC handlers (`ChangeHandler`) no longer receive a context parameter. They captu
+ ### Remaining stub sections
+ All are `<!-- TODO -->` blocks. In rough priority order:
+ 
+-1. **Work Model** — Commission → Mandate writ → child writs → Rigs. Writ lifecycle states (`ready → active → pending → completed/failed/cancelled`). Writ hierarchy and completion rollup. Brief rig intro (Walker assembles from engine designs via Fabricator). Link to `rigging.md`.
++1. **Work Model** — Commission → Mandate writ → child writs → Rigs. Writ lifecycle states (`ready → active → pending → completed/failed/cancelled`). Writ hierarchy and completion rollup. Brief rig intro (Spider assembles from engine designs via Fabricator). Link to `rigging.md`.
+ 
+ 2. **The Clockworks** — Abbreviate; `clockworks.md` is detailed and current. Cover: events as immutable facts, standing orders as guild policy, summon verb, framework vs custom events, runner (manual vs daemon), error handling. Link to `clockworks.md`.
+ 
+diff --git a/docs/architecture/apparatus/animator.md b/docs/architecture/apparatus/animator.md
+index e87b7aa..76a29ca 100644
+--- a/docs/architecture/apparatus/animator.md
++++ b/docs/architecture/apparatus/animator.md
+@@ -225,7 +225,7 @@ interface SessionResult {
+    * The final assistant text from the session.
+    * Extracted from the last assistant message in the provider's transcript.
+    * Useful for programmatic consumers that need the session's conclusion
+-   * without parsing the full transcript (e.g. the Walker's review collect step).
++   * without parsing the full transcript (e.g. the Spider's review collect step).
+    */
+   output?: string
+ }
+diff --git a/docs/architecture/apparatus/clerk.md b/docs/architecture/apparatus/clerk.md
+index a0df54d..c6ea948 100644
+--- a/docs/architecture/apparatus/clerk.md
++++ b/docs/architecture/apparatus/clerk.md
+@@ -12,7 +12,7 @@ Package: `@shardworks/clerk-apparatus` · Plugin id: `clerk`
+ 
+ The Clerk is the guild's obligation authority. It receives commissions from the patron, issues writs that formally record what is owed, manages the lifecycle of those writs through to completion or failure, and maintains the Ledger — the guild's book of work.
+ 
+-The Clerk owns the boundary between "what is asked for" and "how it gets done." A commission arrives; the Clerk creates a mandate writ. When work completes, the Clerk records the outcome. Connecting writs to sessions is the job of the dispatch layer — currently [The Dispatch](dispatch.md), eventually the full rigging system (Walker, Executor, Fabricator). The Clerk tracks the obligation, not the execution.
++The Clerk owns the boundary between "what is asked for" and "how it gets done." A commission arrives; the Clerk creates a mandate writ. When work completes, the Clerk records the outcome. Connecting writs to sessions is the job of the dispatch layer — currently [The Dispatch](dispatch.md), eventually the full rigging system (Spider, Executor, Fabricator). The Clerk tracks the obligation, not the execution.
+ 
+ The Clerk does **not** execute work. It does not launch sessions, manage rigs, or orchestrate engines. It tracks obligations: what has been commissioned, what state each obligation is in, and whether the guild has fulfilled its commitments. When the Clockworks and rigging system exist, the Clerk will integrate with them via lifecycle events and signals.
+ 
+@@ -400,7 +400,7 @@ A new method on `ClerkApi`:
+  * Emits `{type}.ready` into the Clockworks event stream.
+  * In the full design, called after intake processing (Sage
+  * decomposition, validation) completes. This is the signal
+- * the Walker (or summon relay) listens for to begin execution.
++ * the Spider (or summon relay) listens for to begin execution.
+  */
+ signal(id: string): Promise<void>
+ ```
+@@ -409,9 +409,9 @@ signal(id: string): Promise<void>
+ 
+ The Clerk integrates with the dispatch layer at two points:
+ 
+-**Outbound: Ready Signal.** When a writ is signaled ready, the Clockworks event stream carries it to standing orders. The summon relay (or the Walker, for rig-based execution) picks it up and begins work. The Clerk does not know or care which dispatch path handles the writ — it signals readiness; the guild's configuration determines the response.
++**Outbound: Ready Signal.** When a writ is signaled ready, the Clockworks event stream carries it to standing orders. The summon relay (or the Spider, for rig-based execution) picks it up and begins work. The Clerk does not know or care which dispatch path handles the writ — it signals readiness; the guild's configuration determines the response.
+ 
+-**Inbound: Completion Signal.** When work completes (session ends, rig strikes), the completing apparatus calls `clerk.transition(id, 'completed', { outcome })`. For rig-based execution, the Walker calls this when it strikes a completed rig. For direct-summon execution, the anima calls `writ-complete` (which wraps `clerk.transition()`). Both paths converge on the same Clerk API.
++**Inbound: Completion Signal.** When work completes (session ends, rig strikes), the completing apparatus calls `clerk.transition(id, 'completed', { outcome })`. For rig-based execution, the Spider calls this when it strikes a completed rig. For direct-summon execution, the anima calls `writ-complete` (which wraps `clerk.transition()`). Both paths converge on the same Clerk API.
+ 
+ ### Intake with Planning
+ 
+diff --git a/docs/architecture/apparatus/dispatch.md b/docs/architecture/apparatus/dispatch.md
+index 69f7601..f3b2e29 100644
+--- a/docs/architecture/apparatus/dispatch.md
++++ b/docs/architecture/apparatus/dispatch.md
+@@ -4,7 +4,7 @@ Status: **Draft**
+ 
+ Package: `@shardworks/dispatch-apparatus` · Plugin id: `dispatch`
+ 
+-> **⚠️ Temporary rigging.** This apparatus is a stand-in for the full rigging system (Walker, Fabricator, Executor). It provides a single dispatch tool that takes the oldest ready writ and runs it through the guild's existing machinery. When the full rigging system exists, this apparatus is retired and its responsibilities absorbed by the Walker and summon relay. Designed to be disposable.
++> **⚠️ Temporary rigging.** This apparatus is a stand-in for the full rigging system (Spider, Fabricator, Executor). It provides a single dispatch tool that takes the oldest ready writ and runs it through the guild's existing machinery. When the full rigging system exists, this apparatus is retired and its responsibilities absorbed by the Spider and summon relay. Designed to be disposable.
+ 
+ ---
+ 
+@@ -209,9 +209,9 @@ No configuration. The Dispatch reads writs from the Clerk and uses default behav
+ 
+ ## Future: Retirement
+ 
+-When the full rigging system (Walker, Fabricator, Executor) is implemented, the Dispatch apparatus is retired:
++When the full rigging system (Spider, Fabricator, Executor) is implemented, the Dispatch apparatus is retired:
+ 
+-- The Walker takes over rig spawning and engine traversal
++- The Spider takes over rig spawning and engine traversal
+ - The summon relay handles anima dispatch from standing orders
+ - The Fabricator resolves engine chains (draft-open → session → seal is just one possible chain)
+ - `dispatch-next` is replaced by the Clockworks processing `mandate.ready` events
+diff --git a/docs/architecture/apparatus/fabricator.md b/docs/architecture/apparatus/fabricator.md
+index 4dd8527..4574088 100644
+--- a/docs/architecture/apparatus/fabricator.md
++++ b/docs/architecture/apparatus/fabricator.md
+@@ -10,7 +10,7 @@ Package: `@shardworks/fabricator-apparatus` · Plugin id: `fabricator`
+ 
+ ## Purpose
+ 
+-The Fabricator is the guild's capability catalog. It holds engine design specifications and serves them to the Walker on demand. When the Walker needs to run an engine, it asks the Fabricator for the design by ID — the Fabricator resolves it, the Walker runs it.
++The Fabricator is the guild's capability catalog. It holds engine design specifications and serves them to the Spider on demand. When the Spider needs to run an engine, it asks the Fabricator for the design by ID — the Fabricator resolves it, the Spider runs it.
+ 
+ The Fabricator does **not** execute engines. It does not touch rigs, manage sessions, or interact with the Clerk. It is a pure query service: designs in, designs out.
+ 
+@@ -44,10 +44,10 @@ interface EngineDesign {
+    * Execute this engine.
+    *
+    * Returns 'completed' with yields (synchronous work done inline), or
+-   * 'launched' with a sessionId (async work the Walker polls for).
+-   * The Walker inspects the result shape — no need to declare the kind up front.
++   * 'launched' with a sessionId (async work the Spider polls for).
++   * The Spider inspects the result shape — no need to declare the kind up front.
+    *
+-   * @param givens — the engine's declared inputs, assembled by the Walker.
++   * @param givens — the engine's declared inputs, assembled by the Spider.
+    *   A mix of values from the givensSpec (set at rig spawn time, e.g. role,
+    *   buildCommand, writ) and upstream yields (resolved from completed engines,
+    *   e.g. draft worktree path). The engine doesn't know or care about
+@@ -79,7 +79,7 @@ interface EngineRunContext {
+ ```typescript
+ type EngineRunResult =
+   | { status: 'completed'; yields: unknown }    // clockwork: done, here are the yields
+-  | { status: 'launched'; sessionId: string }    // quick: session launched, Walker will poll
++  | { status: 'launched'; sessionId: string }    // quick: session launched, Spider will poll
+ ```
+ 
+ ---
+@@ -152,12 +152,12 @@ interface FabricatorApi {
+    * Resolve a declared need to an engine chain.
+    * Searches installed engine designs for those that satisfy the need,
+    * composes them into an ordered chain, and returns the chain for the
+-   * Walker to graft onto the rig.
++   * Spider to graft onto the rig.
+    */
+   resolve(need: string, context?: ResolutionContext): EngineChain | null
+ }
+ ```
+ 
+-The Fabricator is also the Sage's entry point: planning animas query it to introspect what the guild can build before decomposing a commission into writs. A standalone Fabricator (rather than capability resolution buried inside the Walker) is what makes this possible — it's a shared service both the Walker and the Sage can call.
++The Fabricator is also the Sage's entry point: planning animas query it to introspect what the guild can build before decomposing a commission into writs. A standalone Fabricator (rather than capability resolution buried inside the Spider) is what makes this possible — it's a shared service both the Spider and the Sage can call.
+ 
+ **Unified capability catalog.** The Fabricator may absorb tool designs from the Instrumentarium, becoming the single answer to "what can this guild do?" regardless of whether the answer is an engine or a tool.
+diff --git a/docs/architecture/apparatus/review-loop.md b/docs/architecture/apparatus/review-loop.md
+index ba5a7d2..64038e0 100644
+--- a/docs/architecture/apparatus/review-loop.md
++++ b/docs/architecture/apparatus/review-loop.md
+@@ -2,7 +2,7 @@
+ 
+ Status: **Design** (not yet implemented)
+ 
+-> **Not a traditional apparatus.** The review loop does not have a `start()`/`stop()` lifecycle or a persistent runtime API. It is a composition pattern — a pair of engine designs and a rig structure — that lives at the intersection of the Walker, the Executor, and the Dispatch apparatus. This document specifies the full design, including an MVP path that works before the Walker exists.
++> **Not a traditional apparatus.** The review loop does not have a `start()`/`stop()` lifecycle or a persistent runtime API. It is a composition pattern — a pair of engine designs and a rig structure — that lives at the intersection of the Spider, the Executor, and the Dispatch apparatus. This document specifies the full design, including an MVP path that works before the Spider exists.
+ 
+ ---
+ 
+@@ -44,19 +44,19 @@ Three candidate locations were considered:
+ 
+ ### Option A: Dispatch-level wrapper (MVP path)
+ 
+-The Dispatch apparatus (`dispatch-next`) runs the implementation session, then runs a review pass, then optionally a revision session — all within a single dispatch call. No new apparatus; no Walker dependency.
++The Dispatch apparatus (`dispatch-next`) runs the implementation session, then runs a review pass, then optionally a revision session — all within a single dispatch call. No new apparatus; no Spider dependency.
+ 
+ **Pros:** Implementable now. Works with existing infrastructure. Dispatch is already the single entry point for writ execution.
+ 
+-**Cons:** The Dispatch is temporary infrastructure, scheduled for retirement when the Walker is implemented. Any logic added to Dispatch must be migrated. Also, the dispatch-level wrapper can only retry the entire session; it cannot retry a subcomponent.
++**Cons:** The Dispatch is temporary infrastructure, scheduled for retirement when the Spider is implemented. Any logic added to Dispatch must be migrated. Also, the dispatch-level wrapper can only retry the entire session; it cannot retry a subcomponent.
+ 
+ ### Option B: Review engine in every rig (full design)
+ 
+-The Walker seeds every rig with an `implement → review → [revise → review]*N` chain by default. The review engine is a clockwork engine; the revise engine is a quick engine. Both are standard engine designs contributed by a kit.
++The Spider seeds every rig with an `implement → review → [revise → review]*N` chain by default. The review engine is a clockwork engine; the revise engine is a quick engine. Both are standard engine designs contributed by a kit.
+ 
+-**Pros:** Architecturally clean. Composes naturally with Walker's traversal. Reusable engine designs. No migration from Dispatch required — Dispatch simply dispatches, and the rig handles iteration.
++**Pros:** Architecturally clean. Composes naturally with Spider's traversal. Reusable engine designs. No migration from Dispatch required — Dispatch simply dispatches, and the rig handles iteration.
+ 
+-**Cons:** Requires the Walker. Not implementable until the rigging system exists.
++**Cons:** Requires the Spider. Not implementable until the rigging system exists.
+ 
+ ### Option C: Rig pattern via origination engine
+ 
+@@ -70,7 +70,7 @@ The origination engine seeds rigs with review chains by default. Superficially s
+ 
+ **Adopt both Option A (MVP) and Option B (full design).**
+ 
+-The Dispatch-level wrapper is the MVP: implementable now, catches the known failure modes, produces data on review loop effectiveness. When the Walker is implemented, the review logic migrates to engine designs (Option B), and the Dispatch drops its review wrapping entirely. The rig pattern (Option C) governs per-commission review configuration as a future enhancement.
++The Dispatch-level wrapper is the MVP: implementable now, catches the known failure modes, produces data on review loop effectiveness. When the Spider is implemented, the review logic migrates to engine designs (Option B), and the Dispatch drops its review wrapping entirely. The rig pattern (Option C) governs per-commission review configuration as a future enhancement.
+ 
+ The two designs share the same review criteria and artifact schemas — the MVP is a direct precursor to the full design, not a throwaway.
+ 
+@@ -234,7 +234,7 @@ The patron can inspect the artifacts, diagnose the failure mode, and either rewr
+ 
+ ## Full Design: Review Engines in the Rig
+ 
+-When the Walker is implemented, the review loop migrates from Dispatch into the rig as two engine designs. The Dispatch drops all review logic.
++When the Spider is implemented, the review loop migrates from Dispatch into the rig as two engine designs. The Dispatch drops all review logic.
+ 
+ ### Engine Designs
+ 
+@@ -257,7 +257,7 @@ When the Walker is implemented, the review loop migrates from Dispatch into the
+ 
+ The review engine runs the same three checks as the MVP. It writes a `ReviewResult` to its yield. It does not branch — it always completes, passing the result downstream.
+ 
+-The downstream engine (either a `seal` engine or a `revise` engine) reads `reviewResult.passed` to decide what to do. The Walker sees a completed engine regardless of outcome; the branching logic lives in the rig structure (see Rig Pattern below).
++The downstream engine (either a `seal` engine or a `revise` engine) reads `reviewResult.passed` to decide what to do. The Spider sees a completed engine regardless of outcome; the branching logic lives in the rig structure (see Rig Pattern below).
+ 
+ #### `revise` engine (quick)
+ 
+@@ -313,20 +313,20 @@ The default rig for a commission with review enabled:
+                 └─────────────┘         └──────────────────┘
+ ```
+ 
+-The Walker traverses this graph naturally. Each engine completes and propagates its yield; downstream engines activate when their upstream is complete. The conditional branching (pass → seal, fail → revise) is expressed in the rig structure, not in Walker logic — the Walker just runs whatever is ready.
++The Spider traverses this graph naturally. Each engine completes and propagates its yield; downstream engines activate when their upstream is complete. The conditional branching (pass → seal, fail → revise) is expressed in the rig structure, not in Spider logic — the Spider just runs whatever is ready.
+ 
+ **Seeding the rig:** The origination engine produces this graph when it seeds the rig. For `maxRetries=2`, the origination engine seeds a fixed graph (not dynamically extended). If the guild wants `maxRetries=0` (no review loop), origination seeds the simple `implement → seal` graph.
+ 
+-**Dynamic extension (future):** A more sophisticated design would have the review engine declare a `need: 'revision'` when it fails, and the Fabricator would resolve and graft the next revise+review pair. This avoids pre-seeding the full graph and enables arbitrary retry depths. This is Future scope — the fixed graph is sufficient for MVP and avoids Walker complexity in the initial rigging implementation.
++**Dynamic extension (future):** A more sophisticated design would have the review engine declare a `need: 'revision'` when it fails, and the Fabricator would resolve and graft the next revise+review pair. This avoids pre-seeding the full graph and enables arbitrary retry depths. This is Future scope — the fixed graph is sufficient for MVP and avoids Spider complexity in the initial rigging implementation.
+ 
+-### Walker Integration
++### Spider Integration
+ 
+-The Walker needs no changes to support the review loop. It already:
++The Spider needs no changes to support the review loop. It already:
+ - Traverses all engines whose upstream is complete
+ - Dispatches ready engines to the Executor
+ - Handles both clockwork and quick engine kinds
+ 
+-The review loop is just a graph shape that Walker happens to traverse. The `escalate` clockwork engine signals the Clerk with a `failed` transition; the `seal` clockwork engine signals completion. The Walker itself is agnostic.
++The review loop is just a graph shape that Spider happens to traverse. The `escalate` clockwork engine signals the Clerk with a `failed` transition; the `seal` clockwork engine signals completion. The Spider itself is agnostic.
+ 
+ ---
+ 
+@@ -379,7 +379,7 @@ experiments/data/commissions/<writ-id>/
+     escalation.md        (if loop exhausted; patron-facing summary)
+ ```
+ 
+-For the MVP (Dispatch-level), the Dispatch writes these artifacts directly. For the full design (Walker-level), the review engine writes them via the Stacks or directly to the commission data directory.
++For the MVP (Dispatch-level), the Dispatch writes these artifacts directly. For the full design (Spider-level), the review engine writes them via the Stacks or directly to the commission data directory.
+ 
+ ### `review.md` Schema
+ 
+@@ -456,7 +456,7 @@ For the MVP (Dispatch-level), review configuration lives in `guild.json`:
+ 
+ All fields are optional. `enabled` defaults to `false` for the MVP (opt-in). The intent is to make it default-on once the loop has been validated in practice.
+ 
+-For the full design (Walker-level), the same configuration is consumed by the origination engine to decide whether to seed the review graph and what configuration to pass to the review engine.
++For the full design (Spider-level), the same configuration is consumed by the origination engine to decide whether to seed the review graph and what configuration to pass to the review engine.
+ 
+ ---
+ 
+@@ -513,7 +513,7 @@ This commission is itself a spec-writing commission. There's no build command to
+ - Artifacts written to commission data directory
+ - Opt-in via `review.enabled: true` in `guild.json`
+ 
+-### Phase 2 (Walker-level engine designs)
++### Phase 2 (Spider-level engine designs)
+ - `review` clockwork engine contributed by a kit
+ - `revise` quick engine contributed by the same kit
+ - Origination engine seeds review graph by default
+diff --git a/docs/architecture/apparatus/scriptorium.md b/docs/architecture/apparatus/scriptorium.md
+index 19ab388..8195bf1 100644
+--- a/docs/architecture/apparatus/scriptorium.md
++++ b/docs/architecture/apparatus/scriptorium.md
+@@ -719,7 +719,7 @@ Until then, downstream consumers query the Scriptorium API directly.
+ - **`guild().writeConfig()`** — the Scriptorium uses `guild().writeConfig('codexes', ...)` to persist codex registry changes to `guild.json`. This API was added to the `Guild` interface in `@shardworks/nexus-core` and implemented in Arbor. It updates both the in-memory config and the disk file atomically.
+ - **Git operations.** All git operations use `child_process.execFile` (not shell) via a lightweight `git.ts` helper that handles error parsing and provides typed results (`GitResult`, `GitError`).
+ - **Concurrency.** Multiple animas may open/seal drafts concurrently. The bare clone's git operations need appropriate locking — git's own ref locking handles most cases, but the fetch-rebase-seal cycle should be serialized per codex to avoid ref races.
+-- **No downstream coupling.** The Scriptorium has no dependency on the Surveyor, the Walker, or any other consumer of codex state. It is pure infrastructure. Downstream apparatus query or (future) subscribe to the Scriptorium's state independently.
++- **No downstream coupling.** The Scriptorium has no dependency on the Surveyor, the Spider, or any other consumer of codex state. It is pure infrastructure. Downstream apparatus query or (future) subscribe to the Scriptorium's state independently.
+ 
+ ---
+ 
+diff --git a/docs/architecture/apparatus/walker.md b/docs/architecture/apparatus/spider.md
+similarity index 90%
+rename from docs/architecture/apparatus/walker.md
+rename to docs/architecture/apparatus/spider.md
+index 647b000..f424bae 100644
+--- a/docs/architecture/apparatus/walker.md
++++ b/docs/architecture/apparatus/spider.md
+@@ -1,18 +1,18 @@
+-# The Walker — API Contract
++# The Spider — API Contract
+ 
+ Status: **Ready — MVP**
+ 
+-Package: `@shardworks/walker-apparatus` · Plugin id: `walker`
++Package: `@shardworks/spider-apparatus` · Plugin id: `spider`
+ 
+-> **⚠️ MVP scope.** This spec covers a static rig graph: every commission gets the same five-engine pipeline (`draft → implement → review → revise → seal`). No origination, no dynamic extension, no capability resolution. The Walker runs engines directly — the Executor earns its independence later. See [What This Spec Does NOT Cover](#what-this-spec-does-not-cover) for the full list.
++> **⚠️ MVP scope.** This spec covers a static rig graph: every commission gets the same five-engine pipeline (`draft → implement → review → revise → seal`). No origination, no dynamic extension, no capability resolution. The Spider runs engines directly — the Executor earns its independence later. See [What This Spec Does NOT Cover](#what-this-spec-does-not-cover) for the full list.
+ 
+ ---
+ 
+ ## Purpose
+ 
+-The Walker is the spine of the guild's rigging system. It replaces the Dispatch apparatus, which ran one writ in one session with no review. The Walker runs a structured engine pipeline for each commission, advancing the rig one step at a time via a `walk()` step function.
++The Spider is the spine of the guild's rigging system. It replaces the Dispatch apparatus, which ran one writ in one session with no review. The Spider runs a structured engine pipeline for each commission, advancing the rig one step at a time via a `crawl()` step function.
+ 
+-The Walker owns the rig's structural lifecycle — spawn, traverse, complete — and delegates everything else. Engine designs come from the Fabricator. Sessions come from the Animator. Draft bindings come from the Scriptorium. Writ transitions are handled by a CDC handler, not inline. The Walker itself is stateless between `walk()` calls; all state lives in the Stacks.
++The Spider owns the rig's structural lifecycle — spawn, traverse, complete — and delegates everything else. Engine designs come from the Fabricator. Sessions come from the Animator. Draft bindings come from the Scriptorium. Writ transitions are handled by a CDC handler, not inline. The Spider itself is stateless between `crawl()` calls; all state lives in the Stacks.
+ 
+ ---
+ 
+@@ -43,14 +43,14 @@ Engines pull their own apparatus dependencies (Scriptorium, Animator, Loom) via
+ 
+ Engines are the unit of work in a rig. Each engine implements a standard interface defined by the Fabricator apparatus (`@shardworks/fabricator-apparatus`). The `EngineDesign`, `EngineRunContext`, and `EngineRunResult` types are owned and exported by the Fabricator — see the Fabricator spec (`docs/architecture/apparatus/fabricator.md`) for full type definitions. Engines pull their own apparatus dependencies via `guild().apparatus(...)` — same pattern as tool handlers.
+ 
+-The Walker resolves engine designs by `designId` from the Fabricator at runtime: `fabricator.getEngineDesign(id)`.
++The Spider resolves engine designs by `designId` from the Fabricator at runtime: `fabricator.getEngineDesign(id)`.
+ 
+ ### Kit contribution
+ 
+-The Walker contributes its five engine designs via its support kit:
++The Spider contributes its five engine designs via its support kit:
+ 
+ ```typescript
+-// In walker-apparatus plugin
++// In spider-apparatus plugin
+ supportKit: {
+   engines: {
+     draft:     draftEngine,
+@@ -60,56 +60,56 @@ supportKit: {
+     seal:      sealEngine,
+   },
+   tools: {
+-    walk:          walkTool,           // single step — do one thing and return
+-    walkContinual: walkContinualTool,  // polling loop — walk every ~5s until stopped
++    walk:          crawlTool,           // single step — do one thing and return
++    crawlContinual: crawlContinualTool,  // polling loop — walk every ~5s until stopped
+   },
+ },
+ ```
+ 
+-**Tool naming note:** Hyphenated tool names (e.g. `start-walking`) have known issues with CLI argument parsing and tool grouping in `nsg`. The names above use camelCase in code; the CLI surface (`nsg walk`, `nsg walk-continual`) needs to work cleanly with the Instrumentarium's tool registration. Final CLI naming TBD — may need to revisit how the Instrumentarium maps tool IDs to CLI commands.
++**Tool naming note:** Hyphenated tool names (e.g. `start-walking`) have known issues with CLI argument parsing and tool grouping in `nsg`. The names above use camelCase in code; the CLI surface (`nsg crawl`, `nsg crawl-continual`) needs to work cleanly with the Instrumentarium's tool registration. Final CLI naming TBD — may need to revisit how the Instrumentarium maps tool IDs to CLI commands.
+ 
+-The Fabricator scans kit `engines` contributions at startup (same pattern as the Instrumentarium scanning tools). The Walker contributes its engines like any other kit — no special registration path.
++The Fabricator scans kit `engines` contributions at startup (same pattern as the Instrumentarium scanning tools). The Spider contributes its engines like any other kit — no special registration path.
+ 
+ ---
+ 
+ ## The Walk Function
+ 
+-The Walker's core is a single step function:
++The Spider's core is a single step function:
+ 
+ ```typescript
+-interface WalkerApi {
++interface SpiderApi {
+   /**
+    * Examine guild state and perform the single highest-priority action.
+    * Returns a description of what was done, or null if there's nothing to do.
+    */
+-  walk(): Promise<WalkResult | null>
++  crawl(): Promise<CrawlResult | null>
+ }
+ 
+-type WalkResult =
++type CrawlResult =
+   | { action: 'engine-completed'; rigId: string; engineId: string }
+   | { action: 'engine-started'; rigId: string; engineId: string }
+   | { action: 'rig-spawned'; rigId: string; writId: string }
+   | { action: 'rig-completed'; rigId: string; writId: string; outcome: 'completed' | 'failed' }
+ ```
+ 
+-Each `walk()` call does exactly one thing. The priority ordering:
++Each `crawl()` call does exactly one thing. The priority ordering:
+ 
+ 1. **Collect a completed engine.** Scan all running rigs for an engine with `status === 'running'`. Read the session record from the sessions book by `engine.sessionId`. If the session has reached a terminal status (`completed` or `failed`), update the engine: set its status and populate its yields (or error). If the engine failed, mark the rig `failed` (same transaction). If the completed engine is the terminal engine (`seal`), mark the rig `completed` (same transaction). Rig status changes trigger the CDC handler (see below). Returns `rig-completed` if the rig transitioned, otherwise `engine-completed`. This is the first priority because it unblocks downstream engines.
+-2. **Run a ready engine.** An engine is ready when `status === 'pending'` and all engines in its `upstream` array have `status === 'completed'`. Look up the `EngineDesign` by `designId` from the Fabricator. Assemble givens (from givensSpec) and context (with upstream yields), then call `design.run(givens, context)`. For clockwork engines (`status: 'completed'` result): store the yields on the engine instance, mark it completed, and check for rig completion (same as step 1). Returns `engine-completed` (or `rig-completed` if this was the terminal engine). For quick engines (`status: 'launched'` result): store the `sessionId`, mark the engine `running`. Returns `engine-started`. Completion is collected on subsequent walk calls via step 1.
++2. **Run a ready engine.** An engine is ready when `status === 'pending'` and all engines in its `upstream` array have `status === 'completed'`. Look up the `EngineDesign` by `designId` from the Fabricator. Assemble givens (from givensSpec) and context (with upstream yields), then call `design.run(givens, context)`. For clockwork engines (`status: 'completed'` result): store the yields on the engine instance, mark it completed, and check for rig completion (same as step 1). Returns `engine-completed` (or `rig-completed` if this was the terminal engine). For quick engines (`status: 'launched'` result): store the `sessionId`, mark the engine `running`. Returns `engine-started`. Completion is collected on subsequent crawl calls via step 1.
+ 3. **Spawn a rig.** If there's a ready writ with no rig, spawn the static graph. Returns `rig-spawned`.
+ 
+ If nothing qualifies at any level, return null (the guild is idle or all work is blocked on running quick engines).
+ 
+ ### Operational model: `start-walking`
+ 
+-The Walker exports a `start-walking` tool that runs the walk loop:
++The Spider exports a `start-walking` tool that runs the crawl loop:
+ 
+ ```
+-nsg start-walking    # starts polling loop, walks every ~5s
+-nsg walk             # single step (useful for debugging/testing)
++nsg start-crawling    # starts polling loop, walks every ~5s
++nsg crawl             # single step (useful for debugging/testing)
+ ```
+ 
+-The loop: call `walk()`, sleep `pollIntervalMs` (default 5000), repeat. When `walk()` returns null, the loop doesn't stop — it keeps polling. New writs posted via `nsg commission-post` from a separate terminal are picked up on the next poll cycle.
++The loop: call `crawl()`, sleep `pollIntervalMs` (default 5000), repeat. When `crawl()` returns null, the loop doesn't stop — it keeps polling. New writs posted via `nsg commission-post` from a separate terminal are picked up on the next poll cycle.
+ 
+ ---
+ 
+@@ -126,7 +126,7 @@ interface Rig {
+ }
+ ```
+ 
+-Stored in the Stacks `rigs` book. One rig per writ. The Walker reads and updates rigs via normal Stacks `put()`/`patch()` operations.
++Stored in the Stacks `rigs` book. One rig per writ. The Spider reads and updates rigs via normal Stacks `put()`/`patch()` operations.
+ 
+ ### Engine Instance
+ 
+@@ -152,7 +152,7 @@ An engine is **ready** when: `status === 'pending'` and all engines in its `upst
+ Every spawned rig gets this engine list:
+ 
+ ```typescript
+-function spawnStaticRig(writ: Writ, config: WalkerConfig): EngineInstance[] {
++function spawnStaticRig(writ: Writ, config: SpiderConfig): EngineInstance[] {
+   return [
+     { id: 'draft',     designId: 'draft',     status: 'pending', upstream: [],
+       givensSpec: { writ }, yields: null },
+@@ -168,7 +168,7 @@ function spawnStaticRig(writ: Writ, config: WalkerConfig): EngineInstance[] {
+ }
+ ```
+ 
+-The `givensSpec` is populated from the Walker's config at rig spawn time. The rig is self-contained after spawning — no runtime config lookups needed. The `writ` is passed as a given to engines that need it (most do; `seal` doesn't). All engines start with `yields: null` — yields are populated when the engine completes (see [Yield Types](#yield-types-and-data-flow)).
++The `givensSpec` is populated from the Spider's config at rig spawn time. The rig is self-contained after spawning — no runtime config lookups needed. The `writ` is passed as a given to engines that need it (most do; `seal` doesn't). All engines start with `yields: null` — yields are populated when the engine completes (see [Yield Types](#yield-types-and-data-flow)).
+ 
+ The rig is **completed** when the terminal engine (`seal`) has `status === 'completed'`. The rig is **failed** when any engine has `status === 'failed'`.
+ 
+@@ -178,9 +178,9 @@ The rig is **completed** when the terminal engine (`seal`) has `status === 'comp
+ 
+ Each engine produces typed yields that downstream engines consume. The yields are stored on the `EngineInstance.yields` field in the Stacks.
+ 
+-**Serialization constraint:** Because yields are persisted to the Stacks (JSON-backed), all yield values **must be JSON-serializable**. The Walker should validate this at storage time — if an engine returns a non-serializable value (function, circular reference, etc.), the engine fails with a clear error. This is important because engines are a plugin extension point — kit authors need a hard boundary, not a silent corruption.
++**Serialization constraint:** Because yields are persisted to the Stacks (JSON-backed), all yield values **must be JSON-serializable**. The Spider should validate this at storage time — if an engine returns a non-serializable value (function, circular reference, etc.), the engine fails with a clear error. This is important because engines are a plugin extension point — kit authors need a hard boundary, not a silent corruption.
+ 
+-When the Walker runs an engine, it assembles givens from the givensSpec only — upstream yields are **not** merged into givens. Engines that need upstream data access it via the `context.upstream` escape hatch:
++When the Spider runs an engine, it assembles givens from the givensSpec only — upstream yields are **not** merged into givens. Engines that need upstream data access it via the `context.upstream` escape hatch:
+ 
+ ```typescript
+ function assembleGivensAndContext(rig: Rig, engine: EngineInstance) {
+@@ -292,7 +292,7 @@ interface SealYields {
+ 
+ ## Engine Implementations
+ 
+-Each engine is an `EngineDesign` contributed by the Walker's support kit. The engine's `run()` method receives assembled givens and a thin context, and returns an `EngineRunResult`. Engines pull apparatus dependencies via `guild().apparatus(...)`.
++Each engine is an `EngineDesign` contributed by the Spider's support kit. The engine's `run()` method receives assembled givens and a thin context, and returns an `EngineRunResult`. Engines pull apparatus dependencies via `guild().apparatus(...)`.
+ 
+ ### `draft` (clockwork)
+ 
+@@ -339,7 +339,7 @@ async run(givens: Record<string, unknown>, context: EngineRunContext): Promise<E
+ 
+ The implement engine wraps the writ body with a commit instruction — each engine owns its own prompt contract rather than relying on `dispatch.sh` to append instructions to the writ body.
+ 
+-**Collect step (Walker, not engine):** When the Walker's collect step detects the session has completed, it builds the yields:
++**Collect step (Walker, not engine):** When the Spider's collect step detects the session has completed, it builds the yields:
+ 
+ ```typescript
+ // In Walker's collect step
+@@ -454,7 +454,7 @@ Numbered list of specific changes needed, in priority order.
+ Produce your findings as your final message in the format above.
+ ```
+ 
+-**Collect step:** The Walker retrieves the reviewer's findings from the session output — the reviewer produces structured markdown as its final message, and the Animator captures this on the session record. No file is written to the worktree (review artifacts don't belong in the codebase).
++**Collect step:** The Spider retrieves the reviewer's findings from the session output — the reviewer produces structured markdown as its final message, and the Animator captures this on the session record. No file is written to the worktree (review artifacts don't belong in the codebase).
+ 
+ ```typescript
+ // In Walker's collect step
+@@ -573,7 +573,7 @@ The seal engine does **not** transition the writ — that's handled by the CDC h
+ 
+ ## CDC Handler
+ 
+-The Walker registers one CDC handler at startup:
++The Spider registers one CDC handler at startup:
+ 
+ ### Rig terminal state → writ transition
+ 
+@@ -620,7 +620,7 @@ When any engine fails (throws, or a quick engine's session has `status: 'failed'
+ 
+ No retry. No recovery. The patron inspects and decides what to do. This is appropriate for the static rig — see [Future Evolution](#future-evolution) for the retry/recovery direction.
+ 
+-Quick engine "failure" definition: if the Animator session completes with `status: 'failed'`, the engine fails. If the session completes with `status: 'completed'`, the engine succeeds — even if the anima's work is incomplete (that's the review engine's job to catch, not the Walker's).
++Quick engine "failure" definition: if the Animator session completes with `status: 'failed'`, the engine fails. If the session completes with `status: 'completed'`, the engine succeeds — even if the anima's work is incomplete (that's the review engine's job to catch, not the Spider's).
+ 
+ ---
+ 
+@@ -642,14 +642,14 @@ Walker
+ 
+ ## Future Evolution
+ 
+-These are known directions the Walker and its data model will grow. None are in scope for the static rig MVP.
++These are known directions the Spider and its data model will grow. None are in scope for the static rig MVP.
+ 
+ - **givensSpec templates.** The givensSpec currently holds literal values set at rig spawn time. It will grow to support template expressions (e.g. `${draft.worktreePath}`) that resolve specific values from upstream yields into typed givens, replacing the current reliance on the `context.upstream` escape hatch.
+ - **Engine needs declarations.** Engine designs will declare a `needs` specification that controls which upstream yields are included and how they're mapped — making the data flow between engines explicit and type-safe.
+ - **Typed engine contracts.** The `Record<string, unknown>` givens map with type assertions is scaffolding. The needs/planning system will introduce typed contracts between engines — defining what each engine requires and provides. This scaffolding gets replaced, not extended.
+ - **Dynamic rig extension.** Capability resolution (via the Fabricator) and rig growth at runtime. Engines can declare needs that the Fabricator resolves to additional engine chains, grafted onto the rig mid-execution.
+ - **Retry and recovery.** The static rig has no retry. Recovery logic arrives with dynamic extension — a failed engine can trigger a recovery chain rather than failing the whole rig.
+-- **Engine timeouts.** The `startedAt` field on engine instances is included in the data model for future use. During the collect step, the Walker checks `startedAt` against a configurable timeout. If an engine has been running longer than the threshold, the Walker marks it failed (and optionally terminates the session).
++- **Engine timeouts.** The `startedAt` field on engine instances is included in the data model for future use. During the collect step, the Spider checks `startedAt` against a configurable timeout. If an engine has been running longer than the threshold, the Spider marks it failed (and optionally terminates the session).
+ - **Unified capability catalog.** The Fabricator may absorb tool designs from the Instrumentarium, becoming the single answer to "what can this guild do?" regardless of whether the answer is an engine or a tool.
+ 
+ ---
+@@ -657,8 +657,8 @@ These are known directions the Walker and its data model will grow. None are in
+ ## What This Spec Does NOT Cover
+ 
+ - **Origination.** Commission → rig mapping is hardcoded (static graph).
+-- **The Executor as a separate apparatus.** The Walker runs engines directly — clockwork engines inline, quick engines via the Animator. The Executor earns its independence when substrate switching (Docker, remote VM) is needed.
+-- **Concurrent rigs.** The priority system supports multiple rigs in principle, but the polling loop + single-guild model means we process one commission at a time in practice. Concurrency comes naturally when the Walker processes multiple ready engines across rigs.
++- **The Executor as a separate apparatus.** The Spider runs engines directly — clockwork engines inline, quick engines via the Animator. The Executor earns its independence when substrate switching (Docker, remote VM) is needed.
++- **Concurrent rigs.** The priority system supports multiple rigs in principle, but the polling loop + single-guild model means we process one commission at a time in practice. Concurrency comes naturally when the Spider processes multiple ready engines across rigs.
+ - **Reviewer role curriculum/temperament.** The `reviewer` role exists with a blank identity. The review engine assembles the prompt. Loom content for the reviewer is a separate concern.
+ 
+ ---
+diff --git a/docs/architecture/index.md b/docs/architecture/index.md
+index 917cca6..8619bdc 100644
+--- a/docs/architecture/index.md
++++ b/docs/architecture/index.md
+@@ -10,7 +10,7 @@ For the conceptual vocabulary — what guilds, animas, commissions, writs, and a
+ 
+ > This section describes the **standard guild** — the configuration `nsg init` produces. The framework itself is a plugin loader; every apparatus named below is part of the default plugin set, not a hard requirement. §4 ([Plugin Architecture](#plugin-architecture)) explains the underlying model; the [Standard Guild](#the-standard-guild) section catalogues what the default set includes.
+ 
+-A Nexus guild is a git repository with a `guild.json` at its root and a `.nexus/` directory holding runtime state. When the system starts, **Arbor** — the guild runtime — reads `guild.json`, loads the declared plugins, validates their dependencies, and starts each apparatus in order. From that point, the guild operates: the patron commissions work; **The Clerk** receives it and issues writs; **The Walker** assembles rigs and drives their engines to completion; **The Clockworks** turns events into action, activating relays in response to standing orders; and **anima sessions** — AI processes launched by **The Animator** — do the work that requires judgment. Results land in codexes and documents; the patron consumes what the guild delivers.
++A Nexus guild is a git repository with a `guild.json` at its root and a `.nexus/` directory holding runtime state. When the system starts, **Arbor** — the guild runtime — reads `guild.json`, loads the declared plugins, validates their dependencies, and starts each apparatus in order. From that point, the guild operates: the patron commissions work; **The Clerk** receives it and issues writs; **The Spider** assembles rigs and drives their engines to completion; **The Clockworks** turns events into action, activating relays in response to standing orders; and **anima sessions** — AI processes launched by **The Animator** — do the work that requires judgment. Results land in codexes and documents; the patron consumes what the guild delivers.
+ 
+ ```
+   PATRON
+@@ -26,7 +26,7 @@ A Nexus guild is a git repository with a `guild.json` at its root and a `.nexus/
+   │  ├───────────────────────────────────────────────────────┤  │
+   │  │  Clockworks · Surveyor · Clerk                        │  │
+   │  ├───────────────────────────────────────────────────────┤  │
+-  │  │  Walker · Fabricator · Executor                        │  │
++  │  │  Spider · Fabricator · Executor                        │  │
+   │  │  Loom · Animator                                      │  │
+   │  └─────────────────────────┬─────────────────────────────┘  │
+   │                            │                                 │
+@@ -66,13 +66,13 @@ Two additional commands bypass the tool registry: `nsg consult` and `nsg convene
+ 
+ ### The Apparatus
+ 
+-The guild's operational fabric is provided by apparatus — plugins with a start/stop lifecycle that Arbor starts in dependency order. **The Stacks** is the persistence substrate everything else reads from and writes to. **The Scriptorium** manages codexes — bare clones, draft bindings (worktrees), and the seal-and-push lifecycle. **The Clockworks** is the event-driven nervous system: standing orders bind events to relays, and the summon relay dispatches anima sessions in response. **The Surveyor** tracks what work applies to each registered codex. **The Clerk** handles commission intake, converting patron requests into writs and signaling when work is ready to execute. The Fabricator, Walker, Executor, Loom, and Animator then take it from there — covered in the next section.
++The guild's operational fabric is provided by apparatus — plugins with a start/stop lifecycle that Arbor starts in dependency order. **The Stacks** is the persistence substrate everything else reads from and writes to. **The Scriptorium** manages codexes — bare clones, draft bindings (worktrees), and the seal-and-push lifecycle. **The Clockworks** is the event-driven nervous system: standing orders bind events to relays, and the summon relay dispatches anima sessions in response. **The Surveyor** tracks what work applies to each registered codex. **The Clerk** handles commission intake, converting patron requests into writs and signaling when work is ready to execute. The Fabricator, Spider, Executor, Loom, and Animator then take it from there — covered in the next section.
+ 
+ Each of these is a plugin from the default set, not a built-in. The [Standard Guild](#the-standard-guild) section lists them; the sections that follow document each in detail.
+ 
+ ### Execution, Sessions, and Works
+ 
+-When The Clerk signals a writ is ready, **The Walker** spawns a rig and begins driving it: traversing active engines, dispatching those whose upstream work is complete, and extending the rig by querying **The Fabricator** for engine chains that satisfy declared needs. **The Executor** runs each engine — clockwork engines run their code directly; quick engines launch an anima session.
++When The Clerk signals a writ is ready, **The Spider** spawns a rig and begins driving it: traversing active engines, dispatching those whose upstream work is complete, and extending the rig by querying **The Fabricator** for engine chains that satisfy declared needs. **The Executor** runs each engine — clockwork engines run their code directly; quick engines launch an anima session.
+ 
+ An anima session is an AI process running against an MCP server loaded with the role's tools. Before launch, **The Loom** weaves the session context: system prompt, tool instructions, writ context. **The Animator** then starts the process, monitors it, and records the result. The session exits; the output persists. The Clockworks can also trigger sessions directly via the summon relay, bypassing the rig machinery entirely — The Animator handles both paths the same way.
+ 
+@@ -166,7 +166,7 @@ In the standard guild, `clockworks` contains events and standing orders; `codexe
+ 
+ ## Plugin Architecture
+ 
+-The apparatus described in §2 — The Stacks, The Clockworks, The Clerk, The Walker, and the rest — are all plugins. There is no privileged built-in layer. Arbor, the guild runtime, is only a plugin loader, a dependency graph, and the startup/shutdown lifecycle for what gets loaded. Every piece of operational infrastructure is contributed by a plugin package; the standard guild is simply a particular set of those packages.
++The apparatus described in §2 — The Stacks, The Clockworks, The Clerk, The Spider, and the rest — are all plugins. There is no privileged built-in layer. Arbor, the guild runtime, is only a plugin loader, a dependency graph, and the startup/shutdown lifecycle for what gets loaded. Every piece of operational infrastructure is contributed by a plugin package; the standard guild is simply a particular set of those packages.
+ 
+ Plugins come in two kinds: **kits** and **apparatus**. This section introduces them; [Plugin Architecture](plugins.md) is the full specification.
+ 
+@@ -179,7 +179,7 @@ A **kit** is a passive package contributing capabilities to the guild. Kits have
+ export default {
+   kit: {
+     requires:   ["books"],
+-    recommends: ["clockworks", "walker"],
++    recommends: ["clockworks", "spider"],
+     engines: [createBranchEngine, mergeBranchEngine],
+     relays:  [onMergeRelay],
+     tools:   [statusTool, diffTool],
+@@ -189,7 +189,7 @@ export default {
+ 
+ A kit is an **open record**: the contribution fields (`engines`, `relays`, `tools`, etc.) are defined by the apparatus packages that consume them, not by the framework. The framework only reads `requires` (hard dependency on an apparatus — validated at startup) and `recommends` (advisory — generates a startup warning if absent). Everything else is forwarded opaquely to consuming apparatus via the `plugin:initialized` lifecycle event.
+ 
+-Type safety for contribution fields is opt-in — each apparatus publishes a kit interface (`ClockworksKit`, `WalkerKit`, etc.) that kit authors can import and `satisfies` against.
++Type safety for contribution fields is opt-in — each apparatus publishes a kit interface (`ClockworksKit`, `SpiderKit`, etc.) that kit authors can import and `satisfies` against.
+ 
+ ### Apparatus
+ 
+@@ -246,7 +246,7 @@ Plugins are listed in `guild.json` by their plugin id. The framework determines
+ 
+ ```json
+ {
+-  "plugins": ["books", "clockworks", "walker", "sessions", "nexus-git"]
++  "plugins": ["books", "clockworks", "spider", "sessions", "nexus-git"]
+ }
+ ```
+ 
+@@ -279,7 +279,7 @@ Each section introduces one or more apparatus or kits from the default set. Unde
+ | **The Instrumentarium** | `tools` | Tool registry — resolves installed tools, permission-gated tool sets |
+ | **The Animator** | `animator` | Session lifecycle — launches, monitors, and records anima sessions |
+ | **The Fabricator** | `fabricator` | Engine design registry — answers "what engine chain satisfies this need?" from installed kits |
+-| **The Walker** | `walker` | Rig lifecycle — spawns, traverses, extends, and strikes rigs as work progresses |
++| **The Spider** | `spider` | Rig lifecycle — spawns, traverses, extends, and strikes rigs as work progresses |
+ | **The Executor** | `executor` | Engine runner — executes clockwork and quick engines against a configured substrate |
+ 
+ ### Default Kits
+@@ -358,7 +358,7 @@ See [The Stacks — API Contract](apparatus/stacks.md) for the full specificatio
+ 
+ ## Work Model
+ 
+-<!-- TODO: The obligation pipeline. Commission (patron's request) → Mandate writ (guild's formal record, created by Clerk) → child writs as the guild decomposes the work → Rigs as the execution scaffolding for a writ. Writ lifecycle (ready → active → pending → completed/failed/cancelled). Writ hierarchy and completion rollup. Brief intro to rigs (assembled by Walker from engine designs contributed by kits via Fabricator). Link to rigging.md for rig execution detail. -->
++<!-- TODO: The obligation pipeline. Commission (patron's request) → Mandate writ (guild's formal record, created by Clerk) → child writs as the guild decomposes the work → Rigs as the execution scaffolding for a writ. Writ lifecycle (ready → active → pending → completed/failed/cancelled). Writ hierarchy and completion rollup. Brief intro to rigs (assembled by Spider from engine designs contributed by kits via Fabricator). Link to rigging.md for rig execution detail. -->
+ 
+ ---
+ 
+@@ -392,12 +392,12 @@ Tools can be TypeScript modules or plain scripts (bash, Python, any executable).
+ 
+ ### Engines
+ 
+-**Engines** are the workhorse components of rigs — bounded units of work the Walker mounts and sets in motion. An engine runs when its upstream dependencies (givens) are satisfied and produces yields when done. Two kinds:
++**Engines** are the workhorse components of rigs — bounded units of work the Spider mounts and sets in motion. An engine runs when its upstream dependencies (givens) are satisfied and produces yields when done. Two kinds:
+ 
+ - **Clockwork** — deterministic, no AI. Runs its code directly against the configured substrate.
+ - **Quick** — inhabited by an anima for work requiring judgment. The engine defines the work context; the anima brings the skill.
+ 
+-Kits contribute engine designs; the Walker draws on them (via The Fabricator) to extend rigs as work progresses. Engines are not role-gated — they are not wielded by animas directly; they are the work context an anima staffs.
++Kits contribute engine designs; the Spider draws on them (via The Fabricator) to extend rigs as work progresses. Engines are not role-gated — they are not wielded by animas directly; they are the work context an anima staffs.
+ 
+ ### Relays
+ 
+@@ -408,7 +408,7 @@ Kits contribute engine designs; the Walker draws on them (via The Fabricator) to
+ | | Tools | Engines | Relays |
+ |---|---|---|---|
+ | **Purpose** | Instruments animas wield | Rig workhorses | Clockworks event handlers |
+-| **Invoked by** | Animas (MCP), humans (CLI), code | Walker (within a rig) | Clockworks runner (standing order) |
++| **Invoked by** | Animas (MCP), humans (CLI), code | Spider (within a rig) | Clockworks runner (standing order) |
+ | **Role gating?** | Yes | No | No |
+ | **Instructions?** | Optional | No | No |
+ | **Clockwork or quick?** | Neither (runs on demand) | Either | Always clockwork |
+diff --git a/docs/architecture/kit-components.md b/docs/architecture/kit-components.md
+index 354f801..4d26a9a 100644
+--- a/docs/architecture/kit-components.md
++++ b/docs/architecture/kit-components.md
+@@ -10,7 +10,7 @@ This document describes the artifact model for the guild's installable capabilit
+ 
+ Tools are accessible through multiple paths: animas invoke them as MCP tools during sessions; humans invoke them via the `nexus` CLI; relays and other tools can import them programmatically. All paths execute the same logic with the same inputs and outputs — the tool author writes the logic once.
+ 
+-**Engines** are the workhorse components of rigs — the units of work the Walker mounts and sets in motion. An engine does one bounded piece of work, runs when its upstream dependencies are satisfied, and produces a yield when done. Kits contribute engine designs; the Walker draws on them to extend rigs as needed. An engine may be clockwork (deterministic, no anima required) or quick (inhabited by an anima for work requiring judgment). Engines are described by a `nexus-engine.json` descriptor.
++**Engines** are the workhorse components of rigs — the units of work the Spider mounts and sets in motion. An engine does one bounded piece of work, runs when its upstream dependencies are satisfied, and produces a yield when done. Kits contribute engine designs; the Spider draws on them to extend rigs as needed. An engine may be clockwork (deterministic, no anima required) or quick (inhabited by an anima for work requiring judgment). Engines are described by a `nexus-engine.json` descriptor.
+ 
+ **Relays** are Clockworks handlers — purpose-built to respond to events via standing orders. A relay exports a standard `relay()` contract that the Clockworks runner calls. All relays are clockwork. See [clockworks.md](clockworks.md) for the relay contract and standing order mechanics. Relays are described by a `nexus-relay.json` descriptor.
+ 
+@@ -407,8 +407,8 @@ The guildhall is never a workspace — artifacts flow in through deliberate inst
+ 
+ | | Tools | Engines | Relays |
+ |---|---|---|---|
+-| Purpose | Instruments animas wield | Rig workhorses (Walker mounts them) | Clockworks handlers |
+-| Invoked by | Animas (MCP), humans (CLI), code (import) | Walker (event-driven within a rig) | Clockworks runner (standing order) |
++| Purpose | Instruments animas wield | Rig workhorses (Spider mounts them) | Clockworks handlers |
++| Invoked by | Animas (MCP), humans (CLI), code (import) | Spider (event-driven within a rig) | Clockworks runner (standing order) |
+ | Descriptor | `nexus-tool.json` | `nexus-engine.json` | `nexus-relay.json` |
+ | SDK factory | `tool()` | none required (engine logic is the rig work) | `relay()` |
+ | Instructions doc? | Optional (anima guidance) | No | No |
+diff --git a/docs/architecture/plugins.md b/docs/architecture/plugins.md
+index 7445687..c45c938 100644
+--- a/docs/architecture/plugins.md
++++ b/docs/architecture/plugins.md
+@@ -6,7 +6,7 @@ This document describes the plugin system — how the guild's capabilities are p
+ 
+ ## Overview
+ 
+-The guild framework ships with no running infrastructure of its own. The Clockworks, the Walker, the Surveyor — everything that makes a guild operational is contributed by plugins. `nsg init` installs a default plugin set; a guild's installed plugins determine what it can do.
++The guild framework ships with no running infrastructure of its own. The Clockworks, the Spider, the Surveyor — everything that makes a guild operational is contributed by plugins. `nsg init` installs a default plugin set; a guild's installed plugins determine what it can do.
+ 
+ This is a deliberate design choice. Keeping the framework core to a plugin loader and a set of type contracts means each piece of infrastructure is independently testable, replaceable, and comprehensible. There is no privileged built-in layer; a core apparatus and a community kit are the same kind of thing.
+ 
+@@ -41,24 +41,24 @@ A kit package exports its manifest as the default export:
+ 
+ ```typescript
+ import type { ClockworksKit } from "nexus-clockworks"
+-import type { WalkerKit }     from "nexus-walker"
++import type { SpiderKit }     from "nexus-spider"
+ import type { AnimaKit }      from "nexus-sessions"
+ 
+ export default {
+   kit: {
+     requires:   ["nexus-books"],
+-    recommends: ["nexus-clockworks", "nexus-walker"],
++    recommends: ["nexus-clockworks", "nexus-spider"],
+     engines: [createBranchEngine, deleteBranchEngine, mergeBranchEngine],
+     relays:  [onMergeRelay],
+     tools:   [statusTool, diffTool, logTool],
+-  } satisfies ClockworksKit & WalkerKit & AnimaKit,
++  } satisfies ClockworksKit & SpiderKit & AnimaKit,
+ } satisfies Plugin
+ ```
+ 
+ Type safety for contribution fields is provided by the apparatus that consumes them — not by the framework. Each apparatus package publishes a kit interface that kit authors can import and `satisfies` against:
+ 
+ - `ClockworksKit` — defines `relays`. See [ClockworksKit](clockworks.md#clockworkskit).
+-- `WalkerKit` — defines `engines`. See [Engine Designs](engine-designs.md).
++- `SpiderKit` — defines `engines`. See [Engine Designs](engine-designs.md).
+ - `AnimaKit` — defines `tools`. See [Tools](anima-lifecycle.md#tools).
+ 
+ Kit authors who don't want or need static type checking simply write a plain object — both approaches are valid.
+@@ -69,7 +69,7 @@ The framework never inspects contribution field contents. It sees kit records as
+ 
+ ## Apparatus
+ 
+-An apparatus is a package contributing persistent running infrastructure to the guild. It implements a lifecycle in `start` and `stop`. The Clockworks, Walker, and Surveyor are all apparatuses.
++An apparatus is a package contributing persistent running infrastructure to the guild. It implements a lifecycle in `start` and `stop`. The Clockworks, Spider, and Surveyor are all apparatuses.
+ 
+ ```typescript
+ type Apparatus = {
+@@ -299,7 +299,7 @@ warn: nexus-signals contributes relays but no installed apparatus consumes "rela
+ warn: nexus-git contributes engines but no installed apparatus consumes "engines"
+ ```
+ 
+-Warnings surface at startup where an operator can act on them — not silently at runtime when a commission fails because no Walker is present.
++Warnings surface at startup where an operator can act on them — not silently at runtime when a commission fails because no Spider is present.
+ 
+ ### Design Notes
+ 
+@@ -492,7 +492,7 @@ The Kit/Apparatus split makes this concrete: everything contributed by a kit is
+ 
+ ## Failure Modes
+ 
+-**Missing dependency** — a plugin declares `requires: ["nexus-clockworks"]` and that plugin is not installed. Loud startup failure before any apparatus starts: *"nexus-walker requires nexus-clockworks, which is not installed."*
++**Missing dependency** — a plugin declares `requires: ["nexus-clockworks"]` and that plugin is not installed. Loud startup failure before any apparatus starts: *"nexus-spider requires nexus-clockworks, which is not installed."*
+ 
+ **Plugin provides nothing** — `guild().apparatus("nexus-git")` where the apparatus has no `provides`. Returns a sentinel; throws with a useful message on access.
+ 
+@@ -508,7 +508,7 @@ Installed plugins are declared in `guild.json`:
+ {
+   "plugins": [
+     "nexus-clockworks",
+-    "nexus-walker",
++    "nexus-spider",
+     "nexus-surveyor",
+     "nexus-stacks",
+     "nexus-git"
+diff --git a/docs/architecture/rigging.md b/docs/architecture/rigging.md
+index 96a4adc..4345871 100644
+--- a/docs/architecture/rigging.md
++++ b/docs/architecture/rigging.md
+@@ -8,9 +8,9 @@ The rigging system is not a single apparatus. It is four apparatus working in co
+ 
+ ## Apparatus
+ 
+-### Walker
++### Spider
+ 
+-The Walker is the spine of the rigging system. It owns the rig's structural lifecycle from spawn to completion — and nothing else. The Walker does not know how to resolve capabilities, run engines, or manage AI sessions; it delegates all of those to other apparatus. What it does:
++The Spider is the spine of the rigging system. It owns the rig's structural lifecycle from spawn to completion — and nothing else. The Spider does not know how to resolve capabilities, run engines, or manage AI sessions; it delegates all of those to other apparatus. What it does:
+ 
+ - Spawn a rig when the Clerk signals a writ is ready
+ - Traverse all active rigs, identifying engines whose upstream is complete
+@@ -18,30 +18,30 @@ The Walker is the spine of the rigging system. It owns the rig's structural life
+ - Dispatch ready engines to the Executor
+ - Strike completed rigs and signal the Clerk
+ 
+-The Walker runs continuously — not bound to any single rig or commission.
++The Spider runs continuously — not bound to any single rig or commission.
+ 
+ ### Fabricator
+ 
+-The Fabricator is the guild's capability catalog — the authoritative collection of engine design specifications. Every installed kit contributes its engine designs to the Fabricator at startup. When an engine in a rig declares a need it cannot yet satisfy, the Walker queries the Fabricator:
++The Fabricator is the guild's capability catalog — the authoritative collection of engine design specifications. Every installed kit contributes its engine designs to the Fabricator at startup. When an engine in a rig declares a need it cannot yet satisfy, the Spider queries the Fabricator:
+ 
+ ```
+ fabricator.resolve(need, installedKits) → EngineChain
+ ```
+ 
+-The Fabricator returns the chain of engine designs that satisfies the need; the Walker grafts that chain onto the rig. The Fabricator does not touch the rig — it is a pure query service.
++The Fabricator returns the chain of engine designs that satisfies the need; the Spider grafts that chain onto the rig. The Fabricator does not touch the rig — it is a pure query service.
+ 
+ The Fabricator is also consulted directly by planning animas (Sages) when decomposing a commission: before planning work, a Sage can introspect what the guild is actually capable of building.
+ 
+ ### Executor
+ 
+-The Executor runs engine instances. It is the substrate abstraction layer — the Walker calls `executor.run(engine, inputs)` for any ready engine, without knowing or caring whether the engine runs locally, in a Docker container, on a remote VM, or otherwise.
++The Executor runs engine instances. It is the substrate abstraction layer — the Spider calls `executor.run(engine, inputs)` for any ready engine, without knowing or caring whether the engine runs locally, in a Docker container, on a remote VM, or otherwise.
+ 
+ The Executor handles two engine kinds:
+ 
+ - **Clockwork engines** — deterministic, no AI. The Executor runs the engine code directly against its configured substrate.
+ - **Quick engines** — AI-backed. The Executor calls the Manifester to compose the anima's session context, then the Summoner to launch and manage the AI session. The yields are the session's output.
+ 
+-From the Walker's perspective, both kinds look identical: givens in, yields out.
++From the Spider's perspective, both kinds look identical: givens in, yields out.
+ 
+ ### Manifester *(dependency)*
+ 
+@@ -53,7 +53,7 @@ The Summoner is a foundational apparatus used by more than the rigging system 
+ 
+ ### Clerk *(dependency)*
+ 
+-The Clerk owns the obligation layer. It signals the Walker when a writ is ready for a rig, and receives completion signals when a rig is struck. The rigging system reports back to the Clerk but does not manage writs itself.
++The Clerk owns the obligation layer. It signals the Spider when a writ is ready for a rig, and receives completion signals when a rig is struck. The rigging system reports back to the Clerk but does not manage writs itself.
+ 
+ ---
+ 
+@@ -61,13 +61,13 @@ The Clerk owns the obligation layer. It signals the Walker when a writ is ready
+ 
+ | # | Step | Apparatus |
+ |---|------|-----------|
+-| 1 | Writ becomes ready; spawn initial rig | **Walker** *(triggered by Clerk)* |
++| 1 | Writ becomes ready; spawn initial rig | **Spider** *(triggered by Clerk)* |
+ | 2 | Engine declares a need; scan installed kits; determine satisfying engine chain | **Fabricator** |
+-| 3 | Graft resolved engine chain onto rig structure | **Walker** *(using Fabricator output)* |
+-| 4 | Traverse active rigs; identify engines whose upstream is complete | **Walker** |
++| 3 | Graft resolved engine chain onto rig structure | **Spider** *(using Fabricator output)* |
++| 4 | Traverse active rigs; identify engines whose upstream is complete | **Spider** |
+ | 5 | Execute ready engine — clockwork or quick, any substrate | **Executor** *(routes to substrate or Manifester → Summoner)* |
+-| 6 | Record engine yields; propagate completion state to downstream engines | **Executor** *(yields)* → **Walker** *(state propagation)* |
+-| 7 | Detect rig fully complete; signal Clerk; strike rig | **Walker** → **Clerk** |
++| 6 | Record engine yields; propagate completion state to downstream engines | **Executor** *(yields)* → **Spider** *(state propagation)* |
++| 7 | Detect rig fully complete; signal Clerk; strike rig | **Spider** → **Clerk** |
+ 
+ Steps 2–3 repeat as needed throughout a rig's life — engines declare needs at runtime, and the rig grows as it runs. Steps 4–6 also repeat in a continuous traversal loop. Steps 1 and 7 are the lifecycle bookends.
+ 
+@@ -75,28 +75,28 @@ Steps 2–3 repeat as needed throughout a rig's life — engines declare needs a
+ 
+ ## Design Rationale
+ 
+-### Why Fabricator is separate from Walker
++### Why Fabricator is separate from Spider
+ 
+-The natural first instinct is to put capability resolution inside the Walker — it's the Walker that needs the answer, after all. The Fabricator earns its independence from two directions:
++The natural first instinct is to put capability resolution inside the Spider — it's the Spider that needs the answer, after all. The Fabricator earns its independence from two directions:
+ 
+-1. **The Sage case.** Planning animas need to know what the guild can build before they decompose a commission into writs. If capability resolution is internal to the Walker, the Sage has no clean way to query it. A standalone Fabricator is a shared service both the Walker and the Sage can call.
++1. **The Sage case.** Planning animas need to know what the guild can build before they decompose a commission into writs. If capability resolution is internal to the Spider, the Sage has no clean way to query it. A standalone Fabricator is a shared service both the Spider and the Sage can call.
+ 
+-2. **Separation of concerns.** The Walker's job is motion — advancing what's already planned. Capability reasoning ("what engines can satisfy this need, given the installed kits?") is a different cognitive mode. Keeping them separate keeps both apparatus well-scoped and independently testable.
++2. **Separation of concerns.** The Spider's job is motion — advancing what's already planned. Capability reasoning ("what engines can satisfy this need, given the installed kits?") is a different cognitive mode. Keeping them separate keeps both apparatus well-scoped and independently testable.
+ 
+ ### Why Executor handles both engine kinds
+ 
+-From the Walker's perspective, clockwork and quick engines are the same shape: givens in, yields out. Unifying execution in the Executor means the Walker has one dispatch call for any engine type, and the distinction between "run some code" and "run an AI session" lives entirely within the Executor. The substrate-switching logic (local vs Docker vs remote VM) and the AI session management logic are both Executor concerns — neither bleeds into the Walker.
++From the Spider's perspective, clockwork and quick engines are the same shape: givens in, yields out. Unifying execution in the Executor means the Spider has one dispatch call for any engine type, and the distinction between "run some code" and "run an AI session" lives entirely within the Executor. The substrate-switching logic (local vs Docker vs remote VM) and the AI session management logic are both Executor concerns — neither bleeds into the Spider.
+ 
+ ### Why Summoner is not rig-specific
+ 
+-The Summoner manages agentic AI sessions wherever they're needed — not just in rigs. The Clockworks Summon Relay dispatches animas in response to standing orders without going through the rigging system at all. Making the Summoner a foundational apparatus (not a Walker dependency) reflects this: the Executor uses the Summoner, but the Summoner doesn't know it's inside a rig.
++The Summoner manages agentic AI sessions wherever they're needed — not just in rigs. The Clockworks Summon Relay dispatches animas in response to standing orders without going through the rigging system at all. Making the Summoner a foundational apparatus (not a Spider dependency) reflects this: the Executor uses the Summoner, but the Summoner doesn't know it's inside a rig.
+ 
+-### Clerk / Walker boundary
++### Clerk / Spider boundary
+ 
+-The Clerk and the Walker are in contact at two points — writ-ready signals in, completion signals out — but own entirely different domains:
++The Clerk and the Spider are in contact at two points — writ-ready signals in, completion signals out — but own entirely different domains:
+ 
+ - The **Clerk** tracks obligations: what has been commissioned, what is owed, what state each writ is in.
+-- The **Walker** tracks execution: what rigs are active, what engines are running, what has been completed.
++- The **Spider** tracks execution: what rigs are active, what engines are running, what has been completed.
+ 
+ Writs can exist without rigs (awaiting planning or dependencies). Rigs always trace back to a writ. The boundary keeps the obligation record clean from execution machinery.
+ 
+@@ -108,7 +108,7 @@ Writs can exist without rigs (awaiting planning or dependencies). Rigs always tr
+              Clerk
+                │ (writ:ready / rig:complete)
+                ▼
+-            Walker ──────────────── Fabricator
++            Spider ──────────────── Fabricator
+                │
+                ▼
+             Executor
+@@ -122,4 +122,4 @@ Writs can exist without rigs (awaiting planning or dependencies). Rigs always tr
+                   Stacks (Daybook)
+ ```
+ 
+-The Walker is the only rigging apparatus that touches the Clerk. The Executor is the only rigging apparatus that touches the Summoner. The Fabricator is a stateless query service with no downstream dependencies of its own — it reads from the kit registry provided by installed plugins at startup.
++The Spider is the only rigging apparatus that touches the Clerk. The Executor is the only rigging apparatus that touches the Summoner. The Fabricator is a stateless query service with no downstream dependencies of its own — it reads from the kit registry provided by installed plugins at startup.
+diff --git a/docs/guild-metaphor.md b/docs/guild-metaphor.md
+index eae1997..6e5ffcb 100644
+--- a/docs/guild-metaphor.md
++++ b/docs/guild-metaphor.md
+@@ -75,13 +75,13 @@ When a writ is concrete enough to act on, it spawns a **rig** to carry the oblig
+ 
+ ### Rig
+ 
+-The working structure assembled to fulfill a commission. A rig is seeded at commission time — a minimal starting point representing what must be achieved. From there the Walker builds it out: adding engines and arranging them in sequence, each depending on the work of those before it. Some engines are clockwork; others are quick — inhabited by an anima. A rig is never delivered to the patron; it is the scaffolding that enables delivery. When the work is done, the obligation is fulfilled and the rig is struck.
++The working structure assembled to fulfill a commission. A rig is seeded at commission time — a minimal starting point representing what must be achieved. From there the Spider builds it out: adding engines and arranging them in sequence, each depending on the work of those before it. Some engines are clockwork; others are quick — inhabited by an anima. A rig is never delivered to the patron; it is the scaffolding that enables delivery. When the work is done, the obligation is fulfilled and the rig is struck.
+ 
+ Rigs are dynamic. Any engine whose work is not yet complete may be replaced with a chain of engines, allowing the rig to grow and adapt as the work unfolds. Engines that have completed their work are fixed — their yield is final.
+ 
+ ### Engine
+ 
+-Engines are the workhorse components of a rig — purpose-built machines the guild puts to work. Each engine does one bounded piece of work: runs when its upstream work is ready, produces a yield when done. The same engine design may run in many rigs at once, each working independently. Kits bring engine designs to the guild; the Walker mounts them as each rig demands.
++Engines are the workhorse components of a rig — purpose-built machines the guild puts to work. Each engine does one bounded piece of work: runs when its upstream work is ready, produces a yield when done. The same engine design may run in many rigs at once, each working independently. Kits bring engine designs to the guild; the Spider mounts them as each rig demands.
+ 
+ Two kinds:
+ 
+@@ -112,7 +112,7 @@ A body of inscriptions that compels a system to behave. The guild's primary and
+ | **Abandoning** | Setting a draft binding aside without sealing. The work persists in the Daybook but never becomes authoritative |
+ | **Edition** | The sealed binding at a specific significant moment — marked, versioned, and distributed |
+ 
+-A commission arrives; the Walker opens a draft binding from the codex; an anima staffs the engine — inscribing changes, building up the draft. When the anima signals completion, the sealing engine incorporates the draft into the sealed binding. The codex grows. If the draft contradicts the sealed binding, the sealing engine seizes; the draft must be reconciled before sealing can proceed.
++A commission arrives; the Spider opens a draft binding from the codex; an anima staffs the engine — inscribing changes, building up the draft. When the anima signals completion, the sealing engine incorporates the draft into the sealed binding. The codex grows. If the draft contradicts the sealed binding, the sealing engine seizes; the draft must be reconciled before sealing can proceed.
+ 
+ A codex may have multiple draft bindings open simultaneously. Each is independent. Each must be sealed or abandoned on its own terms.
+ 
+@@ -150,13 +150,13 @@ A named, versioned, immutable personality template. A temperament governs an ani
+ 
+ ### Apparatus
+ 
+-A named, persistent, deterministic system that predates any commission and outlasts any rig is an **apparatus** — the guild's operational fabric. Apparatus are always running; they hold no craft, no spirit, no judgment. Where animas are animated and engines do the work of rigs, apparatus are the guild itself in continuous operation. The Clockworks, the Walker, and the Surveyor are the guild's core apparatus. The set is not fixed — a guild may install additional apparatus as its needs grow.
++A named, persistent, deterministic system that predates any commission and outlasts any rig is an **apparatus** — the guild's operational fabric. Apparatus are always running; they hold no craft, no spirit, no judgment. Where animas are animated and engines do the work of rigs, apparatus are the guild itself in continuous operation. The Clockworks, the Spider, and the Surveyor are the guild's core apparatus. The set is not fixed — a guild may install additional apparatus as its needs grow.
+ 
+ ### Kit
+ 
+-A bundle of engine designs and anima tools contributed to extend what the guild can build. A kit declares what needs it can meet, what prior work it requires, and what chain of engines it will assemble to meet those needs. The Walker draws from installed kits when extending a rig — a guild's installed kits determine what work it can take on.
++A bundle of engine designs and anima tools contributed to extend what the guild can build. A kit declares what needs it can meet, what prior work it requires, and what chain of engines it will assemble to meet those needs. The Spider draws from installed kits when extending a rig — a guild's installed kits determine what work it can take on.
+ 
+-Kits are the guild's extension points. A guild without kits can accept commissions but cannot fulfill them. Each installed kit extends the range of work the Walker can set in motion.
++Kits are the guild's extension points. A guild without kits can accept commissions but cannot fulfill them. Each installed kit extends the range of work the Spider can set in motion.
+ 
+ ### The Clockworks
+ 
+@@ -172,11 +172,11 @@ All relays are clockwork. The summon relay is the built-in relay that handles an
+ 
+ A registered response to an event, defined in `guild.json`. A standing order says: *whenever this event is signaled, do this*. All standing orders invoke relays via the `run` verb. The `summon` verb is syntactic sugar — it invokes the **summon relay**, which manifests an anima in the named role and delivers the event as their context. Standing orders may carry additional params (like `maxSessions` for the circuit breaker) that configure the relay's behavior. Standing orders are guild policy — they live in configuration, not in relay code.
+ 
+-### The Walker
++### The Spider
+ 
+-The apparatus that keeps all active rigs in motion. The Walker moves continuously through every active rig — not bound to any single commission, predating and outlasting them all. When an engine is ready to run, the Walker sets it in motion: starting a clockwork engine or summoning an anima for a quick one. When an engine declares a need the rig cannot yet satisfy, the Walker extends the rig — drawing on installed kits to add the engines needed to meet it.
++The apparatus that keeps all active rigs in motion. The Spider moves continuously through every active rig — not bound to any single commission, predating and outlasting them all. When an engine is ready to run, the Spider sets it in motion: starting a clockwork engine or summoning an anima for a quick one. When an engine declares a need the rig cannot yet satisfy, the Spider extends the rig — drawing on installed kits to add the engines needed to meet it.
+ 
+-The rig grows as it runs. The Walker is why.
++The rig grows as it runs. The Spider is why.
+ 
+ ### The Surveyor
+ 
+diff --git a/packages/plugins/animator/src/types.ts b/packages/plugins/animator/src/types.ts
+index 032a7e0..2243445 100644
+--- a/packages/plugins/animator/src/types.ts
++++ b/packages/plugins/animator/src/types.ts
+@@ -92,7 +92,7 @@ export interface SessionResult {
+    * The final assistant text from the session.
+    * Extracted by the Animator from the provider's transcript.
+    * Useful for programmatic consumers that need the session's conclusion
+-   * without parsing the full transcript (e.g. the Walker's review collect step).
++   * without parsing the full transcript (e.g. the Spider's review collect step).
+    */
+   output?: string;
+ }
+diff --git a/packages/plugins/dashboard/src/dashboard.ts b/packages/plugins/dashboard/src/dashboard.ts
+index 04e11f2..24e4b47 100644
+--- a/packages/plugins/dashboard/src/dashboard.ts
++++ b/packages/plugins/dashboard/src/dashboard.ts
+@@ -15,7 +15,7 @@ import { dashboardStart } from './tool.ts';
+ export function createDashboard(): Plugin {
+   return {
+     apparatus: {
+-      recommends: ['clerk', 'stacks', 'animator', 'walker', 'codexes'],
++      recommends: ['clerk', 'stacks', 'animator', 'spider', 'codexes'],
+ 
+       supportKit: {
+         tools: [dashboardStart],
+diff --git a/packages/plugins/dashboard/src/html.ts b/packages/plugins/dashboard/src/html.ts
+index c0b0b01..397c735 100644
+--- a/packages/plugins/dashboard/src/html.ts
++++ b/packages/plugins/dashboard/src/html.ts
+@@ -179,7 +179,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
+ <nav id="tab-nav">
+   <div class="tab active" data-tab="overview">Overview</div>
+   <div class="tab" data-tab="clerk">Clerk <span class="tab-badge" id="badge-clerk">—</span></div>
+-  <div class="tab" data-tab="walker">Walker <span class="tab-badge" id="badge-walker">—</span></div>
++  <div class="tab" data-tab="spider">Spider <span class="tab-badge" id="badge-spider">—</span></div>
+   <div class="tab" data-tab="animator">Animator <span class="tab-badge" id="badge-animator">—</span></div>
+   <div class="tab" data-tab="codexes">Codexes <span class="tab-badge" id="badge-codexes">—</span></div>
+ </nav>
+@@ -271,21 +271,21 @@ tr:hover td{background:rgba(255,255,255,.02)}
+     </div>
+   </div>
+ 
+-  <!-- WALKER -->
+-  <div class="tab-panel" id="panel-walker">
++  <!-- SPIDER -->
++  <div class="tab-panel" id="panel-spider">
+     <div class="card" style="margin-bottom:0">
+       <div class="toolbar">
+-        <select id="walker-filter-status" onchange="loadRigs()">
++        <select id="spider-filter-status" onchange="loadRigs()">
+           <option value="">All statuses</option>
+           <option value="running">Running</option>
+           <option value="completed">Completed</option>
+           <option value="failed">Failed</option>
+         </select>
+         <div class="toolbar-right">
+-          <span id="walker-count-label" style="color:var(--muted);font-size:12px"></span>
++          <span id="spider-count-label" style="color:var(--muted);font-size:12px"></span>
+         </div>
+       </div>
+-      <div id="walker-loading" class="loading" style="display:none"><div class="spinner"></div>Loading…</div>
++      <div id="spider-loading" class="loading" style="display:none"><div class="spinner"></div>Loading…</div>
+       <table>
+         <thead>
+           <tr>
+@@ -296,12 +296,12 @@ tr:hover td{background:rgba(255,255,255,.02)}
+             <th>Progress</th>
+           </tr>
+         </thead>
+-        <tbody id="walker-tbody"></tbody>
++        <tbody id="spider-tbody"></tbody>
+       </table>
+-      <div id="walker-empty" class="empty-state" style="display:none">
++      <div id="spider-empty" class="empty-state" style="display:none">
+         <div class="empty-icon">⚙️</div>
+         <h3>No rigs found</h3>
+-        <p>Rigs are created when the Walker processes writs.</p>
++        <p>Rigs are created when the Spider processes writs.</p>
+       </div>
+     </div>
+   </div>
+@@ -478,7 +478,7 @@ function switchTab(id) {
+ function loadTab(id) {
+   if (id === 'overview') loadOverview();
+   else if (id === 'clerk') loadWrits();
+-  else if (id === 'walker') loadRigs();
++  else if (id === 'spider') loadRigs();
+   else if (id === 'animator') loadSessions();
+   else if (id === 'codexes') loadCodexes();
+ }
+@@ -578,7 +578,7 @@ function renderOverview(data) {
+ 
+   // Update badges
+   if (data.counts.writs !== undefined) setBadge('clerk', data.counts.writs);
+-  if (data.counts.rigs !== undefined) setBadge('walker', data.counts.rigs);
++  if (data.counts.rigs !== undefined) setBadge('spider', data.counts.rigs);
+   if (data.counts.sessions !== undefined) setBadge('animator', data.counts.sessions);
+   if (data.counts.codexes !== undefined) setBadge('codexes', data.counts.codexes);
+ }
+@@ -794,28 +794,28 @@ async function submitTransition() {
+   }
+ }
+ 
+-// ── WALKER ────────────────────────────────────────────────────────
++// ── SPIDER ────────────────────────────────────────────────────────
+ async function loadRigs() {
+-  const status = document.getElementById('walker-filter-status').value;
+-  document.getElementById('walker-loading').style.display = 'flex';
++  const status = document.getElementById('spider-filter-status').value;
++  document.getElementById('spider-loading').style.display = 'flex';
+   try {
+     const params = new URLSearchParams();
+     if (status) params.set('status', status);
+     const data = await api('/rigs?' + params);
+     rigs = data.rigs;
+     renderRigs();
+-    setBadge('walker', rigs.length);
+-    document.getElementById('walker-count-label').textContent = rigs.length + ' rig' + (rigs.length!==1?'s':'');
++    setBadge('spider', rigs.length);
++    document.getElementById('spider-count-label').textContent = rigs.length + ' rig' + (rigs.length!==1?'s':'');
+   } catch(e) {
+-    document.getElementById('walker-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
++    document.getElementById('spider-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
+     return;
+   }
+-  document.getElementById('walker-loading').style.display = 'none';
++  document.getElementById('spider-loading').style.display = 'none';
+ }
+ 
+ function renderRigs() {
+   const rows = stableSort(rigs, rigSort.col, rigSort.dir);
+-  const tbody = document.getElementById('walker-tbody');
++  const tbody = document.getElementById('spider-tbody');
+   tbody.innerHTML = rows.map(r => {
+     const engines = r.engines || [];
+     const done = engines.filter(e => e.status==='completed' || e.status==='failed').length;
+@@ -836,7 +836,7 @@ function renderRigs() {
+       '</td>' +
+     '</tr>';
+   }).join('');
+-  document.getElementById('walker-empty').style.display = rows.length ? 'none' : 'block';
++  document.getElementById('spider-empty').style.display = rows.length ? 'none' : 'block';
+ }
+ 
+ function sortRigs(col) {
+diff --git a/packages/plugins/dashboard/src/index.ts b/packages/plugins/dashboard/src/index.ts
+index 1a90fa3..0b07e9f 100644
+--- a/packages/plugins/dashboard/src/index.ts
++++ b/packages/plugins/dashboard/src/index.ts
+@@ -3,7 +3,7 @@
+  *
+  * Web-based guild operations dashboard. Exposes the `dashboard-start` CLI
+  * tool which launches a local web server with a live operations UI including
+- * tabs for Overview, Clerk, Walker, Animator, and Codexes.
++ * tabs for Overview, Clerk, Spider, Animator, and Codexes.
+  *
+  * Usage:
+  *   nsg dashboard start
+diff --git a/packages/plugins/dashboard/src/rig-types.ts b/packages/plugins/dashboard/src/rig-types.ts
+index 4392aa3..0eae120 100644
+--- a/packages/plugins/dashboard/src/rig-types.ts
++++ b/packages/plugins/dashboard/src/rig-types.ts
+@@ -1,5 +1,5 @@
+ /**
+- * Local type stubs for Walker rig documents read via Stacks readBook().
++ * Local type stubs for Spider rig documents read via Stacks readBook().
+  */
+ 
+ export interface EngineInstance {
+diff --git a/packages/plugins/dashboard/src/server.ts b/packages/plugins/dashboard/src/server.ts
+index c1a2be5..dc2dd59 100644
+--- a/packages/plugins/dashboard/src/server.ts
++++ b/packages/plugins/dashboard/src/server.ts
+@@ -128,10 +128,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
+         } catch { /* animator not installed */ }
+ 
+         try {
+-          const rigs = stacks.readBook<RigDoc>('walker', 'rigs');
++          const rigs = stacks.readBook<RigDoc>('spider', 'rigs');
+           counts.rigs        = await rigs.count();
+           counts.runningRigs = await rigs.count([['status', '=', 'running']]);
+-        } catch { /* walker not installed */ }
++        } catch { /* spider not installed */ }
+       }
+ 
+       const scriptorium = tryApparatus<ScriptoriumApi>('codexes');
+@@ -238,7 +238,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
+     const stacks = tryApparatus<StacksApi>('stacks');
+     if (!stacks) { json(res, { rigs: [] }); return; }
+     try {
+-      const rigs = stacks.readBook<RigDoc>('walker', 'rigs');
++      const rigs = stacks.readBook<RigDoc>('spider', 'rigs');
+       const where: WhereClause | undefined = qs.status
+         ? [['status', '=', qs.status]]
+         : undefined;
+diff --git a/packages/plugins/dispatch/README.md b/packages/plugins/dispatch/README.md
+index 624626d..53e5a6e 100644
+--- a/packages/plugins/dispatch/README.md
++++ b/packages/plugins/dispatch/README.md
+@@ -1,6 +1,6 @@
+ # `@shardworks/dispatch-apparatus`
+ 
+-> **⚠️ Temporary rigging.** The Dispatch is a stand-in for the full rigging system (Walker, Fabricator, Executor). When that system exists, this apparatus is retired.
++> **⚠️ Temporary rigging.** The Dispatch is a stand-in for the full rigging system (Spider, Fabricator, Executor). When that system exists, this apparatus is retired.
+ 
+ The Dispatch is the guild's interim work runner. It bridges the gap between the Clerk (which tracks obligations) and the session machinery (which runs animas). It does one thing: find the oldest ready writ and execute it.
+ 
+diff --git a/packages/plugins/dispatch/src/dispatch.ts b/packages/plugins/dispatch/src/dispatch.ts
+index 496a65a..d883225 100644
+--- a/packages/plugins/dispatch/src/dispatch.ts
++++ b/packages/plugins/dispatch/src/dispatch.ts
+@@ -7,7 +7,7 @@
+  * the aftermath (seal the draft, transition the writ).
+  *
+  * This apparatus is temporary rigging — designed to be retired when the
+- * full rigging system (Walker, Fabricator, Executor) is implemented.
++ * full rigging system (Spider, Fabricator, Executor) is implemented.
+  *
+  * See: docs/architecture/apparatus/dispatch.md
+  */
+diff --git a/packages/plugins/dispatch/src/index.ts b/packages/plugins/dispatch/src/index.ts
+index 2be0178..321c70e 100644
+--- a/packages/plugins/dispatch/src/index.ts
++++ b/packages/plugins/dispatch/src/index.ts
+@@ -5,7 +5,7 @@
+  * the guild's session machinery. Opens a draft binding on the target codex,
+  * summons an anima via The Animator, and handles the aftermath (seal the
+  * draft, transition the writ). Disposable — retired when the full rigging
+- * system (Walker, Fabricator, Executor) is implemented.
++ * system (Spider, Fabricator, Executor) is implemented.
+  *
+  * See: docs/architecture/apparatus/dispatch.md
+  */
+diff --git a/packages/plugins/fabricator/src/fabricator.ts b/packages/plugins/fabricator/src/fabricator.ts
+index 6edde14..bdfb7ed 100644
+--- a/packages/plugins/fabricator/src/fabricator.ts
++++ b/packages/plugins/fabricator/src/fabricator.ts
+@@ -2,7 +2,7 @@
+  * The Fabricator — guild engine design registry apparatus.
+  *
+  * Scans installed engine designs from kit contributions and apparatus supportKits,
+- * and serves them to the Walker on demand.
++ * and serves them to the Spider on demand.
+  *
+  * The Fabricator does not execute engines. It is a pure query service:
+  * designs in, designs out.
+@@ -34,7 +34,7 @@ export interface EngineRunContext {
+  * The result of an engine run.
+  *
+  * 'completed' — synchronous work done inline, yields are available immediately.
+- * 'launched'  — async work launched in a session; the Walker polls for completion.
++ * 'launched'  — async work launched in a session; the Spider polls for completion.
+  */
+ export type EngineRunResult =
+   | { status: 'completed'; yields: unknown }
+@@ -42,7 +42,7 @@ export type EngineRunResult =
+ 
+ /**
+  * An engine design — the unit of work the Fabricator catalogues and the
+- * Walker executes. Kit authors import this type from @shardworks/fabricator-apparatus.
++ * Spider executes. Kit authors import this type from @shardworks/fabricator-apparatus.
+  */
+ export interface EngineDesign {
+   /** Unique identifier for this engine design (e.g. 'draft', 'implement', 'review'). */
+@@ -51,7 +51,7 @@ export interface EngineDesign {
+   /**
+    * Execute this engine.
+    *
+-   * @param givens   — the engine's declared inputs, assembled by the Walker.
++   * @param givens   — the engine's declared inputs, assembled by the Spider.
+    * @param context  — minimal execution context: engine id and upstream yields.
+    */
+   run(givens: Record<string, unknown>, context: EngineRunContext): Promise<EngineRunResult>;
+diff --git a/packages/plugins/walker/package.json b/packages/plugins/spider/package.json
+similarity index 87%
+rename from packages/plugins/walker/package.json
+rename to packages/plugins/spider/package.json
+index 9524b64..32fefca 100644
+--- a/packages/plugins/walker/package.json
++++ b/packages/plugins/spider/package.json
+@@ -1,13 +1,13 @@
+ {
+-  "name": "@shardworks/walker-apparatus",
++  "name": "@shardworks/spider-apparatus",
+   "version": "0.0.0",
+   "license": "ISC",
+   "repository": {
+     "type": "git",
+     "url": "https://github.com/shardworks/nexus",
+-    "directory": "packages/plugins/walker"
++    "directory": "packages/plugins/spider"
+   },
+-  "description": "The Walker — rig execution engine apparatus",
++  "description": "The Spider — rig execution engine apparatus",
+   "type": "module",
+   "exports": {
+     ".": "./src/index.ts"
+diff --git a/packages/plugins/walker/src/engines/draft.ts b/packages/plugins/spider/src/engines/draft.ts
+similarity index 100%
+rename from packages/plugins/walker/src/engines/draft.ts
+rename to packages/plugins/spider/src/engines/draft.ts
+diff --git a/packages/plugins/walker/src/engines/implement.ts b/packages/plugins/spider/src/engines/implement.ts
+similarity index 95%
+rename from packages/plugins/walker/src/engines/implement.ts
+rename to packages/plugins/spider/src/engines/implement.ts
+index f6f74b6..2c5527b 100644
+--- a/packages/plugins/walker/src/engines/implement.ts
++++ b/packages/plugins/spider/src/engines/implement.ts
+@@ -4,7 +4,7 @@
+  * Summons an anima to do the commissioned work. Wraps the writ body with
+  * a commit instruction, then calls animator.summon() with the draft
+  * worktree as the working directory. Returns `{ status: 'launched', sessionId }`
+- * so the Walker's collect step can poll for completion on subsequent walks.
++ * so the Spider's collect step can poll for completion on subsequent walks.
+  */
+ 
+ import { guild } from '@shardworks/nexus-core';
+diff --git a/packages/plugins/walker/src/engines/index.ts b/packages/plugins/spider/src/engines/index.ts
+similarity index 100%
+rename from packages/plugins/walker/src/engines/index.ts
+rename to packages/plugins/spider/src/engines/index.ts
+diff --git a/packages/plugins/walker/src/engines/review.ts b/packages/plugins/spider/src/engines/review.ts
+similarity index 98%
+rename from packages/plugins/walker/src/engines/review.ts
+rename to packages/plugins/spider/src/engines/review.ts
+index 05f91a1..9f54813 100644
+--- a/packages/plugins/walker/src/engines/review.ts
++++ b/packages/plugins/spider/src/engines/review.ts
+@@ -3,10 +3,10 @@
+  *
+  * Runs mechanical checks (build/test) synchronously in the draft worktree,
+  * then summons a reviewer anima to assess the implementation against the spec.
+- * Returns `{ status: 'launched', sessionId }` so the Walker's collect step
++ * Returns `{ status: 'launched', sessionId }` so the Spider's collect step
+  * can parse the reviewer's findings from session.output on subsequent walks.
+  *
+- * Collect step (Walker):
++ * Collect step (Spider):
+  *   - Reads session.output as the reviewer's structured markdown findings
+  *   - Parses `passed` from /^###\s*Overall:\s*PASS/mi
+  *   - Retrieves mechanicalChecks from session.metadata
+diff --git a/packages/plugins/walker/src/engines/revise.ts b/packages/plugins/spider/src/engines/revise.ts
+similarity index 97%
+rename from packages/plugins/walker/src/engines/revise.ts
+rename to packages/plugins/spider/src/engines/revise.ts
+index d759e5a..ac4cbf7 100644
+--- a/packages/plugins/walker/src/engines/revise.ts
++++ b/packages/plugins/spider/src/engines/revise.ts
+@@ -6,7 +6,7 @@
+  * If the review failed, the prompt directs the anima to address each item
+  * in the findings and commit the result.
+  *
+- * Returns `{ status: 'launched', sessionId }` so the Walker's collect step
++ * Returns `{ status: 'launched', sessionId }` so the Spider's collect step
+  * can store ReviseYields on completion.
+  */
+ 
+diff --git a/packages/plugins/walker/src/engines/seal.ts b/packages/plugins/spider/src/engines/seal.ts
+similarity index 100%
+rename from packages/plugins/walker/src/engines/seal.ts
+rename to packages/plugins/spider/src/engines/seal.ts
+diff --git a/packages/plugins/walker/src/index.ts b/packages/plugins/spider/src/index.ts
+similarity index 74%
+rename from packages/plugins/walker/src/index.ts
+rename to packages/plugins/spider/src/index.ts
+index 02b3407..d7ae4d5 100644
+--- a/packages/plugins/walker/src/index.ts
++++ b/packages/plugins/spider/src/index.ts
+@@ -1,14 +1,14 @@
+ /**
+- * @shardworks/walker-apparatus — The Walker.
++ * @shardworks/spider-apparatus — The Spider.
+  *
+  * Rig execution engine: spawns rigs for ready writs, drives engine pipelines
+  * to completion, and transitions writs via the Clerk on rig completion/failure.
+  *
+- * Public types (RigDoc, EngineInstance, WalkResult, WalkerApi, etc.) are
++ * Public types (RigDoc, EngineInstance, CrawlResult, SpiderApi, etc.) are
+  * re-exported for consumers that inspect walk results or rig state.
+  */
+ 
+-import { createWalker } from './walker.ts';
++import { createSpider } from './spider.ts';
+ 
+ // ── Public types ──────────────────────────────────────────────────────
+ 
+@@ -17,13 +17,13 @@ export type {
+   EngineInstance,
+   RigStatus,
+   RigDoc,
+-  WalkResult,
+-  WalkerApi,
+-  WalkerConfig,
++  CrawlResult,
++  SpiderApi,
++  SpiderConfig,
+   DraftYields,
+   SealYields,
+ } from './types.ts';
+ 
+ // ── Default export: the apparatus plugin ──────────────────────────────
+ 
+-export default createWalker();
++export default createSpider();
+diff --git a/packages/plugins/walker/src/walker.test.ts b/packages/plugins/spider/src/spider.test.ts
+similarity index 89%
+rename from packages/plugins/walker/src/walker.test.ts
+rename to packages/plugins/spider/src/spider.test.ts
+index bbf58a4..9c1b5a3 100644
+--- a/packages/plugins/walker/src/walker.test.ts
++++ b/packages/plugins/spider/src/spider.test.ts
+@@ -1,5 +1,5 @@
+ /**
+- * Walker — unit tests.
++ * Spider — unit tests.
+  *
+  * Tests rig lifecycle, walk priority ordering, engine execution (clockwork
+  * and quick), failure propagation, and CDC-driven writ transitions.
+@@ -25,8 +25,8 @@ import type { FabricatorApi, EngineDesign } from '@shardworks/fabricator-apparat
+ 
+ import type { AnimatorApi, SummonRequest, AnimateHandle, SessionChunk, SessionResult, SessionDoc } from '@shardworks/animator-apparatus';
+ 
+-import { createWalker } from './walker.ts';
+-import type { WalkerApi, RigDoc, EngineInstance, ReviewYields, MechanicalCheck } from './types.ts';
++import { createSpider } from './spider.ts';
++import type { SpiderApi, RigDoc, EngineInstance, ReviewYields, MechanicalCheck } from './types.ts';
+ 
+ // ── Test bootstrap ────────────────────────────────────────────────────
+ 
+@@ -55,7 +55,7 @@ function buildCtx(): {
+ 
+ /**
+  * Full integration fixture: starts Stacks (memory), Clerk, Fabricator,
+- * and Walker. Returns handles to each API plus mock animator controls.
++ * and Spider. Returns handles to each API plus mock animator controls.
+  */
+ function buildFixture(
+   guildConfig: Partial<GuildConfig> = {},
+@@ -64,7 +64,7 @@ function buildFixture(
+   stacks: StacksApi;
+   clerk: ClerkApi;
+   fabricator: FabricatorApi;
+-  walker: WalkerApi;
++  spider: SpiderApi;
+   memBackend: InstanceType<typeof MemoryBackend>;
+   fire: (event: string, ...args: unknown[]) => Promise<void>;
+   summonCalls: SummonRequest[];
+@@ -74,17 +74,17 @@ function buildFixture(
+   const stacksPlugin = createStacksApparatus(memBackend);
+   const clerkPlugin = createClerk();
+   const fabricatorPlugin = createFabricator();
+-  const walkerPlugin = createWalker();
++  const spiderPlugin = createSpider();
+ 
+   if (!('apparatus' in stacksPlugin)) throw new Error('stacks must be apparatus');
+   if (!('apparatus' in clerkPlugin)) throw new Error('clerk must be apparatus');
+   if (!('apparatus' in fabricatorPlugin)) throw new Error('fabricator must be apparatus');
+-  if (!('apparatus' in walkerPlugin)) throw new Error('walker must be apparatus');
++  if (!('apparatus' in spiderPlugin)) throw new Error('spider must be apparatus');
+ 
+   const stacksApparatus = stacksPlugin.apparatus;
+   const clerkApparatus = clerkPlugin.apparatus;
+   const fabricatorApparatus = fabricatorPlugin.apparatus;
+-  const walkerApparatus = walkerPlugin.apparatus;
++  const spiderApparatus = spiderPlugin.apparatus;
+ 
+   const apparatusMap = new Map<string, unknown>();
+ 
+@@ -117,11 +117,11 @@ function buildFixture(
+   const stacks = stacksApparatus.provides as StacksApi;
+   apparatusMap.set('stacks', stacks);
+ 
+-  // Manually ensure all books the Walker and Clerk need
++  // Manually ensure all books the Spider and Clerk need
+   memBackend.ensureBook({ ownerId: 'clerk', book: 'writs' }, {
+     indexes: ['status', 'type', 'createdAt', ['status', 'type'], ['status', 'createdAt']],
+   });
+-  memBackend.ensureBook({ ownerId: 'walker', book: 'rigs' }, {
++  memBackend.ensureBook({ ownerId: 'spider', book: 'rigs' }, {
+     indexes: ['status', 'writId', ['status', 'writId']],
+   });
+   memBackend.ensureBook({ ownerId: 'animator', book: 'sessions' }, {
+@@ -130,7 +130,7 @@ function buildFixture(
+ 
+   // Mock animator — captures summon() calls and writes session docs to Stacks.
+   // The implement engine awaits handle.result to get the session id; the mock
+-  // writes a terminal session record before resolving so the Walker's collect
++  // writes a terminal session record before resolving so the Spider's collect
+   // step finds it on the next walk() call.
+   let currentSessionOutcome = initialSessionOutcome;
+   const summonCalls: SummonRequest[] = [];
+@@ -175,7 +175,7 @@ function buildFixture(
+       return { chunks: emptyChunks(), result };
+     },
+     animate(): AnimateHandle {
+-      throw new Error('animate() not used in Walker tests');
++      throw new Error('animate() not used in Spider tests');
+     },
+   };
+   apparatusMap.set('animator', mockAnimatorApi);
+@@ -191,24 +191,24 @@ function buildFixture(
+   const fabricator = fabricatorApparatus.provides as FabricatorApi;
+   apparatusMap.set('fabricator', fabricator);
+ 
+-  // Start walker
+-  walkerApparatus.start(noopCtx);
+-  const walker = walkerApparatus.provides as WalkerApi;
+-  apparatusMap.set('walker', walker);
++  // Start spider
++  spiderApparatus.start(noopCtx);
++  const spider = spiderApparatus.provides as SpiderApi;
++  apparatusMap.set('spider', spider);
+ 
+-  // Simulate plugin:initialized for the Walker so the Fabricator scans
++  // Simulate plugin:initialized for the Spider so the Fabricator scans
+   // its supportKit and picks up the five engine designs.
+-  const walkerLoaded: LoadedApparatus = {
+-    packageName: '@shardworks/walker-apparatus',
+-    id: 'walker',
++  const spiderLoaded: LoadedApparatus = {
++    packageName: '@shardworks/spider-apparatus',
++    id: 'spider',
+     version: '0.0.0',
+-    apparatus: walkerApparatus,
++    apparatus: spiderApparatus,
+   };
+   // Fire synchronously — fabricator's handler is sync
+-  void fire('plugin:initialized', walkerLoaded);
++  void fire('plugin:initialized', spiderLoaded);
+ 
+   return {
+-    stacks, clerk, fabricator, walker, memBackend, fire,
++    stacks, clerk, fabricator, spider, memBackend, fire,
+     summonCalls,
+     setSessionOutcome(outcome: { status: 'completed' | 'failed'; error?: string; output?: string }) {
+       currentSessionOutcome = outcome;
+@@ -218,7 +218,7 @@ function buildFixture(
+ 
+ /** Get the rigs book. */
+ function rigsBook(stacks: StacksApi) {
+-  return stacks.book<RigDoc>('walker', 'rigs');
++  return stacks.book<RigDoc>('spider', 'rigs');
+ }
+ 
+ /** Post a writ. */
+@@ -228,7 +228,7 @@ async function postWrit(clerk: ClerkApi, title = 'Test writ', codex?: string): P
+ 
+ // ── Tests ─────────────────────────────────────────────────────────────
+ 
+-describe('Walker', () => {
++describe('Spider', () => {
+   let fix: ReturnType<typeof buildFixture>;
+ 
+   beforeEach(() => {
+@@ -241,7 +241,7 @@ describe('Walker', () => {
+ 
+   // ── Fabricator integration ─────────────────────────────────────────
+ 
+-  describe('Fabricator — Walker engine registration', () => {
++  describe('Fabricator — Spider engine registration', () => {
+     it('registers all five engine designs in the Fabricator', () => {
+       const { fabricator } = fix;
+       assert.ok(fabricator.getEngineDesign('draft'), 'draft engine registered');
+@@ -260,7 +260,7 @@ describe('Walker', () => {
+ 
+   describe('walk() — idle', () => {
+     it('returns null when there is no work', async () => {
+-      const result = await fix.walker.walk();
++      const result = await fix.spider.crawl();
+       assert.equal(result, null);
+     });
+   });
+@@ -269,11 +269,11 @@ describe('Walker', () => {
+ 
+   describe('walk() — spawn', () => {
+     it('spawns a rig for a ready writ and transitions writ to active', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       const writ = await postWrit(clerk);
+       assert.equal(writ.status, 'ready');
+ 
+-      const result = await walker.walk();
++      const result = await spider.crawl();
+       assert.ok(result !== null, 'expected a walk result');
+       assert.equal(result.action, 'rig-spawned');
+       assert.equal((result as { writId: string }).writId, writ.id);
+@@ -290,24 +290,24 @@ describe('Walker', () => {
+     });
+ 
+     it('does not spawn a second rig for a writ that already has one', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+ 
+-      await walker.walk(); // spawns rig
++      await spider.crawl(); // spawns rig
+ 
+       const rigs = await rigsBook(stacks).list();
+       assert.equal(rigs.length, 1, 'only one rig should exist');
+     });
+ 
+     it('spawns rigs for the oldest ready writ first (FIFO)', async () => {
+-      const { clerk, walker } = fix;
++      const { clerk, spider } = fix;
+ 
+       // Small delay to ensure different createdAt timestamps
+       const w1 = await postWrit(clerk, 'First writ');
+       await new Promise((r) => setTimeout(r, 2));
+       const w2 = await postWrit(clerk, 'Second writ');
+ 
+-      const r1 = await walker.walk();
++      const r1 = await spider.crawl();
+       assert.equal(r1?.action, 'rig-spawned');
+       assert.equal((r1 as { writId: string }).writId, w1.id);
+ 
+@@ -315,7 +315,7 @@ describe('Walker', () => {
+       const rigs = await rigsBook(fix.stacks).list();
+       await rigsBook(fix.stacks).patch(rigs[0].id, { status: 'failed' });
+ 
+-      const r2 = await walker.walk();
++      const r2 = await spider.crawl();
+       assert.equal(r2?.action, 'rig-spawned');
+       assert.equal((r2 as { writId: string }).writId, w2.id);
+     });
+@@ -325,16 +325,16 @@ describe('Walker', () => {
+ 
+   describe('walk() — priority ordering: collect > run > spawn', () => {
+     it('runs before spawning when a rig already exists', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+ 
+       // Spawn the rig
+-      const r1 = await walker.walk();
++      const r1 = await spider.crawl();
+       assert.equal(r1?.action, 'rig-spawned');
+ 
+       // Second walk should run (not spawn another rig)
+       // The draft engine will fail (no codexes), resulting in 'rig-completed'
+-      const r2 = await walker.walk();
++      const r2 = await spider.crawl();
+       assert.notEqual(r2?.action, 'rig-spawned');
+       // Only one rig created
+       const rigs = await rigsBook(stacks).list();
+@@ -342,9 +342,9 @@ describe('Walker', () => {
+     });
+ 
+     it('collects before running when a running engine has a terminal session', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -363,7 +363,7 @@ describe('Walker', () => {
+       await sessBook.put({ id: fakeSessionId, status: 'completed', startedAt: new Date().toISOString(), provider: 'test' });
+ 
+       // Walk should collect (not run implement which has no completed upstream)
+-      const r = await walker.walk();
++      const r = await spider.crawl();
+       assert.equal(r?.action, 'engine-completed');
+       assert.equal((r as { engineId: string }).engineId, 'draft');
+     });
+@@ -373,9 +373,9 @@ describe('Walker', () => {
+ 
+   describe('engine readiness — upstream must complete first', () => {
+     it('only the first engine (no upstream) is runnable initially', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const [rig] = await rigsBook(stacks).list();
+ 
+@@ -387,9 +387,9 @@ describe('Walker', () => {
+     });
+ 
+     it('implement only launches after draft is completed', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -403,7 +403,7 @@ describe('Walker', () => {
+       await book.patch(rig.id, { engines: updatedEngines });
+ 
+       // Now walk should launch implement (quick engine → 'engine-started', not 'engine-completed')
+-      const result = await walker.walk();
++      const result = await spider.crawl();
+       assert.equal(result?.action, 'engine-started');
+       assert.equal((result as { engineId: string }).engineId, 'implement');
+     });
+@@ -413,9 +413,9 @@ describe('Walker', () => {
+ 
+   describe('implement engine execution', () => {
+     it('launches session on first walk, then collects yields on second walk', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig0] = await book.list();
+@@ -429,7 +429,7 @@ describe('Walker', () => {
+       await book.patch(rig0.id, { engines: updatedEngines });
+ 
+       // Walk: implement launches an Animator session (quick engine → 'engine-started')
+-      const result = await walker.walk();
++      const result = await spider.crawl();
+       assert.equal(result?.action, 'engine-started');
+       assert.equal((result as { engineId: string }).engineId, 'implement');
+ 
+@@ -439,7 +439,7 @@ describe('Walker', () => {
+       assert.ok(impl1?.sessionId !== undefined, 'sessionId should be stored');
+ 
+       // Walk: collect step finds the terminal session and stores yields
+-      const result2 = await walker.walk();
++      const result2 = await spider.crawl();
+       assert.equal(result2?.action, 'engine-completed');
+       assert.equal((result2 as { engineId: string }).engineId, 'implement');
+ 
+@@ -451,9 +451,9 @@ describe('Walker', () => {
+     });
+ 
+     it('marks engine and rig failed when engine design is not found', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -464,7 +464,7 @@ describe('Walker', () => {
+       );
+       await book.patch(rig.id, { engines: brokenEngines });
+ 
+-      const result = await walker.walk();
++      const result = await spider.crawl();
+       assert.equal(result?.action, 'rig-completed');
+       assert.equal((result as { outcome: string }).outcome, 'failed');
+ 
+@@ -480,7 +480,7 @@ describe('Walker', () => {
+ 
+   describe('yield serialization failure', () => {
+     it('non-serializable engine yields cause engine and rig failure', async () => {
+-      const { clerk, walker, stacks, fire } = fix;
++      const { clerk, spider, stacks, fire } = fix;
+ 
+       // Register an engine design that returns non-JSON-serializable yields
+       const badEngine: EngineDesign = {
+@@ -504,7 +504,7 @@ describe('Walker', () => {
+       void fire('plugin:initialized', fakePlugin);
+ 
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -516,7 +516,7 @@ describe('Walker', () => {
+         ),
+       });
+ 
+-      const result = await walker.walk();
++      const result = await spider.crawl();
+       assert.ok(result !== null);
+       assert.equal(result.action, 'rig-completed');
+       assert.equal((result as { outcome: string }).outcome, 'failed');
+@@ -533,9 +533,9 @@ describe('Walker', () => {
+ 
+   describe('implement engine — Animator integration', () => {
+     it('calls animator.summon() with role, prompt, cwd, environment, and metadata', async () => {
+-      const { clerk, walker, stacks, summonCalls } = fix;
++      const { clerk, spider, stacks, summonCalls } = fix;
+       const writ = await postWrit(clerk, 'My commission', 'my-codex');
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -547,7 +547,7 @@ describe('Walker', () => {
+         ),
+       });
+ 
+-      const launchResult = await walker.walk(); // launch implement
++      const launchResult = await spider.crawl(); // launch implement
+       assert.equal(launchResult?.action, 'engine-started');
+ 
+       assert.equal(summonCalls.length, 1, 'summon should be called once');
+@@ -559,9 +559,9 @@ describe('Walker', () => {
+     });
+ 
+     it('wraps the writ body with a commit instruction', async () => {
+-      const { clerk, walker, stacks, summonCalls } = fix;
++      const { clerk, spider, stacks, summonCalls } = fix;
+       await clerk.post({ title: 'My writ', body: 'Build the feature.' });
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -573,7 +573,7 @@ describe('Walker', () => {
+         ),
+       });
+ 
+-      const launchResult2 = await walker.walk(); // launch implement
++      const launchResult2 = await spider.crawl(); // launch implement
+       assert.equal(launchResult2?.action, 'engine-started');
+ 
+       assert.equal(summonCalls.length, 1);
+@@ -582,11 +582,11 @@ describe('Walker', () => {
+     });
+ 
+     it('session failure propagates: engine fails → rig fails → writ transitions to failed', async () => {
+-      const { clerk, walker, stacks, setSessionOutcome } = fix;
++      const { clerk, spider, stacks, setSessionOutcome } = fix;
+       setSessionOutcome({ status: 'failed', error: 'Process exited with code 1' });
+ 
+       const writ = await postWrit(clerk, 'Failing writ');
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -598,8 +598,8 @@ describe('Walker', () => {
+         ),
+       });
+ 
+-      await walker.walk(); // launch implement (session already terminal in Stacks)
+-      await walker.walk(); // collect: session failed → engine fails → rig fails
++      await spider.crawl(); // launch implement (session already terminal in Stacks)
++      await spider.crawl(); // collect: session failed → engine fails → rig fails
+ 
+       const [updatedRig] = await book.list();
+       assert.equal(updatedRig.status, 'failed', 'rig should be failed');
+@@ -611,9 +611,9 @@ describe('Walker', () => {
+     });
+ 
+     it('ImplementYields contain sessionId and sessionStatus from the session record', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk, 'Yields test');
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -625,8 +625,8 @@ describe('Walker', () => {
+         ),
+       });
+ 
+-      await walker.walk(); // launch
+-      await walker.walk(); // collect
++      await spider.crawl(); // launch
++      await spider.crawl(); // collect
+ 
+       const [updated] = await book.list();
+       const impl = updated.engines.find((e: EngineInstance) => e.id === 'implement');
+@@ -641,9 +641,9 @@ describe('Walker', () => {
+ 
+   describe('quick engine — collect', () => {
+     it('collects yields from a terminal session in the sessions book', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -675,7 +675,7 @@ describe('Walker', () => {
+       });
+ 
+       // Walk: collect step should find the terminal session
+-      const result = await walker.walk();
++      const result = await spider.crawl();
+       assert.equal(result?.action, 'engine-completed');
+       assert.equal((result as { engineId: string }).engineId, 'implement');
+ 
+@@ -689,9 +689,9 @@ describe('Walker', () => {
+     });
+ 
+     it('marks engine and rig failed when session failed', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -720,7 +720,7 @@ describe('Walker', () => {
+         error: 'Process exited with code 1',
+       });
+ 
+-      const result = await walker.walk();
++      const result = await spider.crawl();
+       assert.equal(result?.action, 'rig-completed');
+       assert.equal((result as { outcome: string }).outcome, 'failed');
+ 
+@@ -731,9 +731,9 @@ describe('Walker', () => {
+     });
+ 
+     it('does not collect a still-running session', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -763,7 +763,7 @@ describe('Walker', () => {
+ 
+       // Nothing to collect, implement is running (no pending with completed upstream),
+       // spawn skips (rig exists) → null
+-      const result = await walker.walk();
++      const result = await spider.crawl();
+       assert.equal(result, null);
+     });
+   });
+@@ -772,10 +772,10 @@ describe('Walker', () => {
+ 
+   describe('failure propagation', () => {
+     it('engine failure → rig failed → writ transitions to failed via CDC', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       const writ = await postWrit(clerk);
+ 
+-      await walker.walk(); // spawn (writ → active)
++      await spider.crawl(); // spawn (writ → active)
+       const activeWrit = await clerk.show(writ.id);
+       assert.equal(activeWrit.status, 'active');
+ 
+@@ -788,7 +788,7 @@ describe('Walker', () => {
+       await book.patch(rig.id, { engines: brokenEngines });
+ 
+       // Walk: engine fails → rig fails → CDC → writ fails
+-      await walker.walk();
++      await spider.crawl();
+ 
+       const [updatedRig] = await book.list();
+       assert.equal(updatedRig.status, 'failed');
+@@ -802,9 +802,9 @@ describe('Walker', () => {
+ 
+   describe('givens and context assembly', () => {
+     it('each engine receives only the givens it needs', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       const writ = await postWrit(clerk, 'My writ');
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const [rig] = await rigsBook(stacks).list();
+       const eng = (id: string) => rig.engines.find((e: EngineInstance) => e.id === id)!;
+@@ -832,9 +832,9 @@ describe('Walker', () => {
+     });
+ 
+     it('role defaults to "artificer" when not configured', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const [rig] = await rigsBook(stacks).list();
+       const implementEngine = rig.engines.find((e: EngineInstance) => e.id === 'implement');
+@@ -842,9 +842,9 @@ describe('Walker', () => {
+     });
+ 
+     it('upstream map is built from completed engine yields', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -860,12 +860,12 @@ describe('Walker', () => {
+       await book.patch(rig.id, { engines: updatedEngines });
+ 
+       // Walk: review launches a session (quick engine → 'engine-started')
+-      const result = await walker.walk();
++      const result = await spider.crawl();
+       assert.equal(result?.action, 'engine-started');
+       assert.equal((result as { engineId: string }).engineId, 'review');
+ 
+       // Walk: collect step picks up the completed review session
+-      const result2 = await walker.walk();
++      const result2 = await spider.crawl();
+       assert.equal(result2?.action, 'engine-completed');
+       assert.equal((result2 as { engineId: string }).engineId, 'review');
+     });
+@@ -875,10 +875,10 @@ describe('Walker', () => {
+ 
+   describe('full pipeline', () => {
+     it('walks through implement → review → revise → rig completion → writ completed', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       const writ = await postWrit(clerk, 'Full pipeline test');
+ 
+-      await walker.walk(); // spawn (writ → active)
++      await spider.crawl(); // spawn (writ → active)
+ 
+       const book = rigsBook(stacks);
+       const [rig0] = await book.list();
+@@ -892,32 +892,32 @@ describe('Walker', () => {
+       });
+ 
+       // Walk: implement launches an Animator session (quick engine)
+-      const r1 = await walker.walk();
++      const r1 = await spider.crawl();
+       assert.equal(r1?.action, 'engine-started');
+       assert.equal((r1 as { engineId: string }).engineId, 'implement');
+ 
+       // Walk: collect step picks up the completed implement session
+-      const r1c = await walker.walk();
++      const r1c = await spider.crawl();
+       assert.equal(r1c?.action, 'engine-completed');
+       assert.equal((r1c as { engineId: string }).engineId, 'implement');
+ 
+       // Walk: review launches a session (quick engine)
+-      const r2 = await walker.walk();
++      const r2 = await spider.crawl();
+       assert.equal(r2?.action, 'engine-started');
+       assert.equal((r2 as { engineId: string }).engineId, 'review');
+ 
+       // Walk: collect review session
+-      const r2c = await walker.walk();
++      const r2c = await spider.crawl();
+       assert.equal(r2c?.action, 'engine-completed');
+       assert.equal((r2c as { engineId: string }).engineId, 'review');
+ 
+       // Walk: revise launches a session (quick engine)
+-      const r3 = await walker.walk();
++      const r3 = await spider.crawl();
+       assert.equal(r3?.action, 'engine-started');
+       assert.equal((r3 as { engineId: string }).engineId, 'revise');
+ 
+       // Walk: collect revise session
+-      const r3c = await walker.walk();
++      const r3c = await spider.crawl();
+       assert.equal(r3c?.action, 'engine-completed');
+       assert.equal((r3c as { engineId: string }).engineId, 'revise');
+ 
+@@ -940,7 +940,7 @@ describe('Walker', () => {
+     });
+ 
+     it('walks all 5 engines to rig completion without manual seal patching', async () => {
+-      const { clerk, walker, stacks, fire } = fix;
++      const { clerk, spider, stacks, fire } = fix;
+ 
+       // Register a stub seal engine that doesn't require Scriptorium
+       const stubSealEngine: EngineDesign = {
+@@ -966,7 +966,7 @@ describe('Walker', () => {
+       void fire('plugin:initialized', fakePlugin);
+ 
+       const writ = await postWrit(clerk, 'Full pipeline stub seal');
+-      await walker.walk(); // spawn (writ → active)
++      await spider.crawl(); // spawn (writ → active)
+ 
+       const book = rigsBook(stacks);
+       const [rig0] = await book.list();
+@@ -980,37 +980,37 @@ describe('Walker', () => {
+       });
+ 
+       // implement launches
+-      const r1 = await walker.walk();
++      const r1 = await spider.crawl();
+       assert.equal(r1?.action, 'engine-started');
+       assert.equal((r1 as { engineId: string }).engineId, 'implement');
+ 
+       // collect implement
+-      const r1c = await walker.walk();
++      const r1c = await spider.crawl();
+       assert.equal(r1c?.action, 'engine-completed');
+       assert.equal((r1c as { engineId: string }).engineId, 'implement');
+ 
+       // review launches (quick engine)
+-      const r2 = await walker.walk();
++      const r2 = await spider.crawl();
+       assert.equal(r2?.action, 'engine-started');
+       assert.equal((r2 as { engineId: string }).engineId, 'review');
+ 
+       // collect review
+-      const r2c = await walker.walk();
++      const r2c = await spider.crawl();
+       assert.equal(r2c?.action, 'engine-completed');
+       assert.equal((r2c as { engineId: string }).engineId, 'review');
+ 
+       // revise launches (quick engine)
+-      const r3 = await walker.walk();
++      const r3 = await spider.crawl();
+       assert.equal(r3?.action, 'engine-started');
+       assert.equal((r3 as { engineId: string }).engineId, 'revise');
+ 
+       // collect revise
+-      const r3c = await walker.walk();
++      const r3c = await spider.crawl();
+       assert.equal(r3c?.action, 'engine-completed');
+       assert.equal((r3c as { engineId: string }).engineId, 'revise');
+ 
+       // seal runs (stub) — last engine → rig completes
+-      const r4 = await walker.walk();
++      const r4 = await spider.crawl();
+       assert.equal(r4?.action, 'rig-completed');
+       assert.equal((r4 as { outcome: string }).outcome, 'completed');
+ 
+@@ -1027,9 +1027,9 @@ describe('Walker', () => {
+ 
+   describe('review engine — Animator integration', () => {
+     it('calls animator.summon() with reviewer role, draft cwd, and prompt containing spec', async () => {
+-      const { clerk, walker, stacks, summonCalls } = fix;
++      const { clerk, spider, stacks, summonCalls } = fix;
+       const writ = await postWrit(clerk, 'Review integration test');
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -1042,7 +1042,7 @@ describe('Walker', () => {
+         }),
+       });
+ 
+-      const result = await walker.walk(); // launch review
++      const result = await spider.crawl(); // launch review
+       assert.equal(result?.action, 'engine-started');
+       assert.equal((result as { engineId: string }).engineId, 'review');
+ 
+@@ -1058,9 +1058,9 @@ describe('Walker', () => {
+     });
+ 
+     it('collects ReviewYields: parses PASS from session.output', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -1085,7 +1085,7 @@ describe('Walker', () => {
+         metadata: { mechanicalChecks: [] },
+       });
+ 
+-      const result = await walker.walk(); // collect review
++      const result = await spider.crawl(); // collect review
+       assert.equal(result?.action, 'engine-completed');
+       assert.equal((result as { engineId: string }).engineId, 'review');
+ 
+@@ -1099,9 +1099,9 @@ describe('Walker', () => {
+     });
+ 
+     it('collects ReviewYields: passed is false when output contains FAIL', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -1125,7 +1125,7 @@ describe('Walker', () => {
+         metadata: { mechanicalChecks: [] },
+       });
+ 
+-      await walker.walk(); // collect review
++      await spider.crawl(); // collect review
+       const [updated] = await book.list();
+       const reviewEngine = updated.engines.find((e: EngineInstance) => e.id === 'review');
+       const yields = reviewEngine?.yields as ReviewYields;
+@@ -1133,9 +1133,9 @@ describe('Walker', () => {
+     });
+ 
+     it('collects ReviewYields: mechanicalChecks retrieved from session.metadata', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -1163,7 +1163,7 @@ describe('Walker', () => {
+         metadata: { mechanicalChecks: checks },
+       });
+ 
+-      await walker.walk(); // collect review
++      await spider.crawl(); // collect review
+       const [updated] = await book.list();
+       const reviewEngine = updated.engines.find((e: EngineInstance) => e.id === 'review');
+       const yields = reviewEngine?.yields as ReviewYields;
+@@ -1182,7 +1182,7 @@ describe('Walker', () => {
+ 
+     beforeEach(() => {
+       mechFix = buildFixture({
+-        walker: {
++        spider: {
+           buildCommand: 'echo "build output"',
+           testCommand: 'exit 1',
+         },
+@@ -1194,9 +1194,9 @@ describe('Walker', () => {
+     });
+ 
+     it('executes build and test commands; captures pass/fail from exit code', async () => {
+-      const { clerk, walker, stacks, summonCalls } = mechFix;
++      const { clerk, spider, stacks, summonCalls } = mechFix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -1208,7 +1208,7 @@ describe('Walker', () => {
+         }),
+       });
+ 
+-      const result = await walker.walk(); // launch review (runs checks first)
++      const result = await spider.crawl(); // launch review (runs checks first)
+       assert.equal(result?.action, 'engine-started');
+ 
+       assert.equal(summonCalls.length, 1);
+@@ -1227,10 +1227,10 @@ describe('Walker', () => {
+     });
+ 
+     it('skips checks gracefully when no buildCommand or testCommand configured', async () => {
+-      const noCmdFix = buildFixture({ walker: {} }); // no buildCommand/testCommand
+-      const { clerk, walker: w, stacks: s, summonCalls: sc } = noCmdFix;
++      const noCmdFix = buildFixture({ spider: {} }); // no buildCommand/testCommand
++      const { clerk, spider: w, stacks: s, summonCalls: sc } = noCmdFix;
+       await postWrit(clerk);
+-      await w.walk(); // spawn
++      await w.crawl(); // spawn
+ 
+       const book = rigsBook(s);
+       const [rig] = await book.list();
+@@ -1242,18 +1242,18 @@ describe('Walker', () => {
+         }),
+       });
+ 
+-      await w.walk(); // launch review
++      await w.crawl(); // launch review
+       assert.deepEqual(sc[0].metadata?.mechanicalChecks, [], 'no checks when commands not configured');
+       clearGuild();
+     });
+ 
+     it('truncates check output to 4KB', async () => {
+       const bigFix = buildFixture({
+-        walker: { buildCommand: 'python3 -c "print(\'x\' * 8192)"' },
++        spider: { buildCommand: 'python3 -c "print(\'x\' * 8192)"' },
+       });
+-      const { clerk, walker: w, stacks: s, summonCalls: sc } = bigFix;
++      const { clerk, spider: w, stacks: s, summonCalls: sc } = bigFix;
+       await postWrit(clerk);
+-      await w.walk(); // spawn
++      await w.crawl(); // spawn
+ 
+       const book = rigsBook(s);
+       const [rig] = await book.list();
+@@ -1265,7 +1265,7 @@ describe('Walker', () => {
+         }),
+       });
+ 
+-      await w.walk(); // launch review (runs check with big output)
++      await w.crawl(); // launch review (runs check with big output)
+       const checks = sc[0].metadata?.mechanicalChecks as MechanicalCheck[];
+       assert.ok(checks[0].output.length <= 4096, `output should be truncated to 4KB, got ${checks[0].output.length} chars`);
+       clearGuild();
+@@ -1276,9 +1276,9 @@ describe('Walker', () => {
+ 
+   describe('revise engine — Animator integration', () => {
+     it('calls animator.summon() with role from givens, draft cwd, and writ env', async () => {
+-      const { clerk, walker, stacks, summonCalls } = fix;
++      const { clerk, spider, stacks, summonCalls } = fix;
+       const writ = await postWrit(clerk, 'Revise integration test');
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -1292,7 +1292,7 @@ describe('Walker', () => {
+         }),
+       });
+ 
+-      const result = await walker.walk(); // launch revise
++      const result = await spider.crawl(); // launch revise
+       assert.equal(result?.action, 'engine-started');
+       assert.equal((result as { engineId: string }).engineId, 'revise');
+ 
+@@ -1304,9 +1304,9 @@ describe('Walker', () => {
+     });
+ 
+     it('revision prompt includes pass branch when review passed', async () => {
+-      const { clerk, walker, stacks, summonCalls } = fix;
++      const { clerk, spider, stacks, summonCalls } = fix;
+       await postWrit(clerk, 'Pass branch test');
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -1325,7 +1325,7 @@ describe('Walker', () => {
+         }),
+       });
+ 
+-      await walker.walk(); // launch revise
++      await spider.crawl(); // launch revise
+       const prompt = summonCalls[0].prompt;
+       assert.ok(prompt.includes('## Review Result: PASS'), 'prompt includes PASS result');
+       assert.ok(prompt.includes('The review passed'), 'prompt includes pass branch instruction');
+@@ -1333,9 +1333,9 @@ describe('Walker', () => {
+     });
+ 
+     it('revision prompt includes fail branch when review failed', async () => {
+-      const { clerk, walker, stacks, summonCalls } = fix;
++      const { clerk, spider, stacks, summonCalls } = fix;
+       await postWrit(clerk, 'Fail branch test');
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -1354,7 +1354,7 @@ describe('Walker', () => {
+         }),
+       });
+ 
+-      await walker.walk(); // launch revise
++      await spider.crawl(); // launch revise
+       const prompt = summonCalls[0].prompt;
+       assert.ok(prompt.includes('## Review Result: FAIL'), 'prompt includes FAIL result');
+       assert.ok(
+@@ -1365,9 +1365,9 @@ describe('Walker', () => {
+     });
+ 
+     it('ReviseYields: sessionId and sessionStatus collected from session record', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -1391,7 +1391,7 @@ describe('Walker', () => {
+         provider: 'test',
+       });
+ 
+-      const result = await walker.walk(); // collect revise
++      const result = await spider.crawl(); // collect revise
+       assert.equal(result?.action, 'engine-completed');
+       assert.equal((result as { engineId: string }).engineId, 'revise');
+ 
+@@ -1407,14 +1407,14 @@ describe('Walker', () => {
+ 
+   describe('walk() returns null', () => {
+     it('returns null when no rigs exist and no ready writs', async () => {
+-      const result = await fix.walker.walk();
++      const result = await fix.spider.crawl();
+       assert.equal(result, null);
+     });
+ 
+     it('returns null when the rig has a running engine with no terminal session', async () => {
+-      const { clerk, walker, stacks } = fix;
++      const { clerk, spider, stacks } = fix;
+       await postWrit(clerk);
+-      await walker.walk(); // spawn
++      await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+       const [rig] = await book.list();
+@@ -1439,7 +1439,7 @@ describe('Walker', () => {
+         provider: 'test',
+       });
+ 
+-      const result = await walker.walk();
++      const result = await spider.crawl();
+       assert.equal(result, null);
+     });
+   });
+diff --git a/packages/plugins/walker/src/walker.ts b/packages/plugins/spider/src/spider.ts
+similarity index 92%
+rename from packages/plugins/walker/src/walker.ts
+rename to packages/plugins/spider/src/spider.ts
+index 62c2a9b..00badc3 100644
+--- a/packages/plugins/walker/src/walker.ts
++++ b/packages/plugins/spider/src/spider.ts
+@@ -1,8 +1,8 @@
+ /**
+- * The Walker — rig execution engine apparatus.
++ * The Spider — rig execution engine apparatus.
+  *
+- * The Walker drives writ-to-completion by managing rigs: ordered pipelines
+- * of engine instances. Each walk() call performs one unit of work:
++ * The Spider drives writ-to-completion by managing rigs: ordered pipelines
++ * of engine instances. Each crawl() call performs one unit of work:
+  *
+  *   collect > run > spawn   (priority order)
+  *
+@@ -13,7 +13,7 @@
+  * CDC on the rigs book (Phase 1 cascade) transitions the associated writ
+  * when a rig reaches a terminal state (completed or failed).
+  *
+- * See: docs/architecture/apparatus/walker.md
++ * See: docs/architecture/apparatus/spider.md
+  */
+ 
+ import type { Plugin, StartupContext } from '@shardworks/nexus-core';
+@@ -26,9 +26,9 @@ import type { SessionDoc } from '@shardworks/animator-apparatus';
+ import type {
+   RigDoc,
+   EngineInstance,
+-  WalkerApi,
+-  WalkResult,
+-  WalkerConfig,
++  SpiderApi,
++  CrawlResult,
++  SpiderConfig,
+ } from './types.ts';
+ 
+ import {
+@@ -39,7 +39,7 @@ import {
+   sealEngine,
+ } from './engines/index.ts';
+ 
+-import { walkTool, walkContinualTool } from './tools/index.ts';
++import { crawlTool, crawlContinualTool } from './tools/index.ts';
+ 
+ // ── Helpers ────────────────────────────────────────────────────────────
+ 
+@@ -91,7 +91,7 @@ function findRunnableEngine(rig: RigDoc): EngineInstance | null {
+  * Each engine receives only the givens it needs.
+  * Upstream yields arrive via context.upstream at run time.
+  */
+-function buildStaticEngines(writ: WritDoc, config: WalkerConfig): EngineInstance[] {
++function buildStaticEngines(writ: WritDoc, config: SpiderConfig): EngineInstance[] {
+   const role = config.role ?? 'artificer';
+   const reviewGivens: Record<string, unknown> = {
+     writ,
+@@ -111,15 +111,15 @@ function buildStaticEngines(writ: WritDoc, config: WalkerConfig): EngineInstance
+ 
+ // ── Apparatus factory ──────────────────────────────────────────────────
+ 
+-export function createWalker(): Plugin {
++export function createSpider(): Plugin {
+   let rigsBook: Book<RigDoc>;
+   let sessionsBook: ReadOnlyBook<SessionDoc>;
+   let writsBook: ReadOnlyBook<WritDoc>;
+   let clerk: ClerkApi;
+   let fabricator: FabricatorApi;
+-  let walkerConfig: WalkerConfig = {};
++  let spiderConfig: SpiderConfig = {};
+ 
+-  // ── Internal walk operations ─────────────────────────────────────
++  // ── Internal crawl operations ─────────────────────────────────────
+ 
+   /**
+    * Mark an engine failed and propagate failure to the rig (same update).
+@@ -148,7 +148,7 @@ export function createWalker(): Plugin {
+    * reached a terminal state. Populate yields and advance the engine
+    * (and possibly the rig) to completed or failed.
+    */
+-  async function tryCollect(): Promise<WalkResult | null> {
++  async function tryCollect(): Promise<CrawlResult | null> {
+     const runningRigs = await rigsBook.find({ where: [['status', '=', 'running']] });
+     for (const rig of runningRigs) {
+       for (const engine of rig.engines) {
+@@ -217,7 +217,7 @@ export function createWalker(): Plugin {
+    *   check for rig completion.
+    * - Quick ('launched') → store sessionId, mark engine running.
+    */
+-  async function tryRun(): Promise<WalkResult | null> {
++  async function tryRun(): Promise<CrawlResult | null> {
+     const runningRigs = await rigsBook.find({ where: [['status', '=', 'running']] });
+     for (const rig of runningRigs) {
+       const pending = findRunnableEngine(rig);
+@@ -297,7 +297,7 @@ export function createWalker(): Plugin {
+    * Find the oldest ready writ with no existing rig. Create a rig and
+    * transition the writ to active so the Clerk tracks it as in-progress.
+    */
+-  async function trySpawn(): Promise<WalkResult | null> {
++  async function trySpawn(): Promise<CrawlResult | null> {
+     // Find ready writs ordered by creation time (oldest first)
+     const readyWrits = await writsBook.find({
+       where: [['status', '=', 'ready']],
+@@ -314,7 +314,7 @@ export function createWalker(): Plugin {
+       if (existing.length > 0) continue;
+ 
+       const rigId = generateId('rig', 4);
+-      const engines = buildStaticEngines(writ, walkerConfig);
++      const engines = buildStaticEngines(writ, spiderConfig);
+ 
+       const rig: RigDoc = {
+         id: rigId,
+@@ -331,7 +331,7 @@ export function createWalker(): Plugin {
+       } catch (err) {
+         // Only swallow state-transition conflicts (writ already moved past 'ready')
+         if (err instanceof Error && err.message.includes('transition')) {
+-          // Race condition — another walker got here first. The rig is already created,
++          // Race condition — another spider got here first. The rig is already created,
+           // so we continue. The writ is already active or beyond.
+         } else {
+           throw err;
+@@ -344,10 +344,10 @@ export function createWalker(): Plugin {
+     return null;
+   }
+ 
+-  // ── WalkerApi ─────────────────────────────────────────────────────
++  // ── SpiderApi ─────────────────────────────────────────────────────
+ 
+-  const api: WalkerApi = {
+-    async walk(): Promise<WalkResult | null> {
++  const api: SpiderApi = {
++    async crawl(): Promise<CrawlResult | null> {
+       const collected = await tryCollect();
+       if (collected) return collected;
+ 
+@@ -380,27 +380,27 @@ export function createWalker(): Plugin {
+           revise:    reviseEngine,
+           seal:      sealEngine,
+         },
+-        tools: [walkTool, walkContinualTool],
++        tools: [crawlTool, crawlContinualTool],
+       },
+ 
+       provides: api,
+ 
+       start(_ctx: StartupContext): void {
+         const g = guild();
+-        walkerConfig = g.guildConfig().walker ?? {};
++        spiderConfig = g.guildConfig().spider ?? {};
+ 
+         const stacks = g.apparatus<StacksApi>('stacks');
+         clerk = g.apparatus<ClerkApi>('clerk');
+         fabricator = g.apparatus<FabricatorApi>('fabricator');
+ 
+-        rigsBook = stacks.book<RigDoc>('walker', 'rigs');
++        rigsBook = stacks.book<RigDoc>('spider', 'rigs');
+         sessionsBook = stacks.readBook<SessionDoc>('animator', 'sessions');
+         writsBook = stacks.readBook<WritDoc>('clerk', 'writs');
+ 
+         // CDC — Phase 1 cascade on rigs book.
+         // When a rig reaches a terminal state, transition the associated writ.
+         stacks.watch<RigDoc>(
+-          'walker',
++          'spider',
+           'rigs',
+           async (event) => {
+             if (event.type !== 'update') return;
+diff --git a/packages/plugins/walker/src/tools/walk-continual.ts b/packages/plugins/spider/src/tools/crawl-continual.ts
+similarity index 64%
+rename from packages/plugins/walker/src/tools/walk-continual.ts
+rename to packages/plugins/spider/src/tools/crawl-continual.ts
+index 4437139..54b7605 100644
+--- a/packages/plugins/walker/src/tools/walk-continual.ts
++++ b/packages/plugins/spider/src/tools/crawl-continual.ts
+@@ -1,20 +1,20 @@
+ /**
+- * walkContinual tool — runs the walk loop continuously.
++ * crawlContinual tool — runs the crawl loop continuously.
+  *
+- * Polls walk() on a configurable interval until stopped or no remaining
++ * Polls crawl() on a configurable interval until stopped or no remaining
+  * work exists for the configured number of consecutive idle cycles.
+  */
+ 
+ import { z } from 'zod';
+ import { guild } from '@shardworks/nexus-core';
+ import { tool } from '@shardworks/tools-apparatus';
+-import type { WalkerApi, WalkerConfig } from '../types.ts';
++import type { SpiderApi, SpiderConfig } from '../types.ts';
+ 
+ export default tool({
+-  name: 'walkContinual',
+-  description: 'Run the Walker loop continuously until idle',
++  name: 'crawlContinual',
++  description: "Run the Spider's crawl loop continuously until idle",
+   instructions:
+-    'Polls walk() in a loop, sleeping between steps when idle. ' +
++    'Polls crawl() in a loop, sleeping between steps when idle. ' +
+     'Stops when the configured number of consecutive idle cycles is reached. ' +
+     'Returns a summary of all actions taken.',
+   params: {
+@@ -23,7 +23,7 @@ export default tool({
+       .optional()
+       .default(3)
+       .describe(
+-        'Number of consecutive idle walk() calls before stopping (default: 3)',
++        'Number of consecutive idle crawl() calls before stopping (default: 3)',
+       ),
+     pollIntervalMs: z
+       .number()
+@@ -32,11 +32,11 @@ export default tool({
+         'Override the configured poll interval in milliseconds',
+       ),
+   },
+-  permission: 'walker:write',
++  permission: 'spider:write',
+   handler: async (params) => {
+     const g = guild();
+-    const walker = g.apparatus<WalkerApi>('walker');
+-    const config = g.guildConfig().walker ?? {} as WalkerConfig;
++    const spider = g.apparatus<SpiderApi>('spider');
++    const config = g.guildConfig().spider ?? {} as SpiderConfig;
+     const intervalMs = params.pollIntervalMs ?? config.pollIntervalMs ?? 5000;
+     const maxIdle = params.maxIdleCycles;
+ 
+@@ -44,11 +44,11 @@ export default tool({
+     let idleCount = 0;
+ 
+     while (idleCount < maxIdle) {
+-      let result: Awaited<ReturnType<typeof walker.walk>>;
++      let result: Awaited<ReturnType<typeof spider.crawl>>;
+       try {
+-        result = await walker.walk();
++        result = await spider.crawl();
+       } catch (err) {
+-        console.error('[walkContinual] walk() error:', err instanceof Error ? err.message : String(err));
++        console.error('[crawlContinual] crawl() error:', err instanceof Error ? err.message : String(err));
+         idleCount++;
+         if (idleCount < maxIdle) {
+           await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+diff --git a/packages/plugins/spider/src/tools/crawl.ts b/packages/plugins/spider/src/tools/crawl.ts
+new file mode 100644
+index 0000000..4354d8d
+--- /dev/null
++++ b/packages/plugins/spider/src/tools/crawl.ts
+@@ -0,0 +1,25 @@
++/**
++ * crawl tool — executes a single step of the crawl loop.
++ *
++ * Returns the CrawlResult or null (idle) from one crawl() call.
++ * Useful for manual step-through or testing.
++ */
++
++import { guild } from '@shardworks/nexus-core';
++import { tool } from '@shardworks/tools-apparatus';
++import type { SpiderApi } from '../types.ts';
++
++export default tool({
++  name: 'crawl',
++  description: "Execute one step of the Spider's crawl loop",
++  instructions:
++    'Runs a single crawl() step: collect a pending session result, run the next ' +
++    'ready engine, or spawn a rig for a ready writ — in that priority order. ' +
++    'Returns the action taken, or null if there is nothing to do.',
++  params: {},
++  permission: 'spider:write',
++  handler: async () => {
++    const spider = guild().apparatus<SpiderApi>('spider');
++    return spider.crawl();
++  },
++});
+diff --git a/packages/plugins/spider/src/tools/index.ts b/packages/plugins/spider/src/tools/index.ts
+new file mode 100644
+index 0000000..b497c1b
+--- /dev/null
++++ b/packages/plugins/spider/src/tools/index.ts
+@@ -0,0 +1,2 @@
++export { default as crawlTool } from './crawl.ts';
++export { default as crawlContinualTool } from './crawl-continual.ts';
+diff --git a/packages/plugins/walker/src/types.ts b/packages/plugins/spider/src/types.ts
+similarity index 81%
+rename from packages/plugins/walker/src/types.ts
+rename to packages/plugins/spider/src/types.ts
+index 31dad0f..c04c1e4 100644
+--- a/packages/plugins/walker/src/types.ts
++++ b/packages/plugins/spider/src/types.ts
+@@ -1,7 +1,7 @@
+ /**
+- * The Walker — public types.
++ * The Spider — public types.
+  *
+- * Rig and engine data model, WalkResult, WalkerApi, and configuration.
++ * Rig and engine data model, CrawlResult, SpiderApi, and configuration.
+  * Engine yield shapes (DraftYields, SealYields) live here too so downstream
+  * packages can import them without depending on the engine implementation files.
+  */
+@@ -19,7 +19,7 @@ export type EngineStatus = 'pending' | 'running' | 'completed' | 'failed';
+  * For the static pipeline it matches `designId`.
+  *
+  * `givensSpec` holds literal values set at spawn time (writ, role, commands).
+- * The Walker assembles `givens` from this directly; upstream yields arrive
++ * The Spider assembles `givens` from this directly; upstream yields arrive
+  * via `context.upstream` as the escape hatch.
+  */
+ export interface EngineInstance {
+@@ -52,8 +52,8 @@ export type RigStatus = 'running' | 'completed' | 'failed';
+ /**
+  * A rig — the execution context for a single writ.
+  *
+- * Stored in The Stacks (`walker/rigs` book). The `engines` array is the
+- * ordered pipeline of engine instances. The Walker updates this document
++ * Stored in The Stacks (`spider/rigs` book). The `engines` array is the
++ * ordered pipeline of engine instances. The Spider updates this document
+  * in-place as engines run and complete.
+  */
+ export interface RigDoc {
+@@ -69,53 +69,53 @@ export interface RigDoc {
+   engines: EngineInstance[];
+ }
+ 
+-// ── WalkResult ────────────────────────────────────────────────────────
++// ── CrawlResult ────────────────────────────────────────────────────────
+ 
+ /**
+- * The result of a single walk() call.
++ * The result of a single crawl() call.
+  *
+  * Four variants, ordered by priority:
+  * - 'engine-completed' — an engine finished (collected or ran inline); rig still running
+  * - 'engine-started'   — launched a quick engine's session
+  * - 'rig-spawned'      — created a new rig for a ready writ
+- * - 'rig-completed'    — the walk step caused a rig to reach a terminal state
++ * - 'rig-completed'    — the crawl step caused a rig to reach a terminal state
+  *
+  * null means no work was available.
+  */
+-export type WalkResult =
++export type CrawlResult =
+   | { action: 'engine-completed'; rigId: string; engineId: string }
+   | { action: 'engine-started'; rigId: string; engineId: string }
+   | { action: 'rig-spawned'; rigId: string; writId: string }
+   | { action: 'rig-completed'; rigId: string; writId: string; outcome: 'completed' | 'failed' };
+ 
+-// ── WalkerApi ─────────────────────────────────────────────────────────
++// ── SpiderApi ─────────────────────────────────────────────────────────
+ 
+ /**
+- * The Walker's public API — retrieved via guild().apparatus<WalkerApi>('walker').
++ * The Spider's public API — retrieved via guild().apparatus<SpiderApi>('spider').
+  */
+-export interface WalkerApi {
++export interface SpiderApi {
+   /**
+-   * Execute one step of the walk loop.
++   * Execute one step of the crawl loop.
+    *
+    * Priority ordering: collect > run > spawn.
+    * Returns null when no work is available.
+    */
+-  walk(): Promise<WalkResult | null>;
++  crawl(): Promise<CrawlResult | null>;
+ }
+ 
+ // ── Configuration ─────────────────────────────────────────────────────
+ 
+ /**
+- * Walker apparatus configuration — lives under the `walker` key in guild.json.
++ * Spider apparatus configuration — lives under the `spider` key in guild.json.
+  */
+-export interface WalkerConfig {
++export interface SpiderConfig {
+   /**
+    * Role to summon for quick engine sessions.
+    * Default: 'artificer'.
+    */
+   role?: string;
+   /**
+-   * Polling interval for walkContinual tool (milliseconds).
++   * Polling interval for crawlContinual tool (milliseconds).
+    * Default: 5000.
+    */
+   pollIntervalMs?: number;
+@@ -133,7 +133,7 @@ export interface WalkerConfig {
+ 
+ /**
+  * Yields from the `draft` clockwork engine.
+- * The Walker stores these in the engine instance and passes them
++ * The Spider stores these in the engine instance and passes them
+  * to downstream engines via context.upstream['draft'].
+  */
+ export interface DraftYields {
+@@ -165,7 +165,7 @@ export interface SealYields {
+ 
+ /**
+  * Yields from the `implement` quick engine.
+- * Set by the Walker's collect step when the Animator session completes.
++ * Set by the Spider's collect step when the Animator session completes.
+  */
+ export interface ImplementYields {
+   /** The Animator session id. */
+@@ -191,7 +191,7 @@ export interface MechanicalCheck {
+ 
+ /**
+  * Yields from the `review` quick engine.
+- * Assembled by the Walker's collect step from session.output and session.metadata.
++ * Assembled by the Spider's collect step from session.output and session.metadata.
+  */
+ export interface ReviewYields {
+   /** The Animator session id. */
+@@ -206,7 +206,7 @@ export interface ReviewYields {
+ 
+ /**
+  * Yields from the `revise` quick engine.
+- * Set by the Walker's collect step when the Animator session completes.
++ * Set by the Spider's collect step when the Animator session completes.
+  */
+ export interface ReviseYields {
+   /** The Animator session id. */
+@@ -215,9 +215,9 @@ export interface ReviseYields {
+   sessionStatus: 'completed' | 'failed';
+ }
+ 
+-// Augment GuildConfig so `guild().guildConfig().walker` is typed.
++// Augment GuildConfig so `guild().guildConfig().spider` is typed.
+ declare module '@shardworks/nexus-core' {
+   interface GuildConfig {
+-    walker?: WalkerConfig;
++    spider?: SpiderConfig;
+   }
+ }
+diff --git a/packages/plugins/walker/tsconfig.json b/packages/plugins/spider/tsconfig.json
+similarity index 100%
+rename from packages/plugins/walker/tsconfig.json
+rename to packages/plugins/spider/tsconfig.json
+diff --git a/packages/plugins/walker/src/tools/index.ts b/packages/plugins/walker/src/tools/index.ts
+deleted file mode 100644
+index a54f99c..0000000
+--- a/packages/plugins/walker/src/tools/index.ts
++++ /dev/null
+@@ -1,2 +0,0 @@
+-export { default as walkTool } from './walk.ts';
+-export { default as walkContinualTool } from './walk-continual.ts';
+diff --git a/packages/plugins/walker/src/tools/walk.ts b/packages/plugins/walker/src/tools/walk.ts
+deleted file mode 100644
+index 430cf95..0000000
+--- a/packages/plugins/walker/src/tools/walk.ts
++++ /dev/null
+@@ -1,25 +0,0 @@
+-/**
+- * walk tool — executes a single step of the walk loop.
+- *
+- * Returns the WalkResult or null (idle) from one walk() call.
+- * Useful for manual step-through or testing.
+- */
+-
+-import { guild } from '@shardworks/nexus-core';
+-import { tool } from '@shardworks/tools-apparatus';
+-import type { WalkerApi } from '../types.ts';
+-
+-export default tool({
+-  name: 'walk',
+-  description: 'Execute one step of the Walker loop',
+-  instructions:
+-    'Runs a single walk() step: collect a pending session result, run the next ' +
+-    'ready engine, or spawn a rig for a ready writ — in that priority order. ' +
+-    'Returns the action taken, or null if there is nothing to do.',
+-  params: {},
+-  permission: 'walker:write',
+-  handler: async () => {
+-    const walker = guild().apparatus<WalkerApi>('walker');
+-    return walker.walk();
+-  },
+-});
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 21c0c1d..d8b8383 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -236,36 +236,7 @@ importers:
+         specifier: 25.5.0
+         version: 25.5.0
+ 
+-  packages/plugins/stacks:
+-    dependencies:
+-      '@shardworks/nexus-core':
+-        specifier: workspace:*
+-        version: link:../../framework/core
+-      better-sqlite3:
+-        specifier: 12.8.0
+-        version: 12.8.0
+-    devDependencies:
+-      '@types/better-sqlite3':
+-        specifier: 7.6.13
+-        version: 7.6.13
+-      '@types/node':
+-        specifier: 25.5.0
+-        version: 25.5.0
+-
+-  packages/plugins/tools:
+-    dependencies:
+-      '@shardworks/nexus-core':
+-        specifier: workspace:*
+-        version: link:../../framework/core
+-      zod:
+-        specifier: 4.3.6
+-        version: 4.3.6
+-    devDependencies:
+-      '@types/node':
+-        specifier: 25.5.0
+-        version: 25.5.0
+-
+-  packages/plugins/walker:
++  packages/plugins/spider:
+     dependencies:
+       '@shardworks/animator-apparatus':
+         specifier: workspace:*
+@@ -296,6 +267,35 @@ importers:
+         specifier: 25.5.0
+         version: 25.5.0
+ 
++  packages/plugins/stacks:
++    dependencies:
++      '@shardworks/nexus-core':
++        specifier: workspace:*
++        version: link:../../framework/core
++      better-sqlite3:
++        specifier: 12.8.0
++        version: 12.8.0
++    devDependencies:
++      '@types/better-sqlite3':
++        specifier: 7.6.13
++        version: 7.6.13
++      '@types/node':
++        specifier: 25.5.0
++        version: 25.5.0
++
++  packages/plugins/tools:
++    dependencies:
++      '@shardworks/nexus-core':
++        specifier: workspace:*
++        version: link:../../framework/core
++      zod:
++        specifier: 4.3.6
++        version: 4.3.6
++    devDependencies:
++      '@types/node':
++        specifier: 25.5.0
++        version: 25.5.0
++
+ packages:
+ 
+   '@hono/node-server@1.19.11':

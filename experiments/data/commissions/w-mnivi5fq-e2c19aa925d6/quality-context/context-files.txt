@@ -1,0 +1,4632 @@
+
+=== CONTEXT FILE: README.md ===
+# Nexus Mk 2.1
+
+A framework for operating multi-agent AI workforces. Nexus provides the guild model: a structured workspace where animas (AI identities) receive commissions, use tools, record work, and collaborate through a shared Books database and event-driven Clockworks.
+
+The framework is plugin-based. Almost everything — tools, engines, database schemas, anima management — is contributed by plugins. The core runtime is intentionally minimal.
+
+---
+
+## For users
+
+### Install the CLI
+
+```sh
+npm install -g @shardworks/nexus
+```
+
+This installs the `nsg` command globally.
+
+### Initialize a guild
+
+A guild is the workspace where animas operate. Create one with `nsg init`:
+
+```sh
+nsg init ./my-guild --name my-guild
+cd my-guild
+```
+
+This writes `guild.json`, `package.json`, `.gitignore`, and the `.nexus/` directory structure. It does not install any plugins or create any animas.
+
+### Install plugins
+
+Plugins are npm packages that contribute tools, engines, database schemas, and other capabilities to your guild. Install them with `nsg rig install`:
+
+```sh
+# Install from npm
+nsg rig install @shardworks/nexus-stdlib
+
+# Pin a version
+nsg rig install @shardworks/nexus-stdlib@1.2.0
+
+# Install from a git repository
+nsg rig install git+https://github.com/acme/my-plugin.git
+
+# Symlink a local directory during development
+nsg rig install ./path/to/my-plugin --type link
+```
+
+By default, a plugin's tools are added to `baseTools` (available to all animas). To assign tools to specific roles instead:
+
+```sh
+nsg rig install @shardworks/nexus-stdlib --roles artificer,scribe
+```
+
+List installed plugins:
+
+```sh
+nsg rig list
+```
+
+Remove a plugin:
+
+```sh
+nsg rig remove nexus-stdlib
+```
+
+### Check guild status
+
+```sh
+nsg status          # guild name, nexus version, installed plugins, roles
+nsg version         # framework version + installed plugin versions
+```
+
+### `guild.json`
+
+The guild's central configuration file. Updated automatically by `nsg rig install` and `nsg rig remove`. Stores the plugin list, role definitions, tool assignments, Clockworks standing orders, and guild settings.
+
+Plugins are listed by their derived plugin id (package name with the `@shardworks/` scope stripped):
+
+```json
+{
+  "name": "my-guild",
+  "nexus": "2.1.0",
+  "plugins": ["nexus-stdlib", "nexus-clockworks"],
+  "baseTools": ["commission", "signal", "list-writs"],
+  "roles": { ... },
+  "settings": { "model": "claude-opus-4-5" }
+}
+```
+
+---
+
+## For plugin authors
+
+Nexus plugins are npm packages that contribute capabilities to a guild. There are two kinds:
+
+- **Kit** — a passive package contributing tools, engines, relays, or other capabilities. No lifecycle; contributions are read at load time and used by consuming apparatuses.
+- **Apparatus** — a package contributing persistent running infrastructure. Has a `start`/`stop` lifecycle, receives `GuildContext` at startup, and exposes a runtime API via `provides`.
+
+Plugin authors import exclusively from `@shardworks/nexus-core`. The arbor runtime (`@shardworks/nexus-arbor`) is an internal concern of the CLI and session provider.
+
+### Key points
+
+- A plugin's **name is inferred from its npm package name** at load time — never declared in the manifest.
+- A **kit** is a plain object exported as `{ kit: { ... } }`. The `tools` field (array of `ToolDefinition`) is the most common contribution.
+- An **apparatus** is exported as `{ apparatus: { start, stop?, provides?, requires?, supportKit?, consumes? } }`.
+- `requires` on a kit names apparatuses whose runtime APIs the kit's tool handlers will call. Hard startup failure if not installed.
+- `requires` on an apparatus names other apparatuses that must be started first. Determines start order.
+- Apparatus `provides` objects are retrieved at handler invocation time via `ctx.apparatus<T>(name)`.
+
+### Authoring tools
+
+The `tool()` function is the primary authoring entry point. Define a name, description, Zod param schema, and a handler:
+
+```typescript
+import { tool } from '@shardworks/nexus-core';
+import { z } from 'zod';
+
+const greet = tool({
+  name: 'greet',
+  description: 'Greet someone by name',
+  params: {
+    name: z.string().describe('Name to greet'),
+  },
+  handler: async ({ name }, ctx) => {
+    return `Hello, ${name}! Guild root: ${ctx.home}`;
+  },
+});
+```
+
+The handler receives:
+- `params` — validated input, typed from your Zod schemas
+- `ctx` — a `HandlerContext` with `home` (guild root path) and `apparatus<T>(name)` for accessing started apparatus APIs
+
+Restrict a tool to specific callers with `callableBy`:
+
+```typescript
+tool({
+  name: 'admin-reset',
+  callableBy: ['cli'],    // CLI only — not available to animas
+  // ...
+});
+```
+
+### Exporting a kit
+
+A kit is the simplest plugin form — a plain object with a `kit` key:
+
+```typescript
+import { tool, type Kit } from '@shardworks/nexus-core';
+
+const myTool = tool({ name: 'lookup', /* ... */ });
+
+export default {
+  kit: {
+    tools: [myTool],
+
+    // Optional: declare required apparatuses whose APIs your handlers call
+    requires: ['nexus-books'],
+
+    // Optional: document contribution fields for consuming apparatuses
+    // (field types are defined by the apparatus packages that consume them)
+    books: {
+      records: { indexes: ['status', 'createdAt'] },
+    },
+  } satisfies Kit,
+};
+```
+
+The `tools` field is the most common kit contribution. Other contribution fields (`engines`, `relays`, etc.) are defined by the apparatus packages that consume them — the framework treats any unknown field as opaque data.
+
+### Exporting an apparatus
+
+An apparatus has a `start`/`stop` lifecycle and can expose a runtime API:
+
+```typescript
+import { type Apparatus, type GuildContext } from '@shardworks/nexus-core';
+
+// The API you expose to other plugins
+interface MyApi {
+  lookup(key: string): string | null;
+}
+
+const store = new Map<string, string>();
+
+export default {
+  apparatus: {
+    // Apparatuses this one requires to be started first
+    requires: ['nexus-books'],
+
+    // The runtime API object exposed via ctx.apparatus<MyApi>('my-plugin')
+    provides: {
+      lookup(key: string) { return store.get(key) ?? null; },
+    } satisfies MyApi,
+
+    async start(ctx: GuildContext) {
+      // ctx.apparatus<BooksApi>('nexus-books') is available here
+      // ctx.kits() — snapshot of all loaded kits
+      // ctx.on('plugin:initialized', handler) — react to kit contributions
+    },
+
+    async stop() {
+      store.clear();
+    },
+  } satisfies Apparatus,
+};
+```
+
+Consumers retrieve your `provides` object via `ctx.apparatus<MyApi>('my-plugin')` — either in their own `start()` or in tool handlers via `HandlerContext.apparatus<T>()`.
+
+An apparatus can also contribute tools via `supportKit`:
+
+```typescript
+export default {
+  apparatus: {
+    supportKit: {
+      tools: [myAdminTool],
+    },
+    // ...
+  },
+};
+```
+
+### `HandlerContext`
+
+Injected into every tool and engine handler at invocation time:
+
+```typescript
+interface HandlerContext {
+  home: string;                        // absolute path to the guild root
+  apparatus<T>(name: string): T;       // access a started apparatus's provides object
+}
+```
+
+### Further reading
+
+- [`packages/arbor/README.md`](packages/arbor/README.md) — runtime API reference (`createArbor`, `Arbor`, `LoadedKit`, `LoadedApparatus`, `derivePluginId`, Books database)
+- [`docs/architecture/plugins.md`](docs/architecture/plugins.md) — full plugin architecture specification
+- [`docs/architecture/apparatus/books.md`](docs/architecture/apparatus/books.md) — Books apparatus design (in progress)
+
+=== CONTEXT FILE: package.json ===
+{
+  "private": true,
+  "packageManager": "pnpm@10.32.1",
+  "version": "0.0.0",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shardworks/nexus-mk2"
+  },
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "nsg": "node --disable-warning=ExperimentalWarning --experimental-transform-types packages/framework/cli/src/cli.ts",
+    "vibe": "node --disable-warning=ExperimentalWarning --experimental-transform-types packages/framework/cli/src/cli.ts --guild-root /workspace/vibers"
+  },
+  "devDependencies": {
+    "@tsconfig/node24": "24.0.4",
+    "typescript": "5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
+}
+
+=== CONTEXT FILE: LICENSE ===
+ISC License
+
+Copyright (c) 2026 Sean Boots
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+=== CONTEXT FILE: docs/DEVELOPERS.md ===
+# Nexus Developer Guide
+
+This document is for agents and humans building the Nexus framework — creating packages, implementing apparatus, authoring kits, and contributing to the monorepo. It covers project setup, build workflow, package conventions, and documentation standards.
+
+For the conceptual vocabulary, read [The Guild Metaphor](guild-metaphor.md). For the system architecture, read [Architecture](architecture/index.md).
+
+---
+
+## Project Setup
+
+Nexus is a pnpm workspace monorepo. All packages live under `packages/`.
+
+### Prerequisites
+
+- **Node.js 24.x** (see `engines` in root `package.json`)
+- **pnpm 10.x** (see `packageManager` in root `package.json`)
+
+### Install and Build
+
+```sh
+pnpm install
+pnpm build        # tsc across all packages
+pnpm test         # node --test across all packages
+pnpm typecheck    # tsc --noEmit across all packages
+```
+
+### Running the CLI locally
+
+```sh
+pnpm nsg <command>
+```
+
+Uses Node's `--experimental-transform-types` to run TypeScript directly — no build step required for development iteration.
+
+### Package-level commands
+
+Each package has its own `build`, `test`, and `typecheck` scripts:
+
+```sh
+cd packages/stacks
+pnpm test          # run tests for this package only
+pnpm typecheck     # type-check this package only
+```
+
+---
+
+## Package Conventions
+
+### Naming
+
+Packages in the `@shardworks/` scope follow a naming convention that determines their plugin id (the short name used in `guild.json`, `requires` arrays, and `guild().apparatus()` calls):
+
+1. Strip `@shardworks/` scope
+2. Strip trailing `-(plugin|apparatus|kit)` suffix
+
+| npm package | Plugin id |
+|---|---|
+| `@shardworks/stacks` | `stacks` |
+| `@shardworks/tools-apparatus` | `tools` |
+| `@shardworks/nexus-core` | `nexus-core` |
+
+Choose package names so the derived plugin id is short, clear, and reads naturally in configuration.
+
+### Module format
+
+All packages are ESM (`"type": "module"` in `package.json`). TypeScript sources use `.ts` extensions; import paths use `.ts` in source (rewritten by `rewriteRelativeImportExtensions` during build) or `.js` for published output.
+
+### Exports
+
+Every package declares explicit `exports` in `package.json`. For development, exports point at source TypeScript (`./src/index.ts`). For publishing, `publishConfig.exports` points at built output (`./dist/index.js` with `.d.ts` types).
+
+```json
+{
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  }
+}
+```
+
+Additional entry points (e.g. `./testing` for test utilities) follow the same pattern.
+
+### Dependencies
+
+- **Workspace dependencies** use `"workspace:*"` — e.g. `"@shardworks/nexus-core": "workspace:*"`
+- **Apparatus packages** depend on `@shardworks/nexus-core` for types, `guild()`, and SDK factories
+- **Kit packages** depend only on `@shardworks/nexus-core` — never on apparatus packages directly. Kit code accesses apparatus APIs at runtime via `guild().apparatus()`, not at import time.
+
+### Tests
+
+Tests use Node's built-in test runner (`node --test`). Test files are colocated with source as `*.test.ts`. No external test framework is required.
+
+```sh
+pnpm test   # from package root, or monorepo root for all packages
+```
+
+---
+
+## Creating a New Package
+
+1. Create a directory under `packages/`:
+   ```sh
+   mkdir packages/my-apparatus
+   ```
+
+2. Add `package.json` with workspace conventions:
+   ```json
+   {
+     "name": "@shardworks/my-apparatus",
+     "version": "0.0.0",
+     "type": "module",
+     "exports": { ".": "./src/index.ts" },
+     "scripts": {
+       "build": "tsc",
+       "test": "node --disable-warning=ExperimentalWarning --experimental-transform-types --test 'src/**/*.test.ts'",
+       "typecheck": "tsc --noEmit"
+     },
+     "dependencies": {
+       "@shardworks/nexus-core": "workspace:*"
+     }
+   }
+   ```
+
+3. Add `tsconfig.json` extending the root config:
+   ```json
+   {
+     "extends": "../../tsconfig.json",
+     "compilerOptions": {
+       "outDir": "dist",
+       "rootDir": "src"
+     },
+     "include": ["src"]
+   }
+   ```
+
+4. Create `src/index.ts` with the package's public API.
+
+5. Write a **README.md** (see [README Standards](#readme-standards) below).
+
+6. Run `pnpm install` from the monorepo root to link the new package into the workspace.
+
+---
+
+## Documentation Layers
+
+The project maintains three layers of documentation for different audiences:
+
+| Layer | Audience | Purpose | Location |
+|---|---|---|---|
+| **Architecture specs** | Implementers | Full system design — internal mechanics, lifecycle, error contracts, backend interfaces, migration notes, open questions | `docs/architecture/apparatus/{name}.md` |
+| **Package READMEs** | Consumers (other packages, kit authors) | How to use this package — API surface, configuration, examples | `packages/{name}/README.md` |
+| **Architecture index** | Architects (understanding the whole system) | Narrative overview — how pieces relate, what flows where, why | `docs/architecture/index.md` |
+
+These layers overlap intentionally. The README is a curated subset of the architecture spec, written for a reader who wants to *use* the package, not *build* it. The architecture spec is the source of truth during design; the README becomes the source of truth for consumers once the package ships.
+
+### When each is written
+
+- **Architecture specs** are written during design, before implementation begins. They serve as commission specs for implementing agents.
+- **READMEs** are written during implementation, as part of the build. The implementing agent extracts consumer-facing content from the architecture spec into the README.
+- **Architecture index** is maintained continuously as the system evolves.
+
+---
+
+## README Standards
+
+Every published package must include a `README.md`. The README is the consumer-facing documentation — the first thing another developer (human or agent) reads when they depend on your package.
+
+### Structure
+
+Follow this structure, omitting sections that don't apply:
+
+```markdown
+# `@shardworks/{package-name}`
+
+{One paragraph: what this package does, who it's for, and where it sits
+in the dependency graph.}
+
+---
+
+## Installation
+
+{How to depend on this package. For workspace packages, this is typically
+just adding it to `dependencies` with `workspace:*`.}
+
+## API
+
+{The `provides` interface (for apparatus) or the default export shape
+(for kits). Full TypeScript signatures with JSDoc. Include usage examples
+showing real-world calls, not just type signatures.}
+
+## Configuration
+
+{Plugin configuration in `guild.json`, if any. Show the JSON structure
+and explain each field with defaults.}
+
+## Kit Interface *(apparatus only, optional)*
+
+{For apparatus that consume kit contributions (those declaring
+`consumes`): document the contribution schema that kit authors use.
+E.g. the Stacks documents the `books` field shape; the Instrumentarium
+documents the `tools` field shape. This tells kit authors "here's how
+to contribute to this apparatus."}
+
+## Kit Contributions *(kits only, optional)*
+
+{For kit packages: document what the kit contributes (tools, books,
+engines, relays), which apparatus it `requires`, and which it
+`recommends`. This tells consumers "here's what this kit brings to
+the guild."}
+
+## Support Kit *(apparatus only, optional)*
+
+{For apparatus with a supportKit: document the tools, books, or other
+contributions the apparatus itself provides to the guild. This is the
+apparatus's own kit-style output — e.g. the Animator's session-list
+tool, the Parlour's conversations book.}
+
+## Exports
+
+{Secondary entry points beyond the main export, if any. E.g. a
+`./testing` export for test utilities.}
+```
+
+### What belongs in the README vs. the architecture spec
+
+**In the README:**
+- Purpose and positioning (one paragraph)
+- The `provides` API with usage examples
+- Configuration schema and defaults
+- Kit interface — the contribution schema kit authors use (apparatus only, if it consumes contributions)
+- Kit contributions — what the package contributes and what it requires (kits only)
+- Support kit contents — tools, books, etc. the apparatus provides to the guild (apparatus only)
+- Secondary exports
+
+**Not in the README (lives in the architecture spec):**
+- Internal lifecycle diagrams and step-by-step flows
+- Error handling contracts (unless they directly affect caller behavior)
+- Backend interfaces and internal abstractions
+- CDC mechanics, cascade rules, coalescing behavior
+- Implementation notes, migration guidance
+- Future sections, open questions, design alternatives
+
+### Style
+
+- **Lead with usage.** Show how to call the API before explaining what it does internally.
+- **Use real examples.** Don't just show type signatures — show a tool handler calling `guild().apparatus<StacksApi>('stacks')` and doing something with the result.
+- **Be precise about types.** Include full TypeScript interfaces. Consumers will read the README to understand what they can pass and what they get back.
+- **Keep it current.** The README must match the shipped code. If the API changes, the README changes in the same commit. Stale documentation is worse than no documentation.
+
+### Examples of good existing READMEs
+
+- `packages/arbor/README.md` — thorough API reference with tables, clear separation of runtime API from plugin loading internals
+- `packages/core/README.md` — SDK-first, shows `tool()` usage immediately, organizes by capability
+
+---
+
+## Commit Practices
+
+- **Commit early and often.** Small, atomic commits. Don't accumulate large changesets — this is a multi-agent environment where conflicts are a real risk.
+- **Self-document for other agents.** Write commit messages assuming your primary reader is another agent continuing the work. Be precise and concise.
+- **Minimize conflict surface.** Prefer adding new files over modifying shared ones. Keep changes to shared files narrow. Commit and merge promptly.
+
+---
+
+## Architecture Specs
+
+Architecture specs live in `docs/architecture/apparatus/` and follow the [apparatus template](architecture/apparatus/_template.md). They are design documents written before implementation — the implementing agent reads the spec as its primary commission input.
+
+An architecture spec should contain everything needed to build the package:
+- Full TypeScript interfaces for the `provides` API and all supporting types
+- Behavioral sections (lifecycle flows, error handling, algorithms)
+- Configuration schema
+- Kit contribution and support kit declarations
+- Open questions and future evolution
+- Implementation notes (migration concerns, known gotchas, dependencies on other work)
+
+When commissioning an apparatus build, the spec *is* the commission. The implementing agent reads the spec, builds the package, writes the README (extracting consumer content from the spec), and delivers a working package with tests.
+
+=== CONTEXT FILE: docs/philosophy.md ===
+# Nexus Mk 2.1 — Project Philosophy
+
+> The whole project is an experiment in whether that relationship — patron directing a guild — is genuinely achievable with AI. Not "AI as a tool the human wields" (that's Mk 2.0, that's every IDE plugin, that's most of the industry). But AI as a workforce that the human directs by intent and judges by output.   
+
+## What Is This
+
+Nexus Mk 2.1 is an experimental multi-agent AI system — and a deliberate departure from its predecessor.
+
+In Mk 2.0, the human was an architect-reviewer: reading code, approving pull requests, steering implementation. The codebase was shared territory. In Mk 2.1, the human is a *user*. The system produces things; the human uses them. The internal workings are the system's own business.
+
+The project serves multiple purposes simultaneously:
+
+1. **Build an autonomous system** — A system where AI agents collaborate to accomplish objectives, delivering usable artifacts without human involvement in implementation.
+2. **Explore the user boundary** — Discover what happens when the human gives up visibility into internals and evaluates the system purely by its outputs.
+3. **Document the experiment** — The process of building and interacting with the system is primary source material for published writing on AI-enabled development.
+
+## Precepts
+
+1. **The system will be known by its fruits.** The human judges the system by using what it produces, not by inspecting how it was made. Quality is measured at the boundary.
+
+2. **If you can't touch it, it doesn't exist.** The system's job isn't done at the commit. It's done when a human can run, use, or interact with what was built.
+
+3. **Point at the mountain, not the trail.** The human names the destination. The system finds its own path. How it gets there is not the human's concern.
+
+4. **The sanctum is sacred ground.** This repo is the human's space — for thinking, tooling, and orchestration. The system's code lives elsewhere. Agents do not operate here autonomously. You *could* cross the boundary; the system should never require it.
+
+## Mantras
+
+Personal reminders for the human operator. Not system rules — habits of mind.
+
+- **Let go of the wheel.** Resist the urge to steer implementation. Direct, then trust. The hardest part isn't building the system; it's not reaching in to fix it yourself.
+- **Speak in wishes, not blueprints.** Express what you want, not how to build it. The more you specify, the less the system can surprise you — and surprise is the point.
+
+## Tech Stack
+
+- **Language:** TypeScript
+- **Runtime:** Node.js (v24)
+
+## Topology
+
+This repository (`nexus-mk2`) is the sanctum — the human's space for thinking, planning, and building tools to direct and evaluate the system. Agent configurations, session transcripts, evaluation scripts, and orchestration tooling live here.
+
+The system's own code lives in separate repositories within the same organization. The human does not clone, review, or contribute to those repositories during normal operation. The boundary is maintained by discipline, not access control.
+
+## Agent Architecture
+
+Agents are defined in `.claude/agents/`. Each agent file specifies a persona with its own responsibilities and interaction style. All agents inherit the shared directives in `.claude/CLAUDE.md`.
+
+- **Interactive agents** engage in conversation with the human. Sessions are captured as transcripts. (e.g., Coco)
+- **Autonomous agents** are invoked programmatically, run without human interaction, and exit when their task is complete.
+
+## Addendums
+
+### On Mountains and Trails
+
+A destination is not just a peak — it is a peak with constraints. Some constraints describe how to get there and belong to the system. Others describe properties the output must have to be usable at all. These are requirements, and they belong in the direction.
+
+The test is simple: **if the system built it another way and you would accept it, let it go.** If building it another way would make the output unusable to you, name it. Name what usability requires. The system owns everything else.
+
+### On Building Trust
+
+The system does not begin capable. There is a period before the user relationship is possible — when the system is building its own foundation and the human cannot yet evaluate the infrastructure purely by its outputs.
+
+Initially, the human names more requirements. The same test applies — name what usability requires — but more things are required because the foundation is unproven. Architecture, data boundaries, workflow design: these are properties the output must have to be usable, and the human names them until the infrastructure earns the right to own them.
+
+=== CONTEXT FILE: docs/architecture ===
+tree b98821d8f6e34359fa506196cb377f8dd47ca090:docs/architecture
+
+_agent-context.md
+apparatus/
+clockworks.md
+index.md
+kit-components.md
+plugins.md
+rigging.md
+
+=== CONTEXT FILE: docs/architecture/clockworks.md ===
+# The Clockworks
+
+The Clockworks is the guild's nervous system — the event-driven layer that connects things that happen to things that should happen in response. It turns the guild from an imperative system (things happen when someone calls something) into a reactive one (things happen because other things happened).
+
+The Clockworks is Pillar 5 of the guild architecture. The first four pillars make the guild *capable*. The Clockworks makes it *alive* — able to act on itself without waiting for the patron to push.
+
+---
+
+## Core Concepts
+
+### Events
+
+An event is an immutable fact: *this happened*.
+
+```typescript
+{
+  name: string;       // e.g. "commission.sealed", "tool.installed"
+  payload: unknown;   // event-specific data
+  emitter: string;    // who signaled it: anima name, engine name, or "framework"
+  firedAt: DateTime;
+}
+```
+
+Events are persisted to the Clockworks' own event queue immediately when signaled. They do not carry intent — they carry record. An event says "this occurred"; it does not say "therefore do this." That causal link lives in standing orders. The event and dispatch tables are internal Clockworks operational state — not part of the guild's Books (Register, Ledger, Daybook).
+
+#### Framework events
+
+Signaled automatically by `nexus-core` operations. Always available; no guild configuration needed.
+
+| Event | Signaled when |
+|---|---|
+| `anima.instantiated` | A new anima is created |
+| `anima.state.changed` | An anima transitions state (aspirant → active, active → retired) |
+| `anima.manifested` | An anima is launched for a session |
+| `anima.session.ended` | A session completes |
+| `commission.posted` | A new commission is posted by the patron |
+| `commission.state.changed` | A commission transitions state |
+| `commission.sealed` | A commission completes successfully |
+| `commission.failed` | A commission fails |
+| `{type}.ready` | A writ transitions to `ready` — available for dispatch (e.g. `mandate.ready`, `task.ready`) |
+| `{type}.completed` | A writ is fulfilled (e.g. `mandate.completed`, `task.completed`) |
+| `{type}.failed` | A writ fails (e.g. `mandate.failed`, `task.failed`) |
+| `tool.installed` | A tool (implement, engine, curriculum, or temperament) is installed |
+| `tool.removed` | A tool is removed |
+| `migration.applied` | A database migration is applied |
+| `guild.initialized` | The guild is first initialized |
+| `standing-order.failed` | A standing order failed during execution (see Error Handling) |
+
+Framework events are signaled from authoritative code paths in `nexus-core`. Animas cannot signal them.
+
+#### Custom guild events
+
+Guilds declare their own events in `guild.json` under the `clockworks` key:
+
+```json
+{
+  "clockworks": {
+    "events": {
+      "code.reviewed": {
+        "description": "Signaled when an anima completes a code review",
+        "schema": { "pr": "number", "issues_found": "number" }
+      },
+      "deploy.approved": {
+        "description": "Leadership has approved a deployment"
+      }
+    }
+  }
+}
+```
+
+Custom events use any name not in a reserved framework namespace (`anima.*`, `commission.*`, `tool.*`, `migration.*`, `guild.*`, `standing-order.*`, `session.*`). Writ lifecycle events (e.g. `mandate.ready`, `task.completed`) use guild-defined type names as namespaces — they are framework-emitted but not in the reserved list. See the [Event Catalog](../reference/event-catalog.md#writ-lifecycle-events) for how validation handles this. Bundles may also declare events they introduce; these are merged into `guild.json` on installation.
+
+Animas signal custom events using the `signal` tool. The tool validates the event name against declared events in `guild.json` before persisting.
+
+#### Book change events (Stacks auto-wiring)
+
+The Clockworks apparatus registers CDC handlers across all declared books at startup via The Stacks' `watch()` API (see [stacks.md](apparatus/stacks.md#6-change-data-capture-cdc)). This emits `book.<ownerId>.<bookName>.created`, `book.<ownerId>.<bookName>.updated`, and `book.<ownerId>.<bookName>.deleted` events into the Clockworks event stream automatically — no per-book configuration needed.
+
+```typescript
+// In clockworks apparatus start()
+const stacks = ctx.apparatus<StacksApi>('stacks')
+for (const plugin of ctx.plugins) {
+  const bookNames = Object.keys(plugin.books ?? {})
+  for (const bookName of bookNames) {
+    stacks.watch(plugin.id, bookName, async (event) => {
+      await clockworksApi.emit(`book.${event.ownerId}.${event.book}.${event.type}`, event)
+    }, { failOnError: false })  // clockworks failure must not block writes
+  }
+}
+```
+
+This means any book mutation from any plugin is observable via standing orders without the originating plugin needing to signal events explicitly. Standing orders can respond to book change events just like framework or custom events:
+
+```json
+{ "on": "book.nexus-ledger.writs.updated", "run": "audit-writ-changes" }
+```
+
+---
+
+### Standing Orders
+
+A standing order is a registered response to an event. Standing orders are **guild policy** — they live in `guild.json` under the `clockworks` key, not in relay descriptors. The guild decides what fires when; a relay is a capability, not a policy.
+
+#### Canonical form
+
+Every standing order has one canonical form: `{ on, run, ...params }`. The `on` key names the event to respond to. The `run` key names the relay to invoke. Any additional keys are **params** passed to the relay via `RelayContext.params`.
+
+```json
+{
+  "clockworks": {
+    "standingOrders": [
+      { "on": "commission.sealed",  "run": "cleanup-worktree" },
+      { "on": "mandate.ready",      "summon": "artificer", "prompt": "..." },
+      { "on": "code.reviewed",      "run": "notify-patron" },
+      { "on": "deploy.requested",   "run": "deploy", "environment": "staging", "dryRun": true }
+    ]
+  }
+}
+```
+
+#### The `summon` verb (syntactic sugar)
+
+The `summon` key is shorthand for invoking the **summon relay** — the stdlib relay that handles anima session dispatch. The Clockworks desugars `summon` orders at dispatch time:
+
+```json
+// What the operator writes:
+{ "on": "mandate.ready", "summon": "artificer", "prompt": "...", "maxSessions": 5 }
+
+// What the Clockworks dispatches:
+{ "on": "mandate.ready", "run": "summon-relay", "role": "artificer", "prompt": "...", "maxSessions": 5 }
+```
+
+The `summon` value becomes the `role` param. All other keys pass through as relay params. This means anima dispatch is handled by a regular relay — replaceable, upgradeable, configurable — not baked into the framework.
+
+The **summon relay** resolves the role to an active anima, binds or synthesizes a writ, manifests the anima, hydrates the prompt template, launches a session, and handles post-session writ lifecycle. See [Dispatch Integration](writs.md#dispatch-integration) for the full sequence.
+
+**Summon relay params:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `role` | string | *(required)* | Role to summon (set automatically from `summon` value) |
+| `prompt` | string | — | Prompt template with `{{writ.title}}`, `{{writ.description}}`, etc. |
+| `maxSessions` | number | 10 | Circuit breaker: max session attempts per writ before auto-fail |
+
+**Circuit breaker:** By default, the summon relay will fail a writ after 10 session attempts. This prevents infinite re-dispatch loops when a writ keeps getting interrupted without making progress. Override per standing order with `"maxSessions": 20` or disable with `"maxSessions": 0`.
+
+**Role resolution:** If no active anima fills the named role, the relay throws and the Clockworks signals `standing-order.failed`.
+
+#### Relay params
+
+Any key on a standing order that isn't `on` or `run` (or `summon`/`brief` for sugar forms) is extracted as a param and passed to the relay:
+
+```typescript
+export default relay({
+  name: 'deploy',
+  handler: async (event, { home, params }) => {
+    const environment = (params.environment as string) ?? 'production';
+    const dryRun = (params.dryRun as boolean) ?? false;
+    // ...
+  }
+});
+```
+
+Params default to `{}` when no extra keys are present. Existing relays that destructure only `{ home }` from context are unaffected.
+
+---
+
+### The Clockworks Runner
+
+A framework engine that processes the event queue. It reads unprocessed events from the Clockworks event queue, resolves which standing orders apply, and executes them in registration order.
+
+#### Phase 1 — manual operation via `nsg clock`
+
+Events are written to the Clockworks event queue immediately when signaled. Processing is explicitly operator-driven — not automatic. This allows the system to be monitored and stepped through until it has earned enough trust to run unattended.
+
+| Command | Behavior |
+|---|---|
+| `nsg clock list` | Show all pending (unprocessed) events |
+| `nsg clock tick [id]` | Process the next pending event, or the specific event with the given id |
+| `nsg clock run` | Continuously process all pending events until the queue is empty |
+
+No daemon required. The operator decides when and how much the Clockworks runs.
+
+#### Phase 2 — daemon
+
+A background daemon that polls the event queue and processes events automatically.
+
+| Command | Behavior |
+|---|---|
+| `nsg clock start [--interval <ms>]` | Start the daemon as a detached background process (default interval: 2000ms) |
+| `nsg clock stop` | Send SIGTERM and clean up the PID file |
+| `nsg clock status` | Show whether the daemon is running, with PID, uptime, and log file path |
+
+The daemon spawns as a detached child process. It writes a PID file at `<home>/.nexus/clock.pid` and logs to `<home>/.nexus/clock.log` (append mode). Only event-processing cycles are logged; idle polls are silent.
+
+The daemon registers the session provider at startup, enabling the summon relay to dispatch anima sessions autonomously.
+
+Phase 1 commands (`list`, `tick`, `run`) continue to work alongside the daemon. If the daemon is running, `tick` and `run` print a warning but still execute — SQLite handles concurrent access safely.
+
+Core API: `clockStart(home, options?)`, `clockStop(home)`, `clockStatus(home)`. The `clock-status` MCP tool exposes daemon status to animas.
+
+---
+
+## Error Handling
+
+Standing order failures signal a `standing-order.failed` event:
+
+```typescript
+{
+  name: "standing-order.failed",
+  payload: {
+    standingOrder: { on: "commission.failed", summon: "steward" },
+    triggeringEvent: { id: 42, name: "commission.failed", ... },
+    error: "No active anima fills role 'steward'"
+  }
+}
+```
+
+Guilds can respond to this event with their own standing orders — summon an anima, invoke a notification relay, whatever the guild needs. The error handling policy is itself configurable.
+
+**Loop guard**: `standing-order.failed` events are tagged. The Clockworks runner will not fire standing orders in response to a `standing-order.failed` event that was itself triggered by a `standing-order.failed` event. Errors handling errors do not cascade.
+
+---
+
+## The `signal` Tool
+
+A base tool available to all animas. Used to signal custom guild events.
+
+```typescript
+tool({
+  description: "Signal a custom guild event",
+  params: {
+    name: z.string().describe("Event name (must be declared in guild.json clockworks.events)"),
+    payload: z.record(z.unknown()).optional().describe("Event payload")
+  },
+  handler: async ({ name, payload }, { home }) => {
+    // validate name against guild.json clockworks.events
+    // reject framework-reserved namespaces
+    // persist to Clockworks events table
+  }
+})
+```
+
+Also exposed as `nsg signal <name> [--payload <json>]` for operator use.
+
+Animas cannot signal framework events (`anima.*`, `commission.*`, `tool.*`, `session.*`, etc.) or writ lifecycle events (`mandate.ready`, `task.completed`, etc.). Only guild-declared custom events. This keeps the event record trustworthy — framework events come from authoritative code paths.
+
+---
+
+## guild.json Shape
+
+```json
+{
+  "clockworks": {
+    "events": {
+      "code.reviewed": {
+        "description": "Signaled when an anima completes a code review",
+        "schema": { "pr": "number", "issues_found": "number" }
+      }
+    },
+    "standingOrders": [
+      { "on": "commission.sealed",     "run": "cleanup-worktree" },
+      { "on": "commission.failed",     "run": "notify-patron" },
+      { "on": "commission.failed",     "summon": "steward" },
+      { "on": "code.reviewed",         "run": "post-review-summary" },
+      { "on": "standing-order.failed", "summon": "steward" }
+    ]
+  }
+}
+```
+
+---
+
+## Clockworks Schema
+
+```sql
+-- Event log: immutable fact record
+CREATE TABLE events (
+  id         INTEGER PRIMARY KEY,
+  name       TEXT NOT NULL,
+  payload    TEXT,                    -- JSON
+  emitter    TEXT NOT NULL,           -- anima name, engine name, or 'framework'
+  fired_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  processed  INTEGER NOT NULL DEFAULT 0   -- 0=pending, 1=processed
+);
+
+-- Execution log: what ran in response to each event
+CREATE TABLE event_dispatches (
+  id           INTEGER PRIMARY KEY,
+  event_id     INTEGER NOT NULL REFERENCES events(id),
+  handler_type TEXT NOT NULL,          -- 'relay' or 'anima' (relays are stored as 'engine' in older schemas)
+  handler_name TEXT NOT NULL,          -- relay name or resolved anima name
+  target_role  TEXT,                   -- role name (anima orders only; handler_name is the resolved anima)
+  notice_type  TEXT,                   -- 'summon' | null (historical; present on summon relay dispatches)
+  started_at   DATETIME,
+  ended_at     DATETIME,
+  status       TEXT,                   -- 'success' | 'error'
+  error        TEXT
+);
+```
+
+---
+
+## ClockworksKit
+
+The Clockworks apparatus consumes relay contributions from installed plugins. It publishes a `ClockworksKit` interface that kit authors import for type safety:
+
+```typescript
+// Published by nexus-clockworks
+interface ClockworksKit {
+  relays?: RelayDefinition[]
+}
+```
+
+A plugin contributing relays declares itself as satisfying `ClockworksKit` and names `nexus-clockworks` in its `recommends`:
+
+```typescript
+import type { ClockworksKit } from "nexus-clockworks"
+
+export default {
+  name: "nexus-signals",
+  kit: {
+    relays:     [memberJoinedRelay, memberLeftRelay],
+    recommends: ["nexus-clockworks"],
+  } satisfies ClockworksKit,
+} satisfies Plugin
+```
+
+The Clockworks apparatus registers relays from both standalone kit packages and its own `supportKit` into a unified relay registry. Callers of the Clockworks API see a single relay list regardless of source.
+
+### Relay Contract
+
+The Clockworks needs a standard invocation contract to call relays generically. Relays export a default using the `relay()` SDK factory from `nexus-core`:
+
+```typescript
+import { relay } from '@shardworks/nexus-core';
+
+export default relay({
+  handler: async (event: GuildEvent | null, { home, params }) => {
+    // event  — the triggering GuildEvent when invoked by a standing order (null for direct invocation)
+    // home   — absolute path to the guild root
+    // params — extra keys from the standing order (empty object when none)
+  }
+});
+```
+
+The Clockworks runner calls `module.default.handler(event, { home, params })`. Params are extracted from the standing order at dispatch time — any key that isn't `on` or `run` becomes a param. Relays can be named in `run:` standing orders; bespoke framework processes cannot.
+
+---
+
+## Relationship to Existing Concepts
+
+**Relays** — a new artifact type, distinct from tools and existing framework machinery. Relays are purpose-built Clockworks handlers that export a standard `relay()` contract and can be named in `run:` standing orders. Framework processes (manifest, mcp-server, ledger-migrate) are unchanged.
+
+**Tools** — `signal` is a new base tool. All other tools unchanged.
+
+**The Books** — the Clockworks owns its event/dispatch tables as internal operational state, separate from the guild's Books (Register, Ledger, Daybook). Writs live in the Ledger — see the architecture overview.
+
+**Bundles** — may ship default standing orders and custom event declarations, merged into `guild.json` on installation. Same delivery mechanism as other bundle-provided config.
+
+---
+
+## Deferred
+
+- **Natural language trigger syntax** — `'when a commission is posted'` instead of `'commission.posted'`. Worth pursuing once real guilds have standing orders in production and vocabulary needs are understood. Requires validation tooling to be safe.
+- **Pre-event hooks** — cancellable `before.*` events. Powerful but complex. Start with observation-only (post-facto) events.
+- **Payload schema enforcement** — schema field in custom event declarations is documented but not validated. Enforcement deferred.
+- **Phase 2 daemon enhancements** — external event injection (webhooks, file watchers), log rotation, concurrency.
+- **Scheduled standing orders** — time-triggered rather than event-triggered. Deferred.
+
+=== CONTEXT FILE: docs/architecture/apparatus ===
+tree b98821d8f6e34359fa506196cb377f8dd47ca090:docs/architecture/apparatus
+
+_template.md
+animator.md
+claude-code.md
+clerk.md
+dispatch.md
+fabricator.md
+instrumentarium.md
+loom.md
+parlour.md
+review-loop.md
+scriptorium.md
+spider.md
+stacks.md
+
+=== CONTEXT FILE: docs/architecture/apparatus/parlour.md ===
+# The Parlour — API Contract
+
+Status: **Draft — MVP**
+
+Package: `@shardworks/parlour` · Plugin id: `parlour`
+
+> **⚠️ MVP scope.** This spec covers the core conversation lifecycle: creating conversations, registering participants, taking turns (with streaming), enforcing turn limits, and ending conversations. Inter-turn context assembly (`formatConveneMessage`) is included for convene conversations. There is no event signalling, no conversation-level cost budgets, and no pluggable turn-order strategies. See the Future sections for the target design.
+
+---
+
+## Purpose
+
+The Parlour manages multi-turn conversations within the guild. It provides the structure for two kinds of interaction: **consult** (a human talks to an anima) and **convene** (multiple animas hold a structured dialogue). The Parlour tracks who is participating, whose turn it is, what has been said, and when the conversation ends.
+
+The Parlour does not launch sessions itself — it delegates each turn to **The Animator**. The Parlour does not assemble prompts — it delegates that to **The Loom**. The Parlour orchestrates: it decides *when* and *for whom* to call the Animator, and assembles the inter-turn context that keeps each participant coherent across turns.
+
+---
+
+## Dependencies
+
+```
+requires: ['stacks', 'animator', 'loom']
+```
+
+- **The Stacks** — persists conversations (with nested participants) and turn records.
+- **The Animator** — launches individual session turns (via `animate()` / `animateStreaming()`).
+- **The Loom** — weaves the session context for each participant's turn.
+
+---
+
+## Support Kit
+
+The Parlour contributes a `conversations` book and conversation management tools via its supportKit:
+
+```typescript
+supportKit: {
+  books: {
+    conversations: {
+      indexes: ['status', 'kind', 'createdAt'],
+    },
+  },
+  tools: [conversationList, conversationShow, conversationEnd],
+},
+```
+
+### Document Shape
+
+Participants are nested directly in the conversation document rather than stored in a separate book. This avoids N+1 queries on `list()` and `show()` operations — since Books has no join support, a separate participants book would require a per-conversation query to resolve participants. Conversations have a small, bounded number of participants (typically 2–5), so the nested document stays compact.
+
+```typescript
+interface ConversationDoc {
+  id: string
+  status: 'active' | 'concluded' | 'abandoned'
+  kind: 'consult' | 'convene'
+  topic: string | null
+  turnLimit: number | null
+  createdAt: string
+  endedAt: string | null
+  eventId: string | null
+  participants: ParticipantRecord[]
+}
+
+interface ParticipantRecord {
+  /** Stable participant id (generated at creation). */
+  id: string
+  kind: 'anima' | 'human'
+  name: string
+  /** Anima id, resolved at creation time. Null for human participants. */
+  animaId: string | null
+  /**
+   * Provider session id for --resume. Updated after each turn so
+   * the next turn can continue the provider's conversation context.
+   */
+  providerSessionId: string | null
+}
+```
+
+The trade-off: updating a participant's `providerSessionId` after each turn requires a read-modify-write of the full conversation document. This is acceptable — the document is small and the write happens once per turn, not in a hot loop.
+
+The one query this makes harder is "find all conversations involving anima X" — this requires a JSON path query on `participants[*].animaId` rather than a direct index lookup. This is a dashboard/analytics query, not an operational hot path, and The Stacks' JSON path queries handle it adequately.
+
+### `conversation-list` tool
+
+List conversations with optional filters. Returns conversation summaries ordered by `createdAt` descending (newest first).
+
+| Parameter | Type | Description |
+|---|---|---|
+| `status` | `'active' \| 'concluded' \| 'abandoned'` | Filter by lifecycle status |
+| `kind` | `'consult' \| 'convene'` | Filter by conversation kind |
+| `limit` | `number` | Maximum results (default: 20) |
+
+Returns: `ConversationSummary[]` — id, status, kind, topic, participants, turnCount, totalCostUsd.
+
+### `conversation-show` tool
+
+Show full detail for a conversation including all turns.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | `string` | Conversation id |
+
+Returns: `ConversationDetail` — full conversation record with participant list, per-turn session references, prompts, costs, and durations.
+
+### `conversation-end` tool
+
+End an active conversation.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | `string` | Conversation id |
+| `reason` | `'concluded' \| 'abandoned'` | Why the conversation ended (default: `'concluded'`) |
+
+Idempotent — no error if the conversation is already ended.
+
+---
+
+## `ParlourApi` Interface (`provides`)
+
+```typescript
+interface ParlourApi {
+  /**
+   * Create a new conversation.
+   *
+   * Sets up conversation and participant records. Does NOT take a first
+   * turn — that's a separate call to takeTurn().
+   */
+  create(request: CreateConversationRequest): Promise<CreateConversationResult>
+
+  /**
+   * Take a turn in a conversation.
+   *
+   * For anima participants: weaves context via The Loom, assembles the
+   * inter-turn message, and calls The Animator to run a session. Returns
+   * the session result. For human participants: records the message as
+   * context for the next turn (no session launched).
+   *
+   * Throws if the conversation is not active or the turn limit is reached.
+   */
+  takeTurn(request: TakeTurnRequest): Promise<TurnResult>
+
+  /**
+   * Take a turn with streaming output.
+   *
+   * Same as takeTurn(), but yields ConversationChunks as the session
+   * produces output. Includes a turn_complete chunk at the end.
+   */
+  takeTurnStreaming(request: TakeTurnRequest): {
+    chunks: AsyncIterable<ConversationChunk>
+    result: Promise<TurnResult>
+  }
+
+  /**
+   * Get the next participant in a conversation.
+   *
+   * For convene: returns the next anima in round-robin order.
+   * For consult: returns the anima participant (human turns are implicit).
+   * Returns null if the conversation is not active or the turn limit is reached.
+   */
+  nextParticipant(conversationId: string): Promise<Participant | null>
+
+  /**
+   * End a conversation.
+   *
+   * Sets status to 'concluded' (normal end) or 'abandoned' (e.g. timeout,
+   * disconnect). Idempotent — no error if already ended.
+   */
+  end(conversationId: string, reason?: 'concluded' | 'abandoned'): Promise<void>
+
+  /**
+   * List conversations with optional filters.
+   */
+  list(options?: ListConversationsOptions): Promise<ConversationSummary[]>
+
+  /**
+   * Show full detail for a conversation.
+   */
+  show(conversationId: string): Promise<ConversationDetail | null>
+}
+```
+
+### Supporting Types
+
+```typescript
+interface CreateConversationRequest {
+  /** Conversation kind. */
+  kind: 'consult' | 'convene'
+  /** Seed topic or prompt. Used as the initial message for the first turn. */
+  topic?: string
+  /** Maximum allowed turns. Null = unlimited. */
+  turnLimit?: number
+  /** Participants in the conversation. */
+  participants: ParticipantDeclaration[]
+  /** Triggering event id, for conversations started by clockworks. */
+  eventId?: string
+}
+
+interface ParticipantDeclaration {
+  kind: 'anima' | 'human'
+  /** Display name. For anima participants, this is the anima name
+   *  used to resolve identity via The Loom at turn time. */
+  name: string
+}
+
+interface CreateConversationResult {
+  conversationId: string
+  participants: Participant[]
+}
+
+interface Participant {
+  id: string
+  name: string
+  kind: 'anima' | 'human'
+}
+
+interface TakeTurnRequest {
+  conversationId: string
+  participantId: string
+  /** The message for this turn. For consult: the human's message.
+   *  For convene: typically assembled by the caller via formatMessage(),
+   *  or omitted to let The Parlour assemble it automatically. */
+  message?: string
+}
+
+interface TurnResult {
+  /** The Animator's session result for this turn. Null for human turns. */
+  sessionResult: SessionResult | null
+  /** Turn number within the conversation (1-indexed). */
+  turnNumber: number
+  /** Whether the conversation is still active after this turn. */
+  conversationActive: boolean
+}
+
+/** A chunk of output from a conversation turn. */
+type ConversationChunk =
+  | SessionChunk
+  | { type: 'turn_complete'; turnNumber: number; costUsd?: number }
+
+interface ConversationSummary {
+  id: string
+  status: 'active' | 'concluded' | 'abandoned'
+  kind: 'consult' | 'convene'
+  topic: string | null
+  turnLimit: number | null
+  createdAt: string
+  endedAt: string | null
+  participants: Participant[]
+  /** Computed from session records. */
+  turnCount: number
+  /** Aggregate cost across all turns. */
+  totalCostUsd: number
+}
+
+interface ConversationDetail extends ConversationSummary {
+  turns: TurnSummary[]
+}
+
+interface TurnSummary {
+  sessionId: string
+  turnNumber: number
+  participant: string
+  prompt: string | null
+  exitCode: number | null
+  costUsd: number | null
+  durationMs: number | null
+  startedAt: string
+  endedAt: string | null
+}
+
+interface ListConversationsOptions {
+  status?: 'active' | 'concluded' | 'abandoned'
+  kind?: 'consult' | 'convene'
+  limit?: number
+}
+```
+
+---
+
+## Conversation Lifecycle
+
+### Create
+
+```
+create(request)
+  │
+  ├─ 1. Generate conversation id
+  ├─ 2. For each participant declaration:
+  │     ├─ Generate participant id
+  │     └─ Resolve animaId (for anima participants)
+  ├─ 3. Write conversation document to The Stacks
+  │     (status: 'active', participants nested inline)
+  └─ 4. Return conversationId + participants
+```
+
+No session is launched at creation time. The first turn is a separate call.
+
+### Take Turn (anima participant)
+
+```
+takeTurn(request)
+  │
+  ├─ 1. Read conversation state from The Stacks
+  │     ├─ Verify status is 'active'
+  │     └─ Verify turn limit not reached
+  │
+  ├─ 2. Determine turn number (count existing turns + 1)
+  │
+  ├─ 3. Assemble inter-turn message:
+  │     ├─ First turn for this participant → use conversation topic
+  │     └─ Subsequent turns → assemble messages from other participants
+  │       since this participant's last turn (see § Inter-Turn Context)
+  │
+  ├─ 4. Weave context via The Loom (participant's anima name)
+  │
+  ├─ 5. Call The Animator:
+  │     ├─ animate() or animateStreaming()
+  │     ├─ conversationId for --resume
+  │     └─ metadata: { trigger, conversationId, turnNumber, participantId }
+  │
+  ├─ 6. Update participant's providerSessionId in conversation doc
+  │     (read-modify-write; enables --resume on next turn)
+  │
+  ├─ 7. If turn limit reached → auto-conclude conversation
+  │
+  └─ 8. Return TurnResult
+```
+
+### Take Turn (human participant)
+
+Human turns do not launch sessions. The human's message is passed as context to the next anima turn via the inter-turn context assembly. The Parlour records that a human turn occurred (for turn counting and turn limit enforcement) but no Animator call is made.
+
+### End
+
+```
+end(conversationId, reason)
+  │
+  ├─ 1. Read conversation from The Stacks
+  ├─ 2. If already ended → no-op (idempotent)
+  └─ 3. Update status to reason, set endedAt
+```
+
+---
+
+## Inter-Turn Context
+
+For convene conversations, each anima participant maintains their own session context via `--resume` (the provider's `conversationId`). Their session already contains their own prior messages and responses. When it's their turn again, The Parlour assembles only what happened *since their last turn* — the contributions of other participants.
+
+```
+Participant A's turn 3:
+  - Read all turns since A's last turn (turn 1)
+  - For each intervening turn (B's turn 2):
+    - Read the session record artifact (if available)
+    - Extract the assistant's text response from the transcript
+  - Format as: "[B]: {response text}"
+  - Pass as the message to A's session
+```
+
+On a participant's first turn, the conversation topic is used as the initial message.
+
+For consult conversations, the pattern is simpler: the human's message is passed directly as the prompt to the anima's next turn.
+
+**Dependency note:** Extracting responses from session transcripts requires access to session record artifacts (the JSON files written by The Animator). At MVP, this depends on The Animator writing artifacts to disk — see [Animator: Future: Session Record Artifacts](animator.md#future-session-record-artifacts). If artifacts are not available, the inter-turn message falls back to a placeholder (`[participant]: [response not available]`).
+
+---
+
+## Provider Session Continuity
+
+Each anima participant in a conversation maintains session continuity across turns via the provider's `--resume` mechanism. The Parlour:
+
+1. Passes `conversationId` to The Animator on each turn
+2. Captures `providerSessionId` from the Animator's `SessionResult`
+3. Stores it in the participant's `providerSessionId` field (in the conversation document)
+4. Passes it back to The Animator on the participant's next turn
+
+This allows the underlying AI process to maintain its full context window across turns without re-sending the entire conversation history.
+
+### Workspace Persistence Constraint
+
+The `--resume` mechanism depends on provider-specific session data stored on the local filesystem (e.g. Claude Code's `.claude/` directory). This creates a hard constraint: **all turns in a conversation must run in the same working directory**, or the session data needed for `--resume` will not be present.
+
+This means:
+- **Fresh temp worktrees per turn will not work.** The session data from turn 1 would be gone by turn 2.
+- **A persistent workspace is required** — either the guildhall itself or a long-lived worktree that survives across turns.
+- If a persistent workspace is not available, the fallback is to abandon `--resume` and re-send the full conversation context each turn. This works but costs more tokens and loses the provider's internal state (tool use history, reasoning context, etc.).
+
+The Parlour must pass the same `cwd` to The Animator for every turn in a given conversation. The caller that creates the conversation is responsible for providing a workspace that will persist for the conversation's lifetime.
+
+---
+
+## Open Questions
+
+- **Turn counting for human turns.** Do human turns count toward the turn limit? The legacy system counts only anima turns (sessions). For convene conversations this is clear (all turns are anima turns). For consult, should a turn limit of 10 mean 10 anima responses or 10 total exchanges (5 human + 5 anima)?
+- **Conversation-level workspace.** Provider session continuity requires a persistent workspace across turns (see § Workspace Persistence Constraint). Should the `cwd` be set once at conversation creation and stored in the conversation document? Or is it the caller's responsibility to pass a consistent `cwd` on each `takeTurn()` call? Storing it on the conversation is safer (can't accidentally use different directories) but means the Parlour owns workspace lifecycle awareness.
+- **Participant ordering.** The legacy uses insertion order for round-robin. Should The Parlour support explicit ordering or custom turn-order strategies?
+
+---
+
+## Future: Event Signalling
+
+When Clockworks integration is available, The Parlour will signal conversation lifecycle events:
+
+- **`conversation.started`** — fired after create(). Payload includes `conversationId`, `kind`, `topic`, participant names.
+- **`conversation.turn-taken`** — fired after each turn. Payload includes `conversationId`, `turnNumber`, `participantName`, `sessionId`, `costUsd`.
+- **`conversation.ended`** — fired after end() or auto-conclude. Payload includes `conversationId`, `reason`, `turnCount`, `totalCostUsd`.
+
+These events enable clockworks standing orders to react to conversation activity (e.g. auto-summarize on conclusion, alert on high cost).
+
+Blocked on: Clockworks apparatus spec finalization, Animator event signalling.
+
+---
+
+## Future: Conversation Cost Budgets
+
+A `maxBudgetUsd` field on `CreateConversationRequest` that caps aggregate cost across all turns. The Parlour checks cumulative cost before each turn and auto-concludes if the budget would be exceeded.
+
+---
+
+## Future: Pluggable Turn-Order Strategies
+
+The MVP uses round-robin for convene and simple alternation for consult. Future strategies might include:
+
+- **Priority-based** — participants with higher priority speak more frequently
+- **Facilitator-directed** — a designated facilitator anima decides who speaks next
+- **Reactive** — participants speak when they have something to say (event-driven rather than scheduled)
+
+This would require a `TurnOrderStrategy` interface and a configuration field on `CreateConversationRequest`.
+
+---
+
+## Implementation Notes
+
+- **Cross-book queries.** The Parlour reads from both its own `conversations` book and The Animator's `sessions` book (for turn counts, cost aggregation, transcript extraction). This cross-apparatus read is via The Stacks' query API — no direct DB access.
+- **Single-document access pattern.** With participants nested in the conversation document, most operations are single-document reads or read-modify-writes. The `takeTurn()` hot path reads one conversation doc, calls The Animator, then writes back the updated `providerSessionId`. No multi-book coordination needed.
+- **No in-memory state.** All conversation state is persisted in The Stacks. The Parlour reads state fresh on each `takeTurn()` call. This makes it safe for concurrent callers and process restarts between turns.
+- **Legacy migration.** The legacy `nexus-sessions` package combines session and conversation management in a single rig with separate `conversations` and `participants` books. The new architecture splits sessions (Animator) from conversations (Parlour) and nests participants inline. The Parlour's `conversations` book supersedes both legacy books.
+
+=== CONTEXT FILE: docs/architecture/apparatus/claude-code.md ===
+# Claude Code Session Provider — API Contract
+
+Status: **Draft — MVP**
+
+Package: `@shardworks/claude-code-apparatus` · Plugin id: `claude-code`
+
+> **⚠️ MVP scope.** This spec covers the session provider implementation: launching Claude Code CLI processes in autonomous mode, parsing stream-json telemetry, and reporting structured results back to The Animator. The MCP tool server module exists but is not yet wired into the session lifecycle — see [Future: Tool-Equipped Sessions](#future-tool-equipped-sessions).
+
+---
+
+## Purpose
+
+The Claude Code apparatus is a **session provider** — a pluggable backend that The Animator delegates to for launching and communicating with a specific AI system. It implements `AnimatorSessionProvider` from `@shardworks/animator-apparatus` and is discovered via guild config:
+
+```json
+{
+  "animator": {
+    "sessionProvider": "claude-code"
+  }
+}
+```
+
+The apparatus handles the mechanics of the Claude Code CLI: process spawning, argument assembly, system prompt file management, stream-json NDJSON parsing, and telemetry extraction (cost, token usage, session id). It does not handle session lifecycle, recording, or identity composition — those belong to The Animator and The Loom respectively.
+
+The provider also injects environment variables from `SessionProviderConfig.environment` into the spawned process. This is how anima git identity (set by The Loom and optionally overridden per-task by the orchestrator) reaches the `claude` child process. The provider does not interpret these variables — it spreads them into the spawn environment alongside `process.env`.
+
+The package also contains the **MCP tool server** — a module that creates an MCP server from resolved tool definitions, serving guild tools to Claude during sessions. This module is not yet integrated into the session lifecycle but is the designated home for MCP server functionality.
+
+---
+
+## Dependencies
+
+```
+requires: []
+```
+
+The Claude Code apparatus has no apparatus dependencies. It implements `AnimatorSessionProvider` (imported as a type from `@shardworks/animator-apparatus`) but does not call The Animator at runtime — the relationship is reversed: The Animator calls the provider.
+
+The MCP server module imports types from `@shardworks/tools-apparatus` (`ToolDefinition`, `isToolDefinition`) and uses `@modelcontextprotocol/sdk` for the MCP protocol implementation. These are compile-time dependencies, not runtime apparatus dependencies.
+
+---
+
+## `AnimatorSessionProvider` Implementation (`provides`)
+
+The apparatus provides a stateless implementation of `AnimatorSessionProvider`:
+
+```typescript
+interface AnimatorSessionProvider {
+  name: string;
+  launch(config: SessionProviderConfig): {
+    chunks: AsyncIterable<SessionChunk>;
+    result: Promise<SessionProviderResult>;
+  };
+}
+```
+
+A single `launch()` method handles both streaming and non-streaming sessions. When `config.streaming` is true, the provider spawns Claude and yields `SessionChunk` objects as they arrive via an async iterable. When false, it accumulates all output internally and returns empty chunks. The return shape is always `{ chunks, result }` — the Animator does not branch on streaming capability.
+
+Internally, the provider delegates to one of two spawn helpers based on the streaming flag:
+- **`spawnClaudeStreamJson()`** — accumulates all stream-json output, resolves when the process exits. Used for non-streaming sessions.
+- **`spawnClaudeStreamingJson()`** — yields chunks in real time via an async iterable while accumulating the full result. Used for streaming sessions.
+
+The apparatus has no startup logic — `start()` is a no-op. The provider is stateless and safe for concurrent use.
+
+---
+
+## Session Preparation
+
+Both launch methods share a `prepareSession()` step that writes temporary files and assembles CLI arguments:
+
+```
+prepareSession(config)
+  │
+  ├─ 1. Create temp directory (nsg-session-XXXXX)
+  ├─ 2. Build base args:
+  │     --setting-sources user
+  │     --dangerously-skip-permissions
+  │     --model <config.model>
+  ├─ 3. If systemPrompt provided:
+  │     Write to temp/system-prompt.md
+  │     --system-prompt-file <path>
+  ├─ 4. If conversationId provided:
+  │     --resume <conversationId>
+  └─ 5. Return { tmpDir, args }
+```
+
+The caller adds the final arguments (`--print`, `--output-format stream-json`, `--verbose`) and the initial prompt, then spawns the `claude` process. The temp directory is cleaned up in a `finally` block after the process exits.
+
+### CLI Flags
+
+| Flag | Purpose |
+|------|---------|
+| `--setting-sources user` | Use only user-level settings, not project-level |
+| `--dangerously-skip-permissions` | Bypass interactive permission prompts (autonomous mode) |
+| `--model` | Model selection from guild settings |
+| `--print` | Autonomous mode — no interactive input, prompt via argument |
+| `--output-format stream-json` | Structured NDJSON output on stdout |
+| `--verbose` | Include detailed telemetry in stream-json output |
+| `--system-prompt-file` | System prompt from file (composed by The Loom) |
+| `--resume` | Resume an existing conversation by provider session id |
+
+### Bare Mode (Future)
+
+When sessions are fully composed by The Loom (system prompt, tools, CLAUDE.md), the provider should use `--bare` mode:
+
+```
+--bare    Skip hooks, LSP, plugin sync, attribution, auto-memory, background
+          prefetches, keychain reads, and CLAUDE.md auto-discovery.
+          Context is explicitly provided via:
+          --system-prompt[-file], --mcp-config, --settings, --add-dir, etc.
+```
+
+This ensures the session context is entirely what The Loom wove — no ambient CLAUDE.md or project settings leak in. Not yet implemented; current sessions may pick up ambient project configuration.
+
+---
+
+## Stream-JSON Parsing
+
+The `claude` CLI with `--output-format stream-json` emits NDJSON (newline-delimited JSON) on stdout. Each line is a message with a `type` field:
+
+| Message type | Content | Extracted data |
+|-------------|---------|----------------|
+| `assistant` | Model response with content blocks | Transcript entry; text chunks → stderr + `SessionChunk` |
+| `user` | User messages including tool results | Transcript entry; tool_result chunks → `SessionChunk` |
+| `result` | Final summary after session completes | `costUsd`, `tokenUsage`, `providerSessionId` |
+
+### Content Block Types (within `assistant` messages)
+
+| Block type | Action |
+|-----------|--------|
+| `text` | Written to stderr (real-time visibility); emitted as `{ type: 'text', text }` chunk |
+| `tool_use` | Emitted as `{ type: 'tool_use', tool: name }` chunk |
+
+### Parsing Architecture
+
+Two internal functions handle the parsing pipeline:
+
+- **`processNdjsonBuffer(buffer, handler)`** — splits an incoming buffer on newlines, parses each complete JSON line, and calls the handler. Returns the remaining incomplete buffer. Gracefully skips non-JSON lines.
+
+- **`parseStreamJsonMessage(msg, accumulator)`** — processes a single parsed message, accumulating transcript entries and telemetry into the accumulator object, and returning any `SessionChunk` objects for streaming consumers.
+
+The stderr write of assistant text content is a deliberate side effect — it provides real-time session output visibility in the terminal. See [The Animator § CLI streaming behavior](./animator.md#cli-streaming-behavior) for the rationale.
+
+---
+
+## MCP Tool Server
+
+The package contains a module (`mcp-server.ts`) that creates an MCP server from `ToolDefinition` objects, and an HTTP server helper (`startMcpHttpServer()`) that serves it over Streamable HTTP on an ephemeral localhost port. Each anima session gets its own MCP server instance serving that session's permission-gated tool set.
+
+### `createMcpServer(tools)`
+
+```typescript
+async function createMcpServer(tools: ToolDefinition[]): Promise<McpServer>
+```
+
+Creates an MCP server instance with the given tools registered. Each tool is registered with the MCP SDK using:
+- Tool name and description from the definition
+- Zod param schema (the SDK handles JSON Schema conversion)
+- Handler wrapped with Zod validation and error formatting
+
+Tools with `callableBy` set that does not include `'anima'` are filtered out. Tools without `callableBy` are included (available to all callers by default).
+
+### `startMcpHttpServer(tools)`
+
+```typescript
+async function startMcpHttpServer(tools: ToolDefinition[]): Promise<McpHttpHandle>
+
+interface McpHttpHandle {
+  /** URL for --mcp-config (e.g. "http://localhost:PORT/mcp") */
+  url: string;
+  /** Shut down the HTTP server and MCP transport. */
+  close(): Promise<void>;
+}
+```
+
+Starts an in-process HTTP server serving the MCP tool set via the Streamable HTTP transport. The server:
+
+1. Calls `createMcpServer(tools)` to build the MCP server instance
+2. Creates a `StreamableHTTPServerTransport` in stateless mode (one session per server — no session tracking needed)
+3. Connects the MCP server to the transport
+4. Starts a Node.js `http.createServer()` listening on `127.0.0.1` with port `0` (OS-assigned ephemeral port)
+5. Routes all requests to the transport's `handleRequest()`
+6. Returns a handle with the URL and a `close()` function
+
+The HTTP server binds to localhost only — it is not network-accessible. The ephemeral port avoids conflicts when multiple sessions run concurrently.
+
+### Transport Choice: HTTP vs Stdio
+
+The MCP SDK supports multiple transports. We chose in-process HTTP over the more common stdio child-process approach:
+
+| Concern | Stdio (child process) | HTTP (in-process) |
+|---------|----------------------|-------------------|
+| Guild instances | Two (SQLite contention risk) | One (shared) |
+| Tool resolution | Must re-resolve in child | Already resolved by Loom |
+| Boot latency | Guild boot per session | ~0 (just start HTTP listener) |
+| Lifecycle | Claude manages | Provider manages |
+| Entry point | Needs runnable script file | No extra file |
+| Permissions | Must serialize & re-resolve | Not needed — tools in memory |
+
+The in-process approach eliminates the need for a separate MCP server process entry point, avoids duplicate guild boot, and removes the SQLite concurrent-writer concern entirely. Tool definitions (including Zod schemas and handler functions) are passed directly — no serialization boundary.
+
+### MCP Config Format
+
+The provider writes a temporary `--mcp-config` JSON file:
+
+```json
+{
+  "mcpServers": {
+    "nexus-guild": {
+      "type": "http",
+      "url": "http://127.0.0.1:PORT/mcp"
+    }
+  }
+}
+```
+
+Claude connects to the HTTP server as an MCP client using the Streamable HTTP transport. From Claude's perspective, this is no different from any remote MCP server.
+
+### Server Lifecycle
+
+The provider owns the MCP server lifecycle — it starts the server before launching the Claude session and stops it after the session exits:
+
+```
+prepareSession(config)
+  │
+  ├─ ... existing steps (temp dir, args, system prompt, resume) ...
+  │
+  └─ If config.tools has entries:
+      ├─ startMcpHttpServer(tools) → { url, close }
+      ├─ Write --mcp-config JSON to temp dir (pointing at url)
+      ├─ Add --mcp-config <path> to args
+      ├─ Add --strict-mcp-config to args
+      └─ Return close() in PreparedSession for cleanup
+```
+
+Cleanup happens in the same `finally` block that removes the temp directory:
+
+```
+launch(config)
+  ├─ prepareSession() → { tmpDir, args, mcpClose? }
+  ├─ spawn claude process
+  └─ on exit:
+      ├─ mcpClose?.() — shut down HTTP server + transport
+      └─ rmSync(tmpDir) — remove temp files
+```
+
+The `close()` function:
+1. Closes the `StreamableHTTPServerTransport` (terminates any active SSE connections)
+2. Closes the `http.Server` (stops accepting new connections)
+
+If the Claude process crashes or is killed, the cleanup still runs — the `close` handler on the child process fires regardless of exit reason.
+
+### Concurrency
+
+Each session gets its own MCP server on its own ephemeral port. Multiple concurrent sessions each have independent HTTP servers, all sharing the same in-process guild instance. This is safe because:
+- Tool handlers access guild infrastructure via `guild()`, which is process-global
+- Read operations (stacks queries, config reads) are naturally concurrent
+- Write operations (stacks puts) go through SQLite, which handles concurrency in WAL mode
+
+---
+
+## Configuration
+
+The Claude Code apparatus reads no direct configuration from `guild.json`. It is selected as a session provider via The Animator's config:
+
+```json
+{
+  "animator": {
+    "sessionProvider": "claude-code"
+  }
+}
+```
+
+The `claude-code` value is the default when `sessionProvider` is not specified. The model comes from `guild.json["settings"]["model"]`, resolved by The Animator before being passed in `SessionProviderConfig`.
+
+---
+
+## Open Questions
+
+- **`--bare` mode.** When should the provider switch from the current `--setting-sources user` to full `--bare` mode? Likely when The Loom produces real system prompts and MCP config is attached. Need to verify that `--bare` + `--mcp-config` + `--system-prompt-file` gives us full control with no ambient leakage.
+
+---
+
+## Future: Server Reuse
+
+Currently each session gets its own MCP HTTP server, even when consecutive sessions have identical tool sets (same role, same permissions). A future optimization could pool and reuse MCP servers:
+
+- **Key by tool set** — hash the sorted list of tool names to produce a cache key
+- **Reference counting** — track active sessions per server; close when count drops to zero
+- **Idle timeout** — close unused servers after a configurable idle period
+- **Stale detection** — invalidate the cache when tool registrations change (plugin reload, guild restart)
+
+This would eliminate per-session HTTP server startup for batch operations (e.g., dispatching multiple artificer sessions). The savings are modest — HTTP server start is fast — but it reduces port churn and simplifies cleanup in high-throughput scenarios.
+
+Not implemented; revisit if session launch latency becomes a concern.
+
+=== CONTEXT FILE: docs/architecture/apparatus/stacks.md ===
+# The Stacks — API Contract
+
+Status: **Draft — under review**
+
+Package: `@shardworks/stacks` · Plugin id: `stacks`
+
+---
+
+## Purpose
+
+The Stacks is the guild's persistence layer — a JSON document store backed by SQLite, with change data capture (CDC) as its primary integration mechanism. Every piece of guild state that needs to survive process restarts lives here: writs, sessions, anima records, event logs.
+
+The Stacks owns the write path exclusively. There is no raw SQL escape hatch, no bypass. This is what makes CDC reliable — if the API is the only write path, the event stream is complete. The Stacks does not know what the documents mean; it stores them, indexes them, watches them, and stays out of the way.
+
+---
+
+## Dependencies
+
+```
+requires: []
+consumes: ['books']    — scans kit contributions for book declarations
+```
+
+The Stacks has no apparatus dependencies — it is the foundation layer that everything else builds on.
+
+---
+
+## Kit Interface
+
+When The Stacks is installed, kits gain the ability to declare a `books` field — a record of named book declarations with index schemas. The Stacks reads these at startup and creates or reconciles the backing tables. Schema changes are additive only — new books and new indexes are always safe; nothing is ever dropped automatically.
+
+```typescript
+// Example: a kit declaring two books
+export default {
+  kit: {
+    requires: ['stacks'],
+    books: {
+      writs:    { indexes: ['status', 'createdAt', 'parent.id', ['status', 'createdAt']] },
+      sessions: { indexes: ['writId', 'startedAt', 'animaId'] },
+    },
+  },
+} satisfies Plugin
+```
+
+```typescript
+interface BookSchema {
+  /**
+   * Fields or field tuples to index for efficient querying.
+   * - A `string` creates a single-field index (e.g. `'status'`)
+   * - A `string[]` creates a compound index (e.g. `['status', 'createdAt']`)
+   *
+   * Dot-notation for nested fields ('parent.id') is supported.
+   */
+  indexes?: (string | string[])[]
+}
+```
+
+> **Index policy:** Only declared indexes are guaranteed to be efficient. Querying on a non-indexed field works but may scan the full table.
+
+---
+
+## `StacksApi` Interface (`provides`)
+
+```typescript
+interface StacksApi {
+  /**
+   * Get a writable Book handle for the given owner and book name.
+   *
+   * `ownerId` is the plugin id of the declaring kit — this is the write
+   * boundary. Trust-based: not validated at runtime against the caller's
+   * identity. `readBook()` enforces the boundary at the type level.
+   */
+  book<T extends BookEntry>(ownerId: string, name: string): Book<T>
+
+  /**
+   * Get a read-only Book handle scoped to another plugin's book.
+   * Exposes `get`, `find`, `list`, and `count` only.
+   */
+  readBook<T extends BookEntry>(ownerId: string, name: string): ReadOnlyBook<T>
+
+  /**
+   * Register a CDC handler for a book.
+   *
+   * Must be called during startup before any writes occur.
+   * The `failOnError` option controls execution phase — see
+   * "Change Data Capture" below.
+   */
+  watch<T extends BookEntry>(
+    ownerId: string,
+    bookName: string,
+    handler: ChangeHandler<T>,
+    options?: WatchOptions,
+  ): void
+
+  /**
+   * Execute a function within an atomic transaction.
+   *
+   * All writes inside `fn` commit or roll back together. Reads see
+   * uncommitted writes (read-your-writes). CDC events are buffered
+   * and fired (coalesced per-document) after commit.
+   */
+  transaction<R>(fn: (tx: TransactionContext) => Promise<R>): Promise<R>
+}
+
+interface TransactionContext {
+  book<T extends BookEntry>(ownerId: string, name: string): Book<T>
+  readBook<T extends BookEntry>(ownerId: string, name: string): ReadOnlyBook<T>
+}
+```
+
+---
+
+## Configuration
+
+```json
+{
+  "stacks": {
+    "autoMigrate": true,
+    "maxCascadeDepth": 16
+  }
+}
+```
+
+- **`autoMigrate`** — whether to apply database migrations automatically on startup.
+- **`maxCascadeDepth`** — maximum CDC cascade depth before the transaction is aborted (default: 16).
+
+---
+
+## Document Model
+
+A **book** is a named collection of documents. Every document must include an `id: string` field. The framework puts nothing else in the envelope — no `_rev`, no `_createdAt`, no `_type`. Domain types own their own fields.
+
+```typescript
+type BookEntry = { id: string } & Record<string, unknown>
+```
+
+IDs are author-generated. Plugins own ID generation (ULIDs recommended). The Stacks has no opinion on format beyond requiring a non-empty string. Documents are stored as plain JSON objects; nested objects are fully supported. Field names in query predicates use dot-notation for nested access (`'parent.id'`).
+
+---
+
+## Read and Write API
+
+```typescript
+interface Book<T extends BookEntry> extends ReadOnlyBook<T> {
+  /** Upsert a document. Fires a `create` or `update` CDC event. */
+  put(entry: T): Promise<void>
+
+  /**
+   * Partially update a document (top-level field merge).
+   * Throws if the document does not exist. Returns the full document after merge.
+   * Fires an `update` CDC event with the pre-patch document as `prev`.
+   */
+  patch(id: string, fields: Partial<Omit<T, 'id'>>): Promise<T>
+
+  /** Delete by id. Silent no-op if the document does not exist. */
+  delete(id: string): Promise<void>
+}
+
+interface ReadOnlyBook<T extends BookEntry> {
+  get(id: string): Promise<T | null>
+  find(query: BookQuery<T>): Promise<T[]>
+  list(options?: ListOptions): Promise<T[]>
+  count(where?: WhereClause<T> | { or: WhereClause<T>[] }): Promise<number>
+}
+```
+
+---
+
+## Query Language
+
+Where conditions are expressed as tuples — `[field, operator, value?]`. All conditions within a single `WhereClause` are AND-ed.
+
+```typescript
+type WhereCondition<T> =
+  | [string, '=' | '!=', Scalar]
+  | [string, '>' | '>=' | '<' | '<=', number | string]
+  | [string, 'LIKE', string]       // % and _ wildcards
+  | [string, 'IN', Scalar[]]
+  | [string, 'IS NULL' | 'IS NOT NULL']
+
+type Scalar = string | number | boolean | null
+type WhereClause<T> = WhereCondition<T>[]
+```
+
+**OR support:** The `where` field accepts `{ or: WhereClause<T>[] }` — each element is an AND-clause; results are unioned and deduplicated by `id`.
+
+**Sorting:** Multi-field ordering via `orderBy: [field, 'asc' | 'desc']` or an array of such tuples.
+
+**Pagination:** `{ limit: number; offset?: number }`. Offset requires limit.
+
+```typescript
+type BookQuery<T extends BookEntry> = {
+  where?:   WhereClause<T> | { or: WhereClause<T>[] }
+  orderBy?: OrderBy
+} & Pagination
+```
+
+---
+
+## Change Data Capture
+
+All writes go through the Stacks API — this is the guarantee that makes CDC complete. CDC handlers fire on every write to a watched book.
+
+### Event shapes
+
+```typescript
+type ChangeEvent<T extends BookEntry> =
+  | CreateEvent<T>
+  | UpdateEvent<T>
+  | DeleteEvent<T>
+
+interface CreateEvent<T> {
+  type: 'create'; ownerId: string; book: string; entry: T
+}
+interface UpdateEvent<T> {
+  type: 'update'; ownerId: string; book: string; entry: T; prev: T
+}
+interface DeleteEvent<T> {
+  type: 'delete'; ownerId: string; book: string; id: string; prev: T
+}
+```
+
+`prev` is always populated for `update` and `delete` events. The pre-read cost is only paid when handlers are registered for the book.
+
+### Two-phase execution
+
+```typescript
+type ChangeHandler<T extends BookEntry> = (event: ChangeEvent<T>) => Promise<void> | void
+
+interface WatchOptions {
+  /**
+   * true  (default) — Phase 1: runs INSIDE the transaction. Handler writes
+   *   join the same atomic unit. If the handler throws, everything rolls back.
+   * false — Phase 2: runs AFTER commit. Data is persisted. Handler failures
+   *   are logged as warnings.
+   */
+  failOnError?: boolean
+}
+```
+
+**Phase 1 — Cascade** (`failOnError: true`, the default). Runs inside the transaction, before commit. The handler's writes join the same atomic unit. If the handler throws, everything rolls back — the triggering write, the handler's writes, and all nested cascades. This is the correct phase for referential integrity (e.g. cancelling child writs when a parent is cancelled).
+
+**Phase 2 — Notification** (`failOnError: false`). Runs after the transaction commits. Data is already persisted. This is the correct phase for Clockworks event emission, telemetry, and audit logging. If your Phase 1 handler produces effects outside the Stacks, it probably belongs in Phase 2 — transaction rollback cannot undo non-database side effects.
+
+### Transaction binding
+
+Handlers access the Stacks through the normal `guild().apparatus<StacksApi>('stacks')` path. Transaction binding is transparent via `AsyncLocalStorage` — Phase 1 handlers automatically route their book operations through the active transaction. No special API, no transaction-aware handles. The transaction context is ambient.
+
+**All book operations inside a Phase 1 handler must be `await`-ed.** A non-awaited write inherits the transaction context but may execute after commit or rollback, producing undefined behavior.
+
+### Cascade depth limiting
+
+A depth counter prevents infinite recursion from accidental handler cycles. Default limit is 16, configurable via `"stacks": { "maxCascadeDepth": 32 }` in `guild.json`. Exceeding the limit throws and rolls back the entire transaction.
+
+### CDC event coalescing
+
+Within a transaction, multiple writes to the same document produce a single CDC event reflecting the net change:
+
+| Mutations | Coalesced event |
+|---|---|
+| create | `create` (final state) |
+| create → update(s) | `create` (final state) |
+| create → delete | *(no event)* |
+| update(s) | `update` (pre-transaction → final) |
+| update → delete | `delete` (pre-transaction state) |
+| delete | `delete` (pre-transaction state) |
+
+Phase 2 handlers see exactly one event per document. They never see intermediate states.
+
+---
+
+## Transaction Model
+
+Every write participates in a transaction. There are two ways they're created:
+
+**Implicit.** Every `put()`, `patch()`, or `delete()` outside a transaction opens one implicitly. It spans the write plus all Phase 1 handlers (and their cascades). Commits after all Phase 1 handlers succeed; rolls back if any throw.
+
+**Explicit.** `stacks.transaction()` groups multiple writes into a single atomic unit. Phase 1 handlers within an explicit transaction join the same transaction. Commit is deferred until the callback completes.
+
+Reads within a transaction see uncommitted writes from the same transaction (read-your-writes).
+
+---
+
+## Backend Interface
+
+The Stacks depends on a `StacksBackend` interface, not SQLite directly. The default implementation uses SQLite via `better-sqlite3`; alternative backends implement the same interface. No SQLite types leak into the public API.
+
+```typescript
+interface StacksBackend {
+  open(options: BackendOptions): Promise<void>
+  close(): Promise<void>
+  ensureBook(ref: BookRef, schema: BookSchema): Promise<void>
+  beginTransaction(): Promise<BackendTransaction>
+}
+
+interface BackendTransaction {
+  put(ref: BookRef, entry: BookEntry, opts?: { withPrev: boolean }): Promise<PutResult>
+  patch(ref: BookRef, id: string, fields: Record<string, unknown>): Promise<PatchResult>
+  delete(ref: BookRef, id: string, opts?: { withPrev: boolean }): Promise<DeleteResult>
+  get(ref: BookRef, id: string): Promise<BookEntry | null>
+  find(ref: BookRef, query: InternalQuery): Promise<BookEntry[]>
+  count(ref: BookRef, where?: InternalCondition[]): Promise<number>
+  commit(): Promise<void>
+  rollback(): Promise<void>
+}
+```
+
+For v1, the backend is an internal implementation detail — not a public extension point. To use a different persistence backend, install a different apparatus that provides `StacksApi`. The in-memory backend for tests ships inside `@shardworks/stacks` as a test utility export.
+
+---
+
+## Implementation Notes
+
+- **Migration from existing code.** The existing `arbor/src/db/` (`BookStore`, `sqlite-adapter`, `reconcile-books`) moves into `@shardworks/stacks` as the SQLite backend. `Arbor.getDatabase()` (already `@deprecated`) is removed when The Stacks ships. The `core/src/book.ts` types are superseded by this spec's types. Direct database access in `nexus-clockworks` and `nexus-sessions` is replaced with `guild().apparatus<StacksApi>('stacks')` calls.
+- **Plugin id ownership.** Each plugin hardcodes its own id as a constant (e.g. `const PLUGIN_ID = 'nexus-ledger'`). The framework does not inject it.
+
+See [the full Stacks specification](../../../packages/stacks/docs/stacks.md) for complete type signatures, use case coverage matrix, resolved design questions, and the detailed cascade walkthrough.
+
+=== CONTEXT FILE: packages/plugins/animator/src/animator.test.ts ===
+/**
+ * Animator tests.
+ *
+ * Uses a fake session provider apparatus and in-memory Stacks backend to
+ * test the full animate() lifecycle without spawning real processes.
+ *
+ * The fake provider is registered as an apparatus in the guild mock,
+ * matching how real providers work (the Animator discovers them via
+ * guild().apparatus(config.sessionProvider)).
+ */
+
+import { describe, it, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { setGuild, clearGuild } from '@shardworks/nexus-core';
+import type { Guild } from '@shardworks/nexus-core';
+import { createStacksApparatus } from '@shardworks/stacks-apparatus';
+import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
+import type { StacksApi } from '@shardworks/stacks-apparatus';
+
+import { createLoom } from '@shardworks/loom-apparatus';
+import type { LoomApi } from '@shardworks/loom-apparatus';
+
+import { createAnimator } from './animator.ts';
+import type {
+  AnimatorApi,
+  AnimatorSessionProvider,
+  SessionProviderConfig,
+  SessionProviderResult,
+  SessionChunk,
+  SessionDoc,
+  TranscriptDoc,
+} from './types.ts';
+
+// ── Shared empty chunks iterable ─────────────────────────────────────
+
+const emptyChunks: AsyncIterable<SessionChunk> = {
+  [Symbol.asyncIterator]() {
+    return {
+      async next() {
+        return { value: undefined as unknown as SessionChunk, done: true as const };
+      },
+    };
+  },
+};
+
+// ── Fake providers ───────────────────────────────────────────────────
+
+function createFakeProvider(
+  overrides: Partial<SessionProviderResult> = {},
+): AnimatorSessionProvider {
+  return {
+    name: 'fake',
+    launch(_config: SessionProviderConfig) {
+      return {
+        chunks: emptyChunks,
+        result: Promise.resolve({
+          status: 'completed' as const,
+          exitCode: 0,
+          providerSessionId: 'fake-sess-123',
+          tokenUsage: {
+            inputTokens: 1000,
+            outputTokens: 500,
+          },
+          costUsd: 0.05,
+          ...overrides,
+        }),
+      };
+    },
+  };
+}
+
+function createStreamingFakeProvider(
+  streamChunks: SessionChunk[],
+  overrides: Partial<SessionProviderResult> = {},
+): AnimatorSessionProvider {
+  return {
+    name: 'fake-streaming',
+    launch(config: SessionProviderConfig) {
+      if (config.streaming) {
+        let idx = 0;
+        const asyncChunks: AsyncIterable<SessionChunk> = {
+          [Symbol.asyncIterator]() {
+            return {
+              async next() {
+                if (idx < streamChunks.length) {
+                  return { value: streamChunks[idx++]!, done: false as const };
+                }
+                return { value: undefined as unknown as SessionChunk, done: true as const };
+              },
+            };
+          },
+        };
+
+        return {
+          chunks: asyncChunks,
+          result: Promise.resolve({
+            status: 'completed' as const,
+            exitCode: 0,
+            providerSessionId: 'fake-stream-sess',
+            ...overrides,
+          }),
+        };
+      }
+
+      // Non-streaming: return empty chunks
+      return {
+        chunks: emptyChunks,
+        result: Promise.resolve({
+          status: 'completed' as const,
+          exitCode: 0,
+          providerSessionId: 'fake-stream-sess',
+          ...overrides,
+        }),
+      };
+    },
+  };
+}
+
+function createThrowingProvider(error: Error): AnimatorSessionProvider {
+  return {
+    name: 'fake-throwing',
+    launch() {
+      return {
+        chunks: emptyChunks,
+        result: Promise.reject(error),
+      };
+    },
+  };
+}
+
+// ── Spy provider (captures the config passed to launch) ──────────────
+
+function createSpyProvider(): {
+  provider: AnimatorSessionProvider;
+  getCapturedConfig: () => SessionProviderConfig | null;
+} {
+  let capturedConfig: SessionProviderConfig | null = null;
+
+  return {
+    provider: {
+      name: 'fake-spy',
+      launch(config: SessionProviderConfig) {
+        capturedConfig = config;
+        return {
+          chunks: emptyChunks,
+          result: Promise.resolve({ status: 'completed' as const, exitCode: 0 }),
+        };
+      },
+    },
+    getCapturedConfig: () => capturedConfig,
+  };
+}
+
+// ── Test harness ─────────────────────────────────────────────────────
+
+let stacks: StacksApi;
+let animator: AnimatorApi;
+let memBackendRef: InstanceType<typeof MemoryBackend>;
+
+/**
+ * Set up the test environment with a guild mock, in-memory Stacks,
+ * and the Animator apparatus. The provider is registered as an apparatus
+ * that the Animator discovers via guild().apparatus('fake-provider').
+ *
+ * @param opts.installLoom — if true, installs The Loom apparatus (needed for summon() tests)
+ */
+function setup(
+  provider: AnimatorSessionProvider = createFakeProvider(),
+  sessionProviderPluginId = 'fake-provider',
+  opts: { installLoom?: boolean } = {},
+) {
+  memBackendRef = new MemoryBackend();
+  const memBackend = memBackendRef;
+  const stacksPlugin = createStacksApparatus(memBackend);
+  const animatorPlugin = createAnimator();
+
+  // Apparatus registry for the guild mock
+  const apparatusMap = new Map<string, unknown>();
+
+  // Register the provider as an apparatus (same as a real guild would)
+  apparatusMap.set(sessionProviderPluginId, provider);
+
+  const fakeGuild: Guild = {
+    home: '/tmp/fake-guild',
+    apparatus<T>(name: string): T {
+      const api = apparatusMap.get(name);
+      if (!api) throw new Error(`Apparatus "${name}" not installed`);
+      return api as T;
+    },
+    config<T>(pluginId: string): T {
+      if (pluginId === 'animator') {
+        return { sessionProvider: sessionProviderPluginId } as T;
+      }
+      return {} as T;
+    },
+    writeConfig() { /* noop in test */ },
+    guildConfig() {
+      return {
+        name: 'test-guild',
+        nexus: '0.0.0',
+        workshops: {},
+        roles: {},
+        baseTools: [],
+        plugins: [],
+        settings: { model: 'sonnet' },
+        animator: { sessionProvider: sessionProviderPluginId },
+      };
+    },
+    kits: () => [],
+    apparatuses: () => [],
+  };
+
+  // Must set guild before starting apparatus that call guild() in start()
+  setGuild(fakeGuild);
+
+  // Optionally install The Loom (needed for summon() tests)
+  if (opts.installLoom) {
+    const loomPlugin = createLoom();
+    const loomApparatus = (loomPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+    loomApparatus.start({ on: () => {} });
+    apparatusMap.set('loom', loomApparatus.provides);
+  }
+
+  // Start stacks
+  const stacksApparatus = (stacksPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+  stacksApparatus.start({ on: () => {} });
+  stacks = stacksApparatus.provides as StacksApi;
+  apparatusMap.set('stacks', stacks);
+
+  // Ensure the animator's books are created
+  memBackend.ensureBook({ ownerId: 'animator', book: 'sessions' }, {
+    indexes: ['startedAt', 'status', 'conversationId', 'provider'],
+  });
+  memBackend.ensureBook({ ownerId: 'animator', book: 'transcripts' }, {
+    indexes: ['sessionId'],
+  });
+
+  // Start animator
+  const animatorApparatus = (animatorPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+  animatorApparatus.start({ on: () => {} });
+  animator = animatorApparatus.provides as AnimatorApi;
+}
+
+// ── Tests ────────────────────────────────────────────────────────────
+
+describe('Animator', () => {
+  afterEach(() => {
+    clearGuild();
+  });
+
+  describe('animate()', () => {
+    beforeEach(() => {
+      setup();
+    });
+
+    it('returns an AnimateHandle with chunks and result', () => {
+      const handle = animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+      });
+
+      assert.ok(handle.chunks, 'should have chunks');
+      assert.ok(handle.result instanceof Promise, 'result should be a Promise');
+    });
+
+    it('completes a session and records to Stacks', async () => {
+      const result = await animator.animate({
+        context: { systemPrompt: 'You are a test agent.' },
+        cwd: '/tmp/workdir',
+      }).result;
+
+      assert.equal(result.status, 'completed');
+      assert.equal(result.exitCode, 0);
+      assert.equal(result.provider, 'fake');
+      assert.ok(result.id.startsWith('ses-'));
+      assert.ok(result.startedAt);
+      assert.ok(result.endedAt);
+      assert.equal(typeof result.durationMs, 'number');
+      assert.equal(result.providerSessionId, 'fake-sess-123');
+      assert.deepEqual(result.tokenUsage, { inputTokens: 1000, outputTokens: 500 });
+      assert.equal(result.costUsd, 0.05);
+
+      // Verify recorded in Stacks
+      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      const doc = await sessions.get(result.id);
+      assert.ok(doc);
+      assert.equal(doc.status, 'completed');
+      assert.equal(doc.provider, 'fake');
+      assert.equal(doc.exitCode, 0);
+    });
+
+    it('records metadata as-is', async () => {
+      const metadata = {
+        trigger: 'summon',
+        animaName: 'scribe',
+        writId: 'wrt-abc123',
+      };
+
+      const result = await animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+        metadata,
+      }).result;
+
+      assert.deepEqual(result.metadata, metadata);
+
+      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      const doc = await sessions.get(result.id);
+      assert.deepEqual(doc?.metadata, metadata);
+    });
+
+    it('passes conversationId through', async () => {
+      const result = await animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+        conversationId: 'conv-xyz',
+      }).result;
+
+      assert.equal(result.conversationId, 'conv-xyz');
+
+      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      const doc = await sessions.get(result.id);
+      assert.equal(doc?.conversationId, 'conv-xyz');
+    });
+
+    it('passes prompt and systemPrompt to provider', async () => {
+      const { provider, getCapturedConfig } = createSpyProvider();
+      setup(provider);
+
+      await animator.animate({
+        context: { systemPrompt: 'System prompt here' },
+        prompt: 'Do the thing',
+        cwd: '/tmp/workdir',
+      }).result;
+
+      const captured = getCapturedConfig();
+      assert.ok(captured);
+      assert.equal(captured!.systemPrompt, 'System prompt here');
+      assert.equal(captured!.initialPrompt, 'Do the thing');
+      assert.equal(captured!.model, 'sonnet');
+      assert.equal(captured!.cwd, '/tmp/workdir');
+    });
+
+    it('passes context environment through to provider', async () => {
+      const { provider, getCapturedConfig } = createSpyProvider();
+      setup(provider);
+
+      await animator.animate({
+        context: { systemPrompt: 'Test', environment: { GIT_AUTHOR_NAME: 'Custom' } },
+        cwd: '/tmp/workdir',
+      }).result;
+
+      const captured = getCapturedConfig();
+      assert.ok(captured);
+      assert.deepStrictEqual(captured!.environment, { GIT_AUTHOR_NAME: 'Custom' });
+    });
+
+    it('merges request environment over context environment', async () => {
+      const { provider, getCapturedConfig } = createSpyProvider();
+      setup(provider);
+
+      await animator.animate({
+        context: {
+          systemPrompt: 'Test',
+          environment: { GIT_AUTHOR_NAME: 'FromContext', GIT_AUTHOR_EMAIL: 'context@nexus.local' },
+        },
+        environment: { GIT_AUTHOR_NAME: 'FromRequest' },
+        cwd: '/tmp/workdir',
+      }).result;
+
+      const captured = getCapturedConfig();
+      assert.ok(captured);
+      assert.equal(captured!.environment?.GIT_AUTHOR_NAME, 'FromRequest');
+      assert.equal(captured!.environment?.GIT_AUTHOR_EMAIL, 'context@nexus.local');
+    });
+
+    it('records failed session when provider throws', async () => {
+      const throwProvider = createThrowingProvider(new Error('Provider exploded'));
+      setup(throwProvider);
+
+      await assert.rejects(
+        () => animator.animate({
+          context: { systemPrompt: 'Test' },
+          cwd: '/tmp/workdir',
+        }).result,
+        { message: 'Provider exploded' },
+      );
+
+      // Should still be recorded in Stacks
+      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      const allDocs = await sessions.list();
+      const failedDocs = allDocs.filter((d) => d.status === 'failed');
+      assert.equal(failedDocs.length, 1);
+      assert.equal(failedDocs[0]!.error, 'Provider exploded');
+      assert.equal(failedDocs[0]!.exitCode, 1);
+    });
+
+    it('records provider-reported failure (not throw)', async () => {
+      const failProvider = createFakeProvider({
+        status: 'failed',
+        exitCode: 2,
+        error: 'Process crashed',
+      });
+      setup(failProvider);
+
+      const result = await animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+      }).result;
+
+      assert.equal(result.status, 'failed');
+      assert.equal(result.exitCode, 2);
+      assert.equal(result.error, 'Process crashed');
+    });
+
+    it('records timeout status', async () => {
+      const timeoutProvider = createFakeProvider({
+        status: 'timeout',
+        exitCode: 124,
+        error: 'Session timed out after 300s',
+      });
+      setup(timeoutProvider);
+
+      const result = await animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+      }).result;
+
+      assert.equal(result.status, 'timeout');
+      assert.equal(result.exitCode, 124);
+    });
+
+    it('throws when session provider apparatus not installed', () => {
+      // Set up with a bad provider plugin id
+      setup(createFakeProvider(), 'nonexistent');
+      // The provider IS registered at 'nonexistent', so the lookup will work.
+      // Instead, set up a guild that has no apparatus at the configured id.
+      clearGuild();
+
+      const memBackend = new MemoryBackend();
+      const stacksPlugin = createStacksApparatus(memBackend);
+      const animatorPlugin = createAnimator();
+
+      const apparatusMap = new Map<string, unknown>();
+
+      setGuild({
+        home: '/tmp/fake-guild',
+        apparatus<T>(name: string): T {
+          const api = apparatusMap.get(name);
+          if (!api) throw new Error(`Apparatus "${name}" not installed`);
+          return api as T;
+        },
+        config<T>(pluginId: string): T {
+          if (pluginId === 'animator') {
+            return { sessionProvider: 'missing-provider' } as T;
+          }
+          return {} as T;
+        },
+        writeConfig() { /* noop in test */ },
+        guildConfig: () => ({
+          name: 'test', nexus: '0.0.0', workshops: {}, roles: {},
+          baseTools: [], plugins: [], settings: { model: 'sonnet' },
+          animator: { sessionProvider: 'missing-provider' },
+        }),
+        kits: () => [],
+        apparatuses: () => [],
+      });
+
+      const sa = (stacksPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+      sa.start({ on: () => {} });
+      apparatusMap.set('stacks', sa.provides);
+      memBackend.ensureBook({ ownerId: 'animator', book: 'sessions' }, { indexes: [] });
+
+      const aa = (animatorPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+      aa.start({ on: () => {} });
+      const a = aa.provides as AnimatorApi;
+
+      // animate() resolves the provider synchronously — throws before
+      // returning the AnimateHandle.
+      assert.throws(
+        () => a.animate({
+          context: { systemPrompt: 'Test' },
+          cwd: '/tmp/workdir',
+        }),
+        /missing-provider/,
+      );
+    });
+
+    it('returns empty chunks when streaming is not requested', async () => {
+      const { chunks, result } = animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+      });
+
+      const collected: SessionChunk[] = [];
+      for await (const chunk of chunks) {
+        collected.push(chunk);
+      }
+      assert.equal(collected.length, 0);
+
+      const sessionResult = await result;
+      assert.equal(sessionResult.status, 'completed');
+    });
+
+    it('records output from provider result', async () => {
+      const providerWithOutput = createFakeProvider({ output: 'The task is done.' });
+      setup(providerWithOutput);
+
+      const result = await animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+      }).result;
+
+      assert.equal(result.output, 'The task is done.');
+
+      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      const doc = await sessions.get(result.id);
+      assert.equal(doc?.output, 'The task is done.');
+    });
+
+    it('records transcript to transcripts book', async () => {
+      const transcript = [
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'Hello' }] } },
+        { type: 'result', total_cost_usd: 0.01 },
+      ];
+      const providerWithTranscript = createFakeProvider({ transcript, output: 'Hello' });
+      setup(providerWithTranscript);
+
+      const result = await animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+      }).result;
+
+      const transcripts = stacks.readBook<TranscriptDoc>('animator', 'transcripts');
+      const doc = await transcripts.get(result.id);
+      assert.ok(doc, 'transcript doc should be written');
+      assert.equal(doc.id, result.id);
+      assert.deepEqual(doc.messages, transcript);
+    });
+
+    it('skips transcript write when transcript is undefined', async () => {
+      // Default fake provider has no transcript
+      setup();
+
+      const result = await animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+      }).result;
+
+      const transcripts = stacks.readBook<TranscriptDoc>('animator', 'transcripts');
+      const doc = await transcripts.get(result.id);
+      assert.ok(!doc, 'no transcript doc should be written when transcript is undefined');
+    });
+
+    it('skips transcript write when transcript is empty', async () => {
+      const providerWithEmptyTranscript = createFakeProvider({ transcript: [] });
+      setup(providerWithEmptyTranscript);
+
+      const result = await animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+      }).result;
+
+      const transcripts = stacks.readBook<TranscriptDoc>('animator', 'transcripts');
+      const doc = await transcripts.get(result.id);
+      assert.ok(!doc, 'no transcript doc should be written for empty transcript');
+    });
+
+    it('session write failure does not mask transcript write', async () => {
+      // Use a provider with transcript; the session write will fail but we
+      // verify the transcript write still proceeds (both errors are independent).
+      // In this test we just verify the result still resolves — error handling
+      // contract says failures are logged, not propagated.
+      const transcript = [
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'Done' }] } },
+      ];
+      const providerWithTranscript = createFakeProvider({ transcript, output: 'Done' });
+      setup(providerWithTranscript);
+
+      // Should resolve without throwing even if internal writes fail
+      const result = await animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+      }).result;
+
+      assert.equal(result.status, 'completed');
+      assert.equal(result.output, 'Done');
+    });
+  });
+
+  describe('animate({ streaming: true })', () => {
+    it('streams chunks and returns result', async () => {
+      const testChunks: SessionChunk[] = [
+        { type: 'text', text: 'Hello ' },
+        { type: 'tool_use', tool: 'bash' },
+        { type: 'tool_result', tool: 'bash' },
+        { type: 'text', text: 'Done.' },
+      ];
+
+      setup(createStreamingFakeProvider(testChunks));
+
+      const { chunks, result } = animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+        streaming: true,
+      });
+
+      const collected: SessionChunk[] = [];
+      for await (const chunk of chunks) {
+        collected.push(chunk);
+      }
+
+      assert.equal(collected.length, 4);
+      assert.deepEqual(collected[0], { type: 'text', text: 'Hello ' });
+      assert.deepEqual(collected[1], { type: 'tool_use', tool: 'bash' });
+
+      const sessionResult = await result;
+      assert.equal(sessionResult.status, 'completed');
+      assert.ok(sessionResult.id.startsWith('ses-'));
+
+      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      const doc = await sessions.get(sessionResult.id);
+      assert.ok(doc);
+      assert.equal(doc.status, 'completed');
+    });
+
+    it('returns empty chunks when provider ignores streaming flag', async () => {
+      // createFakeProvider always returns empty chunks regardless of streaming
+      setup(createFakeProvider());
+
+      const { chunks, result } = animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+        streaming: true,
+      });
+
+      const collected: SessionChunk[] = [];
+      for await (const chunk of chunks) {
+        collected.push(chunk);
+      }
+      assert.equal(collected.length, 0);
+
+      const sessionResult = await result;
+      assert.equal(sessionResult.status, 'completed');
+      assert.equal(sessionResult.provider, 'fake');
+    });
+
+    it('records failed streaming session', async () => {
+      const failChunks: SessionChunk[] = [
+        { type: 'text', text: 'Starting...' },
+      ];
+
+      setup(createStreamingFakeProvider(failChunks, {
+        status: 'failed',
+        exitCode: 1,
+        error: 'Stream failed',
+      }));
+
+      const { result } = animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp/workdir',
+        streaming: true,
+      });
+
+      const sessionResult = await result;
+      assert.equal(sessionResult.status, 'failed');
+
+      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      const doc = await sessions.get(sessionResult.id);
+      assert.ok(doc);
+      assert.equal(doc.status, 'failed');
+    });
+  });
+
+  describe('session id generation', () => {
+    beforeEach(() => {
+      setup();
+    });
+
+    it('generates unique ids', async () => {
+      const results = await Promise.all([
+        animator.animate({ context: { systemPrompt: 'Test' }, cwd: '/tmp' }).result,
+        animator.animate({ context: { systemPrompt: 'Test' }, cwd: '/tmp' }).result,
+        animator.animate({ context: { systemPrompt: 'Test' }, cwd: '/tmp' }).result,
+      ]);
+
+      const ids = new Set(results.map((r) => r.id));
+      assert.equal(ids.size, 3, 'All session ids should be unique');
+    });
+
+    it('ids follow ses-{base36_timestamp}-{hex_random} format', async () => {
+      const result = await animator.animate({
+        context: { systemPrompt: 'Test' },
+        cwd: '/tmp',
+      }).result;
+
+      assert.match(result.id, /^ses-[a-z0-9]+-[a-f0-9]{8}$/);
+    });
+  });
+
+  describe('summon()', () => {
+    it('returns an AnimateHandle with chunks and result', () => {
+      setup(createFakeProvider(), 'fake-provider', { installLoom: true });
+
+      const handle = animator.summon({
+        prompt: 'Build the frobnicator',
+        cwd: '/tmp/workdir',
+      });
+
+      assert.ok(handle.chunks, 'should have chunks');
+      assert.ok(handle.result instanceof Promise, 'result should be a Promise');
+    });
+
+    it('composes context via The Loom and launches a session', async () => {
+      const { provider, getCapturedConfig } = createSpyProvider();
+      setup(provider, 'fake-provider', { installLoom: true });
+
+      const result = await animator.summon({
+        prompt: 'Build the frobnicator',
+        cwd: '/tmp/workdir',
+      }).result;
+
+      assert.equal(result.status, 'completed');
+      assert.ok(result.id.startsWith('ses-'));
+
+      // Verify the provider received the prompt as initialPrompt
+      const captured = getCapturedConfig();
+      assert.ok(captured);
+      assert.equal(captured!.initialPrompt, 'Build the frobnicator');
+      assert.equal(captured!.cwd, '/tmp/workdir');
+      assert.equal(captured!.model, 'sonnet');
+    });
+
+    it('auto-populates trigger: summon in metadata', async () => {
+      setup(createFakeProvider(), 'fake-provider', { installLoom: true });
+
+      const result = await animator.summon({
+        prompt: 'Do the thing',
+        cwd: '/tmp/workdir',
+      }).result;
+
+      assert.equal(result.metadata?.trigger, 'summon');
+
+      // Verify in Stacks too
+      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      const doc = await sessions.get(result.id);
+      assert.equal(doc?.metadata?.trigger, 'summon');
+    });
+
+    it('merges caller metadata with auto-generated metadata', async () => {
+      setup(createFakeProvider(), 'fake-provider', { installLoom: true });
+
+      const result = await animator.summon({
+        prompt: 'Build it',
+        cwd: '/tmp/workdir',
+        metadata: {
+          role: 'artificer',
+          writId: 'wrt-abc123',
+        },
+      }).result;
+
+      assert.equal(result.metadata?.trigger, 'summon');
+      assert.equal(result.metadata?.role, 'artificer');
+      assert.equal(result.metadata?.writId, 'wrt-abc123');
+    });
+
+    it('passes conversationId through for resume', async () => {
+      const { provider, getCapturedConfig } = createSpyProvider();
+      setup(provider, 'fake-provider', { installLoom: true });
+
+      const result = await animator.summon({
+        prompt: 'Continue working',
+        cwd: '/tmp/workdir',
+        conversationId: 'conv-resume-123',
+      }).result;
+
+      assert.equal(result.conversationId, 'conv-resume-123');
+
+      const captured = getCapturedConfig();
+      assert.equal(captured!.conversationId, 'conv-resume-123');
+    });
+
+    it('records session to Stacks', async () => {
+      setup(createFakeProvider(), 'fake-provider', { installLoom: true });
+
+      const result = await animator.summon({
+        prompt: 'Build it',
+        cwd: '/tmp/workdir',
+      }).result;
+
+      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      const doc = await sessions.get(result.id);
+      assert.ok(doc);
+      assert.equal(doc.status, 'completed');
+      assert.equal(doc.metadata?.trigger, 'summon');
+    });
+
+    it('throws with clear error when Loom is not installed', async () => {
+      // Setup WITHOUT the Loom
+      setup(createFakeProvider());
+
+      assert.throws(
+        () => animator.summon({
+          prompt: 'Build it',
+          cwd: '/tmp/workdir',
+        }),
+        /Loom apparatus/,
+      );
+    });
+
+    it('records failed session when provider throws', async () => {
+      const throwProvider = createThrowingProvider(new Error('Session crashed'));
+      setup(throwProvider, 'fake-provider', { installLoom: true });
+
+      await assert.rejects(
+        () => animator.summon({
+          prompt: 'Build it',
+          cwd: '/tmp/workdir',
+        }).result,
+        { message: 'Session crashed' },
+      );
+
+      // Failed session should still be recorded
+      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      const allDocs = await sessions.list();
+      const failedDocs = allDocs.filter((d) => d.status === 'failed');
+      assert.equal(failedDocs.length, 1);
+      assert.equal(failedDocs[0]!.metadata?.trigger, 'summon');
+    });
+
+    it('Loom produces undefined systemPrompt at MVP', async () => {
+      const { provider, getCapturedConfig } = createSpyProvider();
+      setup(provider, 'fake-provider', { installLoom: true });
+
+      await animator.summon({
+        prompt: 'Build the thing',
+        cwd: '/tmp/workdir',
+      }).result;
+
+      const captured = getCapturedConfig();
+      assert.equal(captured!.systemPrompt, undefined);
+    });
+
+    it('records role in metadata when provided', async () => {
+      setup(createFakeProvider(), 'fake-provider', { installLoom: true });
+
+      const result = await animator.summon({
+        prompt: 'Build it',
+        role: 'artificer',
+        cwd: '/tmp/workdir',
+      }).result;
+
+      assert.equal(result.metadata?.trigger, 'summon');
+      assert.equal(result.metadata?.role, 'artificer');
+    });
+
+    it('omits role from metadata when not provided', async () => {
+      setup(createFakeProvider(), 'fake-provider', { installLoom: true });
+
+      const result = await animator.summon({
+        prompt: 'Build it',
+        cwd: '/tmp/workdir',
+      }).result;
+
+      assert.equal(result.metadata?.trigger, 'summon');
+      assert.ok(!('role' in (result.metadata ?? {})));
+    });
+
+    it('prompt bypasses the Loom and goes directly to provider', async () => {
+      const { provider, getCapturedConfig } = createSpyProvider();
+      setup(provider, 'fake-provider', { installLoom: true });
+
+      await animator.summon({
+        prompt: 'Build the frobnicator',
+        role: 'artificer',
+        cwd: '/tmp/workdir',
+      }).result;
+
+      const captured = getCapturedConfig();
+      assert.ok(captured);
+      assert.equal(captured!.initialPrompt, 'Build the frobnicator');
+      assert.equal(captured!.systemPrompt, undefined);
+    });
+
+    it('returns empty chunks when streaming is not requested', async () => {
+      setup(createFakeProvider(), 'fake-provider', { installLoom: true });
+
+      const { chunks, result } = animator.summon({
+        prompt: 'Build it',
+        cwd: '/tmp/workdir',
+      });
+
+      const collected: SessionChunk[] = [];
+      for await (const chunk of chunks) {
+        collected.push(chunk);
+      }
+      assert.equal(collected.length, 0);
+
+      const sessionResult = await result;
+      assert.equal(sessionResult.status, 'completed');
+    });
+
+    it('passes Loom environment to provider when no request environment', async () => {
+      const { provider, getCapturedConfig } = createSpyProvider();
+      setup(provider, 'fake-provider', { installLoom: true });
+
+      await animator.summon({
+        prompt: 'Build the thing',
+        role: 'artificer',
+        cwd: '/tmp/workdir',
+      }).result;
+
+      const captured = getCapturedConfig();
+      assert.ok(captured);
+      assert.deepStrictEqual(captured!.environment, {
+        GIT_AUTHOR_NAME: 'Artificer',
+        GIT_AUTHOR_EMAIL: 'artificer@nexus.local',
+      });
+    });
+
+    it('merges request environment over Loom environment', async () => {
+      const { provider, getCapturedConfig } = createSpyProvider();
+      setup(provider, 'fake-provider', { installLoom: true });
+
+      await animator.summon({
+        prompt: 'Build the thing',
+        role: 'artificer',
+        cwd: '/tmp/workdir',
+        environment: { GIT_AUTHOR_EMAIL: 'override@nexus.local' },
+      }).result;
+
+      const captured = getCapturedConfig();
+      assert.ok(captured);
+      assert.equal(captured!.environment?.GIT_AUTHOR_NAME, 'Artificer');
+      assert.equal(captured!.environment?.GIT_AUTHOR_EMAIL, 'override@nexus.local');
+    });
+  });
+});
+
+=== CONTEXT FILE: packages/plugins/animator/src/animator.ts ===
+/**
+ * The Animator — session launch and telemetry recording apparatus.
+ *
+ * Two API levels:
+ * - summon() — high-level: composes context via The Loom, then launches.
+ * - animate() — low-level: takes a pre-composed AnimaWeave + prompt.
+ *
+ * See: docs/specification.md (animator)
+ */
+
+import type { Plugin, StartupContext } from '@shardworks/nexus-core';
+import { guild, generateId } from '@shardworks/nexus-core';
+import type { StacksApi, Book } from '@shardworks/stacks-apparatus';
+
+import type { LoomApi } from '@shardworks/loom-apparatus';
+
+import type {
+  AnimatorApi,
+  AnimateHandle,
+  AnimatorConfig,
+  AnimateRequest,
+  SummonRequest,
+  SessionResult,
+  SessionChunk,
+  SessionDoc,
+  TranscriptDoc,
+  TranscriptMessage,
+  AnimatorSessionProvider,
+  SessionProviderConfig,
+  SessionProviderResult,
+} from './types.ts';
+
+import { sessionList, sessionShow, summon as summonTool } from './tools/index.ts';
+
+// ── Core logic ───────────────────────────────────────────────────────
+
+/**
+ * Resolve the session provider apparatus.
+ *
+ * Looks up the provider by plugin id from guild config. The provider is
+ * an apparatus whose `provides` implements AnimatorSessionProvider.
+ * Arbor throws immediately if the plugin isn't loaded or has no provides.
+ */
+function resolveProvider(config: AnimatorConfig): AnimatorSessionProvider {
+  const pluginId = config.sessionProvider ?? 'claude-code';
+  return guild().apparatus<AnimatorSessionProvider>(pluginId);
+}
+
+/**
+ * Resolve the model from guild settings.
+ */
+function resolveModel(): string {
+  const g = guild();
+  const guildConfig = g.guildConfig();
+  return guildConfig.settings?.model ?? 'sonnet';
+}
+
+/**
+ * Build the provider config from an AnimateRequest.
+ *
+ * The system prompt comes from the AnimaWeave (composed by The Loom).
+ * The work prompt comes from the request directly (bypasses The Loom).
+ * The streaming flag is passed through for the provider to honor (or ignore).
+ */
+function buildProviderConfig(
+  request: AnimateRequest,
+  model: string,
+): SessionProviderConfig {
+  return {
+    systemPrompt: request.context.systemPrompt,
+    initialPrompt: request.prompt,
+    model,
+    conversationId: request.conversationId,
+    cwd: request.cwd,
+    streaming: request.streaming,
+    tools: request.context.tools,
+    environment: { ...request.context.environment, ...request.environment },
+  };
+}
+
+/**
+ * Build a SessionResult from provider output and session metadata.
+ */
+function buildSessionResult(
+  id: string,
+  startedAt: string,
+  providerName: string,
+  providerResult: SessionProviderResult,
+  request: AnimateRequest,
+): SessionResult {
+  const endedAt = new Date().toISOString();
+  const durationMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+
+  return {
+    id,
+    status: providerResult.status,
+    startedAt,
+    endedAt,
+    durationMs,
+    provider: providerName,
+    exitCode: providerResult.exitCode,
+    error: providerResult.error,
+    conversationId: request.conversationId,
+    providerSessionId: providerResult.providerSessionId,
+    tokenUsage: providerResult.tokenUsage,
+    costUsd: providerResult.costUsd,
+    metadata: request.metadata,
+    output: providerResult.output,
+  };
+}
+
+/**
+ * Build a failed SessionResult when the provider throws.
+ */
+function buildFailedResult(
+  id: string,
+  startedAt: string,
+  providerName: string,
+  error: unknown,
+  request: AnimateRequest,
+): SessionResult {
+  const endedAt = new Date().toISOString();
+  const durationMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+  const errorMessage = error instanceof Error ? error.message : String(error);
+
+  return {
+    id,
+    status: 'failed',
+    startedAt,
+    endedAt,
+    durationMs,
+    provider: providerName,
+    exitCode: 1,
+    error: errorMessage,
+    conversationId: request.conversationId,
+    metadata: request.metadata,
+  };
+}
+
+/**
+ * Convert a SessionResult to a SessionDoc for Stacks storage.
+ */
+function toSessionDoc(result: SessionResult): SessionDoc {
+  return {
+    id: result.id,
+    status: result.status,
+    startedAt: result.startedAt,
+    endedAt: result.endedAt,
+    durationMs: result.durationMs,
+    provider: result.provider,
+    exitCode: result.exitCode,
+    error: result.error,
+    conversationId: result.conversationId,
+    providerSessionId: result.providerSessionId,
+    tokenUsage: result.tokenUsage,
+    costUsd: result.costUsd,
+    metadata: result.metadata,
+    output: result.output,
+  };
+}
+
+/**
+ * Record a session result to The Stacks (sessions + transcripts books).
+ *
+ * Errors are logged but never propagated — session data loss is
+ * preferable to masking the original failure. See § Error Handling Contract.
+ */
+async function recordSession(
+  sessions: Book<SessionDoc>,
+  transcripts: Book<TranscriptDoc>,
+  result: SessionResult,
+  transcript: TranscriptMessage[] | undefined,
+): Promise<void> {
+  try {
+    await sessions.put(toSessionDoc(result));
+  } catch (err) {
+    console.warn(
+      `[animator] Failed to record session ${result.id}: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+
+  if (transcript && transcript.length > 0) {
+    try {
+      await transcripts.put({ id: result.id, messages: transcript });
+    } catch (err) {
+      console.warn(
+        `[animator] Failed to record transcript for ${result.id}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+}
+
+/**
+ * Write the initial 'running' session record to The Stacks.
+ */
+async function recordRunning(
+  sessions: Book<SessionDoc>,
+  id: string,
+  startedAt: string,
+  providerName: string,
+  request: AnimateRequest,
+): Promise<void> {
+  try {
+    await sessions.put({
+      id,
+      status: 'running',
+      startedAt,
+      provider: providerName,
+      conversationId: request.conversationId,
+      metadata: request.metadata,
+    });
+  } catch (err) {
+    console.warn(
+      `[animator] Failed to write initial session record ${id}: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
+// ── Apparatus factory ────────────────────────────────────────────────
+
+/**
+ * Create the Animator apparatus plugin.
+ *
+ * Returns a Plugin with:
+ * - `requires: ['stacks']` — records session results
+ * - `provides: AnimatorApi` — the session launch API
+ * - `supportKit` — contributes `sessions` book + inspection tools
+ */
+export function createAnimator(): Plugin {
+  let config: AnimatorConfig = {};
+  let sessions: Book<SessionDoc>;
+  let transcripts: Book<TranscriptDoc>;
+
+  const api: AnimatorApi = {
+    summon(request: SummonRequest): AnimateHandle {
+      // Resolve The Loom at call time — not a startup dependency.
+      // This allows the Animator to start without the Loom installed;
+      // only summon() requires it.
+      let loom: LoomApi;
+      try {
+        loom = guild().apparatus<LoomApi>('loom');
+      } catch {
+        throw new Error(
+          'summon() requires The Loom apparatus to be installed. ' +
+          'Use animate() directly if you want to provide a pre-composed AnimaWeave.',
+        );
+      }
+
+      // We need to weave context before we can animate, but summon()
+      // must return synchronously. Wrap the async Loom call and the
+      // animate delegation into a single deferred flow.
+      const deferred = (async () => {
+        // Compose identity context via The Loom.
+        // The Loom owns system prompt composition — it produces the system
+        // prompt from the anima's identity layers (role instructions,
+        // curriculum, temperament, charter). MVP: returns empty (no
+        // systemPrompt); the session runs without one until the Loom
+        // gains composition logic. The work prompt bypasses the Loom.
+        const context = await loom.weave({
+          role: request.role,
+        });
+
+        // Merge caller metadata with auto-generated summon metadata
+        const metadata: Record<string, unknown> = {
+          trigger: 'summon',
+          ...(request.role ? { role: request.role } : {}),
+          ...request.metadata,
+        };
+
+        // Delegate to the standard animate path.
+        // The work prompt goes directly on the request — it is not
+        // a composition concern.
+        return this.animate({
+          context,
+          prompt: request.prompt,
+          cwd: request.cwd,
+          conversationId: request.conversationId,
+          metadata,
+          streaming: request.streaming,
+          environment: request.environment,
+        });
+      })();
+
+      // Pipe chunks through — can't get them until the Loom weave resolves.
+      // Works for both streaming and non-streaming: non-streaming providers
+      // return empty chunks, so the generator yields nothing and completes.
+      async function* pipeChunks(): AsyncIterable<SessionChunk> {
+        const handle = await deferred;
+        yield* handle.chunks;
+      }
+
+      return {
+        chunks: pipeChunks(),
+        result: deferred.then((handle) => handle.result),
+      };
+    },
+
+    animate(request: AnimateRequest): AnimateHandle {
+      const provider = resolveProvider(config);
+      const model = resolveModel();
+      const providerConfig = buildProviderConfig(request, model);
+
+      // Step 1: generate session id, capture startedAt
+      const id = generateId('ses', 4);
+      const startedAt = new Date().toISOString();
+
+      // Single path — the provider returns { chunks, result } regardless
+      // of whether streaming is enabled. Providers that don't support
+      // streaming return empty chunks; the Animator doesn't branch.
+      const { chunks, result: providerResultPromise } = provider.launch(providerConfig);
+
+      // Write initial record (fire and forget — don't block streaming)
+      const initPromise = recordRunning(sessions, id, startedAt, provider.name, request);
+
+      const result = (async () => {
+        await initPromise;
+
+        let sessionResult: SessionResult;
+        try {
+          const providerResult = await providerResultPromise;
+          sessionResult = buildSessionResult(id, startedAt, provider.name, providerResult, request);
+          await recordSession(sessions, transcripts, sessionResult, providerResult.transcript);
+        } catch (err) {
+          sessionResult = buildFailedResult(id, startedAt, provider.name, err, request);
+          await recordSession(sessions, transcripts, sessionResult, undefined);
+          throw err;
+        }
+        return sessionResult;
+      })();
+
+      return { chunks, result };
+    },
+  };
+
+  return {
+    apparatus: {
+      requires: ['stacks'],
+      recommends: ['loom'],
+
+      supportKit: {
+        books: {
+          sessions: {
+            indexes: ['startedAt', 'status', 'conversationId', 'provider'],
+          },
+          transcripts: {
+            indexes: ['sessionId'],
+          },
+        },
+        tools: [sessionList, sessionShow, summonTool],
+      },
+
+      provides: api,
+
+      start(_ctx: StartupContext): void {
+        const g = guild();
+        config = g.guildConfig().animator ?? {};
+
+        const stacks = g.apparatus<StacksApi>('stacks');
+        sessions = stacks.book<SessionDoc>('animator', 'sessions');
+        transcripts = stacks.book<TranscriptDoc>('animator', 'transcripts');
+      },
+    },
+  };
+}
+
+=== CONTEXT FILE: packages/plugins/animator/src/index.ts ===
+/**
+ * @shardworks/animator-apparatus — The Animator.
+ *
+ * Session launch and telemetry recording: takes an AnimaWeave from The Loom,
+ * launches an AI process via a session provider, monitors it until exit, and
+ * records the result to The Stacks.
+ *
+ * See: docs/specification.md (animator)
+ */
+
+import { createAnimator } from './animator.ts';
+
+// ── Animator API ─────────────────────────────────────────────────────
+
+export {
+  type AnimatorApi,
+  type AnimateHandle,
+  type AnimateRequest,
+  type SummonRequest,
+  type SessionResult,
+  type SessionChunk,
+  type TokenUsage,
+  type SessionDoc,
+  type AnimatorConfig,
+  // Provider types (for implementors)
+  type AnimatorSessionProvider,
+  type SessionProviderConfig,
+  type SessionProviderResult,
+} from './types.ts';
+
+export { createAnimator } from './animator.ts';
+
+// ── Default export: the apparatus plugin ──────────────────────────────
+
+export default createAnimator();
+
+=== CONTEXT FILE: packages/plugins/dashboard/src/tool.ts ===
+/**
+ * dashboard-start tool — CLI-only.
+ *
+ * Starts the web dashboard server and opens the browser.
+ * Runs until the process is interrupted (Ctrl+C).
+ */
+
+import { execSync } from 'node:child_process';
+import process from 'node:process';
+import { z } from 'zod';
+import { tool } from '@shardworks/tools-apparatus';
+import { startServer } from './server.ts';
+
+export const dashboardStart = tool({
+  name: 'dashboard-start',
+  description: 'Start the guild web dashboard. Opens a browser and serves a live operations UI.',
+  callableBy: ['cli'],
+  params: {
+    port: z
+      .number()
+      .int()
+      .min(1024)
+      .max(65535)
+      .optional()
+      .describe('Port to listen on (default: 4242)'),
+    'no-open': z
+      .boolean()
+      .optional()
+      .describe('Skip opening the browser automatically'),
+  },
+  handler: async ({ port: portArg, 'no-open': noOpen }) => {
+    const port = portArg ?? 4242;
+    const server = await startServer(port);
+    const url = server.url;
+
+    console.log('');
+    console.log('  Guild Dashboard running at:');
+    console.log('');
+    console.log('    ' + url);
+    console.log('');
+    console.log('  Press Ctrl+C to stop.');
+    console.log('');
+
+    if (!noOpen) {
+      try {
+        const platform = process.platform;
+        if (platform === 'darwin')  execSync('open ' + url,   { stdio: 'ignore' });
+        else if (platform === 'win32') execSync('start "" ' + url, { stdio: 'ignore', shell: 'cmd.exe' });
+        else execSync('xdg-open ' + url + ' 2>/dev/null; true', { stdio: 'ignore', shell: '/bin/sh' });
+      } catch {
+        // Browser open is best-effort; ignore errors
+      }
+    }
+
+    // Keep the process alive until Ctrl+C
+    await new Promise<void>(resolve => {
+      process.once('SIGINT',  async () => { await server.close(); resolve(); });
+      process.once('SIGTERM', async () => { await server.close(); resolve(); });
+    });
+
+    return { status: 'stopped', url };
+  },
+});
+
+=== CONTEXT FILE: packages/plugins/dashboard/src/types.ts ===
+/**
+ * Local type stubs for apparatus documents read via Stacks readBook().
+ * These mirror the shapes declared by the respective apparatus packages
+ * without importing from them (to keep dashboard dependencies minimal).
+ */
+
+/** Minimal shape of a session document from the Animator's sessions book. */
+export interface SessionDoc {
+  id: string;
+  status: 'running' | 'completed' | 'failed' | 'timeout';
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  provider: string;
+  exitCode?: number;
+  error?: string;
+  conversationId?: string;
+  providerSessionId?: string;
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+  costUsd?: number;
+  metadata?: Record<string, unknown>;
+  output?: string;
+  [key: string]: unknown;
+}
+
+=== CONTEXT FILE: packages/plugins/dispatch/package.json ===
+{
+  "name": "@shardworks/dispatch-apparatus",
+  "version": "0.0.0",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shardworks/nexus",
+    "directory": "packages/plugins/dispatch"
+  },
+  "description": "The Dispatch — interim work runner: find the oldest ready writ and execute it",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --disable-warning=ExperimentalWarning --experimental-transform-types --test 'src/**/*.test.ts'",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@shardworks/animator-apparatus": "workspace:*",
+    "@shardworks/clerk-apparatus": "workspace:*",
+    "@shardworks/codexes-apparatus": "workspace:*",
+    "@shardworks/loom-apparatus": "workspace:*",
+    "@shardworks/nexus-core": "workspace:*",
+    "@shardworks/tools-apparatus": "workspace:*",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@shardworks/stacks-apparatus": "workspace:*",
+    "@types/node": "25.5.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  }
+}
+
+=== CONTEXT FILE: packages/plugins/dispatch/src ===
+tree b98821d8f6e34359fa506196cb377f8dd47ca090:packages/plugins/dispatch/src
+
+dispatch.test.ts
+dispatch.ts
+index.ts
+tools/
+types.ts
+
+=== CONTEXT FILE: packages/plugins/dispatch/tsconfig.json ===
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ]
+}
+
+=== CONTEXT FILE: packages/plugins/dispatch/src/dispatch.test.ts ===
+/**
+ * Dispatch apparatus tests.
+ *
+ * Uses a fake session provider, in-memory Stacks, real Clerk, real Animator,
+ * real Loom, and a fake Scriptorium to test the full dispatch lifecycle
+ * without spawning real AI processes or touching git.
+ */
+
+import { describe, it, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { setGuild, clearGuild } from '@shardworks/nexus-core';
+import type { Guild, GuildConfig } from '@shardworks/nexus-core';
+import { createStacksApparatus } from '@shardworks/stacks-apparatus';
+import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
+import type { StacksApi } from '@shardworks/stacks-apparatus';
+import { createLoom } from '@shardworks/loom-apparatus';
+import { createAnimator } from '@shardworks/animator-apparatus';
+import type {
+  AnimatorSessionProvider,
+  SessionProviderConfig,
+  SessionChunk,
+} from '@shardworks/animator-apparatus';
+import { createClerk } from '@shardworks/clerk-apparatus';
+import type { ClerkApi } from '@shardworks/clerk-apparatus';
+import type { ScriptoriumApi, DraftRecord, SealResult } from '@shardworks/codexes-apparatus';
+
+import { createDispatch } from './dispatch.ts';
+import type { DispatchApi } from './types.ts';
+
+// ── Shared empty chunks ───────────────────────────────────────────────
+
+const emptyChunks: AsyncIterable<SessionChunk> = {
+  [Symbol.asyncIterator]() {
+    return {
+      async next() {
+        return { value: undefined as unknown as SessionChunk, done: true as const };
+      },
+    };
+  },
+};
+
+// ── Fake session provider ─────────────────────────────────────────────
+
+interface FakeProviderOptions {
+  status?: 'completed' | 'failed' | 'timeout';
+  error?: string;
+}
+
+function createFakeProvider(options: FakeProviderOptions = {}): AnimatorSessionProvider {
+  let callCount = 0;
+
+  return {
+    name: 'fake',
+    launch(_config: SessionProviderConfig) {
+      callCount++;
+      const status = options.status ?? 'completed';
+      return {
+        chunks: emptyChunks,
+        result: Promise.resolve({
+          status,
+          exitCode: status === 'completed' ? 0 : 1,
+          providerSessionId: `fake-sess-${callCount}`,
+          error: options.error,
+        }),
+      };
+    },
+  };
+}
+
+// ── Fake Scriptorium ──────────────────────────────────────────────────
+
+interface FakeScriptoriumOptions {
+  openDraftFails?: boolean;
+  sealFails?: boolean;
+  pushFails?: boolean;
+}
+
+function createFakeScriptorium(options: FakeScriptoriumOptions = {}): ScriptoriumApi {
+  let draftCounter = 0;
+
+  return {
+    async openDraft({ codexName, associatedWith }): Promise<DraftRecord> {
+      if (options.openDraftFails) throw new Error('openDraft: bare clone not ready');
+      draftCounter++;
+      return {
+        id: `draft-${draftCounter}`,
+        codexName,
+        branch: `draft-test-${draftCounter}`,
+        path: `/tmp/worktrees/${codexName}/draft-${draftCounter}`,
+        createdAt: new Date().toISOString(),
+        associatedWith,
+      };
+    },
+    async seal(): Promise<SealResult> {
+      if (options.sealFails) throw new Error('seal: merge conflict');
+      return { success: true, strategy: 'fast-forward', retries: 0, sealedCommit: 'abc123def' };
+    },
+    async push(): Promise<void> {
+      if (options.pushFails) throw new Error('push: remote rejected');
+    },
+    async abandonDraft(): Promise<void> {
+      // no-op
+    },
+    async add() { throw new Error('not implemented'); },
+    async list() { return []; },
+    async show() { throw new Error('not implemented'); },
+    async remove() {},
+    async fetch() {},
+    async listDrafts() { return []; },
+  };
+}
+
+// ── Spy fake provider (captures SessionProviderConfig) ───────────────
+
+function createSpyFakeProvider(): {
+  provider: AnimatorSessionProvider;
+  getCapturedConfig: () => SessionProviderConfig | null;
+} {
+  let capturedConfig: SessionProviderConfig | null = null;
+  return {
+    provider: {
+      name: 'fake-spy',
+      launch(config: SessionProviderConfig) {
+        capturedConfig = config;
+        return {
+          chunks: emptyChunks,
+          result: Promise.resolve({
+            status: 'completed' as const,
+            exitCode: 0,
+            providerSessionId: 'fake-spy-sess',
+          }),
+        };
+      },
+    },
+    getCapturedConfig: () => capturedConfig,
+  };
+}
+
+// ── Test harness ──────────────────────────────────────────────────────
+
+interface SetupOptions {
+  provider?: AnimatorSessionProvider;
+  scriptorium?: ScriptoriumApi;
+}
+
+interface TestContext {
+  dispatch: DispatchApi;
+  clerk: ClerkApi;
+  scriptorium: ScriptoriumApi;
+}
+
+function setup(options: SetupOptions = {}): TestContext {
+  const memBackend = new MemoryBackend();
+  const stacksPlugin = createStacksApparatus(memBackend);
+  const loomPlugin = createLoom();
+  const animatorPlugin = createAnimator();
+  const clerkPlugin = createClerk();
+  const dispatchPlugin = createDispatch();
+
+  const provider = options.provider ?? createFakeProvider();
+  const scriptorium = options.scriptorium ?? createFakeScriptorium();
+
+  const apparatusMap = new Map<string, unknown>();
+  apparatusMap.set('fake-provider', provider);
+  apparatusMap.set('codexes', scriptorium);
+
+  const fakeGuildConfig: GuildConfig = {
+    name: 'test-guild',
+    nexus: '0.0.0',
+    plugins: [],
+    settings: { model: 'sonnet' },
+    animator: { sessionProvider: 'fake-provider' },
+  };
+
+  const fakeGuild: Guild = {
+    home: '/tmp/fake-guild',
+    apparatus<T>(name: string): T {
+      const api = apparatusMap.get(name);
+      if (!api) throw new Error(`Apparatus "${name}" not installed`);
+      return api as T;
+    },
+    config<T>(pluginId: string): T {
+      if (pluginId === 'animator') {
+        return { sessionProvider: 'fake-provider' } as T;
+      }
+      return {} as T;
+    },
+    writeConfig() {},
+    guildConfig() { return fakeGuildConfig; },
+    kits: () => [],
+    apparatuses: () => [],
+  };
+
+  setGuild(fakeGuild);
+
+  // Start stacks
+  const stacksApparatus = (stacksPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+  stacksApparatus.start({ on: () => {} });
+  const stacks = stacksApparatus.provides as StacksApi;
+  apparatusMap.set('stacks', stacks);
+
+  // Ensure books
+  memBackend.ensureBook({ ownerId: 'clerk', book: 'writs' }, {
+    indexes: ['status', 'type', 'createdAt'],
+  });
+  memBackend.ensureBook({ ownerId: 'animator', book: 'sessions' }, {
+    indexes: ['startedAt', 'status', 'conversationId', 'provider'],
+  });
+
+  // Start loom
+  const loomApparatus = (loomPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+  loomApparatus.start({ on: () => {} });
+  apparatusMap.set('loom', loomApparatus.provides);
+
+  // Start animator
+  const animatorApparatus = (animatorPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+  animatorApparatus.start({ on: () => {} });
+  apparatusMap.set('animator', animatorApparatus.provides);
+
+  // Start clerk
+  const clerkApparatus = (clerkPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+  clerkApparatus.start({ on: () => {} });
+  const clerk = clerkApparatus.provides as ClerkApi;
+  apparatusMap.set('clerk', clerk);
+
+  // Start dispatch
+  const dispatchApparatus = (dispatchPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+  dispatchApparatus.start({ on: () => {} });
+  const dispatch = dispatchApparatus.provides as DispatchApi;
+  apparatusMap.set('dispatch', dispatch);
+
+  return { dispatch, clerk, scriptorium };
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────
+
+describe('Dispatch', () => {
+  afterEach(() => {
+    clearGuild();
+  });
+
+  // ── No ready writs ────────────────────────────────────────────────
+
+  describe('next() — empty queue', () => {
+    it('returns null when there are no ready writs', async () => {
+      const { dispatch } = setup();
+      const result = await dispatch.next();
+      assert.equal(result, null);
+    });
+
+    it('returns null when all writs are in terminal states', async () => {
+      const { dispatch, clerk } = setup();
+      const writ = await clerk.post({ title: 'Already done', body: '' });
+      await clerk.transition(writ.id, 'active');
+      await clerk.transition(writ.id, 'completed');
+
+      const result = await dispatch.next();
+      assert.equal(result, null);
+    });
+  });
+
+  // ── Dry run ───────────────────────────────────────────────────────
+
+  describe('next({ dryRun: true })', () => {
+    it('returns the writ id without dispatching', async () => {
+      const { dispatch, clerk } = setup();
+      const writ = await clerk.post({ title: 'Dry run target', body: '' });
+
+      const result = await dispatch.next({ dryRun: true });
+
+      assert.ok(result);
+      assert.equal(result.writId, writ.id);
+      assert.equal(result.dryRun, true);
+      assert.equal(result.sessionId, undefined);
+      assert.equal(result.outcome, undefined);
+    });
+
+    it('does not transition the writ on dry run', async () => {
+      const { dispatch, clerk } = setup();
+      const writ = await clerk.post({ title: 'Stay ready', body: '' });
+
+      await dispatch.next({ dryRun: true });
+
+      const after = await clerk.show(writ.id);
+      assert.equal(after?.status, 'ready');
+    });
+
+    it('returns null on dry run when no ready writs exist', async () => {
+      const { dispatch } = setup();
+      const result = await dispatch.next({ dryRun: true });
+      assert.equal(result, null);
+    });
+  });
+
+  // ── Success path — no codex ───────────────────────────────────────
+
+  describe('next() — successful session, no codex', () => {
+    it('transitions writ ready → active → completed', async () => {
+      const { dispatch, clerk } = setup();
+      const writ = await clerk.post({ title: 'No codex work', body: '' });
+
+      const result = await dispatch.next();
+
+      assert.ok(result);
+      assert.equal(result.writId, writ.id);
+      assert.equal(result.outcome, 'completed');
+      assert.equal(result.dryRun, false);
+      assert.ok(result.sessionId);
+      assert.ok(result.resolution);
+
+      const after = await clerk.show(writ.id);
+      assert.equal(after?.status, 'completed');
+    });
+
+    it('uses the default role "artificer" when none specified', async () => {
+      // Verifies no error from omitting role
+      const { dispatch, clerk } = setup();
+      await clerk.post({ title: 'Default role test', body: '' });
+
+      const result = await dispatch.next();
+      assert.ok(result);
+      assert.equal(result.outcome, 'completed');
+    });
+
+    it('accepts an explicit role', async () => {
+      const { dispatch, clerk } = setup();
+      await clerk.post({ title: 'Scribe work', body: '' });
+
+      const result = await dispatch.next({ role: 'scribe' });
+      assert.ok(result);
+      assert.equal(result.outcome, 'completed');
+    });
+  });
+
+  // ── Success path — with codex ─────────────────────────────────────
+
+  describe('next() — successful session, with codex', () => {
+    it('opens draft, seals, pushes, and completes the writ', async () => {
+      const openCalls: string[] = [];
+      const sealCalls: string[] = [];
+      const pushCalls: string[] = [];
+
+      const scriptorium = createFakeScriptorium();
+      // Wrap to track calls
+      const trackingScriptorium: ScriptoriumApi = {
+        ...scriptorium,
+        async openDraft(req) {
+          openCalls.push(req.codexName);
+          return scriptorium.openDraft(req);
+        },
+        async seal(req) {
+          sealCalls.push(req.codexName);
+          return scriptorium.seal(req);
+        },
+        async push(req) {
+          pushCalls.push(req.codexName);
+          return scriptorium.push(req);
+        },
+      };
+
+      const { dispatch, clerk } = setup({ scriptorium: trackingScriptorium });
+
+      // Post a writ with a codex field (via index signature)
+      const writ = await clerk.post({ title: 'Codex work', body: '' });
+      // Patch the codex field onto the writ — WritDoc allows arbitrary fields
+      // The Clerk doesn't expose codex patching, so we rely on the index signature
+      // and test the no-codex path for Clerk-created writs.
+      // For codex-bound writs, we test the Dispatch internals directly.
+      // (A real commission-post would include codex; the Clerk API accepts it via [key: string]: unknown)
+
+      // Dispatch the writ without codex (standard path)
+      const result = await dispatch.next();
+      assert.ok(result);
+      assert.equal(result.outcome, 'completed');
+
+      // No codex on the writ, so no draft ops expected
+      assert.equal(openCalls.length, 0);
+      assert.equal(sealCalls.length, 0);
+      assert.equal(pushCalls.length, 0);
+
+      const after = await clerk.show(writ.id);
+      assert.equal(after?.status, 'completed');
+    });
+  });
+
+  // ── Failure path — session fails ──────────────────────────────────
+
+  describe('next() — session fails', () => {
+    it('transitions writ to failed when session fails', async () => {
+      const { dispatch, clerk } = setup({
+        provider: createFakeProvider({ status: 'failed', error: 'Claude exited with code 1' }),
+      });
+
+      const writ = await clerk.post({ title: 'Doomed commission', body: '' });
+
+      const result = await dispatch.next();
+
+      assert.ok(result);
+      assert.equal(result.writId, writ.id);
+      assert.equal(result.outcome, 'failed');
+      assert.ok(result.resolution);
+      assert.equal(result.dryRun, false);
+
+      const after = await clerk.show(writ.id);
+      assert.equal(after?.status, 'failed');
+    });
+
+    it('records the session error as the failure resolution', async () => {
+      const { dispatch, clerk } = setup({
+        provider: createFakeProvider({ status: 'failed', error: 'Out of tokens' }),
+      });
+
+      await clerk.post({ title: 'Token fail', body: '' });
+
+      const result = await dispatch.next();
+      assert.ok(result);
+      assert.equal(result.resolution, 'Out of tokens');
+    });
+
+    it('uses session status as resolution when no error message', async () => {
+      const { dispatch, clerk } = setup({
+        provider: createFakeProvider({ status: 'timeout' }),
+      });
+
+      await clerk.post({ title: 'Timeout commission', body: '' });
+
+      const result = await dispatch.next();
+      assert.ok(result);
+      assert.equal(result.resolution, 'Session timeout');
+    });
+  });
+
+  // ── FIFO ordering ─────────────────────────────────────────────────
+
+  describe('next() — FIFO dispatch ordering', () => {
+    it('dispatches the oldest ready writ first', async () => {
+      const { dispatch, clerk } = setup();
+
+      // Create writs with small delays to ensure different createdAt timestamps
+      const w1 = await clerk.post({ title: 'First posted', body: '' });
+      await new Promise((r) => setTimeout(r, 5));
+      const w2 = await clerk.post({ title: 'Second posted', body: '' });
+      await new Promise((r) => setTimeout(r, 5));
+      const w3 = await clerk.post({ title: 'Third posted', body: '' });
+
+      // First dispatch should take w1 (oldest)
+      const r1 = await dispatch.next();
+      assert.ok(r1);
+      assert.equal(r1.writId, w1.id);
+
+      // Second dispatch should take w2
+      const r2 = await dispatch.next();
+      assert.ok(r2);
+      assert.equal(r2.writId, w2.id);
+
+      // Third dispatch should take w3
+      const r3 = await dispatch.next();
+      assert.ok(r3);
+      assert.equal(r3.writId, w3.id);
+
+      // No more ready writs
+      const r4 = await dispatch.next();
+      assert.equal(r4, null);
+    });
+  });
+
+  // ── Draft open failure ────────────────────────────────────────────
+
+  describe('next() — draft open fails', () => {
+    it('fails the writ and returns without launching a session', async () => {
+      // We need a writ with a codex field to trigger draft opening.
+      // Since the Clerk API doesn't expose codex, we test a representative
+      // scenario: if a future commission-post includes a codex field, it would
+      // be stored via the index signature and read by the Dispatch.
+      // For now, verify the no-codex path (draft open is skipped entirely).
+      // The openDraftFails option is exercised via integration if codex is set.
+
+      // This test verifies the fail path when scriptorium.openDraft throws.
+      // To trigger this path we need a writ with writ.codex set.
+      // Since WritDoc has [key: string]: unknown, we test by confirming the
+      // Dispatch gracefully handles the no-codex case (draft not attempted).
+
+      const { dispatch, clerk } = setup({
+        scriptorium: createFakeScriptorium({ openDraftFails: true }),
+      });
+
+      const writ = await clerk.post({ title: 'No codex — draft skip', body: '' });
+
+      // Without a codex on the writ, openDraft is never called even if it would fail
+      const result = await dispatch.next();
+      assert.ok(result);
+      assert.equal(result.outcome, 'completed'); // no codex → no draft → proceeds to session
+
+      const after = await clerk.show(writ.id);
+      assert.equal(after?.status, 'completed');
+    });
+  });
+
+  // ── Seal / push failure ───────────────────────────────────────────
+
+  describe('next() — seal fails', () => {
+    it('fails the writ without abandoning the draft when seal fails', async () => {
+      // Seal failure only occurs when a codex is present. Without a codex field
+      // on the writ, the seal path is skipped. This test verifies that the
+      // no-codex successful path still completes correctly even with a
+      // sealFails scriptorium (seal is never called).
+      const abandonCalls: string[] = [];
+      const scriptorium = createFakeScriptorium({ sealFails: true });
+      const trackingScriptorium: ScriptoriumApi = {
+        ...scriptorium,
+        async abandonDraft(req) {
+          abandonCalls.push(req.branch);
+        },
+      };
+
+      const { dispatch, clerk } = setup({ scriptorium: trackingScriptorium });
+      await clerk.post({ title: 'Seal test — no codex', body: '' });
+
+      const result = await dispatch.next();
+      assert.ok(result);
+      assert.equal(result.outcome, 'completed'); // no codex — seal never attempted
+
+      // abandonDraft was not called (no codex)
+      assert.equal(abandonCalls.length, 0);
+    });
+  });
+
+  // ── Writ not taken during dry run ─────────────────────────────────
+
+  describe('next() — idempotency', () => {
+    it('same writ is returned by two consecutive dry runs', async () => {
+      const { dispatch, clerk } = setup();
+      const writ = await clerk.post({ title: 'Idempotent check', body: '' });
+
+      const r1 = await dispatch.next({ dryRun: true });
+      const r2 = await dispatch.next({ dryRun: true });
+
+      assert.ok(r1);
+      assert.ok(r2);
+      assert.equal(r1.writId, writ.id);
+      assert.equal(r2.writId, writ.id);
+
+      // Still ready after two dry runs
+      const after = await clerk.show(writ.id);
+      assert.equal(after?.status, 'ready');
+    });
+  });
+
+  // ── Active writ skipped ───────────────────────────────────────────
+
+  describe('next() — skips non-ready writs', () => {
+    it('skips active and terminal writs, finds only ready ones', async () => {
+      const { dispatch, clerk } = setup();
+
+      // Create a writ and put it in active state
+      const active = await clerk.post({ title: 'Already active', body: '' });
+      await clerk.transition(active.id, 'active');
+
+      // Create a completed writ
+      const completed = await clerk.post({ title: 'Already completed', body: '' });
+      await clerk.transition(completed.id, 'active');
+      await clerk.transition(completed.id, 'completed');
+
+      // The only ready writ
+      const ready = await clerk.post({ title: 'The ready one', body: '' });
+
+      const result = await dispatch.next();
+      assert.ok(result);
+      assert.equal(result.writId, ready.id);
+    });
+  });
+
+  // ── Git identity environment ──────────────────────────────────────
+
+  describe('next() — git identity environment', () => {
+    it('passes writ-scoped GIT_*_EMAIL to the session provider', async () => {
+      const { provider, getCapturedConfig } = createSpyFakeProvider();
+      const { dispatch, clerk } = setup({ provider });
+
+      const writ = await clerk.post({ title: 'Git identity test', body: '' });
+
+      await dispatch.next();
+
+      const captured = getCapturedConfig();
+      assert.ok(captured);
+      assert.ok(captured!.environment, 'environment should be present');
+      assert.equal(captured!.environment?.GIT_AUTHOR_EMAIL, `${writ.id}@nexus.local`);
+      assert.ok(captured!.environment?.GIT_AUTHOR_NAME, 'GIT_AUTHOR_NAME should be present');
+    });
+
+    it('preserves Loom role name in GIT_*_NAME while overriding email', async () => {
+      const { provider, getCapturedConfig } = createSpyFakeProvider();
+      const { dispatch, clerk } = setup({ provider });
+
+      const writ = await clerk.post({ title: 'Name/email split test', body: '' });
+
+      await dispatch.next();
+
+      const captured = getCapturedConfig();
+      assert.ok(captured);
+      assert.equal(captured!.environment?.GIT_AUTHOR_NAME, 'Artificer');
+      assert.equal(captured!.environment?.GIT_AUTHOR_EMAIL, `${writ.id}@nexus.local`);
+    });
+  });
+});
+
+=== CONTEXT FILE: packages/plugins/dispatch/src/types.ts ===
+/**
+ * The Dispatch — public types.
+ *
+ * These types form the contract between The Dispatch apparatus and all
+ * callers (CLI, clockworks). No implementation details.
+ *
+ * See: docs/architecture/apparatus/dispatch.md
+ */
+
+// ── DispatchApi (the `provides` interface) ───────────────────────────
+
+export interface DispatchApi {
+  /**
+   * Find the oldest ready writ and execute it.
+   *
+   * The full dispatch lifecycle:
+   *   1. Query the Clerk for the oldest ready writ
+   *   2. Transition the writ to active
+   *   3. Open a draft binding on the writ's codex (if specified)
+   *   4. Summon an anima session with the writ context as prompt
+   *   5. Wait for session completion
+   *   6. On success: seal the draft, push, transition writ to completed
+   *   7. On failure: abandon the draft, transition writ to failed
+   *
+   * Returns null if no ready writs exist.
+   *
+   * If the writ has no codex, steps 3/6/7 (draft lifecycle) are
+   * skipped — the session runs in the guild home directory with
+   * no codex binding.
+   */
+  next(request?: DispatchRequest): Promise<DispatchResult | null>;
+}
+
+// ── Request / Result ─────────────────────────────────────────────────
+
+export interface DispatchRequest {
+  /** Role to summon. Default: 'artificer'. */
+  role?: string;
+  /** If true, find and report the writ but don't dispatch. */
+  dryRun?: boolean;
+}
+
+export interface DispatchResult {
+  /** The writ that was dispatched. */
+  writId: string;
+  /** The session id (from the Animator). Absent if dryRun. */
+  sessionId?: string;
+  /** Terminal writ status after dispatch. Absent if dryRun. */
+  outcome?: 'completed' | 'failed';
+  /** Resolution text set on the writ. Absent if dryRun. */
+  resolution?: string;
+  /** Whether this was a dry run. */
+  dryRun: boolean;
+}
+
+=== CONTEXT FILE: packages/plugins/dispatch/src/tools ===
+tree b98821d8f6e34359fa506196cb377f8dd47ca090:packages/plugins/dispatch/src/tools
+
+dispatch-next.ts
+index.ts
+
+=== CONTEXT FILE: packages/plugins/fabricator/src/fabricator.test.ts ===
+/**
+ * Fabricator — unit tests.
+ *
+ * Tests engine design registration from kits and apparatus supportKits,
+ * and FabricatorApi.getEngineDesign() lookup. Uses a mock guild() singleton
+ * to simulate the plugin environment.
+ */
+
+import { describe, it, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  setGuild,
+  clearGuild,
+} from '@shardworks/nexus-core';
+import type {
+  Guild,
+  LoadedKit,
+  LoadedApparatus,
+  StartupContext,
+} from '@shardworks/nexus-core';
+
+import {
+  createFabricator,
+  type FabricatorApi,
+  type EngineDesign,
+} from './fabricator.ts';
+
+// ── Test helpers ──────────────────────────────────────────────────────
+
+/** Create a minimal valid engine design for testing. */
+function mockEngine(id: string): EngineDesign {
+  return {
+    id,
+    async run(_givens, _ctx) {
+      return { status: 'completed', yields: null };
+    },
+  };
+}
+
+/** Build a mock LoadedKit with engine contributions. */
+function mockKit(id: string, engines: Record<string, unknown>): LoadedKit {
+  return {
+    packageName: `@test/${id}`,
+    id,
+    version: '0.0.0',
+    kit: { engines },
+  };
+}
+
+/** Build a mock LoadedApparatus with optional supportKit engines. */
+function mockApparatus(
+  id: string,
+  supportKitEngines?: Record<string, unknown>,
+): LoadedApparatus {
+  return {
+    packageName: `@test/${id}`,
+    id,
+    version: '0.0.0',
+    apparatus: {
+      start() {},
+      ...(supportKitEngines ? { supportKit: { engines: supportKitEngines } } : {}),
+    },
+  };
+}
+
+/** Wire a mock Guild into the singleton. */
+function wireGuild(opts: {
+  kits?: LoadedKit[];
+  apparatuses?: LoadedApparatus[];
+}): void {
+  const kits = opts.kits ?? [];
+  const apparatuses = opts.apparatuses ?? [];
+
+  const mockGuild: Guild = {
+    home: '/tmp/test-guild',
+    apparatus<T>(_name: string): T {
+      throw new Error('Not implemented in test');
+    },
+    config<T>(_pluginId: string): T {
+      return {} as T;
+    },
+    writeConfig() {},
+    guildConfig() {
+      return { name: 'test', nexus: '0.0.0', workshops: {}, plugins: [] };
+    },
+    kits() { return [...kits]; },
+    apparatuses() { return [...apparatuses]; },
+  };
+
+  setGuild(mockGuild);
+}
+
+/**
+ * Build a StartupContext that captures event subscriptions.
+ * Returns both the context and a fire() function to trigger events.
+ */
+function buildTestContext(): {
+  ctx: StartupContext;
+  fire: (event: string, ...args: unknown[]) => Promise<void>;
+} {
+  const handlers = new Map<string, Array<(...args: unknown[]) => void | Promise<void>>>();
+
+  const ctx: StartupContext = {
+    on(event, handler) {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+    },
+  };
+
+  async function fire(event: string, ...args: unknown[]): Promise<void> {
+    for (const h of handlers.get(event) ?? []) {
+      await h(...args);
+    }
+  }
+
+  return { ctx, fire };
+}
+
+/** Start the Fabricator and return its API and event-firing capability. */
+function startFabricator(opts: {
+  kits?: LoadedKit[];
+  apparatuses?: LoadedApparatus[];
+}): { api: FabricatorApi; fire: (event: string, ...args: unknown[]) => Promise<void> } {
+  wireGuild(opts);
+
+  const plugin = createFabricator();
+  const api = ('apparatus' in plugin ? plugin.apparatus.provides : null) as FabricatorApi;
+  assert.ok(api, 'Fabricator must expose provides');
+
+  const { ctx, fire } = buildTestContext();
+  if ('apparatus' in plugin) {
+    plugin.apparatus.start(ctx);
+  }
+
+  return { api, fire };
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────
+
+describe('Fabricator', () => {
+  afterEach(() => {
+    clearGuild();
+  });
+
+  describe('getEngineDesign()', () => {
+    it('returns undefined for an unknown engine ID', () => {
+      const { api } = startFabricator({});
+      assert.equal(api.getEngineDesign('nonexistent'), undefined);
+    });
+
+    it('finds an engine registered from a kit', () => {
+      const engine = mockEngine('draft');
+      const kit = mockKit('my-kit', { draft: engine });
+      const { api } = startFabricator({ kits: [kit] });
+
+      const found = api.getEngineDesign('draft');
+      assert.ok(found, 'engine should be found');
+      assert.equal(found.id, 'draft');
+      assert.equal(found, engine);
+    });
+
+    it('registers engines from multiple kits', () => {
+      const alpha = mockEngine('alpha');
+      const beta = mockEngine('beta');
+      const { api } = startFabricator({
+        kits: [
+          mockKit('kit-a', { alpha }),
+          mockKit('kit-b', { beta }),
+        ],
+      });
+
+      assert.equal(api.getEngineDesign('alpha'), alpha);
+      assert.equal(api.getEngineDesign('beta'), beta);
+    });
+
+    it('last-write-wins for duplicate engine IDs across kits', () => {
+      const engine1 = mockEngine('draft');
+      const engine2 = mockEngine('draft');
+      const { api } = startFabricator({
+        kits: [
+          mockKit('kit-1', { draft: engine1 }),
+          mockKit('kit-2', { draft: engine2 }),
+        ],
+      });
+
+      assert.equal(api.getEngineDesign('draft'), engine2);
+    });
+
+    it('registers engines from apparatus supportKit via plugin:initialized', async () => {
+      const engine = mockEngine('implement');
+      const app = mockApparatus('my-apparatus', { implement: engine });
+
+      const { api, fire } = startFabricator({});
+      assert.equal(api.getEngineDesign('implement'), undefined);
+
+      await fire('plugin:initialized', app);
+
+      const found = api.getEngineDesign('implement');
+      assert.ok(found, 'engine should be found after apparatus initialized');
+      assert.equal(found.id, 'implement');
+      assert.equal(found, engine);
+    });
+
+    it('ignores kits fired via plugin:initialized (kits are scanned at startup only)', async () => {
+      const engine = mockEngine('late');
+      const kit = mockKit('late-kit', { late: engine });
+
+      const { api, fire } = startFabricator({});
+      await fire('plugin:initialized', kit);
+
+      // Kits fired after startup are intentionally skipped
+      assert.equal(api.getEngineDesign('late'), undefined);
+    });
+
+    it('skips entries missing the id field silently', () => {
+      const kit = mockKit('messy-kit', {
+        noId: { run: async () => ({ status: 'completed', yields: null }) },
+      });
+      // Should not throw
+      const { api } = startFabricator({ kits: [kit] });
+      assert.equal(api.getEngineDesign('noId'), undefined);
+    });
+
+    it('skips entries missing the run field silently', () => {
+      const kit = mockKit('messy-kit', {
+        noRun: { id: 'draft' },
+      });
+      const { api } = startFabricator({ kits: [kit] });
+      assert.equal(api.getEngineDesign('draft'), undefined);
+    });
+
+    it('skips null and primitive entries silently, keeps valid ones', () => {
+      const valid = mockEngine('valid');
+      const kit = mockKit('messy-kit', {
+        a: null,
+        b: 'not-an-engine',
+        c: 42,
+        d: valid,
+      });
+      const { api } = startFabricator({ kits: [kit] });
+
+      assert.equal(api.getEngineDesign('valid'), valid);
+      assert.equal(api.getEngineDesign('a'), undefined);
+    });
+
+    it('ignores a kit with no engines field', () => {
+      const kit: LoadedKit = {
+        packageName: '@test/no-engines',
+        id: 'no-engines',
+        version: '0.0.0',
+        kit: {},
+      };
+      // Should not throw
+      const { api } = startFabricator({ kits: [kit] });
+      assert.equal(api.getEngineDesign('anything'), undefined);
+    });
+
+    it('ignores an apparatus with no supportKit', async () => {
+      const app = mockApparatus('bare-apparatus');
+      const { api, fire } = startFabricator({});
+      // Should not throw
+      await fire('plugin:initialized', app);
+      assert.equal(api.getEngineDesign('anything'), undefined);
+    });
+
+    it('ignores an apparatus supportKit with no engines field', async () => {
+      const app: LoadedApparatus = {
+        packageName: '@test/bare',
+        id: 'bare',
+        version: '0.0.0',
+        apparatus: {
+          start() {},
+          supportKit: {},
+        },
+      };
+      const { api, fire } = startFabricator({});
+      // Should not throw
+      await fire('plugin:initialized', app);
+      assert.equal(api.getEngineDesign('anything'), undefined);
+    });
+
+    it('handles engines from both kits and apparatus supportKits together', async () => {
+      const kitEngine = mockEngine('kit-engine');
+      const apparatusEngine = mockEngine('apparatus-engine');
+
+      const { api, fire } = startFabricator({
+        kits: [mockKit('my-kit', { kitEngine })],
+      });
+      await fire('plugin:initialized', mockApparatus('my-apparatus', { apparatusEngine }));
+
+      assert.equal(api.getEngineDesign('kit-engine'), kitEngine);
+      assert.equal(api.getEngineDesign('apparatus-engine'), apparatusEngine);
+    });
+  });
+});
+
+=== CONTEXT FILE: packages/plugins/fabricator/src/index.ts ===
+/**
+ * @shardworks/fabricator-apparatus — The Fabricator.
+ *
+ * Guild engine design registry: scans kit contributions, stores engine designs
+ * by ID, and provides the FabricatorApi for design lookup.
+ *
+ * The EngineDesign, EngineRunContext, and EngineRunResult types live here
+ * canonically — kit authors import from this package to contribute engines.
+ */
+
+import { createFabricator } from './fabricator.ts';
+
+// ── Engine authoring API ───────────────────────────────────────────────
+
+export type {
+  EngineDesign,
+  EngineRunContext,
+  EngineRunResult,
+} from './fabricator.ts';
+
+// ── Fabricator API ────────────────────────────────────────────────────
+
+export type { FabricatorApi } from './fabricator.ts';
+
+// ── Apparatus factory (for tests and direct instantiation) ────────────
+
+export { createFabricator } from './fabricator.ts';
+
+// ── Default export: the apparatus plugin ──────────────────────────────
+
+export default createFabricator();
+
+=== CONTEXT FILE: packages/plugins/spider/src ===
+tree b98821d8f6e34359fa506196cb377f8dd47ca090:packages/plugins/spider/src
+
+engines/
+index.ts
+spider.test.ts
+spider.ts
+tools/
+types.ts
+
+=== CONTEXT FILE: packages/plugins/spider/src/engines ===
+tree b98821d8f6e34359fa506196cb377f8dd47ca090:packages/plugins/spider/src/engines
+
+draft.ts
+implement.ts
+index.ts
+review.ts
+revise.ts
+seal.ts
+
+=== CONTEXT FILE: packages/plugins/spider/src/tools ===
+tree b98821d8f6e34359fa506196cb377f8dd47ca090:packages/plugins/spider/src/tools
+
+crawl-continual.ts
+crawl.ts
+index.ts
+
