@@ -26,6 +26,10 @@ The patron gets used to: seeing work happen in real time, steering mid-implement
 
 **If false:** The transition is natural and the tight loop doesn't create problematic attachment. The patron adapts to async delivery without friction.
 
+**Early assessment (as of 2026-04-03):** Partially confirmed — but inverted. The tight loop did create a baseline, but what it created was not attachment. Instead, first autonomous dispatch made the *costs* of the loop visible: constant follow-up, never fully off the hook. The patron described autonomous delivery as a potential liberation, not a loss. However, the bootstrap period did leave a residue: a fear-based dispatch heuristic that keeps some work in the interactive channel longer than capability analysis would warrant. The unresolved question is whether this heuristic calibrates over time. See H4.
+
+---
+
 ### H2 — Conversational Implementation Follows a Different Shape
 
 Implementation through conversation naturally produces smaller, more incremental changes with tighter scope — while commission-based implementation produces larger, more self-contained chunks. These are structurally different work patterns, not just different speeds.
@@ -35,6 +39,10 @@ Coco's recent work has been surgical: remove one concept, rename one term, fix o
 **If true:** Commission design should account for granularity. Some work is naturally "conversational-sized" and may need a different dispatch pattern (micro-commissions? standing animas with ongoing mandates?) than feature-scale work.
 
 **If false:** The work shape is determined by the task, not the interaction mode. Commissions and conversations produce similar outputs.
+
+**Early assessment (as of 2026-04-03):** Confirmed — but the organizing principle is more nuanced than predicted. The granularity split is real and observable: Coco handles surgical/risky/architectural work; commissions handle self-contained feature work. However, the primary dividing line is *perceived risk to the working system*, not task size. The heuristic is fear-based and somatic ("an anxiety signal"), not a deliberate capability analysis. Coco's role has also evolved to include commission spec authorship and output review, meaning the "shape" question isn't just about what autonomous agents receive but about the full commissioning pipeline.
+
+---
 
 ### H3 — Seeing the Work Changes the Judgment
 
@@ -46,6 +54,67 @@ The project philosophy says "the system will be known by its fruits." This assum
 
 **If false:** Clean output boundaries work as designed. The patron evaluates fairly without process visibility. "Known by its fruits" holds.
 
+**Early assessment (as of 2026-04-03):** Partially confirmed — but the data revealed a more important finding. The tight loop doesn't actually provide code-level visibility ("I was only reviewing a fraction of the code"). And pure output evaluation does produce shallower reads — structural debt was missed when only the functional output was judged. However, neither pole (watching the work / judging only outputs) is the right answer. A structured post-hoc review layer (automated scoring + interpretive agent review) provides better calibration than either extreme.
+
+This review layer is a transitional state, not the target. The goal is criteria internalized in the system — quality standards baked into agent curricula, pipelines, and guild codex — combined with self-auditing that surfaces only the critical subset of commissions for periodic human attention. Per-commission review by Coco or the patron, even with structural support, is overhead on the path to that target. See H5.
+
+---
+
+### H4 — The Calibration Curve
+
+*Added 2026-04-03 based on H1 data.*
+
+Dispatch confidence follows a learning curve rather than a step function. The fear-based heuristic that emerged from the bootstrap period updates incrementally with each successful commission in a given task category, eventually reaching a threshold where that category stops triggering the anxiety signal and autonomous dispatch becomes routine.
+
+**If true:** The most useful investment is breadth of commission types — getting a success record in each major risk category (framework changes, cross-cutting refactors, architectural additions) — rather than additional successes in already-familiar categories. A calibration log (tracking which categories have crossed the threshold) would be a useful instrument.
+
+**If false:** The heuristic doesn't update meaningfully with evidence; fear-based avoidance persists even after repeated successful autonomous work. In that case, the organizing principle is temperament, not calibration.
+
+---
+
+### H5 — The Criteria-Internalization Path
+
+*Added 2026-04-03 based on H3 data and patron target-state clarification.*
+
+The current per-commission review pattern (patron + Coco reviewing each output, aided by quality scoring infrastructure) is a transitional state. The target is: quality criteria baked into the system (agent curricula, codex standards, pipeline checks), with self-auditing that surfaces only the critical minority of commissions for periodic human attention. That endpoint eliminates per-commission review without eliminating quality assurance.
+
+**If true:** The system is capable of internalizing the criteria currently applied by the patron and Coco in review, and self-auditing can reliably identify the cases worth human attention. Per-commission review declines naturally as criteria propagate into the pipeline. The transition has a clear trajectory.
+
+**If false:** Per-commission review (by patron, Coco, or structural tooling) remains necessary because criteria cannot be fully internalized or because self-auditing produces too many false negatives. The review layer becomes permanent overhead rather than a transitional scaffold.
+
+*Target state articulated by patron:* "The work is generally trusted without review because the criteria Coco and I use are built into the system. Self-auditing identifies a small set of commissions or issues which are critical enough to surface for periodic manual review."
+
+---
+
+### H6 — The Bootstrap Imprint
+
+*Added 2026-04-03 based on session note patterns.*
+
+The codebase built during the bootstrap period carries characteristic patterns from having been built under interactive steering: architectural pivots mid-implementation, code shaped by Coco's capabilities and the conversational cadence, fast iteration without the verification discipline of autonomous dispatch. As autonomous agents work on the bootstrap codebase, they encounter friction points that reflect its origin — not necessarily bad code, but code with a different texture than agent-produced code.
+
+**If true:** Revisions and failures will cluster in modules built during the bootstrap period, particularly those built in high-velocity Coco sessions. The bootstrap imprint is measurable in the commission log over time.
+
+**If false:** The bootstrap codebase is not systematically harder for autonomous agents to work on. Any failures distribute across the codebase without correlation to origin.
+
+---
+
+
+### H7 — The Mountain-to-Spec Path
+
+*Added 2026-04-03 based on patron target-state clarification.*
+
+The patron's involvement in the input side of the commission pipeline should converge toward direction and preference, not detailed requirement work. The target: the patron points at a mountain (brief statement of goal or direction), and the system generates an adequate commission spec. Patron involvement is reserved for genuinely unknown requirements and choices that are purely preference-based — things only the patron can resolve.
+
+Currently, spec authorship is a significant iterative process: patron and Coco co-develop specs through conversation, often with multiple rounds of refinement. This is both a quality mechanism (Coco surfaces implications and gaps) and a cost center (patron time, conversational turns).
+
+**If true:** As the guild builds domain knowledge (in codex, curricula, and established patterns), spec generation from mountain-level direction becomes adequate for a growing proportion of commissions. Patron involvement at spec time converges toward exception handling rather than full authorship.
+
+**If false:** Spec quality remains dependent on patron participation in detail work. Mountain-level direction produces specs with too many gaps to dispatch reliably, and the iterative co-authorship pattern is permanent rather than transitional.
+
+*Target state articulated by patron:* "Pointing out mountains" — only key/critical unknowns, genuine open questions, or purely preference-based decisions should require patron involvement at spec time.
+
+---
+
 ## Data Collection
 
 ### Primary: Ethnographer Interviews
@@ -55,8 +124,12 @@ The ethnographer should probe this theme during regular interviews. Specific pro
 - "You've been doing implementation work through Coco. What's that like compared to how you imagined autonomous agents would work?"
 - "When you directed Coco to do the rename — did you think about posting it as a commission instead? Why or why not?"
 - "What would you lose if Coco stopped doing implementation tomorrow?"
-- After autonomous agents are running: "How does getting back a finished commission compare to working through it with Coco?"
-- "Are you harsher or more forgiving when you can't see the work happening?"
+- *After autonomous agents are running:* "How does getting back a finished commission compare to working through it with Coco?"
+- *After autonomous agents are running:* "Are you harsher or more forgiving when you can't see the work happening?"
+- *For H4:* "Is there a category of work that used to trigger the anxiety signal that now feels routine to dispatch?"
+- *For H5:* "As the commission volume grows, is the review load getting heavier or is the infrastructure absorbing it? What would it take for per-commission review to feel unnecessary?"
+- *For H6:* "When you review a commission touching code from the early build period, does it feel different from code built more recently?"
+- *For H7:* "Walk me through how you wrote the last commission spec. How much of it was direction vs. detail work? What parts could the system have filled in without you?"
 
 ### Secondary: Session Note Analysis
 
@@ -74,6 +147,20 @@ When autonomous agents come online, actively observe:
 - Does the patron reach for Coco to do work that should go to an agent?
 - Does the patron add more detail to commissions than necessary (trying to recreate the tight loop)?
 - How long before async delivery feels normal?
+- *For H4:* Which task categories have crossed from "anxiety signal" to "routine dispatch"?
+- *For H5:* Is per-commission review declining as criteria propagate into the pipeline? Is self-auditing surfacing the right set of cases?
+- *For H6:* Do revisions and failures cluster in bootstrap-era modules?
+- *For H7:* Is the patron's spec authorship time declining? Are mountain-level inputs producing adequate specs without iteration?
+
+## Closing Condition
+
+X008 reaches its natural end when the transition has stabilized — specifically, when three conditions are met:
+
+1. **Dispatch heuristic has updated:** The patron can describe dispatch decisions in terms of task characteristics rather than anxiety signals. Fear-based avoidance is no longer the primary organizing principle.
+
+2. **Review trajectory is clear:** Either (a) per-commission review has been substantially displaced by system-native criteria and self-auditing, with human attention reserved for the critical minority — or (b) it has become clear that per-commission review is structurally permanent and the criteria-internalization path is blocked.
+
+3. **Input trajectory is clear:** Either (a) mountain-level direction is producing adequate specs for a substantial proportion of commissions without iterative patron involvement — or (b) spec co-authorship has stabilized as a permanent pattern and the mountain-to-spec path is not viable without further architectural investment.
 
 ## Depends On
 
@@ -99,3 +186,13 @@ When autonomous agents come online, actively observe:
 **H3 signal — Coco as process visibility layer.** Sean asked Coco to review the artificer's recent commits. This is a middle path between full process visibility and pure output evaluation: the patron isn't watching work happen in real time, but uses the interactive agent to evaluate finished outputs with context. Neither pure tight-loop nor pure black-box. Worth tracking whether this becomes a stable pattern or whether Sean shifts toward trusting output without the review step.
 
 **H2 signal — granularity split is self-organizing.** No deliberation occurred about which mode to use for which task. Small surgical changes (role terminology, config edits) flowed naturally to Coco. Larger features with spec-level complexity (workshop-prepare idempotency, update-writ actions, sortable table) flowed to commissions. This is consistent with H2: work shape is structurally different, not just faster or slower.
+
+### Sessions 2026-04-02 – 2026-04-03
+
+**H3 / H5 — the review layer and its limits.** The scorer + Coco review pattern has proven its value: architectural debt in Walker Increment 3 (hardcoded `engine.id === 'review'` branch) was surfaced by the scorer and Coco that Sean says he probably wouldn't have caught manually. However, Sean has clarified the target state: not structured per-commission review as the endpoint, but criteria baked into agent curricula and pipelines, with self-auditing surfacing only the critical minority. Per-commission review is overhead on the path to that target.
+
+**H1 — freedom signal confirmed.** Sean described the anticipated transition from Coco-as-implementer as a "clean shift" to "dispatch, collect experiment data via pipeline, and have Coco review+suggest followups" — framed as forward progress, not loss.
+
+**H4 — fear-based heuristic still operating.** High-risk architectural work (engine collect callback, 11 files, 230 lines) continued to route through Coco as of April 3. The heuristic is intact; calibration against the new commission history has not yet visibly shifted it.
+
+**H7 — input side still iterative.** Spec authorship remains a patron + Coco collaborative process as of April 3. Coco drafts specs from design conversations, Sean reviews and dispatches. Mountain-level inputs do not yet reliably produce dispatch-ready specs without iteration. The target state (patron direction + system-generated spec, patron review limited to unknowns and preferences) is articulated but not yet tested.

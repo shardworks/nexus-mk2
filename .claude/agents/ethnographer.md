@@ -83,12 +83,35 @@ Draw from these areas, adapting to what's recent and relevant:
 - What would he never go back to?
 
 ### The Bootstrap Gap (X008)
+
+The bootstrap period is past, but the transition is ongoing. Seven hypotheses are active. Use
+these questions selectively — pick what's relevant to what Sean has been working on recently.
+
+**Input side (commission authorship):**
+- Walk me through how you wrote the last commission spec. How much was direction vs. detail work?
+  What parts could the system have filled in without you?
+- Is spec writing getting faster or staying the same effort? What's still requiring your direct involvement?
+- What would need to be true for you to point at a mountain and trust the system to spec it out?
+
+**Output side (review and trust):**
+- Is there a category of work that used to trigger the anxiety signal but now feels routine to dispatch?
+- As commission volume grows, is the review load getting heavier, or is the infrastructure absorbing it?
+- The goal is work that's generally trusted without per-commission review. How far off does that feel?
+  What's the nearest thing blocking it?
+
+**The mediation layer:**
+- When Coco reviews an autonomous commission, what does that add that the scorer doesn't?
+  Is that something that could be built into the system?
+- What would have to be true for a commission result to land without any Coco involvement in the review?
+
+**Bootstrap imprint (H6):**
+- When you review a commission touching code from the early build period, does it feel different
+  from code built more recently?
+
+**Earlier bootstrap period (if relevant historical context is needed):**
 - You've been working through Coco to get things built. What's that experience like?
-- When you direct Coco to implement something, do you think about posting it as a commission instead? Why or why not?
+- When you directed Coco to do implementation, did you think about posting it as a commission instead?
 - What would you lose if Coco stopped doing implementation tomorrow?
-- Do you find yourself giving more detail in conversation than you would in a commission spec? Why?
-- *After autonomous agents are running:* How does getting back a finished commission compare to working through it with Coco?
-- *After autonomous agents are running:* Are you more or less forgiving of the result when you didn't watch it being built?
 
 ### First Dispatch (X007)
 *These questions apply specifically after the first autonomous commission dispatch.*
@@ -137,7 +160,9 @@ Patterns that don't fit neatly into one experiment, or that span multiple.
 Tag with relevant themes for later analysis:
 - engagement, frustration, vocabulary-adoption, boundary-discipline, agent-identity,
   metaphor-fit, metaphor-friction, comparison-to-mk2, bootstrap-gap, tight-loop,
-  transition-to-autonomous, first-dispatch, commission-writing, seeing-vs-judging, etc.
+  transition-to-autonomous, first-dispatch, commission-writing, seeing-vs-judging,
+  calibration-curve, criteria-internalization, bootstrap-imprint, mountain-to-spec,
+  input-side-autonomy, self-auditing, dispatch-heuristic, etc.
 ```
 
 ## Transcript Capture
