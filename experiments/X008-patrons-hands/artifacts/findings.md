@@ -1,0 +1,474 @@
+# X008 — The Patron's Hands: Findings & Analysis
+
+*Compiled 2026-04-03 from 11 ethnographer interviews (2026-03-22 through 2026-04-03), 90+ session notes, commission log data, and spec observations.*
+
+---
+
+## Overview
+
+X008 asks what happens when an interactive agent fills the autonomous agent role during a
+bootstrap period, and how that shapes the patron's expectations and behavior when autonomous
+dispatch comes online. The experiment was designed around a specific structural fact: the
+Nexus Mk 2.1 system was built largely through Coco (the interactive collaborator) before any
+autonomous agents were commissioned. Coco removed version slots across 24 files, renamed
+"implement" → "tool" across 57 files, built the Stacks apparatus (~2,200 lines), the Animator
+(~1,500 lines), the Parlour (~1,200 lines), the full plugin/apparatus architecture, and dozens
+of mechanical fixes and upgrades. All of this was patron-directed interactive work — a tight
+collaborative loop — before a single commission was dispatched to an autonomous anima.
+
+The question was whether that baseline experience would become a trap.
+
+---
+
+## Hypothesis Assessments
+
+---
+
+### H1 — The Tight Loop Trap
+
+**Hypothesis:** Interactive bootstrap creates expectations that make the transition to autonomous
+agents feel like a downgrade — even if output quality is equivalent.
+
+**Verdict: Partially confirmed — but with a critical inversion.**
+
+The tight loop did create a baseline, and that baseline did shape expectations. But the
+dominant effect was not the one predicted. Rather than creating *attachment to the loop*, the
+loop made the costs of the loop visible once an alternative appeared.
+
+The clearest statement came from the first post-dispatch session (2026-03-25):
+
+> *"With Coco, I give some instructions and know there is going to be a follow-up: perhaps
+> more changes, or at a minimum instructions to wrap-up and push everything. So I'm never
+> really 'free' even if I'm not physically typing the code. With a process that's more opaque,
+> I might unlock more of that freedom."*
+
+The loss of real-time steering was framed not as deprivation but as potential liberation. The
+tight loop's costs — never quite off the hook, always a follow-up pending — were invisible
+until the contrast of autonomous dispatch made them legible.
+
+A month later (2026-04-02), Sean was articulating a "clean shift" spontaneously:
+
+> *"I think there will be a pretty clean shift from 'have Coco implement things interactively'
+> to 'dispatch, collect experiment data via pipeline, and have Coco review+suggest followups'."*
+
+This was his own framing, not a response to the experiment's prompting. The transition was
+self-organizing and felt like forward progress, not loss.
+
+**Where H1 does hold:** The tight loop created a *fear-based* dispatch heuristic that
+persisted well after autonomous dispatch became available. From 2026-03-27:
+
+> *"It's intuitive... fear-based, maybe. I get an anxiety signal if something feels dangerous
+> to dispatch blindly."*
+
+This heuristic — core/critical work to Coco, new/self-contained work to commissions — wasn't
+rationally derived. It was an emotional residue of having watched implementation happen in
+real time and knowing what the high-risk paths felt like. The tight loop didn't create
+attachment; it calibrated caution.
+
+**What H1 missed:** The hypothesis assumed the patron would *prefer* watching work happen.
+What actually happened: the patron was *comfortable* watching during the bootstrap, and that
+comfort masked how much the constant follow-up cadence cost. The transition didn't feel like
+a downgrade because the patron was already impatient for something else:
+
+> *"It feels 'expedient'. But I'm impatient for getting this thing off the ground, running
+> autonomously."* (2026-04-02)
+
+The "trap" wasn't attachment to the tight loop. It was the slow realization that the tight loop
+was itself the delay.
+
+**Design implication:** The H1 prediction ("explicit transition protocol needed") may still
+be useful — not because patrons will resist the transition, but because the transition is
+happening unevenly. The fear-based dispatch heuristic persists even when it could safely be
+loosened. Explicit calibration checkpoints ("would this task actually break anything if an
+agent got it wrong?") may accelerate the heuristic's update rate.
+
+---
+
+### H2 — Conversational Implementation Follows a Different Shape
+
+**Hypothesis:** Interactive implementation produces smaller, more incremental changes with
+tighter scope; commission-based implementation produces larger, self-contained chunks. These
+are structurally different work patterns.
+
+**Verdict: Confirmed — but the organizing principle is more nuanced than predicted.**
+
+The split between Coco work and commission work is observable and consistent across the full
+dataset. Session notes show the pattern clearly:
+
+- **Coco work:** Cross-cutting renames (57 files), version slot removals, mechanical fixes
+  from code reviews, CI hardening, upgrade scripts, documentation updates, operational
+  scaffolding. Typically: a clear target state, mechanical execution, tight feedback at
+  decision points.
+
+- **Commission work:** Full apparatus implementations (Clerk, Dispatch, Scriptorium, Animator
+  variants), new tool features, self-contained additions. Typically: a bounded scope, a spec
+  that describes expected behavior, output evaluated after the fact.
+
+The split became an explicit heuristic by 2026-03-27:
+
+> *"Anything that is core/critical enough that it could break the framework I still do manually
+> with Coco. Everything else, I try to commission. Especially if it's new or self-contained."*
+
+**What the hypothesis got right:** Commission work does tend to be larger and more
+self-contained. The granularity difference is real. A typical Coco task is 1–3 files and 20–200
+lines; a typical commission is 5–15 files and 500–1500 lines, with a spec and verification
+criteria.
+
+**What the hypothesis underspecified:** The primary organizing principle is *risk*, not task
+size or type. The heuristic is fear-based: will getting this wrong block me? Small tasks can go
+to commissions (the vocabulary rename spec was a one-off), and large tasks can stay with Coco
+(the engine collect callback: 11 files, ~230 lines, implemented directly on 2026-04-03). The
+key variable is perceived downside, not scope.
+
+This reframes the design implication. H2 suggested we might need a different dispatch pattern
+for "naturally conversational-sized" work (micro-commissions, standing animas). The more useful
+framing: the pattern that's emerging is a *risk-stratified* dispatch model. Coco absorbs the
+work where getting it wrong is consequential or where the patron needs real-time steering to
+navigate uncertainty. Commissions absorb the work where failure is recoverable and scope is
+clear.
+
+A second nuance: Coco's role in the commission pipeline is not separate from autonomous dispatch
+— it's part of it. Coco drafts commission specs, reviews outputs, interprets results for the
+patron, and implements review fixes. This means commission granularity includes the wrapper
+work that Coco does around autonomous sessions, not just the sessions themselves.
+
+**The "who is right for this kind of reasoning?" dimension:** A pattern noted in the spec
+observations (2026-03-27) that wasn't in the original hypothesis: Coco drafts commission specs
+as part of the design conversation, then Sean dispatches them. Coco is doing patron-adjacent
+reasoning (specifying what to build), not implementation. The H2 granularity question isn't
+just "how big" but "which kind of cognition is needed" — and some cognition (architectural
+decision-making under uncertainty, spec authorship) is naturally interactive even when the
+execution isn't.
+
+---
+
+### H3 — Seeing the Work Changes the Judgment
+
+**Hypothesis:** Watching implementation happen makes the patron more forgiving of imperfection
+(understands tradeoffs, forgives reasonable compromises). Judging only output makes the patron
+harsher and less calibrated.
+
+**Verdict: Partially confirmed — but the data reveals a third path that the binary framing
+missed.**
+
+**Where H3 holds:** The in-the-moment vs. retrospective response to failures does differ. When
+Ergon committed to the wrong branch (2026-03-27), the immediate reaction was frustration that
+eroded confidence — *"Every time something like that happens I lose a bit of confidence in the
+system."* The equanimity ("the whole thing can just be redone") emerged in retrospect, not in
+the moment. This is consistent with H3's prediction: pure output evaluation triggers more
+immediate negative reactions.
+
+The quality scorer data also supports H3's logic. Without the scorer and Coco's review, the
+Walker Increment 3 architectural debt (hardcoded `engine.id === 'review'` branch) would likely
+have been approved on the functional "fruits" alone:
+
+> *"If I had done a review manually I would have seen it, yeah. Not sure if I would be
+> reviewing anima code and how much if it were all manual though."* (2026-04-03)
+
+Judgment without structured process visibility does appear to be shallower and potentially
+miscalibrated.
+
+**Where H3 is complicated:** The tight loop doesn't actually give the patron the code-level
+visibility H3 assumed. From 2026-03-27:
+
+> *"Even while working collaboratively with Coco I was only reviewing a fraction of the code."*
+
+The safety differential between tight-loop and autonomous dispatch is smaller than it feels.
+The patron is trusting Coco's execution in both cases — the difference is the presence of a
+steering channel, not a verification channel. This deflates the H3 premise: the tight loop
+wasn't providing genuine calibration through visibility; it was providing *conversational
+confidence through dialogue*.
+
+**The third path — structured post-hoc review:** What actually improved evaluation quality
+was neither real-time visibility nor pure output evaluation, but a specific infrastructure:
+quality scorer (automated) + Coco as post-hoc reviewer. From 2026-04-03:
+
+> *"It's been internally consistent, and tracking my own assessments pretty closely. It's
+> probably caught more things than I have, to be honest."* (on the quality scorer)
+
+And:
+
+> *"If I had done a review manually I would have seen it, yeah. Not sure if I would be
+> reviewing anima code and how much if it were all manual though."*
+
+The review infrastructure is not just confirming the patron's reads — it's enabling evaluation
+depth that the patron would not sustain without structural support. This is a significant design
+implication: the H3 prescription ("autonomous agents need to expose more reasoning") is right,
+but the mechanism isn't process transparency (showing the work). It's a post-hoc review layer
+that closes the gap between output evaluation and calibrated judgment.
+
+**The commission output-as-draft pattern:** By 2026-04-02, autonomous outputs were being
+framed as draft implementations:
+
+> *"Still not trusting the system to build things, but I'd say it's pretty good at creating
+> draft implementations and iterating."*
+
+This framing resolves the H3 tension: outputs aren't judged as finished work against a clean
+standard, but as inputs to a review cycle where gaps are identified and follow-up commissions
+are dispatched. The "fruits" judgment is real, but it's one step in a pipeline rather than a
+final verdict.
+
+---
+
+## Additional Findings (Beyond the Hypotheses)
+
+### 1. The Bootstrap Period Built the Foundation, Not Just Expectations
+
+X008 was designed to study how the bootstrap shaped the *patron's mental model*. It also
+shaped the *codebase and architecture in ways that enabled autonomous dispatch*. The March 28 –
+April 2 rebuild (all Coco-driven) was explicitly motivated by making autonomous dispatch safer
+and more tractable:
+
+> *"I'm hoping this buys better agent outcomes, because they work on self-contained pieces
+> without breaking the whole system."*
+
+The plugin/apparatus architecture, the monorepo restructure, the clean package boundaries —
+all built interactively — are what made the first autonomous commissions viable. The bootstrap
+wasn't a liability whose effects need managing. It was construction work that created the
+conditions for a different relationship with autonomous agents.
+
+### 2. Cost-of-Effort Asymmetry as a Mental Model Lag
+
+A real-time insight from 2026-03-27 that was noted explicitly but is not yet fully integrated:
+
+> *"The interesting thing about that is it's sort of a relic of building things myself...
+> Losing code I write is incredibly frustrating, and a big setback. But even if a whole
+> commission is lost it doesn't really matter. There's maybe a token cost or whatever, but
+> the whole thing can just be redone. That's an interesting thing to note, and something
+> I'll need to internalize more."*
+
+The patron's anxiety about agent failures is calibrated to the cost of *his own effort*, not
+to token costs. A failed commission costs tokens, not hours. This miscalibration keeps the
+dispatch anxiety floor higher than the actual risk warrants. Sean identified this as a holdover
+from self-built code culture, named it explicitly, and said he needs to internalize it — but
+as of April 3, it's still an intellectual insight rather than an embodied prior.
+
+This may be the most durable finding from X008 for practitioners: the effort-cost asymmetry is
+a specific, named mental model lag that affects dispatch confidence. It deserves explicit
+surfacing and a calibration mechanism (e.g., tracking actual cost-to-redo of failed commissions
+vs. the felt loss).
+
+### 3. Coco's Role Migrated Rather Than Being Displaced
+
+The hypothesis framing positioned Coco and autonomous agents as alternatives during the
+transition. What actually happened: Coco's role migrated. The trajectory:
+
+- **Pre-autonomous (March 22 – March 25):** Coco as primary implementer, doing 100% of
+  implementation work interactively.
+- **Early autonomous (March 25 – March 27):** Coco retained for core/critical work; autonomous
+  agents for new/self-contained work. Coco also reviews autonomous outputs via mediated code
+  review.
+- **Stable operating pattern (April 2):** Coco as spec author, reviewer, interpreter. Autonomous
+  agents as draft producers. Coco no longer primarily an implementer — that role is now shared
+  with autonomous agents, but the commission pipeline is the default for new self-contained work.
+- **Current (April 3):** Coco still doing direct implementation for high-risk architectural
+  work (the collect callback: 11 files, 230 lines), spec drafting, review, and follow-up fix
+  implementation from review artifacts.
+
+The migration is not complete. Coco remains an implementer for work that is either too risky
+for autonomous dispatch or too tightly coupled to real-time architectural decisions. The
+endpoint (self-directed improvement loops without Coco routing) is articulated and aspired to
+but not reached.
+
+Sean drew a hard line on the destination (2026-04-02):
+
+> *"If it's a permanent part of the workflow I'd consider the system a failure."*
+
+He means Coco-as-reviewer as a permanent oversight pattern — not Coco as interactive
+collaborator. This is a calibrated ambition: Coco continues as a design and conversation
+partner; what he wants to eliminate is Coco as a *quality bridge* that substitutes for the
+system's own self-evaluation capacity.
+
+### 4. The First Commission Result Was Mediated Before It Was Experienced
+
+A detail from X007 that has X008 implications: the first autonomous commission result (the
+guild monitor web dashboard) was reviewed by Coco before Sean saw it. Coco gave high praise.
+Sean then saw it through that positive frame.
+
+This became a pattern. By April 3, the pipeline is: autonomous commission → scorer →
+Coco review → patron. Raw output evaluation is not the norm. Every output is pre-interpreted
+before Sean encounters it.
+
+This has two implications for H3: (a) the "seeing vs. judging" binary in H3 was already
+resolved in practice — the system built a structured middle path rather than choosing a pole;
+(b) the patron's evaluation disposition toward autonomous work is consistently mediated, which
+means the real variable is the quality of the mediation layer, not the patron's raw
+calibration.
+
+---
+
+## Synthesis: What Actually Happened
+
+The bootstrap period produced three distinct effects that were not fully anticipated:
+
+**1. It made the loop's costs visible.** The tight loop was the only mode available during
+bootstrap, so its costs were invisible. The first autonomous commission made those costs
+legible — and what the patron found was that he'd been less free than he realized. This is an
+inversion of H1 but still a bootstrap effect: you can only recognize the loop's costs by
+escaping it temporarily.
+
+**2. It built the preconditions for trust — not trust itself.** The rebuild that happened
+through Coco wasn't just implementation. It was the construction of the architecture (plugin
+system, clean package boundaries, self-contained pieces) that makes autonomous dispatch safer.
+The bootstrap period was the patron building the conditions he needed before he could extend
+confidence to autonomous agents. The sequence was necessary, not wasteful.
+
+**3. It shaped a middle path rather than a transition.** The X008 framing anticipated a
+transition: from tight-loop to autonomous. What actually emerged was a stable hybrid where
+different modes fill genuinely different roles. The tight loop didn't get replaced — it evolved
+into a review and steering layer that surrounds, rather than substitutes for, autonomous work.
+
+---
+
+## Implications for System Design
+
+**For multi-agent system builders:**
+
+- **Plan for the Coco role, not just the agent role.** An interactive collaborator that can
+  work alongside autonomous agents — for spec drafting, output review, architectural decisions,
+  and follow-up implementation — is not a temporary bootstrap convenience. It's a permanent
+  role in a mature multi-agent workflow. Design it explicitly.
+
+- **The dispatch heuristic will be fear-based initially.** Patrons new to autonomous dispatch
+  develop risk-based intuitions ("anxiety signals") rather than deliberated capability analyses.
+  This is rational given limited history with agent behavior, but it also means the heuristic
+  updates slowly. Build explicit calibration tools: tracked success rates by task type,
+  cost-to-redo data, visible failure recovery paths.
+
+- **Output mediation is not a workaround.** Structured post-hoc review (automated scoring +
+  interpretive agent) enables evaluation depth that patrons won't sustain manually. This isn't
+  compensating for patron limitations — it's a structural component of reliable evaluation. The
+  alternative (raw output judgment) produces shallower reads and misses architectural debt.
+
+- **Expose the effort-cost asymmetry explicitly.** Patrons from self-build backgrounds carry
+  a calibrated dread of losing their own work that is wildly miscalibrated for agent work. A
+  failed commission costs $2–4 and an hour of calendar time. Name this asymmetry early. Track
+  and display actual cost-to-redo numbers. The miscalibration suppresses dispatch confidence
+  more than actual risk warrants.
+
+- **The bootstrap codebase is a baseline, not a liability.** Work done through the interactive
+  agent during bootstrap shapes the codebase that autonomous agents will operate on. Investing
+  in good architecture during the interactive phase pays dividends when autonomous dispatch
+  begins — better package boundaries mean smaller blast radius, fewer cross-cutting failures,
+  more recoverable mistakes.
+
+**For patrons entering their first autonomous dispatch period:**
+
+- The transition doesn't feel like a downgrade. It feels like getting time back. Expect this.
+
+- Your anxiety about dispatching will be higher than the actual risk warrants. Track what
+  actually goes wrong. The failure modes that matter most are recoverable ones with modest
+  token cost — not catastrophic ones requiring manual intervention.
+
+- Your first instinct will be to keep more work in the interactive loop because it feels safer.
+  It is marginally safer, but at a cost (constant follow-up, never fully off the hook) that
+  accumulates invisibly until you have an alternative.
+
+- Build a review layer before you need it. The quality of your evaluation of autonomous output
+  depends heavily on whether you have structured post-hoc review infrastructure. Without it,
+  you'll approve work you'd catch with scoring and a review pass.
+
+---
+
+## Guidance for Future Architects of AI-Assisted Development Systems
+
+**Design the three modes from the start, not one at a time:**
+1. Interactive collaboration (patron + agent, real-time)
+2. Autonomous dispatch (patron posts spec, agent completes, patron evaluates)
+3. Post-hoc review (structured evaluation of autonomous output, possibly by a different agent)
+
+Most systems are designed with only mode 2 in mind. Modes 1 and 3 are often treated as
+workarounds. The data here suggests they are permanent and necessary.
+
+**The tight loop is not a temporary scaffold.** It doesn't go away when agents are good enough.
+It changes role: from primary production mode to oversight and steering layer. Design the
+interaction contract for that mature role, not just for "we haven't built autonomous agents yet."
+
+**Trust is accumulated through successful-failure cycles, not through capability thresholds.**
+The patron's dispatch confidence grew not when the system became more capable, but when the
+pattern of recoverable failures became familiar. Trust calibration is a learning process.
+Design for evidence accumulation: visible success rates, trackable failure modes, legible
+recovery paths.
+
+**The patron's mental model is a lagging indicator.** The system's actual capability will
+generally exceed the patron's willingness to dispatch. The bottleneck is not model capability
+but patron confidence. Design for confidence calibration as much as for output quality.
+
+---
+
+## Ideas for Publishable Work
+
+### 1. "The Tight Loop Tax: Hidden Costs of Interactive AI Collaboration" *(practitioner article)*
+
+**Target:** software practitioners, AI engineering blogs (Increment, The Pragmatic Engineer)
+
+The tight loop between a developer and an AI coding agent carries costs that are invisible
+until you have an alternative: you're never fully off the hook, there's always a follow-up
+pending, steering mid-implementation keeps you attending even when you don't need to. This
+piece would quantify the productivity cost of interactive-as-default for work that could be
+dispatched autonomously, and argue for deliberate mode-switching as a discipline.
+
+---
+
+### 2. "Bootstrapping a Multi-Agent System: What You Build Before You Can Build It" *(technical blog post)*
+
+**Target:** AI engineering audiences, the HuggingFace/LangChain community
+
+A case study of the bootstrap period in Nexus Mk 2.1: how the interactive phase shaped the
+architecture that made autonomous dispatch viable, what the interactive agent built before
+autonomous agents came online, and how the "wrong" phase (implementing through the wrong agent)
+was actually foundation work. Would challenge the common advice to "start autonomous from day
+one" — there's a legitimate bootstrap sequence, and understanding it prevents false starts.
+
+---
+
+### 3. "Who Reviews the Agents? Calibrated Evaluation in Multi-Agent Systems" *(research article or conference talk)*
+
+**Target:** academic venues (CSCW, CHI) or applied ML conferences (MLSys, SysML)
+
+**Core argument:** Pure output evaluation (judge only the fruits) is structurally insufficient
+for complex multi-agent outputs. Real-time process visibility is also insufficient (patrons
+don't actually review much of what interactive agents do). The middle path — structured
+post-hoc review combining automated scoring with an interpretive agent — provides better
+calibration than either extreme. This paper would present the X008/X013 data, characterize
+the three evaluation modes, and offer design principles for the review layer.
+
+**Testable claim:** Patrons who have structured post-hoc review infrastructure catch more
+structural debt and have better-calibrated quality assessments than those relying on unaided
+output evaluation.
+
+---
+
+### 4. "The Effort-Cost Asymmetry: Why Developers Underuse Autonomous AI Agents" *(short paper or workshop)*
+
+**Target:** ICSE, SOUPS, or AI/UX workshops
+
+**Core argument:** Developers from self-build backgrounds carry a fear of losing work that is
+well-calibrated for their own effort (losing 8 hours of coding is a real cost) but wildly
+miscalibrated for autonomous agent work (a failed commission costs $2-4 and can be re-run in
+minutes). This asymmetry suppresses autonomous dispatch confidence in ways that are
+identifiable, predictable, and potentially designable-against. This paper would characterize
+the asymmetry, trace its source (self-build culture internalized), and propose interface
+interventions (visible cost-to-redo tracking, "what's the worst case?" prompts).
+
+---
+
+### 5. "The Bootstrap Condition in Human-AI Teaming" *(conference talk or panel contribution)*
+
+**Target:** NeurIPS workshop on human-AI interaction, ACL/EMNLP applied track
+
+The bootstrap period in human-AI teaming — when the human uses the AI in a mode that won't
+scale, because the scalable mode isn't ready — creates effects on expectations, habits, and
+system design that persist into the operational phase. This talk would use X008 as a case
+study to argue that the bootstrap condition is undertheorized in human-AI teaming literature:
+it's treated as a transition rather than as a phase with its own design requirements. Would
+call for explicit bootstrap-phase design: what does the patron do in this phase, what
+expectations should they form, and what architectural investments pay off in the transition?
+
+---
+
+*Document status: Initial synthesis, as of 2026-04-03. X008 is still active — the transition
+to autonomous dispatch is ongoing. Key open questions: Does the effort-cost asymmetry resolve
+as commission volume grows? Does the fear-based dispatch heuristic update measurably? Does
+Coco's role as reviewer eventually give way to system-native evaluation? These will inform
+later revisions.*
