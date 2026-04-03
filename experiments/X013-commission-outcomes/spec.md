@@ -312,8 +312,8 @@ claim about requirement fulfillment. The quality scorer closes this
 gap.
 
 **Instrument design:** See
-`instruments/anima-quality-scorer/proposal.md` (relative to X013
-experiment directory) for full motivation and design rationale.
+`experiments/instruments/anima-quality-scorer/proposal.md` for full
+motivation and design rationale (archival — the original instrument).
 Key properties:
 
 - **Four dimensions, 3-point scale:** test quality, code structure,
@@ -380,12 +380,12 @@ points are not.
 
 ### Operational (built, running)
 
-- **Quality scorer** — autonomous code quality reviewer. Rubric,
-  prompts, and runner script at
-  `experiments/X013-commission-outcomes/instruments/anima-quality-scorer/`.
-  Output lands in per-commission artifacts (`quality-blind.yaml`,
-  `quality-aware.yaml`). Strengthens H1 by providing a code quality
-  signal independent of requirement satisfaction. See
+- **Quality scorer** — autonomous code quality reviewer. Instrument
+  definitions at `experiments/instruments/spec-blind-quality-scorer/`
+  and `experiments/instruments/spec-aware-quality-scorer/`. Runner
+  package at `packages/instruments/`. Output lands in per-commission
+  artifacts. Strengthens H1 by providing a code quality signal
+  independent of requirement satisfaction. See
   Data Collection — Quality Scorer.
 - **Session telemetry** — The Laboratory auto-generates session YAML
   with cost, duration, and token usage. Lands in per-commission
