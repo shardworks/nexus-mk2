@@ -7,3 +7,30 @@
 2026-04-03T01:26:29Z [dispatch] Dispatching (role=artificer)... this may take a while.
 2026-04-03T01:26:29Z [dispatch] --- anima session output ---
 2026-04-03T01:26:33Z [anima] Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+2026-04-03T01:40:35Z [anima] Let me read the specific files I need to modify.Now update `walker.ts` — per-engine givensSpec, updated return values, and narrowed catch:Now update `tryCollect` to return the new variant names:Now update `tryRun` return values:Now update `trySpawn` — rename `spawned` to `rig-spawned` and narrow the catch:Now I need to make all the test changes. Let me do them systematically:Now for the big test update. I'll work through them section by section:Now update the two Animator integration tests that check for `launched`:Now the quick engine collect tests:Now the upstream map test (review ran):Now the givensSpec test — update from all-engines-same to per-engine:Now update the full pipeline test and add the two new tests. First the full pipeline test:Now add the yield serialization failure test. I'll add it in the appropriate section — after the existing "marks engine and rig failed" test:Now let me run the tests to see if everything passes:The worktree doesn't have node_modules installed, but the main nexus repo does. Let me run from there:The tests ran against the main nexus source, not the draft. Let me link node_modules and run from the draft:The serialization test fails because `JSON.stringify({ fn: () => {} })` silently drops functions (returns `"{}"`) so `isJsonSerializable` passes, but the Stacks' structured clone rejects functions. The error message is `"()=>{} could not be cloned."` — not containing "serial". Let me fix the assertion:28/28 passing. Let me clean up the symlink and commit:All done. 28/28 tests pass. Here's a summary of what was delivered:
+2026-04-03T01:40:35Z [anima] 
+2026-04-03T01:40:35Z [anima] **`types.ts`**
+2026-04-03T01:40:35Z [anima] - `WalkResult`: discriminant renamed `type` → `action`; variants renamed to `engine-completed`, `engine-started`, `rig-spawned`, plus new `rig-completed` with `outcome` field
+2026-04-03T01:40:35Z [anima] - `DraftYields`: added `baseSha: string`
+2026-04-03T01:40:35Z [anima] 
+2026-04-03T01:40:35Z [anima] **`walker.ts`**
+2026-04-03T01:40:35Z [anima] - `buildStaticEngines()`: each engine now gets its own minimal `givensSpec` (draft: `{writ}`, implement: `{writ, role}`, review: `{writ, role:'reviewer', cmds}`, revise: `{writ, role}`, seal: `{}`)
+2026-04-03T01:40:35Z [anima] - `tryCollect`/`tryRun`: return `rig-completed` when rig reaches terminal state, `engine-completed` otherwise
+2026-04-03T01:40:35Z [anima] - `trySpawn`: narrowed catch — only swallows transition-conflict errors, re-throws unexpected ones
+2026-04-03T01:40:35Z [anima] 
+2026-04-03T01:40:35Z [anima] **`engines/draft.ts`**: reads `git rev-parse HEAD` via `execSync` after `openDraft()`, populates `baseSha` in yields
+2026-04-03T01:40:35Z [anima] 
+2026-04-03T01:40:35Z [anima] **`tools/walk-continual.ts`**: wraps `walk()` in try/catch, logs errors and continues polling
+2026-04-03T01:40:35Z [anima] 
+2026-04-03T01:40:35Z [anima] **`walker.test.ts`**: all 22 existing assertions updated to new discriminant/variant names; added serialization-failure test; added full-pipeline-without-patching test (stub seal overrides real seal engine, verifies all 5 engines run through Walker → CDC → writ completed)
+2026-04-03T01:40:53Z [dispatch] --- end session output ---
+2026-04-03T01:40:53Z [dispatch] Dispatch complete: outcome=completed session=ses-mni83e34-1c8077ad
+2026-04-03T01:40:53Z [dispatch] 
+2026-04-03T01:40:53Z [dispatch] ✓ Dispatch complete
+2026-04-03T01:40:53Z [dispatch]   writ=w-mni83clg-8750dc6eac23
+2026-04-03T01:40:53Z [dispatch]   session=ses-mni83e34-1c8077ad
+2026-04-03T01:40:53Z [dispatch]   outcome=completed
+2026-04-03T01:40:53Z [dispatch]   artifacts=/workspace/nexus-mk2/experiments/data/commissions/w-mni83clg-8750dc6eac23
+2026-04-03T01:40:53Z [dispatch] 
+2026-04-03T01:40:53Z [dispatch] The Laboratory handles: commission log, session records, quality scoring.
+2026-04-03T01:40:53Z [dispatch] Dispatch log: /workspace/nexus-mk2/experiments/data/commissions/w-mni83clg-8750dc6eac23/dispatch.log

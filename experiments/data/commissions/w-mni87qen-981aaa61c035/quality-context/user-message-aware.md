@@ -1,0 +1,4921 @@
+## Commission Spec
+
+# Web Dashboard
+
+Create a dashboard apparatus which exposes a single tool, dashboard-start, which is only available via CLI. This should launch a web application which displays information about the guild. Include an 'Overview' tab which displays basic information and configuration for the guild. Then include a tab for each apparatus which has useful information and/or controls for guild operators. Display information from apparatus' books using sortable tables with filter options on key pieces of information. Provide controls for doing things like transitioning statuses or posting commissions that follow UX best practices.
+
+---
+
+**Important:** When you are finished, commit all changes in a single commit with a clear, descriptive message. Do not leave uncommitted changes — they will be lost when the session closes.
+## Referenced Files (from spec, pre-commission state)
+
+
+
+## Commission Diff
+
+```
+```
+ packages/plugins/dashboard/package.json     |   40 ++
+ packages/plugins/dashboard/src/dashboard.ts |   30 +
+ packages/plugins/dashboard/src/html.ts      | 1017 +++++++++++++++++++++++++++
+ packages/plugins/dashboard/src/index.ts     |   20 +
+ packages/plugins/dashboard/src/rig-types.ts |   24 +
+ packages/plugins/dashboard/src/server.ts    |  311 ++++++++
+ packages/plugins/dashboard/src/tool.ts      |   63 ++
+ packages/plugins/dashboard/src/types.ts     |   29 +
+ packages/plugins/dashboard/tsconfig.json    |   10 +
+ pnpm-lock.yaml                              |   22 +
+ 10 files changed, 1566 insertions(+)
+
+diff --git a/packages/plugins/dashboard/package.json b/packages/plugins/dashboard/package.json
+new file mode 100644
+index 0000000..a6ff8c3
+--- /dev/null
++++ b/packages/plugins/dashboard/package.json
+@@ -0,0 +1,40 @@
++{
++  "name": "@shardworks/dashboard-apparatus",
++  "version": "0.0.0",
++  "license": "ISC",
++  "repository": {
++    "type": "git",
++    "url": "https://github.com/shardworks/nexus",
++    "directory": "packages/plugins/dashboard"
++  },
++  "description": "The Dashboard — web-based guild operations dashboard apparatus",
++  "type": "module",
++  "exports": {
++    ".": "./src/index.ts"
++  },
++  "scripts": {
++    "build": "tsc",
++    "typecheck": "tsc --noEmit"
++  },
++  "dependencies": {
++    "@shardworks/nexus-core": "workspace:*",
++    "@shardworks/tools-apparatus": "workspace:*",
++    "@shardworks/clerk-apparatus": "workspace:*",
++    "@shardworks/stacks-apparatus": "workspace:*",
++    "zod": "4.3.6"
++  },
++  "devDependencies": {
++    "@types/node": "25.5.0"
++  },
++  "files": [
++    "dist"
++  ],
++  "publishConfig": {
++    "exports": {
++      ".": {
++        "types": "./dist/index.d.ts",
++        "import": "./dist/index.js"
++      }
++    }
++  }
++}
+diff --git a/packages/plugins/dashboard/src/dashboard.ts b/packages/plugins/dashboard/src/dashboard.ts
+new file mode 100644
+index 0000000..04e11f2
+--- /dev/null
++++ b/packages/plugins/dashboard/src/dashboard.ts
+@@ -0,0 +1,30 @@
++/**
++ * The Dashboard — web-based guild operations dashboard apparatus.
++ *
++ * Contributes the `dashboard-start` CLI tool which launches a web server
++ * serving a live operations UI. The apparatus itself is passive — no
++ * background server runs at guild startup. The server only runs when
++ * the operator explicitly invokes `nsg dashboard start`.
++ *
++ * See: docs/architecture/apparatus/dashboard.md
++ */
++
++import type { Plugin } from '@shardworks/nexus-core';
++import { dashboardStart } from './tool.ts';
++
++export function createDashboard(): Plugin {
++  return {
++    apparatus: {
++      recommends: ['clerk', 'stacks', 'animator', 'walker', 'codexes'],
++
++      supportKit: {
++        tools: [dashboardStart],
++      },
++
++      start(): void {
++        // Nothing to start — the dashboard server is launched on demand
++        // via the dashboard-start CLI tool.
++      },
++    },
++  };
++}
+diff --git a/packages/plugins/dashboard/src/html.ts b/packages/plugins/dashboard/src/html.ts
+new file mode 100644
+index 0000000..c0b0b01
+--- /dev/null
++++ b/packages/plugins/dashboard/src/html.ts
+@@ -0,0 +1,1017 @@
++/**
++ * Dashboard web UI — embedded HTML/CSS/JS as a single-file SPA.
++ *
++ * Returned by the server's root handler. All API calls go to /api/*.
++ */
++
++export function getDashboardHtml(): string {
++  return `<!DOCTYPE html>
++<html lang="en">
++<head>
++<meta charset="UTF-8">
++<meta name="viewport" content="width=device-width, initial-scale=1.0">
++<title>Guild Dashboard</title>
++<style>
++*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
++:root{
++  --bg:#0f1117;--surface:#1a1d27;--surface2:#242736;--surface3:#2e3248;
++  --border:#3a3f5c;--text:#e2e8f0;--muted:#8892a4;--accent:#6366f1;
++  --accent2:#818cf8;--green:#22c55e;--yellow:#eab308;--red:#ef4444;
++  --blue:#3b82f6;--orange:#f97316;--radius:6px;--font:'Inter',system-ui,sans-serif;
++}
++body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;min-height:100vh;display:flex;flex-direction:column}
++a{color:var(--accent2);text-decoration:none}
++button{cursor:pointer;font-family:inherit;font-size:13px;border:none;border-radius:var(--radius);padding:5px 12px;transition:opacity .15s}
++button:hover{opacity:.85}
++button:disabled{opacity:.4;cursor:default}
++input,select,textarea{background:var(--surface3);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);padding:6px 10px;font-family:inherit;font-size:13px;outline:none;transition:border-color .15s}
++input:focus,select:focus,textarea:focus{border-color:var(--accent)}
++select option{background:var(--surface2)}
++label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:500;text-transform:uppercase;letter-spacing:.05em}
++.btn-primary{background:var(--accent);color:#fff}
++.btn-ghost{background:var(--surface3);color:var(--text);border:1px solid var(--border)}
++.btn-danger{background:var(--red);color:#fff}
++.btn-success{background:var(--green);color:#000}
++.btn-warning{background:var(--yellow);color:#000}
++.btn-sm{padding:3px 8px;font-size:12px}
++
++/* Layout */
++header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:16px;height:52px;flex-shrink:0}
++header h1{font-size:16px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px}
++header h1 .guild-name{color:var(--accent2)}
++.header-meta{margin-left:auto;display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px}
++.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block}
++
++nav{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:2px;flex-shrink:0}
++.tab{padding:10px 16px;font-size:13px;font-weight:500;color:var(--muted);border-bottom:2px solid transparent;cursor:pointer;transition:color .15s,border-color .15s;user-select:none;display:flex;align-items:center;gap:6px}
++.tab:hover{color:var(--text)}
++.tab.active{color:var(--accent2);border-bottom-color:var(--accent2)}
++.tab-badge{background:var(--surface3);color:var(--muted);font-size:10px;padding:1px 6px;border-radius:10px;font-weight:600}
++.tab.active .tab-badge{background:var(--accent);color:#fff}
++
++main{flex:1;overflow:auto;padding:24px}
++.tab-panel{display:none}
++.tab-panel.active{display:block}
++
++/* Cards */
++.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
++.card-title{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:16px;display:flex;align-items:center;gap:8px}
++.card-title svg{flex-shrink:0}
++.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
++.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
++.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
++
++/* Stats */
++.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
++.stat-label{font-size:11px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
++.stat-value{font-size:28px;font-weight:700;color:var(--text);line-height:1}
++.stat-sub{font-size:11px;color:var(--muted);margin-top:4px}
++
++/* Badges / status */
++.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:lowercase;letter-spacing:.03em}
++.badge-ready{background:#1e3a5f;color:#60a5fa}
++.badge-active{background:#1a3a2a;color:#4ade80}
++.badge-completed{background:#1a2a1a;color:#86efac}
++.badge-failed{background:#3a1a1a;color:#f87171}
++.badge-cancelled{background:#2a2a2a;color:#9ca3af}
++.badge-running{background:#1a2a3a;color:#38bdf8;animation:pulse 2s infinite}
++.badge-pending{background:#2a2a1a;color:#fbbf24}
++.badge-ready-codex{background:#1e3a5f;color:#60a5fa}
++.badge-cloning{background:#2a2a1a;color:#fbbf24}
++.badge-error{background:#3a1a1a;color:#f87171}
++@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
++
++/* Tables */
++.toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
++.toolbar-right{margin-left:auto;display:flex;gap:8px;align-items:center}
++.search-input{width:200px}
++table{width:100%;border-collapse:collapse}
++thead tr{border-bottom:1px solid var(--border)}
++th{text-align:left;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;padding:8px 12px;white-space:nowrap;cursor:pointer;user-select:none}
++th:hover{color:var(--text)}
++th .sort-icon{display:inline-block;margin-left:4px;opacity:.4}
++th.sorted .sort-icon{opacity:1;color:var(--accent2)}
++td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle;max-width:340px}
++tr:last-child td{border-bottom:none}
++tr:hover td{background:rgba(255,255,255,.02)}
++.td-id{font-family:monospace;font-size:11px;color:var(--muted);white-space:nowrap}
++.td-title{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++.td-time{font-size:12px;color:var(--muted);white-space:nowrap}
++.td-actions{white-space:nowrap;display:flex;gap:6px;align-items:center}
++.empty-state{text-align:center;padding:48px 16px;color:var(--muted)}
++.empty-state h3{font-size:15px;margin-bottom:6px;color:var(--text)}
++.empty-icon{font-size:32px;margin-bottom:12px}
++.pagination{display:flex;align-items:center;gap:8px;margin-top:12px;justify-content:flex-end;font-size:12px;color:var(--muted)}
++.page-btn{background:var(--surface3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:12px}
++.page-btn:disabled{opacity:.35;cursor:default}
++
++/* Expandable rows */
++.row-detail{background:var(--surface2);padding:12px 16px;border-bottom:1px solid var(--border)}
++.row-detail pre{font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto;background:var(--surface);padding:10px;border-radius:4px;border:1px solid var(--border);margin-top:6px}
++.detail-label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
++.detail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:10px}
++.detail-item{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px 10px}
++.detail-item .k{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}
++.detail-item .v{font-size:12px;font-family:monospace;word-break:break-all}
++
++/* Modal */
++.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
++.modal-overlay.open{display:flex}
++.modal{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;width:520px;max-width:95vw;max-height:90vh;overflow:auto}
++.modal h2{font-size:16px;font-weight:600;margin-bottom:20px}
++.modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
++.form-group{margin-bottom:14px}
++.form-group input,.form-group select,.form-group textarea{width:100%}
++.form-group textarea{resize:vertical;min-height:80px}
++.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
++.error-msg{color:var(--red);font-size:12px;margin-top:6px;display:none}
++.error-msg.show{display:block}
++.success-msg{color:var(--green);font-size:12px;margin-top:6px}
++
++/* Plugin list */
++.plugin-list{display:flex;flex-direction:column;gap:6px}
++.plugin-item{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius)}
++.plugin-item .pi-name{font-weight:500;flex:1}
++.plugin-item .pi-type{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600;text-transform:uppercase}
++.pi-type-apparatus{background:#1e2a4a;color:#818cf8}
++.pi-type-kit{background:#1a2a2a;color:#34d399}
++.plugin-item .pi-ver{font-size:11px;color:var(--muted);font-family:monospace}
++
++/* Config view */
++.config-view{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-family:monospace;font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:400px;overflow:auto;line-height:1.6}
++.config-key{color:var(--accent2)}
++.config-str{color:var(--green)}
++.config-num{color:var(--orange)}
++.config-bool{color:var(--yellow)}
++.config-null{color:var(--muted)}
++
++/* Engine pipeline */
++.pipeline{display:flex;align-items:center;gap:0;overflow-x:auto;padding:4px 0}
++.engine-chip{display:flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:3px 8px;font-size:11px;white-space:nowrap}
++.engine-arrow{color:var(--border);font-size:14px;margin:0 2px;flex-shrink:0}
++
++/* Loading */
++.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--muted);gap:10px}
++.spinner{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent2);border-radius:50%;animation:spin .7s linear infinite}
++@keyframes spin{to{transform:rotate(360deg)}}
++.refresh-btn{background:none;border:none;color:var(--muted);padding:4px;line-height:1;font-size:16px}
++.refresh-btn:hover{color:var(--text)}
++.toast-area{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:200}
++.toast{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 16px;font-size:13px;animation:slide-in .2s ease;max-width:340px}
++.toast.success{border-color:var(--green);color:var(--green)}
++.toast.error{border-color:var(--red);color:var(--red)}
++@keyframes slide-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
++</style>
++</head>
++<body>
++<header>
++  <h1>
++    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
++    <span id="guild-title">Guild Dashboard</span>
++  </h1>
++  <div class="header-meta">
++    <span class="status-dot"></span>
++    <span id="header-status">Loading…</span>
++    <button class="refresh-btn" onclick="refreshCurrent()" title="Refresh">↻</button>
++  </div>
++</header>
++
++<nav id="tab-nav">
++  <div class="tab active" data-tab="overview">Overview</div>
++  <div class="tab" data-tab="clerk">Clerk <span class="tab-badge" id="badge-clerk">—</span></div>
++  <div class="tab" data-tab="walker">Walker <span class="tab-badge" id="badge-walker">—</span></div>
++  <div class="tab" data-tab="animator">Animator <span class="tab-badge" id="badge-animator">—</span></div>
++  <div class="tab" data-tab="codexes">Codexes <span class="tab-badge" id="badge-codexes">—</span></div>
++</nav>
++
++<main>
++  <!-- OVERVIEW -->
++  <div class="tab-panel active" id="panel-overview">
++    <div id="overview-loading" class="loading"><div class="spinner"></div>Loading…</div>
++    <div id="overview-content" style="display:none">
++      <div class="grid-4" id="overview-stats" style="margin-bottom:16px"></div>
++      <div class="grid-2">
++        <div>
++          <div class="card">
++            <div class="card-title">
++              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
++              Guild Info
++            </div>
++            <div id="overview-info"></div>
++          </div>
++          <div class="card">
++            <div class="card-title">
++              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 0 0 4.93 19.07M4.93 4.93a10 10 0 0 0 14.14 14.14"/></svg>
++              Settings
++            </div>
++            <div id="overview-settings"></div>
++          </div>
++        </div>
++        <div>
++          <div class="card">
++            <div class="card-title">
++              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
++              Loaded Plugins
++            </div>
++            <div id="overview-plugins" class="plugin-list"></div>
++          </div>
++        </div>
++      </div>
++    </div>
++  </div>
++
++  <!-- CLERK -->
++  <div class="tab-panel" id="panel-clerk">
++    <div class="card" style="margin-bottom:0">
++      <div class="toolbar">
++        <select id="clerk-filter-status" onchange="loadWrits()">
++          <option value="">All statuses</option>
++          <option value="ready">Ready</option>
++          <option value="active">Active</option>
++          <option value="completed">Completed</option>
++          <option value="failed">Failed</option>
++          <option value="cancelled">Cancelled</option>
++        </select>
++        <select id="clerk-filter-type" onchange="loadWrits()">
++          <option value="">All types</option>
++        </select>
++        <input class="search-input" type="text" id="clerk-search" placeholder="Search title…" oninput="filterWritsLocal()">
++        <div class="toolbar-right">
++          <span id="clerk-count-label" style="color:var(--muted);font-size:12px"></span>
++          <button class="btn-primary" onclick="openPostModal()">+ Post Commission</button>
++        </div>
++      </div>
++      <div id="clerk-loading" class="loading" style="display:none"><div class="spinner"></div>Loading…</div>
++      <div id="clerk-table-wrap">
++        <table>
++          <thead>
++            <tr>
++              <th onclick="sortWrits('id')" data-col="id">ID <span class="sort-icon">↕</span></th>
++              <th onclick="sortWrits('type')" data-col="type">Type <span class="sort-icon">↕</span></th>
++              <th onclick="sortWrits('title')" data-col="title">Title <span class="sort-icon">↕</span></th>
++              <th onclick="sortWrits('status')" data-col="status">Status <span class="sort-icon">↕</span></th>
++              <th onclick="sortWrits('createdAt')" data-col="createdAt">Created <span class="sort-icon">↕</span></th>
++              <th onclick="sortWrits('updatedAt')" data-col="updatedAt">Updated <span class="sort-icon">↕</span></th>
++              <th>Actions</th>
++            </tr>
++          </thead>
++          <tbody id="clerk-tbody"></tbody>
++        </table>
++        <div id="clerk-empty" class="empty-state" style="display:none">
++          <div class="empty-icon">📋</div>
++          <h3>No writs found</h3>
++          <p>Post a commission to create your first writ.</p>
++        </div>
++      </div>
++      <div class="pagination">
++        <button class="page-btn" id="clerk-prev" onclick="writPage(-1)" disabled>‹ Prev</button>
++        <span id="clerk-page-info" style="font-size:12px;color:var(--muted)"></span>
++        <button class="page-btn" id="clerk-next" onclick="writPage(1)">Next ›</button>
++      </div>
++    </div>
++  </div>
++
++  <!-- WALKER -->
++  <div class="tab-panel" id="panel-walker">
++    <div class="card" style="margin-bottom:0">
++      <div class="toolbar">
++        <select id="walker-filter-status" onchange="loadRigs()">
++          <option value="">All statuses</option>
++          <option value="running">Running</option>
++          <option value="completed">Completed</option>
++          <option value="failed">Failed</option>
++        </select>
++        <div class="toolbar-right">
++          <span id="walker-count-label" style="color:var(--muted);font-size:12px"></span>
++        </div>
++      </div>
++      <div id="walker-loading" class="loading" style="display:none"><div class="spinner"></div>Loading…</div>
++      <table>
++        <thead>
++          <tr>
++            <th onclick="sortRigs('id')" data-col="id">Rig ID <span class="sort-icon">↕</span></th>
++            <th onclick="sortRigs('writId')" data-col="writId">Writ <span class="sort-icon">↕</span></th>
++            <th onclick="sortRigs('status')" data-col="status">Status <span class="sort-icon">↕</span></th>
++            <th>Pipeline</th>
++            <th>Progress</th>
++          </tr>
++        </thead>
++        <tbody id="walker-tbody"></tbody>
++      </table>
++      <div id="walker-empty" class="empty-state" style="display:none">
++        <div class="empty-icon">⚙️</div>
++        <h3>No rigs found</h3>
++        <p>Rigs are created when the Walker processes writs.</p>
++      </div>
++    </div>
++  </div>
++
++  <!-- ANIMATOR -->
++  <div class="tab-panel" id="panel-animator">
++    <div class="card" style="margin-bottom:0">
++      <div class="toolbar">
++        <select id="animator-filter-status" onchange="loadSessions()">
++          <option value="">All statuses</option>
++          <option value="running">Running</option>
++          <option value="completed">Completed</option>
++          <option value="failed">Failed</option>
++          <option value="timeout">Timeout</option>
++        </select>
++        <div class="toolbar-right">
++          <span id="animator-count-label" style="color:var(--muted);font-size:12px"></span>
++        </div>
++      </div>
++      <div id="animator-loading" class="loading" style="display:none"><div class="spinner"></div>Loading…</div>
++      <table>
++        <thead>
++          <tr>
++            <th onclick="sortSessions('id')" data-col="id">Session ID <span class="sort-icon">↕</span></th>
++            <th onclick="sortSessions('status')" data-col="status">Status <span class="sort-icon">↕</span></th>
++            <th onclick="sortSessions('provider')" data-col="provider">Provider <span class="sort-icon">↕</span></th>
++            <th onclick="sortSessions('startedAt')" data-col="startedAt">Started <span class="sort-icon">↕</span></th>
++            <th onclick="sortSessions('durationMs')" data-col="durationMs">Duration <span class="sort-icon">↕</span></th>
++            <th>Tokens / Cost</th>
++          </tr>
++        </thead>
++        <tbody id="animator-tbody"></tbody>
++      </table>
++      <div id="animator-empty" class="empty-state" style="display:none">
++        <div class="empty-icon">✨</div>
++        <h3>No sessions recorded</h3>
++        <p>Sessions appear here when animas are animated.</p>
++      </div>
++      <div class="pagination">
++        <button class="page-btn" id="animator-prev" onclick="sessionPage(-1)" disabled>‹ Prev</button>
++        <span id="animator-page-info"></span>
++        <button class="page-btn" id="animator-next" onclick="sessionPage(1)">Next ›</button>
++      </div>
++    </div>
++  </div>
++
++  <!-- CODEXES -->
++  <div class="tab-panel" id="panel-codexes">
++    <div id="codexes-loading" class="loading"><div class="spinner"></div>Loading…</div>
++    <div id="codexes-content" style="display:none">
++      <div class="toolbar" style="margin-bottom:16px">
++        <div class="toolbar-right">
++          <span id="codexes-count-label" style="color:var(--muted);font-size:12px"></span>
++        </div>
++      </div>
++      <table>
++        <thead>
++          <tr>
++            <th>Name</th>
++            <th>Remote URL</th>
++            <th>Status</th>
++            <th>Active Drafts</th>
++          </tr>
++        </thead>
++        <tbody id="codexes-tbody"></tbody>
++      </table>
++      <div id="codexes-empty" class="empty-state" style="display:none">
++        <div class="empty-icon">📚</div>
++        <h3>No codexes registered</h3>
++        <p>Add a codex with <code>nsg codex add &lt;name&gt; &lt;url&gt;</code>.</p>
++      </div>
++      <div id="drafts-section" style="margin-top:24px;display:none">
++        <div class="card">
++          <div class="card-title">Active Drafts</div>
++          <table>
++            <thead>
++              <tr>
++                <th>ID</th>
++                <th>Codex</th>
++                <th>Branch</th>
++                <th>Associated With</th>
++                <th>Created</th>
++              </tr>
++            </thead>
++            <tbody id="drafts-tbody"></tbody>
++          </table>
++        </div>
++      </div>
++    </div>
++  </div>
++</main>
++
++<!-- POST COMMISSION MODAL -->
++<div class="modal-overlay" id="post-modal">
++  <div class="modal">
++    <h2>Post Commission</h2>
++    <div class="form-row">
++      <div class="form-group">
++        <label for="pm-type">Type</label>
++        <select id="pm-type"></select>
++      </div>
++      <div class="form-group">
++        <label for="pm-codex">Codex (optional)</label>
++        <select id="pm-codex">
++          <option value="">None</option>
++        </select>
++      </div>
++    </div>
++    <div class="form-group">
++      <label for="pm-title">Title</label>
++      <input type="text" id="pm-title" placeholder="Short description of the work">
++    </div>
++    <div class="form-group">
++      <label for="pm-body">Body</label>
++      <textarea id="pm-body" placeholder="Detailed description, requirements, context…" rows="5"></textarea>
++    </div>
++    <div id="pm-error" class="error-msg"></div>
++    <div class="modal-footer">
++      <button class="btn-ghost" onclick="closePostModal()">Cancel</button>
++      <button class="btn-primary" id="pm-submit" onclick="submitPost()">Post Commission</button>
++    </div>
++  </div>
++</div>
++
++<!-- TRANSITION MODAL -->
++<div class="modal-overlay" id="trans-modal">
++  <div class="modal" style="width:420px">
++    <h2 id="trans-title">Transition Writ</h2>
++    <p style="color:var(--muted);font-size:13px;margin-bottom:16px" id="trans-desc"></p>
++    <div class="form-group" id="trans-resolution-wrap" style="display:none">
++      <label for="trans-resolution">Resolution (optional)</label>
++      <textarea id="trans-resolution" rows="3" placeholder="Brief summary of how this writ resolved…"></textarea>
++    </div>
++    <div id="trans-error" class="error-msg"></div>
++    <div class="modal-footer">
++      <button class="btn-ghost" onclick="closeTransModal()">Cancel</button>
++      <button class="btn-primary" id="trans-submit" onclick="submitTransition()">Confirm</button>
++    </div>
++  </div>
++</div>
++
++<div class="toast-area" id="toast-area"></div>
++
++<script>
++// ── State ────────────────────────────────────────────────────────
++let activeTab = 'overview';
++let overview = null;
++let writs = [];
++let writsTotal = 0;
++let writsPage = 0;
++const WRIT_PAGE_SIZE = 20;
++let writSort = { col: 'createdAt', dir: 'desc' };
++let rigs = [];
++let rigSort = { col: 'id', dir: 'desc' };
++let sessions = [];
++let sessionsTotal = 0;
++let sessionsPage = 0;
++const SESSION_PAGE_SIZE = 20;
++let sessionSort = { col: 'startedAt', dir: 'desc' };
++let transData = null;
++
++// ── Tabs ─────────────────────────────────────────────────────────
++document.querySelectorAll('.tab').forEach(t => {
++  t.addEventListener('click', () => switchTab(t.dataset.tab));
++});
++
++function switchTab(id) {
++  activeTab = id;
++  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === id));
++  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + id));
++  loadTab(id);
++}
++
++function loadTab(id) {
++  if (id === 'overview') loadOverview();
++  else if (id === 'clerk') loadWrits();
++  else if (id === 'walker') loadRigs();
++  else if (id === 'animator') loadSessions();
++  else if (id === 'codexes') loadCodexes();
++}
++
++function refreshCurrent() { loadTab(activeTab); }
++
++// ── API helpers ──────────────────────────────────────────────────
++async function api(path, opts) {
++  const r = await fetch('/api' + path, opts);
++  if (!r.ok) {
++    const t = await r.text().catch(() => 'Unknown error');
++    throw new Error(t || r.statusText);
++  }
++  return r.json();
++}
++
++async function apiPost(path, body) {
++  return api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
++}
++
++// ── Toast ────────────────────────────────────────────────────────
++function toast(msg, type='success') {
++  const area = document.getElementById('toast-area');
++  const el = document.createElement('div');
++  el.className = 'toast ' + type;
++  el.textContent = msg;
++  area.appendChild(el);
++  setTimeout(() => el.remove(), 3500);
++}
++
++// ── OVERVIEW ─────────────────────────────────────────────────────
++async function loadOverview() {
++  document.getElementById('overview-loading').style.display = 'flex';
++  document.getElementById('overview-content').style.display = 'none';
++  try {
++    overview = await api('/overview');
++    renderOverview(overview);
++    document.getElementById('header-status').textContent = overview.guild.name + ' · nexus ' + overview.guild.nexus;
++    document.getElementById('guild-title').innerHTML =
++      'Guild Dashboard · <span class="guild-name">' + esc(overview.guild.name) + '</span>';
++  } catch(e) {
++    document.getElementById('overview-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
++    return;
++  }
++  document.getElementById('overview-loading').style.display = 'none';
++  document.getElementById('overview-content').style.display = 'block';
++}
++
++function renderOverview(data) {
++  // Stats
++  const stats = [
++    { label: 'Plugins', value: data.plugins.length, sub: data.plugins.filter(p=>p.type==='apparatus').length + ' apparatus' },
++    { label: 'Writs', value: data.counts.writs ?? '—', sub: (data.counts.ready ?? 0) + ' ready · ' + (data.counts.active ?? 0) + ' active' },
++    { label: 'Sessions', value: data.counts.sessions ?? '—', sub: (data.counts.runningSessions ?? 0) + ' running' },
++    { label: 'Rigs', value: data.counts.rigs ?? '—', sub: (data.counts.runningRigs ?? 0) + ' running' },
++  ];
++  document.getElementById('overview-stats').innerHTML = stats.map(s =>
++    '<div class="stat-card"><div class="stat-label">' + esc(s.label) + '</div><div class="stat-value">' + esc(String(s.value)) + '</div><div class="stat-sub">' + esc(s.sub) + '</div></div>'
++  ).join('');
++
++  // Info
++  const g = data.guild;
++  document.getElementById('overview-info').innerHTML = kv([
++    ['Name', g.name],
++    ['Nexus Version', g.nexus],
++    ['Model', g.settings?.model ?? '(default)'],
++    ['Auto Migrate', g.settings?.autoMigrate !== false ? 'Yes' : 'No'],
++  ]);
++
++  // Settings — show full clockworks if present
++  let settingsHtml = '';
++  if (g.clockworks?.standingOrders?.length) {
++    settingsHtml += '<div class="detail-label" style="margin-bottom:8px">Standing Orders</div>';
++    settingsHtml += g.clockworks.standingOrders.map(o => {
++      const trigger = 'on: ' + o.on;
++      const action = o.run ? 'run: ' + o.run : o.summon ? 'summon: ' + o.summon : 'brief: ' + o.brief;
++      return '<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border);display:flex;gap:8px"><span style="color:var(--muted);font-family:monospace">' + esc(trigger) + '</span><span style="color:var(--accent2);font-family:monospace">' + esc(action) + '</span></div>';
++    }).join('');
++  }
++  if (g.clerk?.writTypes?.length) {
++    settingsHtml += '<div class="detail-label" style="margin:12px 0 6px">Writ Types</div>';
++    settingsHtml += g.clerk.writTypes.map(t =>
++      '<span class="badge badge-ready" style="margin:2px">' + esc(t.name) + '</span>'
++    ).join(' ');
++  }
++  if (!settingsHtml) settingsHtml = '<span style="color:var(--muted);font-size:12px">No additional configuration</span>';
++  document.getElementById('overview-settings').innerHTML = settingsHtml;
++
++  // Plugins
++  document.getElementById('overview-plugins').innerHTML = data.plugins.map(p =>
++    '<div class="plugin-item">' +
++    '<span class="pi-type ' + (p.type==='apparatus'?'pi-type-apparatus':'pi-type-kit') + '">' + esc(p.type) + '</span>' +
++    '<span class="pi-name">' + esc(p.id) + '</span>' +
++    '<span class="pi-ver">' + esc(p.version) + '</span>' +
++    '</div>'
++  ).join('');
++
++  // Update badges
++  if (data.counts.writs !== undefined) setBadge('clerk', data.counts.writs);
++  if (data.counts.rigs !== undefined) setBadge('walker', data.counts.rigs);
++  if (data.counts.sessions !== undefined) setBadge('animator', data.counts.sessions);
++  if (data.counts.codexes !== undefined) setBadge('codexes', data.counts.codexes);
++}
++
++function kv(pairs) {
++  return pairs.map(([k,v]) =>
++    '<div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">' +
++    '<span style="font-size:11px;font-weight:600;color:var(--muted);min-width:110px;text-transform:uppercase;letter-spacing:.05em">' + esc(k) + '</span>' +
++    '<span style="font-size:13px">' + esc(String(v ?? '—')) + '</span>' +
++    '</div>'
++  ).join('');
++}
++
++function setBadge(tab, val) {
++  const el = document.getElementById('badge-' + tab);
++  if (el) el.textContent = String(val);
++}
++
++// ── CLERK ─────────────────────────────────────────────────────────
++async function loadWrits() {
++  const status = document.getElementById('clerk-filter-status').value;
++  const type   = document.getElementById('clerk-filter-type').value;
++  document.getElementById('clerk-loading').style.display = 'flex';
++  document.getElementById('clerk-table-wrap').style.display = 'none';
++  try {
++    const params = new URLSearchParams({ limit: WRIT_PAGE_SIZE, offset: writsPage * WRIT_PAGE_SIZE });
++    if (status) params.set('status', status);
++    if (type)   params.set('type', type);
++    const data = await api('/writs?' + params);
++    writs = data.writs;
++    writsTotal = data.total;
++    // Populate type filter (once)
++    if (data.types?.length && document.getElementById('clerk-filter-type').options.length <= 1) {
++      data.types.forEach(t => {
++        const o = document.createElement('option');
++        o.value = t; o.textContent = t;
++        document.getElementById('clerk-filter-type').appendChild(o);
++      });
++    }
++    // Populate type select in modal
++    if (data.types?.length) {
++      const sel = document.getElementById('pm-type');
++      sel.innerHTML = '';
++      data.types.forEach(t => {
++        const o = document.createElement('option');
++        o.value = t; o.textContent = t;
++        sel.appendChild(o);
++      });
++    }
++    renderWrits();
++    setBadge('clerk', writsTotal);
++    document.getElementById('clerk-count-label').textContent = writsTotal + ' writ' + (writsTotal!==1?'s':'');
++  } catch(e) {
++    document.getElementById('clerk-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
++    return;
++  }
++  document.getElementById('clerk-loading').style.display = 'none';
++  document.getElementById('clerk-table-wrap').style.display = 'block';
++}
++
++function renderWrits() {
++  const search = (document.getElementById('clerk-search').value || '').toLowerCase();
++  let rows = writs.filter(w => !search || w.title.toLowerCase().includes(search));
++  rows = stableSort(rows, writSort.col, writSort.dir);
++  updateSortHeaders('clerk-tbody', writSort);
++
++  const tbody = document.getElementById('clerk-tbody');
++  tbody.innerHTML = rows.map(w =>
++    '<tr>' +
++    '<td class="td-id">' + esc(w.id) + '</td>' +
++    '<td><code style="font-size:11px;color:var(--muted)">' + esc(w.type) + '</code></td>' +
++    '<td class="td-title" title="' + esc(w.title) + '">' + esc(w.title) + '</td>' +
++    '<td>' + statusBadge(w.status) + '</td>' +
++    '<td class="td-time">' + fmtDate(w.createdAt) + '</td>' +
++    '<td class="td-time">' + fmtDate(w.updatedAt) + '</td>' +
++    '<td class="td-actions">' + writActions(w) + '</td>' +
++    '</tr>'
++  ).join('');
++
++  document.getElementById('clerk-empty').style.display = rows.length ? 'none' : 'block';
++
++  // Pagination
++  const totalPages = Math.ceil(writsTotal / WRIT_PAGE_SIZE);
++  document.getElementById('clerk-prev').disabled = writsPage <= 0;
++  document.getElementById('clerk-next').disabled = writsPage >= totalPages - 1;
++  document.getElementById('clerk-page-info').textContent = totalPages > 1
++    ? 'Page ' + (writsPage+1) + ' of ' + totalPages : '';
++}
++
++function filterWritsLocal() { renderWrits(); }
++
++function writActions(w) {
++  const btns = [];
++  if (w.status === 'ready') {
++    btns.push('<button class="btn-success btn-sm" onclick="openTrans(\'' + w.id + '\',\'active\')">Accept</button>');
++    btns.push('<button class="btn-danger btn-sm" onclick="openTrans(\'' + w.id + '\',\'cancelled\')">Cancel</button>');
++  } else if (w.status === 'active') {
++    btns.push('<button class="btn-success btn-sm" onclick="openTrans(\'' + w.id + '\',\'completed\')">Complete</button>');
++    btns.push('<button class="btn-danger btn-sm" onclick="openTrans(\'' + w.id + '\',\'failed\')">Fail</button>');
++    btns.push('<button class="btn-ghost btn-sm" onclick="openTrans(\'' + w.id + '\',\'cancelled\')">Cancel</button>');
++  }
++  return btns.join('') || '<span style="color:var(--muted);font-size:11px">Terminal</span>';
++}
++
++function sortWrits(col) {
++  if (writSort.col === col) writSort.dir = writSort.dir === 'asc' ? 'desc' : 'asc';
++  else { writSort.col = col; writSort.dir = 'desc'; }
++  renderWrits();
++}
++
++function writPage(delta) {
++  writsPage = Math.max(0, writsPage + delta);
++  loadWrits();
++}
++
++// ── POST COMMISSION MODAL ─────────────────────────────────────────
++function openPostModal() {
++  document.getElementById('pm-title').value = '';
++  document.getElementById('pm-body').value = '';
++  document.getElementById('pm-error').className = 'error-msg';
++  // Populate codexes
++  const sel = document.getElementById('pm-codex');
++  sel.innerHTML = '<option value="">None</option>';
++  if (overview?.counts?.codexNames) {
++    overview.counts.codexNames.forEach(n => {
++      const o = document.createElement('option');
++      o.value = n; o.textContent = n;
++      sel.appendChild(o);
++    });
++  }
++  document.getElementById('post-modal').classList.add('open');
++  document.getElementById('pm-title').focus();
++}
++
++function closePostModal() {
++  document.getElementById('post-modal').classList.remove('open');
++}
++
++async function submitPost() {
++  const title  = document.getElementById('pm-title').value.trim();
++  const body   = document.getElementById('pm-body').value.trim();
++  const type   = document.getElementById('pm-type').value;
++  const codex  = document.getElementById('pm-codex').value || undefined;
++  const errEl  = document.getElementById('pm-error');
++  errEl.className = 'error-msg';
++
++  if (!title) { errEl.textContent = 'Title is required.'; errEl.className = 'error-msg show'; return; }
++  if (!body)  { errEl.textContent = 'Body is required.'; errEl.className = 'error-msg show'; return; }
++
++  document.getElementById('pm-submit').disabled = true;
++  try {
++    await apiPost('/writs', { title, body, type, codex });
++    closePostModal();
++    toast('Commission posted!');
++    writsPage = 0;
++    loadWrits();
++    loadOverview();
++  } catch(e) {
++    errEl.textContent = e.message;
++    errEl.className = 'error-msg show';
++  } finally {
++    document.getElementById('pm-submit').disabled = false;
++  }
++}
++
++// ── TRANSITION MODAL ──────────────────────────────────────────────
++function openTrans(id, to) {
++  transData = { id, to };
++  const labels = { active:'Accept', completed:'Complete', failed:'Fail', cancelled:'Cancel' };
++  const descs = {
++    active:    'Accept this writ and begin working on it.',
++    completed: 'Mark this writ as completed.',
++    failed:    'Mark this writ as failed.',
++    cancelled: 'Cancel this writ.',
++  };
++  document.getElementById('trans-title').textContent = labels[to] + ' Writ';
++  document.getElementById('trans-desc').textContent = descs[to] || '';
++  const showRes = to === 'completed' || to === 'failed' || to === 'cancelled';
++  document.getElementById('trans-resolution-wrap').style.display = showRes ? 'block' : 'none';
++  document.getElementById('trans-resolution').value = '';
++  document.getElementById('trans-error').className = 'error-msg';
++  const btn = document.getElementById('trans-submit');
++  btn.className = 'btn-primary';
++  if (to === 'failed' || to === 'cancelled') btn.className = 'btn-danger';
++  if (to === 'completed') btn.className = 'btn-success';
++  btn.textContent = labels[to];
++  document.getElementById('trans-modal').classList.add('open');
++}
++
++function closeTransModal() {
++  document.getElementById('trans-modal').classList.remove('open');
++  transData = null;
++}
++
++async function submitTransition() {
++  if (!transData) return;
++  const { id, to } = transData;
++  const resolution = document.getElementById('trans-resolution').value.trim() || undefined;
++  const errEl = document.getElementById('trans-error');
++  errEl.className = 'error-msg';
++  document.getElementById('trans-submit').disabled = true;
++  try {
++    await apiPost('/writs/' + id + '/transition', { to, ...(resolution ? { resolution } : {}) });
++    closeTransModal();
++    toast('Writ transitioned to ' + to);
++    loadWrits();
++    loadOverview();
++  } catch(e) {
++    errEl.textContent = e.message;
++    errEl.className = 'error-msg show';
++  } finally {
++    document.getElementById('trans-submit').disabled = false;
++  }
++}
++
++// ── WALKER ────────────────────────────────────────────────────────
++async function loadRigs() {
++  const status = document.getElementById('walker-filter-status').value;
++  document.getElementById('walker-loading').style.display = 'flex';
++  try {
++    const params = new URLSearchParams();
++    if (status) params.set('status', status);
++    const data = await api('/rigs?' + params);
++    rigs = data.rigs;
++    renderRigs();
++    setBadge('walker', rigs.length);
++    document.getElementById('walker-count-label').textContent = rigs.length + ' rig' + (rigs.length!==1?'s':'');
++  } catch(e) {
++    document.getElementById('walker-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
++    return;
++  }
++  document.getElementById('walker-loading').style.display = 'none';
++}
++
++function renderRigs() {
++  const rows = stableSort(rigs, rigSort.col, rigSort.dir);
++  const tbody = document.getElementById('walker-tbody');
++  tbody.innerHTML = rows.map(r => {
++    const engines = r.engines || [];
++    const done = engines.filter(e => e.status==='completed' || e.status==='failed').length;
++    const total = engines.length;
++    const pct = total ? Math.round(done/total*100) : 0;
++    return '<tr>' +
++      '<td class="td-id">' + esc(r.id) + '</td>' +
++      '<td class="td-id">' + esc(r.writId) + '</td>' +
++      '<td>' + statusBadge(r.status) + '</td>' +
++      '<td><div class="pipeline">' + engines.map((e,i) =>
++        (i>0?'<span class="engine-arrow">›</span>':'')+
++        '<div class="engine-chip">' + statusDot(e.status) + ' ' + esc(e.id) + '</div>'
++      ).join('') + '</div></td>' +
++      '<td><div style="font-size:11px;color:var(--muted)">' + done + '/' + total + ' engines</div>' +
++        '<div style="height:4px;background:var(--surface3);border-radius:2px;margin-top:4px;width:80px">' +
++        '<div style="height:4px;background:' + (r.status==='failed'?'var(--red)':r.status==='completed'?'var(--green)':'var(--accent)') + ';border-radius:2px;width:' + pct + '%"></div>' +
++        '</div>' +
++      '</td>' +
++    '</tr>';
++  }).join('');
++  document.getElementById('walker-empty').style.display = rows.length ? 'none' : 'block';
++}
++
++function sortRigs(col) {
++  if (rigSort.col === col) rigSort.dir = rigSort.dir === 'asc' ? 'desc' : 'asc';
++  else { rigSort.col = col; rigSort.dir = 'desc'; }
++  renderRigs();
++}
++
++// ── ANIMATOR ─────────────────────────────────────────────────────
++async function loadSessions() {
++  const status = document.getElementById('animator-filter-status').value;
++  document.getElementById('animator-loading').style.display = 'flex';
++  try {
++    const params = new URLSearchParams({ limit: SESSION_PAGE_SIZE, offset: sessionsPage * SESSION_PAGE_SIZE });
++    if (status) params.set('status', status);
++    const data = await api('/sessions?' + params);
++    sessions = data.sessions;
++    sessionsTotal = data.total;
++    renderSessions();
++    setBadge('animator', sessionsTotal);
++    document.getElementById('animator-count-label').textContent = sessionsTotal + ' session' + (sessionsTotal!==1?'s':'');
++  } catch(e) {
++    document.getElementById('animator-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
++    return;
++  }
++  document.getElementById('animator-loading').style.display = 'none';
++}
++
++function renderSessions() {
++  const rows = stableSort(sessions, sessionSort.col, sessionSort.dir);
++  const tbody = document.getElementById('animator-tbody');
++  tbody.innerHTML = rows.map(s => {
++    const tokens = s.tokenUsage
++      ? (s.tokenUsage.inputTokens||0) + '↑ ' + (s.tokenUsage.outputTokens||0) + '↓'
++      : '—';
++    const cost = s.costUsd != null ? '$' + s.costUsd.toFixed(4) : '—';
++    return '<tr>' +
++      '<td class="td-id">' + esc(s.id) + '</td>' +
++      '<td>' + statusBadge(s.status) + '</td>' +
++      '<td style="font-size:12px;color:var(--muted)">' + esc(s.provider||'—') + '</td>' +
++      '<td class="td-time">' + fmtDate(s.startedAt) + '</td>' +
++      '<td class="td-time">' + fmtDuration(s.durationMs) + '</td>' +
++      '<td style="font-size:11px;color:var(--muted);font-family:monospace">' + esc(tokens) + ' · ' + esc(cost) + '</td>' +
++    '</tr>';
++  }).join('');
++  document.getElementById('animator-empty').style.display = rows.length ? 'none' : 'block';
++
++  const totalPages = Math.ceil(sessionsTotal / SESSION_PAGE_SIZE);
++  document.getElementById('animator-prev').disabled = sessionsPage <= 0;
++  document.getElementById('animator-next').disabled = sessionsPage >= totalPages - 1;
++  document.getElementById('animator-page-info').textContent = totalPages > 1
++    ? 'Page ' + (sessionsPage+1) + ' of ' + totalPages : '';
++}
++
++function sortSessions(col) {
++  if (sessionSort.col === col) sessionSort.dir = sessionSort.dir === 'asc' ? 'desc' : 'asc';
++  else { sessionSort.col = col; sessionSort.dir = 'desc'; }
++  renderSessions();
++}
++
++function sessionPage(delta) {
++  sessionsPage = Math.max(0, sessionsPage + delta);
++  loadSessions();
++}
++
++// ── CODEXES ───────────────────────────────────────────────────────
++async function loadCodexes() {
++  document.getElementById('codexes-loading').style.display = 'flex';
++  document.getElementById('codexes-content').style.display = 'none';
++  try {
++    const data = await api('/codexes');
++    renderCodexes(data);
++    setBadge('codexes', data.codexes.length);
++    document.getElementById('codexes-count-label').textContent = data.codexes.length + ' codex' + (data.codexes.length!==1?'es':'');
++  } catch(e) {
++    document.getElementById('codexes-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
++    return;
++  }
++  document.getElementById('codexes-loading').style.display = 'none';
++  document.getElementById('codexes-content').style.display = 'block';
++}
++
++function renderCodexes(data) {
++  const tbody = document.getElementById('codexes-tbody');
++  tbody.innerHTML = data.codexes.map(c =>
++    '<tr>' +
++    '<td style="font-weight:500">' + esc(c.name) + '</td>' +
++    '<td style="font-size:11px;font-family:monospace;color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(c.remoteUrl) + '">' + esc(c.remoteUrl) + '</td>' +
++    '<td>' + codexStatusBadge(c.cloneStatus) + '</td>' +
++    '<td style="text-align:center">' + (c.activeDrafts || 0) + '</td>' +
++    '</tr>'
++  ).join('');
++  document.getElementById('codexes-empty').style.display = data.codexes.length ? 'none' : 'block';
++
++  // Drafts
++  const allDrafts = data.drafts || [];
++  document.getElementById('drafts-section').style.display = allDrafts.length ? 'block' : 'none';
++  if (allDrafts.length) {
++    document.getElementById('drafts-tbody').innerHTML = allDrafts.map(d =>
++      '<tr>' +
++      '<td class="td-id">' + esc(d.id) + '</td>' +
++      '<td>' + esc(d.codexName) + '</td>' +
++      '<td style="font-family:monospace;font-size:11px">' + esc(d.branch) + '</td>' +
++      '<td class="td-id">' + esc(d.associatedWith || '—') + '</td>' +
++      '<td class="td-time">' + fmtDate(d.createdAt) + '</td>' +
++      '</tr>'
++    ).join('');
++  }
++}
++
++function codexStatusBadge(s) {
++  const map = { ready:'badge-ready', cloning:'badge-cloning', error:'badge-error' };
++  return '<span class="badge ' + (map[s]||'badge-cancelled') + '">' + esc(s) + '</span>';
++}
++
++// ── Utilities ────────────────────────────────────────────────────
++function statusBadge(s) {
++  return '<span class="badge badge-' + s + '">' + esc(s) + '</span>';
++}
++
++function statusDot(s) {
++  const colors = { pending:'var(--yellow)', running:'var(--blue)', completed:'var(--green)', failed:'var(--red)' };
++  return '<span style="width:7px;height:7px;border-radius:50%;background:' + (colors[s]||'var(--muted)') + ';display:inline-block;flex-shrink:0"></span>';
++}
++
++function esc(s) {
++  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
++}
++
++function fmtDate(iso) {
++  if (!iso) return '—';
++  const d = new Date(iso);
++  const now = new Date();
++  const diff = now - d;
++  if (diff < 60000) return 'just now';
++  if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
++  if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
++  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
++}
++
++function fmtDuration(ms) {
++  if (!ms && ms !== 0) return '—';
++  if (ms < 1000) return ms + 'ms';
++  if (ms < 60000) return (ms/1000).toFixed(1) + 's';
++  return Math.floor(ms/60000) + 'm ' + Math.round((ms%60000)/1000) + 's';
++}
++
++function stableSort(arr, col, dir) {
++  return [...arr].sort((a, b) => {
++    const av = a[col] ?? '', bv = b[col] ?? '';
++    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
++    return dir === 'asc' ? cmp : -cmp;
++  });
++}
++
++function updateSortHeaders(tbodyId, sort) {
++  const table = document.getElementById(tbodyId)?.closest('table');
++  if (!table) return;
++  table.querySelectorAll('th').forEach(th => {
++    const col = th.dataset?.col;
++    th.classList.toggle('sorted', col === sort.col);
++    const icon = th.querySelector('.sort-icon');
++    if (icon && col === sort.col) icon.textContent = sort.dir === 'asc' ? '↑' : '↓';
++    else if (icon) icon.textContent = '↕';
++  });
++}
++
++// Close modals on overlay click
++document.querySelectorAll('.modal-overlay').forEach(o => {
++  o.addEventListener('click', e => { if (e.target === o) o.classList.remove('open'); });
++});
++
++// ── Init ─────────────────────────────────────────────────────────
++loadOverview();
++</script>
++</body>
++</html>`;
++}
+diff --git a/packages/plugins/dashboard/src/index.ts b/packages/plugins/dashboard/src/index.ts
+new file mode 100644
+index 0000000..1a90fa3
+--- /dev/null
++++ b/packages/plugins/dashboard/src/index.ts
+@@ -0,0 +1,20 @@
++/**
++ * @shardworks/dashboard-apparatus — The Dashboard.
++ *
++ * Web-based guild operations dashboard. Exposes the `dashboard-start` CLI
++ * tool which launches a local web server with a live operations UI including
++ * tabs for Overview, Clerk, Walker, Animator, and Codexes.
++ *
++ * Usage:
++ *   nsg dashboard start
++ *   nsg dashboard start --port 8080
++ *   nsg dashboard start --no-open
++ */
++
++import { createDashboard } from './dashboard.ts';
++
++export { createDashboard } from './dashboard.ts';
++
++// ── Default export: the apparatus plugin ──────────────────────────
++
++export default createDashboard();
+diff --git a/packages/plugins/dashboard/src/rig-types.ts b/packages/plugins/dashboard/src/rig-types.ts
+new file mode 100644
+index 0000000..4392aa3
+--- /dev/null
++++ b/packages/plugins/dashboard/src/rig-types.ts
+@@ -0,0 +1,24 @@
++/**
++ * Local type stubs for Walker rig documents read via Stacks readBook().
++ */
++
++export interface EngineInstance {
++  id: string;
++  designId: string;
++  status: 'pending' | 'running' | 'completed' | 'failed';
++  upstream: string[];
++  givensSpec: Record<string, unknown>;
++  yields?: unknown;
++  error?: string;
++  sessionId?: string;
++  startedAt?: string;
++  completedAt?: string;
++}
++
++export interface RigDoc {
++  id: string;
++  writId: string;
++  status: 'running' | 'completed' | 'failed';
++  engines: EngineInstance[];
++  [key: string]: unknown;
++}
+diff --git a/packages/plugins/dashboard/src/server.ts b/packages/plugins/dashboard/src/server.ts
+new file mode 100644
+index 0000000..c1a2be5
+--- /dev/null
++++ b/packages/plugins/dashboard/src/server.ts
+@@ -0,0 +1,311 @@
++/**
++ * Dashboard HTTP server.
++ *
++ * Serves the web UI at / and REST API endpoints at /api/*.
++ * Uses only Node built-ins — no express or other dependencies.
++ */
++
++import http from 'node:http';
++import type { IncomingMessage, ServerResponse } from 'node:http';
++import { guild } from '@shardworks/nexus-core';
++import type { ClerkApi, WritDoc, WritStatus } from '@shardworks/clerk-apparatus';
++import type { StacksApi, WhereClause } from '@shardworks/stacks-apparatus';
++import type { SessionDoc } from './types.ts';
++import type { RigDoc } from './rig-types.ts';
++import { getDashboardHtml } from './html.ts';
++
++// ── Types for codexes (optional apparatus) ────────────────────────
++
++interface CodexRecord {
++  name: string;
++  remoteUrl: string;
++  cloneStatus: string;
++  activeDrafts: number;
++}
++
++interface DraftRecord {
++  id: string;
++  codexName: string;
++  branch: string;
++  path: string;
++  createdAt: string;
++  associatedWith?: string;
++}
++
++interface ScriptoriumApi {
++  list(): Promise<CodexRecord[]>;
++  listDrafts(codexName?: string): Promise<DraftRecord[]>;
++}
++
++// ── Helpers ───────────────────────────────────────────────────────
++
++function json(res: ServerResponse, data: unknown, status = 200): void {
++  const body = JSON.stringify(data);
++  res.writeHead(status, {
++    'Content-Type': 'application/json',
++    'Content-Length': Buffer.byteLength(body),
++    'Cache-Control': 'no-cache',
++  });
++  res.end(body);
++}
++
++function error(res: ServerResponse, msg: string, status = 500): void {
++  res.writeHead(status, { 'Content-Type': 'text/plain' });
++  res.end(msg);
++}
++
++async function readBody(req: IncomingMessage): Promise<unknown> {
++  return new Promise((resolve, reject) => {
++    let raw = '';
++    req.on('data', chunk => { raw += chunk; });
++    req.on('end', () => {
++      try { resolve(JSON.parse(raw || '{}')); }
++      catch { reject(new Error('Invalid JSON body')); }
++    });
++    req.on('error', reject);
++  });
++}
++
++function parseQS(url: string): Record<string, string> {
++  const qm = url.indexOf('?');
++  if (qm < 0) return {};
++  return Object.fromEntries(new URLSearchParams(url.slice(qm + 1)));
++}
++
++function pathname(url: string): string {
++  const qm = url.indexOf('?');
++  return qm < 0 ? url : url.slice(0, qm);
++}
++
++function tryApparatus<T>(name: string): T | null {
++  try { return guild().apparatus<T>(name); }
++  catch { return null; }
++}
++
++// ── Request router ────────────────────────────────────────────────
++
++async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
++  const method = req.method ?? 'GET';
++  const path   = pathname(req.url ?? '/');
++  const qs     = parseQS(req.url ?? '');
++
++  // ── Web UI ──────────────────────────────────────────────────────
++  if (path === '/' || path === '/index.html') {
++    const html = getDashboardHtml();
++    res.writeHead(200, {
++      'Content-Type': 'text/html; charset=utf-8',
++      'Content-Length': Buffer.byteLength(html),
++    });
++    res.end(html);
++    return;
++  }
++
++  // ── API: Overview ───────────────────────────────────────────────
++  if (path === '/api/overview' && method === 'GET') {
++    try {
++      const g = guild();
++      const config = g.guildConfig();
++      const plugins = [
++        ...g.kits().map(k => ({ id: k.id, version: k.version, type: 'kit' as const })),
++        ...g.apparatuses().map(a => ({ id: a.id, version: a.version, type: 'apparatus' as const })),
++      ].sort((a, b) => a.id.localeCompare(b.id));
++
++      const counts: Record<string, unknown> = {};
++
++      const clerk = tryApparatus<ClerkApi>('clerk');
++      if (clerk) {
++        counts.writs    = await clerk.count();
++        counts.ready    = await clerk.count({ status: 'ready' });
++        counts.active   = await clerk.count({ status: 'active' });
++      }
++
++      const stacks = tryApparatus<StacksApi>('stacks');
++      if (stacks) {
++        try {
++          const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
++          counts.sessions        = await sessions.count();
++          counts.runningSessions = await sessions.count([['status', '=', 'running']]);
++        } catch { /* animator not installed */ }
++
++        try {
++          const rigs = stacks.readBook<RigDoc>('walker', 'rigs');
++          counts.rigs        = await rigs.count();
++          counts.runningRigs = await rigs.count([['status', '=', 'running']]);
++        } catch { /* walker not installed */ }
++      }
++
++      const scriptorium = tryApparatus<ScriptoriumApi>('codexes');
++      if (scriptorium) {
++        const codexList = await scriptorium.list();
++        counts.codexes     = codexList.length;
++        counts.codexNames  = codexList.map(c => c.name);
++      }
++
++      json(res, { guild: config, plugins, counts });
++    } catch (e) {
++      error(res, (e as Error).message);
++    }
++    return;
++  }
++
++  // ── API: Writs ──────────────────────────────────────────────────
++  if (path === '/api/writs' && method === 'GET') {
++    const clerk = tryApparatus<ClerkApi>('clerk');
++    if (!clerk) { error(res, 'Clerk apparatus not installed', 404); return; }
++    try {
++      const filters: { status?: WritStatus; type?: string; limit?: number; offset?: number } = {};
++      if (qs.status) filters.status = qs.status as WritStatus;
++      if (qs.type)   filters.type   = qs.type;
++      filters.limit  = qs.limit  ? parseInt(qs.limit,  10) : 20;
++      filters.offset = qs.offset ? parseInt(qs.offset, 10) : 0;
++
++      const [writs, total] = await Promise.all([
++        clerk.list(filters),
++        clerk.count({ status: filters.status, type: filters.type }),
++      ]);
++
++      // Derive declared types from guild config
++      const clerkConfig = guild().guildConfig().clerk;
++      const types = ['mandate', ...(clerkConfig?.writTypes?.map(t => t.name) ?? [])];
++
++      json(res, { writs, total, types });
++    } catch (e) {
++      error(res, (e as Error).message);
++    }
++    return;
++  }
++
++  if (path === '/api/writs' && method === 'POST') {
++    const clerk = tryApparatus<ClerkApi>('clerk');
++    if (!clerk) { error(res, 'Clerk apparatus not installed', 404); return; }
++    try {
++      const body = await readBody(req) as { title: string; body: string; type?: string; codex?: string };
++      const writ = await clerk.post({
++        title: body.title,
++        body:  body.body,
++        ...(body.type  ? { type:  body.type  } : {}),
++        ...(body.codex ? { codex: body.codex } : {}),
++      });
++      json(res, writ, 201);
++    } catch (e) {
++      error(res, (e as Error).message, 400);
++    }
++    return;
++  }
++
++  // ── API: Writ transition ─────────────────────────────────────────
++  const transMatch = path.match(/^\/api\/writs\/([^/]+)\/transition$/);
++  if (transMatch && method === 'POST') {
++    const clerk = tryApparatus<ClerkApi>('clerk');
++    if (!clerk) { error(res, 'Clerk apparatus not installed', 404); return; }
++    try {
++      const id = transMatch[1];
++      const body = await readBody(req) as { to: WritStatus; resolution?: string };
++      const fields: Partial<WritDoc> = {};
++      if (body.resolution) fields.resolution = body.resolution;
++      const writ = await clerk.transition(id, body.to, Object.keys(fields).length ? fields : undefined);
++      json(res, writ);
++    } catch (e) {
++      error(res, (e as Error).message, 400);
++    }
++    return;
++  }
++
++  // ── API: Sessions ────────────────────────────────────────────────
++  if (path === '/api/sessions' && method === 'GET') {
++    const stacks = tryApparatus<StacksApi>('stacks');
++    if (!stacks) { json(res, { sessions: [], total: 0 }); return; }
++    try {
++      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
++      const limit  = qs.limit  ? parseInt(qs.limit,  10) : 20;
++      const offset = qs.offset ? parseInt(qs.offset, 10) : 0;
++      const where: WhereClause | undefined = qs.status
++        ? [['status', '=', qs.status]]
++        : undefined;
++      const [rows, total] = await Promise.all([
++        sessions.find({ where, orderBy: ['startedAt', 'desc'], limit, offset }),
++        sessions.count(where),
++      ]);
++      json(res, { sessions: rows, total });
++    } catch (e) {
++      json(res, { sessions: [], total: 0 });
++    }
++    return;
++  }
++
++  // ── API: Rigs ────────────────────────────────────────────────────
++  if (path === '/api/rigs' && method === 'GET') {
++    const stacks = tryApparatus<StacksApi>('stacks');
++    if (!stacks) { json(res, { rigs: [] }); return; }
++    try {
++      const rigs = stacks.readBook<RigDoc>('walker', 'rigs');
++      const where: WhereClause | undefined = qs.status
++        ? [['status', '=', qs.status]]
++        : undefined;
++      const rows = await rigs.find({
++        where,
++        orderBy: ['id', 'desc'],
++        limit: 100,
++      });
++      json(res, { rigs: rows });
++    } catch (e) {
++      json(res, { rigs: [] });
++    }
++    return;
++  }
++
++  // ── API: Codexes ─────────────────────────────────────────────────
++  if (path === '/api/codexes' && method === 'GET') {
++    const scriptorium = tryApparatus<ScriptoriumApi>('codexes');
++    if (!scriptorium) { json(res, { codexes: [], drafts: [] }); return; }
++    try {
++      const [codexes, drafts] = await Promise.all([
++        scriptorium.list(),
++        scriptorium.listDrafts(),
++      ]);
++      json(res, { codexes, drafts });
++    } catch (e) {
++      error(res, (e as Error).message);
++    }
++    return;
++  }
++
++  // ── 404 ──────────────────────────────────────────────────────────
++  error(res, 'Not found', 404);
++}
++
++// ── Server factory ────────────────────────────────────────────────
++
++export interface DashboardServer {
++  port: number;
++  url: string;
++  close(): Promise<void>;
++}
++
++export async function startServer(port: number): Promise<DashboardServer> {
++  const server = http.createServer(async (req, res) => {
++    try {
++      await handleRequest(req, res);
++    } catch (e) {
++      if (!res.headersSent) {
++        error(res, (e as Error).message ?? 'Internal error');
++      }
++    }
++  });
++
++  await new Promise<void>((resolve, reject) => {
++    server.listen(port, '127.0.0.1', resolve);
++    server.once('error', reject);
++  });
++
++  const addr = server.address() as { port: number };
++  const actualPort = addr.port;
++
++  return {
++    port: actualPort,
++    url: `http://127.0.0.1:${actualPort}`,
++    close: () => new Promise<void>((resolve, reject) => {
++      server.close(err => err ? reject(err) : resolve());
++    }),
++  };
++}
+diff --git a/packages/plugins/dashboard/src/tool.ts b/packages/plugins/dashboard/src/tool.ts
+new file mode 100644
+index 0000000..d7dabf0
+--- /dev/null
++++ b/packages/plugins/dashboard/src/tool.ts
+@@ -0,0 +1,63 @@
++/**
++ * dashboard-start tool — CLI-only.
++ *
++ * Starts the web dashboard server and opens the browser.
++ * Runs until the process is interrupted (Ctrl+C).
++ */
++
++import { execSync } from 'node:child_process';
++import process from 'node:process';
++import { z } from 'zod';
++import { tool } from '@shardworks/tools-apparatus';
++import { startServer } from './server.ts';
++
++export const dashboardStart = tool({
++  name: 'dashboard-start',
++  description: 'Start the guild web dashboard. Opens a browser and serves a live operations UI.',
++  callableBy: ['cli'],
++  params: {
++    port: z
++      .number()
++      .int()
++      .min(1024)
++      .max(65535)
++      .optional()
++      .describe('Port to listen on (default: 4242)'),
++    'no-open': z
++      .boolean()
++      .optional()
++      .describe('Skip opening the browser automatically'),
++  },
++  handler: async ({ port: portArg, 'no-open': noOpen }) => {
++    const port = portArg ?? 4242;
++    const server = await startServer(port);
++    const url = server.url;
++
++    console.log('');
++    console.log('  Guild Dashboard running at:');
++    console.log('');
++    console.log('    ' + url);
++    console.log('');
++    console.log('  Press Ctrl+C to stop.');
++    console.log('');
++
++    if (!noOpen) {
++      try {
++        const platform = process.platform;
++        if (platform === 'darwin')  execSync('open ' + url,   { stdio: 'ignore' });
++        else if (platform === 'win32') execSync('start "" ' + url, { stdio: 'ignore', shell: 'cmd.exe' });
++        else execSync('xdg-open ' + url + ' 2>/dev/null; true', { stdio: 'ignore', shell: '/bin/sh' });
++      } catch {
++        // Browser open is best-effort; ignore errors
++      }
++    }
++
++    // Keep the process alive until Ctrl+C
++    await new Promise<void>(resolve => {
++      process.once('SIGINT',  async () => { await server.close(); resolve(); });
++      process.once('SIGTERM', async () => { await server.close(); resolve(); });
++    });
++
++    return { status: 'stopped', url };
++  },
++});
+diff --git a/packages/plugins/dashboard/src/types.ts b/packages/plugins/dashboard/src/types.ts
+new file mode 100644
+index 0000000..ba55a38
+--- /dev/null
++++ b/packages/plugins/dashboard/src/types.ts
+@@ -0,0 +1,29 @@
++/**
++ * Local type stubs for apparatus documents read via Stacks readBook().
++ * These mirror the shapes declared by the respective apparatus packages
++ * without importing from them (to keep dashboard dependencies minimal).
++ */
++
++/** Minimal shape of a session document from the Animator's sessions book. */
++export interface SessionDoc {
++  id: string;
++  status: 'running' | 'completed' | 'failed' | 'timeout';
++  startedAt: string;
++  endedAt?: string;
++  durationMs?: number;
++  provider: string;
++  exitCode?: number;
++  error?: string;
++  conversationId?: string;
++  providerSessionId?: string;
++  tokenUsage?: {
++    inputTokens: number;
++    outputTokens: number;
++    cacheReadTokens?: number;
++    cacheWriteTokens?: number;
++  };
++  costUsd?: number;
++  metadata?: Record<string, unknown>;
++  output?: string;
++  [key: string]: unknown;
++}
+diff --git a/packages/plugins/dashboard/tsconfig.json b/packages/plugins/dashboard/tsconfig.json
+new file mode 100644
+index 0000000..78ca37b
+--- /dev/null
++++ b/packages/plugins/dashboard/tsconfig.json
+@@ -0,0 +1,10 @@
++{
++  "extends": "../../../tsconfig.json",
++  "compilerOptions": {
++    "outDir": "dist",
++    "rootDir": "src"
++  },
++  "include": [
++    "src"
++  ]
++}
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 770bbe3..21c0c1d 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -132,6 +132,28 @@ importers:
+         specifier: 25.5.0
+         version: 25.5.0
+ 
++  packages/plugins/dashboard:
++    dependencies:
++      '@shardworks/clerk-apparatus':
++        specifier: workspace:*
++        version: link:../clerk
++      '@shardworks/nexus-core':
++        specifier: workspace:*
++        version: link:../../framework/core
++      '@shardworks/stacks-apparatus':
++        specifier: workspace:*
++        version: link:../stacks
++      '@shardworks/tools-apparatus':
++        specifier: workspace:*
++        version: link:../tools
++      zod:
++        specifier: 4.3.6
++        version: 4.3.6
++    devDependencies:
++      '@types/node':
++        specifier: 25.5.0
++        version: 25.5.0
++
+   packages/plugins/dispatch:
+     dependencies:
+       '@shardworks/animator-apparatus':
+```
+```
+
+## Full File Contents (for context)
+
+
+=== FILE: packages/plugins/dashboard/package.json ===
+{
+  "name": "@shardworks/dashboard-apparatus",
+  "version": "0.0.0",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shardworks/nexus",
+    "directory": "packages/plugins/dashboard"
+  },
+  "description": "The Dashboard — web-based guild operations dashboard apparatus",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@shardworks/nexus-core": "workspace:*",
+    "@shardworks/tools-apparatus": "workspace:*",
+    "@shardworks/clerk-apparatus": "workspace:*",
+    "@shardworks/stacks-apparatus": "workspace:*",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "25.5.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  }
+}
+
+=== FILE: packages/plugins/dashboard/src/dashboard.ts ===
+/**
+ * The Dashboard — web-based guild operations dashboard apparatus.
+ *
+ * Contributes the `dashboard-start` CLI tool which launches a web server
+ * serving a live operations UI. The apparatus itself is passive — no
+ * background server runs at guild startup. The server only runs when
+ * the operator explicitly invokes `nsg dashboard start`.
+ *
+ * See: docs/architecture/apparatus/dashboard.md
+ */
+
+import type { Plugin } from '@shardworks/nexus-core';
+import { dashboardStart } from './tool.ts';
+
+export function createDashboard(): Plugin {
+  return {
+    apparatus: {
+      recommends: ['clerk', 'stacks', 'animator', 'walker', 'codexes'],
+
+      supportKit: {
+        tools: [dashboardStart],
+      },
+
+      start(): void {
+        // Nothing to start — the dashboard server is launched on demand
+        // via the dashboard-start CLI tool.
+      },
+    },
+  };
+}
+
+=== FILE: packages/plugins/dashboard/src/html.ts ===
+/**
+ * Dashboard web UI — embedded HTML/CSS/JS as a single-file SPA.
+ *
+ * Returned by the server's root handler. All API calls go to /api/*.
+ */
+
+export function getDashboardHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guild Dashboard</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#242736;--surface3:#2e3248;
+  --border:#3a3f5c;--text:#e2e8f0;--muted:#8892a4;--accent:#6366f1;
+  --accent2:#818cf8;--green:#22c55e;--yellow:#eab308;--red:#ef4444;
+  --blue:#3b82f6;--orange:#f97316;--radius:6px;--font:'Inter',system-ui,sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;min-height:100vh;display:flex;flex-direction:column}
+a{color:var(--accent2);text-decoration:none}
+button{cursor:pointer;font-family:inherit;font-size:13px;border:none;border-radius:var(--radius);padding:5px 12px;transition:opacity .15s}
+button:hover{opacity:.85}
+button:disabled{opacity:.4;cursor:default}
+input,select,textarea{background:var(--surface3);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);padding:6px 10px;font-family:inherit;font-size:13px;outline:none;transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+select option{background:var(--surface2)}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:500;text-transform:uppercase;letter-spacing:.05em}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-ghost{background:var(--surface3);color:var(--text);border:1px solid var(--border)}
+.btn-danger{background:var(--red);color:#fff}
+.btn-success{background:var(--green);color:#000}
+.btn-warning{background:var(--yellow);color:#000}
+.btn-sm{padding:3px 8px;font-size:12px}
+
+/* Layout */
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:16px;height:52px;flex-shrink:0}
+header h1{font-size:16px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px}
+header h1 .guild-name{color:var(--accent2)}
+.header-meta{margin-left:auto;display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block}
+
+nav{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:2px;flex-shrink:0}
+.tab{padding:10px 16px;font-size:13px;font-weight:500;color:var(--muted);border-bottom:2px solid transparent;cursor:pointer;transition:color .15s,border-color .15s;user-select:none;display:flex;align-items:center;gap:6px}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent2);border-bottom-color:var(--accent2)}
+.tab-badge{background:var(--surface3);color:var(--muted);font-size:10px;padding:1px 6px;border-radius:10px;font-weight:600}
+.tab.active .tab-badge{background:var(--accent);color:#fff}
+
+main{flex:1;overflow:auto;padding:24px}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* Cards */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.card-title{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.card-title svg{flex-shrink:0}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+
+/* Stats */
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.stat-label{font-size:11px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.stat-value{font-size:28px;font-weight:700;color:var(--text);line-height:1}
+.stat-sub{font-size:11px;color:var(--muted);margin-top:4px}
+
+/* Badges / status */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:lowercase;letter-spacing:.03em}
+.badge-ready{background:#1e3a5f;color:#60a5fa}
+.badge-active{background:#1a3a2a;color:#4ade80}
+.badge-completed{background:#1a2a1a;color:#86efac}
+.badge-failed{background:#3a1a1a;color:#f87171}
+.badge-cancelled{background:#2a2a2a;color:#9ca3af}
+.badge-running{background:#1a2a3a;color:#38bdf8;animation:pulse 2s infinite}
+.badge-pending{background:#2a2a1a;color:#fbbf24}
+.badge-ready-codex{background:#1e3a5f;color:#60a5fa}
+.badge-cloning{background:#2a2a1a;color:#fbbf24}
+.badge-error{background:#3a1a1a;color:#f87171}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+
+/* Tables */
+.toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.toolbar-right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.search-input{width:200px}
+table{width:100%;border-collapse:collapse}
+thead tr{border-bottom:1px solid var(--border)}
+th{text-align:left;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;padding:8px 12px;white-space:nowrap;cursor:pointer;user-select:none}
+th:hover{color:var(--text)}
+th .sort-icon{display:inline-block;margin-left:4px;opacity:.4}
+th.sorted .sort-icon{opacity:1;color:var(--accent2)}
+td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle;max-width:340px}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+.td-id{font-family:monospace;font-size:11px;color:var(--muted);white-space:nowrap}
+.td-title{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.td-time{font-size:12px;color:var(--muted);white-space:nowrap}
+.td-actions{white-space:nowrap;display:flex;gap:6px;align-items:center}
+.empty-state{text-align:center;padding:48px 16px;color:var(--muted)}
+.empty-state h3{font-size:15px;margin-bottom:6px;color:var(--text)}
+.empty-icon{font-size:32px;margin-bottom:12px}
+.pagination{display:flex;align-items:center;gap:8px;margin-top:12px;justify-content:flex-end;font-size:12px;color:var(--muted)}
+.page-btn{background:var(--surface3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:12px}
+.page-btn:disabled{opacity:.35;cursor:default}
+
+/* Expandable rows */
+.row-detail{background:var(--surface2);padding:12px 16px;border-bottom:1px solid var(--border)}
+.row-detail pre{font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto;background:var(--surface);padding:10px;border-radius:4px;border:1px solid var(--border);margin-top:6px}
+.detail-label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.detail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:10px}
+.detail-item{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px 10px}
+.detail-item .k{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}
+.detail-item .v{font-size:12px;font-family:monospace;word-break:break-all}
+
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;width:520px;max-width:95vw;max-height:90vh;overflow:auto}
+.modal h2{font-size:16px;font-weight:600;margin-bottom:20px}
+.modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.form-group{margin-bottom:14px}
+.form-group input,.form-group select,.form-group textarea{width:100%}
+.form-group textarea{resize:vertical;min-height:80px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.error-msg{color:var(--red);font-size:12px;margin-top:6px;display:none}
+.error-msg.show{display:block}
+.success-msg{color:var(--green);font-size:12px;margin-top:6px}
+
+/* Plugin list */
+.plugin-list{display:flex;flex-direction:column;gap:6px}
+.plugin-item{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius)}
+.plugin-item .pi-name{font-weight:500;flex:1}
+.plugin-item .pi-type{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600;text-transform:uppercase}
+.pi-type-apparatus{background:#1e2a4a;color:#818cf8}
+.pi-type-kit{background:#1a2a2a;color:#34d399}
+.plugin-item .pi-ver{font-size:11px;color:var(--muted);font-family:monospace}
+
+/* Config view */
+.config-view{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-family:monospace;font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:400px;overflow:auto;line-height:1.6}
+.config-key{color:var(--accent2)}
+.config-str{color:var(--green)}
+.config-num{color:var(--orange)}
+.config-bool{color:var(--yellow)}
+.config-null{color:var(--muted)}
+
+/* Engine pipeline */
+.pipeline{display:flex;align-items:center;gap:0;overflow-x:auto;padding:4px 0}
+.engine-chip{display:flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:3px 8px;font-size:11px;white-space:nowrap}
+.engine-arrow{color:var(--border);font-size:14px;margin:0 2px;flex-shrink:0}
+
+/* Loading */
+.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--muted);gap:10px}
+.spinner{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent2);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.refresh-btn{background:none;border:none;color:var(--muted);padding:4px;line-height:1;font-size:16px}
+.refresh-btn:hover{color:var(--text)}
+.toast-area{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:200}
+.toast{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 16px;font-size:13px;animation:slide-in .2s ease;max-width:340px}
+.toast.success{border-color:var(--green);color:var(--green)}
+.toast.error{border-color:var(--red);color:var(--red)}
+@keyframes slide-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+    <span id="guild-title">Guild Dashboard</span>
+  </h1>
+  <div class="header-meta">
+    <span class="status-dot"></span>
+    <span id="header-status">Loading…</span>
+    <button class="refresh-btn" onclick="refreshCurrent()" title="Refresh">↻</button>
+  </div>
+</header>
+
+<nav id="tab-nav">
+  <div class="tab active" data-tab="overview">Overview</div>
+  <div class="tab" data-tab="clerk">Clerk <span class="tab-badge" id="badge-clerk">—</span></div>
+  <div class="tab" data-tab="walker">Walker <span class="tab-badge" id="badge-walker">—</span></div>
+  <div class="tab" data-tab="animator">Animator <span class="tab-badge" id="badge-animator">—</span></div>
+  <div class="tab" data-tab="codexes">Codexes <span class="tab-badge" id="badge-codexes">—</span></div>
+</nav>
+
+<main>
+  <!-- OVERVIEW -->
+  <div class="tab-panel active" id="panel-overview">
+    <div id="overview-loading" class="loading"><div class="spinner"></div>Loading…</div>
+    <div id="overview-content" style="display:none">
+      <div class="grid-4" id="overview-stats" style="margin-bottom:16px"></div>
+      <div class="grid-2">
+        <div>
+          <div class="card">
+            <div class="card-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Guild Info
+            </div>
+            <div id="overview-info"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 0 0 4.93 19.07M4.93 4.93a10 10 0 0 0 14.14 14.14"/></svg>
+              Settings
+            </div>
+            <div id="overview-settings"></div>
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <div class="card-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              Loaded Plugins
+            </div>
+            <div id="overview-plugins" class="plugin-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CLERK -->
+  <div class="tab-panel" id="panel-clerk">
+    <div class="card" style="margin-bottom:0">
+      <div class="toolbar">
+        <select id="clerk-filter-status" onchange="loadWrits()">
+          <option value="">All statuses</option>
+          <option value="ready">Ready</option>
+          <option value="active">Active</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <select id="clerk-filter-type" onchange="loadWrits()">
+          <option value="">All types</option>
+        </select>
+        <input class="search-input" type="text" id="clerk-search" placeholder="Search title…" oninput="filterWritsLocal()">
+        <div class="toolbar-right">
+          <span id="clerk-count-label" style="color:var(--muted);font-size:12px"></span>
+          <button class="btn-primary" onclick="openPostModal()">+ Post Commission</button>
+        </div>
+      </div>
+      <div id="clerk-loading" class="loading" style="display:none"><div class="spinner"></div>Loading…</div>
+      <div id="clerk-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th onclick="sortWrits('id')" data-col="id">ID <span class="sort-icon">↕</span></th>
+              <th onclick="sortWrits('type')" data-col="type">Type <span class="sort-icon">↕</span></th>
+              <th onclick="sortWrits('title')" data-col="title">Title <span class="sort-icon">↕</span></th>
+              <th onclick="sortWrits('status')" data-col="status">Status <span class="sort-icon">↕</span></th>
+              <th onclick="sortWrits('createdAt')" data-col="createdAt">Created <span class="sort-icon">↕</span></th>
+              <th onclick="sortWrits('updatedAt')" data-col="updatedAt">Updated <span class="sort-icon">↕</span></th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="clerk-tbody"></tbody>
+        </table>
+        <div id="clerk-empty" class="empty-state" style="display:none">
+          <div class="empty-icon">📋</div>
+          <h3>No writs found</h3>
+          <p>Post a commission to create your first writ.</p>
+        </div>
+      </div>
+      <div class="pagination">
+        <button class="page-btn" id="clerk-prev" onclick="writPage(-1)" disabled>‹ Prev</button>
+        <span id="clerk-page-info" style="font-size:12px;color:var(--muted)"></span>
+        <button class="page-btn" id="clerk-next" onclick="writPage(1)">Next ›</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WALKER -->
+  <div class="tab-panel" id="panel-walker">
+    <div class="card" style="margin-bottom:0">
+      <div class="toolbar">
+        <select id="walker-filter-status" onchange="loadRigs()">
+          <option value="">All statuses</option>
+          <option value="running">Running</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+        </select>
+        <div class="toolbar-right">
+          <span id="walker-count-label" style="color:var(--muted);font-size:12px"></span>
+        </div>
+      </div>
+      <div id="walker-loading" class="loading" style="display:none"><div class="spinner"></div>Loading…</div>
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortRigs('id')" data-col="id">Rig ID <span class="sort-icon">↕</span></th>
+            <th onclick="sortRigs('writId')" data-col="writId">Writ <span class="sort-icon">↕</span></th>
+            <th onclick="sortRigs('status')" data-col="status">Status <span class="sort-icon">↕</span></th>
+            <th>Pipeline</th>
+            <th>Progress</th>
+          </tr>
+        </thead>
+        <tbody id="walker-tbody"></tbody>
+      </table>
+      <div id="walker-empty" class="empty-state" style="display:none">
+        <div class="empty-icon">⚙️</div>
+        <h3>No rigs found</h3>
+        <p>Rigs are created when the Walker processes writs.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ANIMATOR -->
+  <div class="tab-panel" id="panel-animator">
+    <div class="card" style="margin-bottom:0">
+      <div class="toolbar">
+        <select id="animator-filter-status" onchange="loadSessions()">
+          <option value="">All statuses</option>
+          <option value="running">Running</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+          <option value="timeout">Timeout</option>
+        </select>
+        <div class="toolbar-right">
+          <span id="animator-count-label" style="color:var(--muted);font-size:12px"></span>
+        </div>
+      </div>
+      <div id="animator-loading" class="loading" style="display:none"><div class="spinner"></div>Loading…</div>
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortSessions('id')" data-col="id">Session ID <span class="sort-icon">↕</span></th>
+            <th onclick="sortSessions('status')" data-col="status">Status <span class="sort-icon">↕</span></th>
+            <th onclick="sortSessions('provider')" data-col="provider">Provider <span class="sort-icon">↕</span></th>
+            <th onclick="sortSessions('startedAt')" data-col="startedAt">Started <span class="sort-icon">↕</span></th>
+            <th onclick="sortSessions('durationMs')" data-col="durationMs">Duration <span class="sort-icon">↕</span></th>
+            <th>Tokens / Cost</th>
+          </tr>
+        </thead>
+        <tbody id="animator-tbody"></tbody>
+      </table>
+      <div id="animator-empty" class="empty-state" style="display:none">
+        <div class="empty-icon">✨</div>
+        <h3>No sessions recorded</h3>
+        <p>Sessions appear here when animas are animated.</p>
+      </div>
+      <div class="pagination">
+        <button class="page-btn" id="animator-prev" onclick="sessionPage(-1)" disabled>‹ Prev</button>
+        <span id="animator-page-info"></span>
+        <button class="page-btn" id="animator-next" onclick="sessionPage(1)">Next ›</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CODEXES -->
+  <div class="tab-panel" id="panel-codexes">
+    <div id="codexes-loading" class="loading"><div class="spinner"></div>Loading…</div>
+    <div id="codexes-content" style="display:none">
+      <div class="toolbar" style="margin-bottom:16px">
+        <div class="toolbar-right">
+          <span id="codexes-count-label" style="color:var(--muted);font-size:12px"></span>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Remote URL</th>
+            <th>Status</th>
+            <th>Active Drafts</th>
+          </tr>
+        </thead>
+        <tbody id="codexes-tbody"></tbody>
+      </table>
+      <div id="codexes-empty" class="empty-state" style="display:none">
+        <div class="empty-icon">📚</div>
+        <h3>No codexes registered</h3>
+        <p>Add a codex with <code>nsg codex add &lt;name&gt; &lt;url&gt;</code>.</p>
+      </div>
+      <div id="drafts-section" style="margin-top:24px;display:none">
+        <div class="card">
+          <div class="card-title">Active Drafts</div>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Codex</th>
+                <th>Branch</th>
+                <th>Associated With</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="drafts-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- POST COMMISSION MODAL -->
+<div class="modal-overlay" id="post-modal">
+  <div class="modal">
+    <h2>Post Commission</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="pm-type">Type</label>
+        <select id="pm-type"></select>
+      </div>
+      <div class="form-group">
+        <label for="pm-codex">Codex (optional)</label>
+        <select id="pm-codex">
+          <option value="">None</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="pm-title">Title</label>
+      <input type="text" id="pm-title" placeholder="Short description of the work">
+    </div>
+    <div class="form-group">
+      <label for="pm-body">Body</label>
+      <textarea id="pm-body" placeholder="Detailed description, requirements, context…" rows="5"></textarea>
+    </div>
+    <div id="pm-error" class="error-msg"></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" onclick="closePostModal()">Cancel</button>
+      <button class="btn-primary" id="pm-submit" onclick="submitPost()">Post Commission</button>
+    </div>
+  </div>
+</div>
+
+<!-- TRANSITION MODAL -->
+<div class="modal-overlay" id="trans-modal">
+  <div class="modal" style="width:420px">
+    <h2 id="trans-title">Transition Writ</h2>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:16px" id="trans-desc"></p>
+    <div class="form-group" id="trans-resolution-wrap" style="display:none">
+      <label for="trans-resolution">Resolution (optional)</label>
+      <textarea id="trans-resolution" rows="3" placeholder="Brief summary of how this writ resolved…"></textarea>
+    </div>
+    <div id="trans-error" class="error-msg"></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" onclick="closeTransModal()">Cancel</button>
+      <button class="btn-primary" id="trans-submit" onclick="submitTransition()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-area" id="toast-area"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────
+let activeTab = 'overview';
+let overview = null;
+let writs = [];
+let writsTotal = 0;
+let writsPage = 0;
+const WRIT_PAGE_SIZE = 20;
+let writSort = { col: 'createdAt', dir: 'desc' };
+let rigs = [];
+let rigSort = { col: 'id', dir: 'desc' };
+let sessions = [];
+let sessionsTotal = 0;
+let sessionsPage = 0;
+const SESSION_PAGE_SIZE = 20;
+let sessionSort = { col: 'startedAt', dir: 'desc' };
+let transData = null;
+
+// ── Tabs ─────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => switchTab(t.dataset.tab));
+});
+
+function switchTab(id) {
+  activeTab = id;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === id));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + id));
+  loadTab(id);
+}
+
+function loadTab(id) {
+  if (id === 'overview') loadOverview();
+  else if (id === 'clerk') loadWrits();
+  else if (id === 'walker') loadRigs();
+  else if (id === 'animator') loadSessions();
+  else if (id === 'codexes') loadCodexes();
+}
+
+function refreshCurrent() { loadTab(activeTab); }
+
+// ── API helpers ──────────────────────────────────────────────────
+async function api(path, opts) {
+  const r = await fetch('/api' + path, opts);
+  if (!r.ok) {
+    const t = await r.text().catch(() => 'Unknown error');
+    throw new Error(t || r.statusText);
+  }
+  return r.json();
+}
+
+async function apiPost(path, body) {
+  return api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
+// ── Toast ────────────────────────────────────────────────────────
+function toast(msg, type='success') {
+  const area = document.getElementById('toast-area');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  area.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ── OVERVIEW ─────────────────────────────────────────────────────
+async function loadOverview() {
+  document.getElementById('overview-loading').style.display = 'flex';
+  document.getElementById('overview-content').style.display = 'none';
+  try {
+    overview = await api('/overview');
+    renderOverview(overview);
+    document.getElementById('header-status').textContent = overview.guild.name + ' · nexus ' + overview.guild.nexus;
+    document.getElementById('guild-title').innerHTML =
+      'Guild Dashboard · <span class="guild-name">' + esc(overview.guild.name) + '</span>';
+  } catch(e) {
+    document.getElementById('overview-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
+    return;
+  }
+  document.getElementById('overview-loading').style.display = 'none';
+  document.getElementById('overview-content').style.display = 'block';
+}
+
+function renderOverview(data) {
+  // Stats
+  const stats = [
+    { label: 'Plugins', value: data.plugins.length, sub: data.plugins.filter(p=>p.type==='apparatus').length + ' apparatus' },
+    { label: 'Writs', value: data.counts.writs ?? '—', sub: (data.counts.ready ?? 0) + ' ready · ' + (data.counts.active ?? 0) + ' active' },
+    { label: 'Sessions', value: data.counts.sessions ?? '—', sub: (data.counts.runningSessions ?? 0) + ' running' },
+    { label: 'Rigs', value: data.counts.rigs ?? '—', sub: (data.counts.runningRigs ?? 0) + ' running' },
+  ];
+  document.getElementById('overview-stats').innerHTML = stats.map(s =>
+    '<div class="stat-card"><div class="stat-label">' + esc(s.label) + '</div><div class="stat-value">' + esc(String(s.value)) + '</div><div class="stat-sub">' + esc(s.sub) + '</div></div>'
+  ).join('');
+
+  // Info
+  const g = data.guild;
+  document.getElementById('overview-info').innerHTML = kv([
+    ['Name', g.name],
+    ['Nexus Version', g.nexus],
+    ['Model', g.settings?.model ?? '(default)'],
+    ['Auto Migrate', g.settings?.autoMigrate !== false ? 'Yes' : 'No'],
+  ]);
+
+  // Settings — show full clockworks if present
+  let settingsHtml = '';
+  if (g.clockworks?.standingOrders?.length) {
+    settingsHtml += '<div class="detail-label" style="margin-bottom:8px">Standing Orders</div>';
+    settingsHtml += g.clockworks.standingOrders.map(o => {
+      const trigger = 'on: ' + o.on;
+      const action = o.run ? 'run: ' + o.run : o.summon ? 'summon: ' + o.summon : 'brief: ' + o.brief;
+      return '<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border);display:flex;gap:8px"><span style="color:var(--muted);font-family:monospace">' + esc(trigger) + '</span><span style="color:var(--accent2);font-family:monospace">' + esc(action) + '</span></div>';
+    }).join('');
+  }
+  if (g.clerk?.writTypes?.length) {
+    settingsHtml += '<div class="detail-label" style="margin:12px 0 6px">Writ Types</div>';
+    settingsHtml += g.clerk.writTypes.map(t =>
+      '<span class="badge badge-ready" style="margin:2px">' + esc(t.name) + '</span>'
+    ).join(' ');
+  }
+  if (!settingsHtml) settingsHtml = '<span style="color:var(--muted);font-size:12px">No additional configuration</span>';
+  document.getElementById('overview-settings').innerHTML = settingsHtml;
+
+  // Plugins
+  document.getElementById('overview-plugins').innerHTML = data.plugins.map(p =>
+    '<div class="plugin-item">' +
+    '<span class="pi-type ' + (p.type==='apparatus'?'pi-type-apparatus':'pi-type-kit') + '">' + esc(p.type) + '</span>' +
+    '<span class="pi-name">' + esc(p.id) + '</span>' +
+    '<span class="pi-ver">' + esc(p.version) + '</span>' +
+    '</div>'
+  ).join('');
+
+  // Update badges
+  if (data.counts.writs !== undefined) setBadge('clerk', data.counts.writs);
+  if (data.counts.rigs !== undefined) setBadge('walker', data.counts.rigs);
+  if (data.counts.sessions !== undefined) setBadge('animator', data.counts.sessions);
+  if (data.counts.codexes !== undefined) setBadge('codexes', data.counts.codexes);
+}
+
+function kv(pairs) {
+  return pairs.map(([k,v]) =>
+    '<div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">' +
+    '<span style="font-size:11px;font-weight:600;color:var(--muted);min-width:110px;text-transform:uppercase;letter-spacing:.05em">' + esc(k) + '</span>' +
+    '<span style="font-size:13px">' + esc(String(v ?? '—')) + '</span>' +
+    '</div>'
+  ).join('');
+}
+
+function setBadge(tab, val) {
+  const el = document.getElementById('badge-' + tab);
+  if (el) el.textContent = String(val);
+}
+
+// ── CLERK ─────────────────────────────────────────────────────────
+async function loadWrits() {
+  const status = document.getElementById('clerk-filter-status').value;
+  const type   = document.getElementById('clerk-filter-type').value;
+  document.getElementById('clerk-loading').style.display = 'flex';
+  document.getElementById('clerk-table-wrap').style.display = 'none';
+  try {
+    const params = new URLSearchParams({ limit: WRIT_PAGE_SIZE, offset: writsPage * WRIT_PAGE_SIZE });
+    if (status) params.set('status', status);
+    if (type)   params.set('type', type);
+    const data = await api('/writs?' + params);
+    writs = data.writs;
+    writsTotal = data.total;
+    // Populate type filter (once)
+    if (data.types?.length && document.getElementById('clerk-filter-type').options.length <= 1) {
+      data.types.forEach(t => {
+        const o = document.createElement('option');
+        o.value = t; o.textContent = t;
+        document.getElementById('clerk-filter-type').appendChild(o);
+      });
+    }
+    // Populate type select in modal
+    if (data.types?.length) {
+      const sel = document.getElementById('pm-type');
+      sel.innerHTML = '';
+      data.types.forEach(t => {
+        const o = document.createElement('option');
+        o.value = t; o.textContent = t;
+        sel.appendChild(o);
+      });
+    }
+    renderWrits();
+    setBadge('clerk', writsTotal);
+    document.getElementById('clerk-count-label').textContent = writsTotal + ' writ' + (writsTotal!==1?'s':'');
+  } catch(e) {
+    document.getElementById('clerk-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
+    return;
+  }
+  document.getElementById('clerk-loading').style.display = 'none';
+  document.getElementById('clerk-table-wrap').style.display = 'block';
+}
+
+function renderWrits() {
+  const search = (document.getElementById('clerk-search').value || '').toLowerCase();
+  let rows = writs.filter(w => !search || w.title.toLowerCase().includes(search));
+  rows = stableSort(rows, writSort.col, writSort.dir);
+  updateSortHeaders('clerk-tbody', writSort);
+
+  const tbody = document.getElementById('clerk-tbody');
+  tbody.innerHTML = rows.map(w =>
+    '<tr>' +
+    '<td class="td-id">' + esc(w.id) + '</td>' +
+    '<td><code style="font-size:11px;color:var(--muted)">' + esc(w.type) + '</code></td>' +
+    '<td class="td-title" title="' + esc(w.title) + '">' + esc(w.title) + '</td>' +
+    '<td>' + statusBadge(w.status) + '</td>' +
+    '<td class="td-time">' + fmtDate(w.createdAt) + '</td>' +
+    '<td class="td-time">' + fmtDate(w.updatedAt) + '</td>' +
+    '<td class="td-actions">' + writActions(w) + '</td>' +
+    '</tr>'
+  ).join('');
+
+  document.getElementById('clerk-empty').style.display = rows.length ? 'none' : 'block';
+
+  // Pagination
+  const totalPages = Math.ceil(writsTotal / WRIT_PAGE_SIZE);
+  document.getElementById('clerk-prev').disabled = writsPage <= 0;
+  document.getElementById('clerk-next').disabled = writsPage >= totalPages - 1;
+  document.getElementById('clerk-page-info').textContent = totalPages > 1
+    ? 'Page ' + (writsPage+1) + ' of ' + totalPages : '';
+}
+
+function filterWritsLocal() { renderWrits(); }
+
+function writActions(w) {
+  const btns = [];
+  if (w.status === 'ready') {
+    btns.push('<button class="btn-success btn-sm" onclick="openTrans(\'' + w.id + '\',\'active\')">Accept</button>');
+    btns.push('<button class="btn-danger btn-sm" onclick="openTrans(\'' + w.id + '\',\'cancelled\')">Cancel</button>');
+  } else if (w.status === 'active') {
+    btns.push('<button class="btn-success btn-sm" onclick="openTrans(\'' + w.id + '\',\'completed\')">Complete</button>');
+    btns.push('<button class="btn-danger btn-sm" onclick="openTrans(\'' + w.id + '\',\'failed\')">Fail</button>');
+    btns.push('<button class="btn-ghost btn-sm" onclick="openTrans(\'' + w.id + '\',\'cancelled\')">Cancel</button>');
+  }
+  return btns.join('') || '<span style="color:var(--muted);font-size:11px">Terminal</span>';
+}
+
+function sortWrits(col) {
+  if (writSort.col === col) writSort.dir = writSort.dir === 'asc' ? 'desc' : 'asc';
+  else { writSort.col = col; writSort.dir = 'desc'; }
+  renderWrits();
+}
+
+function writPage(delta) {
+  writsPage = Math.max(0, writsPage + delta);
+  loadWrits();
+}
+
+// ── POST COMMISSION MODAL ─────────────────────────────────────────
+function openPostModal() {
+  document.getElementById('pm-title').value = '';
+  document.getElementById('pm-body').value = '';
+  document.getElementById('pm-error').className = 'error-msg';
+  // Populate codexes
+  const sel = document.getElementById('pm-codex');
+  sel.innerHTML = '<option value="">None</option>';
+  if (overview?.counts?.codexNames) {
+    overview.counts.codexNames.forEach(n => {
+      const o = document.createElement('option');
+      o.value = n; o.textContent = n;
+      sel.appendChild(o);
+    });
+  }
+  document.getElementById('post-modal').classList.add('open');
+  document.getElementById('pm-title').focus();
+}
+
+function closePostModal() {
+  document.getElementById('post-modal').classList.remove('open');
+}
+
+async function submitPost() {
+  const title  = document.getElementById('pm-title').value.trim();
+  const body   = document.getElementById('pm-body').value.trim();
+  const type   = document.getElementById('pm-type').value;
+  const codex  = document.getElementById('pm-codex').value || undefined;
+  const errEl  = document.getElementById('pm-error');
+  errEl.className = 'error-msg';
+
+  if (!title) { errEl.textContent = 'Title is required.'; errEl.className = 'error-msg show'; return; }
+  if (!body)  { errEl.textContent = 'Body is required.'; errEl.className = 'error-msg show'; return; }
+
+  document.getElementById('pm-submit').disabled = true;
+  try {
+    await apiPost('/writs', { title, body, type, codex });
+    closePostModal();
+    toast('Commission posted!');
+    writsPage = 0;
+    loadWrits();
+    loadOverview();
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.className = 'error-msg show';
+  } finally {
+    document.getElementById('pm-submit').disabled = false;
+  }
+}
+
+// ── TRANSITION MODAL ──────────────────────────────────────────────
+function openTrans(id, to) {
+  transData = { id, to };
+  const labels = { active:'Accept', completed:'Complete', failed:'Fail', cancelled:'Cancel' };
+  const descs = {
+    active:    'Accept this writ and begin working on it.',
+    completed: 'Mark this writ as completed.',
+    failed:    'Mark this writ as failed.',
+    cancelled: 'Cancel this writ.',
+  };
+  document.getElementById('trans-title').textContent = labels[to] + ' Writ';
+  document.getElementById('trans-desc').textContent = descs[to] || '';
+  const showRes = to === 'completed' || to === 'failed' || to === 'cancelled';
+  document.getElementById('trans-resolution-wrap').style.display = showRes ? 'block' : 'none';
+  document.getElementById('trans-resolution').value = '';
+  document.getElementById('trans-error').className = 'error-msg';
+  const btn = document.getElementById('trans-submit');
+  btn.className = 'btn-primary';
+  if (to === 'failed' || to === 'cancelled') btn.className = 'btn-danger';
+  if (to === 'completed') btn.className = 'btn-success';
+  btn.textContent = labels[to];
+  document.getElementById('trans-modal').classList.add('open');
+}
+
+function closeTransModal() {
+  document.getElementById('trans-modal').classList.remove('open');
+  transData = null;
+}
+
+async function submitTransition() {
+  if (!transData) return;
+  const { id, to } = transData;
+  const resolution = document.getElementById('trans-resolution').value.trim() || undefined;
+  const errEl = document.getElementById('trans-error');
+  errEl.className = 'error-msg';
+  document.getElementById('trans-submit').disabled = true;
+  try {
+    await apiPost('/writs/' + id + '/transition', { to, ...(resolution ? { resolution } : {}) });
+    closeTransModal();
+    toast('Writ transitioned to ' + to);
+    loadWrits();
+    loadOverview();
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.className = 'error-msg show';
+  } finally {
+    document.getElementById('trans-submit').disabled = false;
+  }
+}
+
+// ── WALKER ────────────────────────────────────────────────────────
+async function loadRigs() {
+  const status = document.getElementById('walker-filter-status').value;
+  document.getElementById('walker-loading').style.display = 'flex';
+  try {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    const data = await api('/rigs?' + params);
+    rigs = data.rigs;
+    renderRigs();
+    setBadge('walker', rigs.length);
+    document.getElementById('walker-count-label').textContent = rigs.length + ' rig' + (rigs.length!==1?'s':'');
+  } catch(e) {
+    document.getElementById('walker-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
+    return;
+  }
+  document.getElementById('walker-loading').style.display = 'none';
+}
+
+function renderRigs() {
+  const rows = stableSort(rigs, rigSort.col, rigSort.dir);
+  const tbody = document.getElementById('walker-tbody');
+  tbody.innerHTML = rows.map(r => {
+    const engines = r.engines || [];
+    const done = engines.filter(e => e.status==='completed' || e.status==='failed').length;
+    const total = engines.length;
+    const pct = total ? Math.round(done/total*100) : 0;
+    return '<tr>' +
+      '<td class="td-id">' + esc(r.id) + '</td>' +
+      '<td class="td-id">' + esc(r.writId) + '</td>' +
+      '<td>' + statusBadge(r.status) + '</td>' +
+      '<td><div class="pipeline">' + engines.map((e,i) =>
+        (i>0?'<span class="engine-arrow">›</span>':'')+
+        '<div class="engine-chip">' + statusDot(e.status) + ' ' + esc(e.id) + '</div>'
+      ).join('') + '</div></td>' +
+      '<td><div style="font-size:11px;color:var(--muted)">' + done + '/' + total + ' engines</div>' +
+        '<div style="height:4px;background:var(--surface3);border-radius:2px;margin-top:4px;width:80px">' +
+        '<div style="height:4px;background:' + (r.status==='failed'?'var(--red)':r.status==='completed'?'var(--green)':'var(--accent)') + ';border-radius:2px;width:' + pct + '%"></div>' +
+        '</div>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('walker-empty').style.display = rows.length ? 'none' : 'block';
+}
+
+function sortRigs(col) {
+  if (rigSort.col === col) rigSort.dir = rigSort.dir === 'asc' ? 'desc' : 'asc';
+  else { rigSort.col = col; rigSort.dir = 'desc'; }
+  renderRigs();
+}
+
+// ── ANIMATOR ─────────────────────────────────────────────────────
+async function loadSessions() {
+  const status = document.getElementById('animator-filter-status').value;
+  document.getElementById('animator-loading').style.display = 'flex';
+  try {
+    const params = new URLSearchParams({ limit: SESSION_PAGE_SIZE, offset: sessionsPage * SESSION_PAGE_SIZE });
+    if (status) params.set('status', status);
+    const data = await api('/sessions?' + params);
+    sessions = data.sessions;
+    sessionsTotal = data.total;
+    renderSessions();
+    setBadge('animator', sessionsTotal);
+    document.getElementById('animator-count-label').textContent = sessionsTotal + ' session' + (sessionsTotal!==1?'s':'');
+  } catch(e) {
+    document.getElementById('animator-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
+    return;
+  }
+  document.getElementById('animator-loading').style.display = 'none';
+}
+
+function renderSessions() {
+  const rows = stableSort(sessions, sessionSort.col, sessionSort.dir);
+  const tbody = document.getElementById('animator-tbody');
+  tbody.innerHTML = rows.map(s => {
+    const tokens = s.tokenUsage
+      ? (s.tokenUsage.inputTokens||0) + '↑ ' + (s.tokenUsage.outputTokens||0) + '↓'
+      : '—';
+    const cost = s.costUsd != null ? '$' + s.costUsd.toFixed(4) : '—';
+    return '<tr>' +
+      '<td class="td-id">' + esc(s.id) + '</td>' +
+      '<td>' + statusBadge(s.status) + '</td>' +
+      '<td style="font-size:12px;color:var(--muted)">' + esc(s.provider||'—') + '</td>' +
+      '<td class="td-time">' + fmtDate(s.startedAt) + '</td>' +
+      '<td class="td-time">' + fmtDuration(s.durationMs) + '</td>' +
+      '<td style="font-size:11px;color:var(--muted);font-family:monospace">' + esc(tokens) + ' · ' + esc(cost) + '</td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('animator-empty').style.display = rows.length ? 'none' : 'block';
+
+  const totalPages = Math.ceil(sessionsTotal / SESSION_PAGE_SIZE);
+  document.getElementById('animator-prev').disabled = sessionsPage <= 0;
+  document.getElementById('animator-next').disabled = sessionsPage >= totalPages - 1;
+  document.getElementById('animator-page-info').textContent = totalPages > 1
+    ? 'Page ' + (sessionsPage+1) + ' of ' + totalPages : '';
+}
+
+function sortSessions(col) {
+  if (sessionSort.col === col) sessionSort.dir = sessionSort.dir === 'asc' ? 'desc' : 'asc';
+  else { sessionSort.col = col; sessionSort.dir = 'desc'; }
+  renderSessions();
+}
+
+function sessionPage(delta) {
+  sessionsPage = Math.max(0, sessionsPage + delta);
+  loadSessions();
+}
+
+// ── CODEXES ───────────────────────────────────────────────────────
+async function loadCodexes() {
+  document.getElementById('codexes-loading').style.display = 'flex';
+  document.getElementById('codexes-content').style.display = 'none';
+  try {
+    const data = await api('/codexes');
+    renderCodexes(data);
+    setBadge('codexes', data.codexes.length);
+    document.getElementById('codexes-count-label').textContent = data.codexes.length + ' codex' + (data.codexes.length!==1?'es':'');
+  } catch(e) {
+    document.getElementById('codexes-loading').innerHTML = '<span style="color:var(--red)">Error: ' + esc(e.message) + '</span>';
+    return;
+  }
+  document.getElementById('codexes-loading').style.display = 'none';
+  document.getElementById('codexes-content').style.display = 'block';
+}
+
+function renderCodexes(data) {
+  const tbody = document.getElementById('codexes-tbody');
+  tbody.innerHTML = data.codexes.map(c =>
+    '<tr>' +
+    '<td style="font-weight:500">' + esc(c.name) + '</td>' +
+    '<td style="font-size:11px;font-family:monospace;color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(c.remoteUrl) + '">' + esc(c.remoteUrl) + '</td>' +
+    '<td>' + codexStatusBadge(c.cloneStatus) + '</td>' +
+    '<td style="text-align:center">' + (c.activeDrafts || 0) + '</td>' +
+    '</tr>'
+  ).join('');
+  document.getElementById('codexes-empty').style.display = data.codexes.length ? 'none' : 'block';
+
+  // Drafts
+  const allDrafts = data.drafts || [];
+  document.getElementById('drafts-section').style.display = allDrafts.length ? 'block' : 'none';
+  if (allDrafts.length) {
+    document.getElementById('drafts-tbody').innerHTML = allDrafts.map(d =>
+      '<tr>' +
+      '<td class="td-id">' + esc(d.id) + '</td>' +
+      '<td>' + esc(d.codexName) + '</td>' +
+      '<td style="font-family:monospace;font-size:11px">' + esc(d.branch) + '</td>' +
+      '<td class="td-id">' + esc(d.associatedWith || '—') + '</td>' +
+      '<td class="td-time">' + fmtDate(d.createdAt) + '</td>' +
+      '</tr>'
+    ).join('');
+  }
+}
+
+function codexStatusBadge(s) {
+  const map = { ready:'badge-ready', cloning:'badge-cloning', error:'badge-error' };
+  return '<span class="badge ' + (map[s]||'badge-cancelled') + '">' + esc(s) + '</span>';
+}
+
+// ── Utilities ────────────────────────────────────────────────────
+function statusBadge(s) {
+  return '<span class="badge badge-' + s + '">' + esc(s) + '</span>';
+}
+
+function statusDot(s) {
+  const colors = { pending:'var(--yellow)', running:'var(--blue)', completed:'var(--green)', failed:'var(--red)' };
+  return '<span style="width:7px;height:7px;border-radius:50%;background:' + (colors[s]||'var(--muted)') + ';display:inline-block;flex-shrink:0"></span>';
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+}
+
+function fmtDuration(ms) {
+  if (!ms && ms !== 0) return '—';
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms/1000).toFixed(1) + 's';
+  return Math.floor(ms/60000) + 'm ' + Math.round((ms%60000)/1000) + 's';
+}
+
+function stableSort(arr, col, dir) {
+  return [...arr].sort((a, b) => {
+    const av = a[col] ?? '', bv = b[col] ?? '';
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return dir === 'asc' ? cmp : -cmp;
+  });
+}
+
+function updateSortHeaders(tbodyId, sort) {
+  const table = document.getElementById(tbodyId)?.closest('table');
+  if (!table) return;
+  table.querySelectorAll('th').forEach(th => {
+    const col = th.dataset?.col;
+    th.classList.toggle('sorted', col === sort.col);
+    const icon = th.querySelector('.sort-icon');
+    if (icon && col === sort.col) icon.textContent = sort.dir === 'asc' ? '↑' : '↓';
+    else if (icon) icon.textContent = '↕';
+  });
+}
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(o => {
+  o.addEventListener('click', e => { if (e.target === o) o.classList.remove('open'); });
+});
+
+// ── Init ─────────────────────────────────────────────────────────
+loadOverview();
+</script>
+</body>
+</html>`;
+}
+
+=== FILE: packages/plugins/dashboard/src/index.ts ===
+/**
+ * @shardworks/dashboard-apparatus — The Dashboard.
+ *
+ * Web-based guild operations dashboard. Exposes the `dashboard-start` CLI
+ * tool which launches a local web server with a live operations UI including
+ * tabs for Overview, Clerk, Walker, Animator, and Codexes.
+ *
+ * Usage:
+ *   nsg dashboard start
+ *   nsg dashboard start --port 8080
+ *   nsg dashboard start --no-open
+ */
+
+import { createDashboard } from './dashboard.ts';
+
+export { createDashboard } from './dashboard.ts';
+
+// ── Default export: the apparatus plugin ──────────────────────────
+
+export default createDashboard();
+
+=== FILE: packages/plugins/dashboard/src/rig-types.ts ===
+/**
+ * Local type stubs for Walker rig documents read via Stacks readBook().
+ */
+
+export interface EngineInstance {
+  id: string;
+  designId: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  upstream: string[];
+  givensSpec: Record<string, unknown>;
+  yields?: unknown;
+  error?: string;
+  sessionId?: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface RigDoc {
+  id: string;
+  writId: string;
+  status: 'running' | 'completed' | 'failed';
+  engines: EngineInstance[];
+  [key: string]: unknown;
+}
+
+=== FILE: packages/plugins/dashboard/src/server.ts ===
+/**
+ * Dashboard HTTP server.
+ *
+ * Serves the web UI at / and REST API endpoints at /api/*.
+ * Uses only Node built-ins — no express or other dependencies.
+ */
+
+import http from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { guild } from '@shardworks/nexus-core';
+import type { ClerkApi, WritDoc, WritStatus } from '@shardworks/clerk-apparatus';
+import type { StacksApi, WhereClause } from '@shardworks/stacks-apparatus';
+import type { SessionDoc } from './types.ts';
+import type { RigDoc } from './rig-types.ts';
+import { getDashboardHtml } from './html.ts';
+
+// ── Types for codexes (optional apparatus) ────────────────────────
+
+interface CodexRecord {
+  name: string;
+  remoteUrl: string;
+  cloneStatus: string;
+  activeDrafts: number;
+}
+
+interface DraftRecord {
+  id: string;
+  codexName: string;
+  branch: string;
+  path: string;
+  createdAt: string;
+  associatedWith?: string;
+}
+
+interface ScriptoriumApi {
+  list(): Promise<CodexRecord[]>;
+  listDrafts(codexName?: string): Promise<DraftRecord[]>;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────
+
+function json(res: ServerResponse, data: unknown, status = 200): void {
+  const body = JSON.stringify(data);
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(body),
+    'Cache-Control': 'no-cache',
+  });
+  res.end(body);
+}
+
+function error(res: ServerResponse, msg: string, status = 500): void {
+  res.writeHead(status, { 'Content-Type': 'text/plain' });
+  res.end(msg);
+}
+
+async function readBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      try { resolve(JSON.parse(raw || '{}')); }
+      catch { reject(new Error('Invalid JSON body')); }
+    });
+    req.on('error', reject);
+  });
+}
+
+function parseQS(url: string): Record<string, string> {
+  const qm = url.indexOf('?');
+  if (qm < 0) return {};
+  return Object.fromEntries(new URLSearchParams(url.slice(qm + 1)));
+}
+
+function pathname(url: string): string {
+  const qm = url.indexOf('?');
+  return qm < 0 ? url : url.slice(0, qm);
+}
+
+function tryApparatus<T>(name: string): T | null {
+  try { return guild().apparatus<T>(name); }
+  catch { return null; }
+}
+
+// ── Request router ────────────────────────────────────────────────
+
+async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const method = req.method ?? 'GET';
+  const path   = pathname(req.url ?? '/');
+  const qs     = parseQS(req.url ?? '');
+
+  // ── Web UI ──────────────────────────────────────────────────────
+  if (path === '/' || path === '/index.html') {
+    const html = getDashboardHtml();
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Length': Buffer.byteLength(html),
+    });
+    res.end(html);
+    return;
+  }
+
+  // ── API: Overview ───────────────────────────────────────────────
+  if (path === '/api/overview' && method === 'GET') {
+    try {
+      const g = guild();
+      const config = g.guildConfig();
+      const plugins = [
+        ...g.kits().map(k => ({ id: k.id, version: k.version, type: 'kit' as const })),
+        ...g.apparatuses().map(a => ({ id: a.id, version: a.version, type: 'apparatus' as const })),
+      ].sort((a, b) => a.id.localeCompare(b.id));
+
+      const counts: Record<string, unknown> = {};
+
+      const clerk = tryApparatus<ClerkApi>('clerk');
+      if (clerk) {
+        counts.writs    = await clerk.count();
+        counts.ready    = await clerk.count({ status: 'ready' });
+        counts.active   = await clerk.count({ status: 'active' });
+      }
+
+      const stacks = tryApparatus<StacksApi>('stacks');
+      if (stacks) {
+        try {
+          const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+          counts.sessions        = await sessions.count();
+          counts.runningSessions = await sessions.count([['status', '=', 'running']]);
+        } catch { /* animator not installed */ }
+
+        try {
+          const rigs = stacks.readBook<RigDoc>('walker', 'rigs');
+          counts.rigs        = await rigs.count();
+          counts.runningRigs = await rigs.count([['status', '=', 'running']]);
+        } catch { /* walker not installed */ }
+      }
+
+      const scriptorium = tryApparatus<ScriptoriumApi>('codexes');
+      if (scriptorium) {
+        const codexList = await scriptorium.list();
+        counts.codexes     = codexList.length;
+        counts.codexNames  = codexList.map(c => c.name);
+      }
+
+      json(res, { guild: config, plugins, counts });
+    } catch (e) {
+      error(res, (e as Error).message);
+    }
+    return;
+  }
+
+  // ── API: Writs ──────────────────────────────────────────────────
+  if (path === '/api/writs' && method === 'GET') {
+    const clerk = tryApparatus<ClerkApi>('clerk');
+    if (!clerk) { error(res, 'Clerk apparatus not installed', 404); return; }
+    try {
+      const filters: { status?: WritStatus; type?: string; limit?: number; offset?: number } = {};
+      if (qs.status) filters.status = qs.status as WritStatus;
+      if (qs.type)   filters.type   = qs.type;
+      filters.limit  = qs.limit  ? parseInt(qs.limit,  10) : 20;
+      filters.offset = qs.offset ? parseInt(qs.offset, 10) : 0;
+
+      const [writs, total] = await Promise.all([
+        clerk.list(filters),
+        clerk.count({ status: filters.status, type: filters.type }),
+      ]);
+
+      // Derive declared types from guild config
+      const clerkConfig = guild().guildConfig().clerk;
+      const types = ['mandate', ...(clerkConfig?.writTypes?.map(t => t.name) ?? [])];
+
+      json(res, { writs, total, types });
+    } catch (e) {
+      error(res, (e as Error).message);
+    }
+    return;
+  }
+
+  if (path === '/api/writs' && method === 'POST') {
+    const clerk = tryApparatus<ClerkApi>('clerk');
+    if (!clerk) { error(res, 'Clerk apparatus not installed', 404); return; }
+    try {
+      const body = await readBody(req) as { title: string; body: string; type?: string; codex?: string };
+      const writ = await clerk.post({
+        title: body.title,
+        body:  body.body,
+        ...(body.type  ? { type:  body.type  } : {}),
+        ...(body.codex ? { codex: body.codex } : {}),
+      });
+      json(res, writ, 201);
+    } catch (e) {
+      error(res, (e as Error).message, 400);
+    }
+    return;
+  }
+
+  // ── API: Writ transition ─────────────────────────────────────────
+  const transMatch = path.match(/^\/api\/writs\/([^/]+)\/transition$/);
+  if (transMatch && method === 'POST') {
+    const clerk = tryApparatus<ClerkApi>('clerk');
+    if (!clerk) { error(res, 'Clerk apparatus not installed', 404); return; }
+    try {
+      const id = transMatch[1];
+      const body = await readBody(req) as { to: WritStatus; resolution?: string };
+      const fields: Partial<WritDoc> = {};
+      if (body.resolution) fields.resolution = body.resolution;
+      const writ = await clerk.transition(id, body.to, Object.keys(fields).length ? fields : undefined);
+      json(res, writ);
+    } catch (e) {
+      error(res, (e as Error).message, 400);
+    }
+    return;
+  }
+
+  // ── API: Sessions ────────────────────────────────────────────────
+  if (path === '/api/sessions' && method === 'GET') {
+    const stacks = tryApparatus<StacksApi>('stacks');
+    if (!stacks) { json(res, { sessions: [], total: 0 }); return; }
+    try {
+      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+      const limit  = qs.limit  ? parseInt(qs.limit,  10) : 20;
+      const offset = qs.offset ? parseInt(qs.offset, 10) : 0;
+      const where: WhereClause | undefined = qs.status
+        ? [['status', '=', qs.status]]
+        : undefined;
+      const [rows, total] = await Promise.all([
+        sessions.find({ where, orderBy: ['startedAt', 'desc'], limit, offset }),
+        sessions.count(where),
+      ]);
+      json(res, { sessions: rows, total });
+    } catch (e) {
+      json(res, { sessions: [], total: 0 });
+    }
+    return;
+  }
+
+  // ── API: Rigs ────────────────────────────────────────────────────
+  if (path === '/api/rigs' && method === 'GET') {
+    const stacks = tryApparatus<StacksApi>('stacks');
+    if (!stacks) { json(res, { rigs: [] }); return; }
+    try {
+      const rigs = stacks.readBook<RigDoc>('walker', 'rigs');
+      const where: WhereClause | undefined = qs.status
+        ? [['status', '=', qs.status]]
+        : undefined;
+      const rows = await rigs.find({
+        where,
+        orderBy: ['id', 'desc'],
+        limit: 100,
+      });
+      json(res, { rigs: rows });
+    } catch (e) {
+      json(res, { rigs: [] });
+    }
+    return;
+  }
+
+  // ── API: Codexes ─────────────────────────────────────────────────
+  if (path === '/api/codexes' && method === 'GET') {
+    const scriptorium = tryApparatus<ScriptoriumApi>('codexes');
+    if (!scriptorium) { json(res, { codexes: [], drafts: [] }); return; }
+    try {
+      const [codexes, drafts] = await Promise.all([
+        scriptorium.list(),
+        scriptorium.listDrafts(),
+      ]);
+      json(res, { codexes, drafts });
+    } catch (e) {
+      error(res, (e as Error).message);
+    }
+    return;
+  }
+
+  // ── 404 ──────────────────────────────────────────────────────────
+  error(res, 'Not found', 404);
+}
+
+// ── Server factory ────────────────────────────────────────────────
+
+export interface DashboardServer {
+  port: number;
+  url: string;
+  close(): Promise<void>;
+}
+
+export async function startServer(port: number): Promise<DashboardServer> {
+  const server = http.createServer(async (req, res) => {
+    try {
+      await handleRequest(req, res);
+    } catch (e) {
+      if (!res.headersSent) {
+        error(res, (e as Error).message ?? 'Internal error');
+      }
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.listen(port, '127.0.0.1', resolve);
+    server.once('error', reject);
+  });
+
+  const addr = server.address() as { port: number };
+  const actualPort = addr.port;
+
+  return {
+    port: actualPort,
+    url: `http://127.0.0.1:${actualPort}`,
+    close: () => new Promise<void>((resolve, reject) => {
+      server.close(err => err ? reject(err) : resolve());
+    }),
+  };
+}
+
+=== FILE: packages/plugins/dashboard/src/tool.ts ===
+/**
+ * dashboard-start tool — CLI-only.
+ *
+ * Starts the web dashboard server and opens the browser.
+ * Runs until the process is interrupted (Ctrl+C).
+ */
+
+import { execSync } from 'node:child_process';
+import process from 'node:process';
+import { z } from 'zod';
+import { tool } from '@shardworks/tools-apparatus';
+import { startServer } from './server.ts';
+
+export const dashboardStart = tool({
+  name: 'dashboard-start',
+  description: 'Start the guild web dashboard. Opens a browser and serves a live operations UI.',
+  callableBy: ['cli'],
+  params: {
+    port: z
+      .number()
+      .int()
+      .min(1024)
+      .max(65535)
+      .optional()
+      .describe('Port to listen on (default: 4242)'),
+    'no-open': z
+      .boolean()
+      .optional()
+      .describe('Skip opening the browser automatically'),
+  },
+  handler: async ({ port: portArg, 'no-open': noOpen }) => {
+    const port = portArg ?? 4242;
+    const server = await startServer(port);
+    const url = server.url;
+
+    console.log('');
+    console.log('  Guild Dashboard running at:');
+    console.log('');
+    console.log('    ' + url);
+    console.log('');
+    console.log('  Press Ctrl+C to stop.');
+    console.log('');
+
+    if (!noOpen) {
+      try {
+        const platform = process.platform;
+        if (platform === 'darwin')  execSync('open ' + url,   { stdio: 'ignore' });
+        else if (platform === 'win32') execSync('start "" ' + url, { stdio: 'ignore', shell: 'cmd.exe' });
+        else execSync('xdg-open ' + url + ' 2>/dev/null; true', { stdio: 'ignore', shell: '/bin/sh' });
+      } catch {
+        // Browser open is best-effort; ignore errors
+      }
+    }
+
+    // Keep the process alive until Ctrl+C
+    await new Promise<void>(resolve => {
+      process.once('SIGINT',  async () => { await server.close(); resolve(); });
+      process.once('SIGTERM', async () => { await server.close(); resolve(); });
+    });
+
+    return { status: 'stopped', url };
+  },
+});
+
+=== FILE: packages/plugins/dashboard/src/types.ts ===
+/**
+ * Local type stubs for apparatus documents read via Stacks readBook().
+ * These mirror the shapes declared by the respective apparatus packages
+ * without importing from them (to keep dashboard dependencies minimal).
+ */
+
+/** Minimal shape of a session document from the Animator's sessions book. */
+export interface SessionDoc {
+  id: string;
+  status: 'running' | 'completed' | 'failed' | 'timeout';
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  provider: string;
+  exitCode?: number;
+  error?: string;
+  conversationId?: string;
+  providerSessionId?: string;
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+  costUsd?: number;
+  metadata?: Record<string, unknown>;
+  output?: string;
+  [key: string]: unknown;
+}
+
+=== FILE: packages/plugins/dashboard/tsconfig.json ===
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": [
+    "src"
+  ]
+}
+
+=== FILE: pnpm-lock.yaml ===
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      '@tsconfig/node24':
+        specifier: 24.0.4
+        version: 24.0.4
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
+  packages/framework/arbor:
+    dependencies:
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/framework/cli:
+    dependencies:
+      '@shardworks/nexus-arbor':
+        specifier: workspace:*
+        version: link:../arbor
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../core
+      '@shardworks/tools-apparatus':
+        specifier: workspace:*
+        version: link:../../plugins/tools
+      commander:
+        specifier: 14.0.3
+        version: 14.0.3
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/framework/core:
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/animator:
+    dependencies:
+      '@shardworks/loom-apparatus':
+        specifier: workspace:*
+        version: link:../loom
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      '@shardworks/stacks-apparatus':
+        specifier: workspace:*
+        version: link:../stacks
+      '@shardworks/tools-apparatus':
+        specifier: workspace:*
+        version: link:../tools
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/claude-code:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.27.1
+        version: 1.27.1(zod@4.3.6)
+      '@shardworks/animator-apparatus':
+        specifier: workspace:*
+        version: link:../animator
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      '@shardworks/tools-apparatus':
+        specifier: workspace:*
+        version: link:../tools
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/clerk:
+    dependencies:
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      '@shardworks/stacks-apparatus':
+        specifier: workspace:*
+        version: link:../stacks
+      '@shardworks/tools-apparatus':
+        specifier: workspace:*
+        version: link:../tools
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/codexes:
+    dependencies:
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      '@shardworks/tools-apparatus':
+        specifier: workspace:*
+        version: link:../tools
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/dashboard:
+    dependencies:
+      '@shardworks/clerk-apparatus':
+        specifier: workspace:*
+        version: link:../clerk
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      '@shardworks/stacks-apparatus':
+        specifier: workspace:*
+        version: link:../stacks
+      '@shardworks/tools-apparatus':
+        specifier: workspace:*
+        version: link:../tools
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/dispatch:
+    dependencies:
+      '@shardworks/animator-apparatus':
+        specifier: workspace:*
+        version: link:../animator
+      '@shardworks/clerk-apparatus':
+        specifier: workspace:*
+        version: link:../clerk
+      '@shardworks/codexes-apparatus':
+        specifier: workspace:*
+        version: link:../codexes
+      '@shardworks/loom-apparatus':
+        specifier: workspace:*
+        version: link:../loom
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      '@shardworks/tools-apparatus':
+        specifier: workspace:*
+        version: link:../tools
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@shardworks/stacks-apparatus':
+        specifier: workspace:*
+        version: link:../stacks
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/fabricator:
+    dependencies:
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/loom:
+    dependencies:
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      '@shardworks/tools-apparatus':
+        specifier: workspace:*
+        version: link:../tools
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/parlour:
+    dependencies:
+      '@shardworks/animator-apparatus':
+        specifier: workspace:*
+        version: link:../animator
+      '@shardworks/loom-apparatus':
+        specifier: workspace:*
+        version: link:../loom
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      '@shardworks/stacks-apparatus':
+        specifier: workspace:*
+        version: link:../stacks
+      '@shardworks/tools-apparatus':
+        specifier: workspace:*
+        version: link:../tools
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/stacks:
+    dependencies:
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      better-sqlite3:
+        specifier: 12.8.0
+        version: 12.8.0
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: 7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/tools:
+    dependencies:
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+  packages/plugins/walker:
+    dependencies:
+      '@shardworks/animator-apparatus':
+        specifier: workspace:*
+        version: link:../animator
+      '@shardworks/clerk-apparatus':
+        specifier: workspace:*
+        version: link:../clerk
+      '@shardworks/codexes-apparatus':
+        specifier: workspace:*
+        version: link:../codexes
+      '@shardworks/fabricator-apparatus':
+        specifier: workspace:*
+        version: link:../fabricator
+      '@shardworks/nexus-core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      '@shardworks/stacks-apparatus':
+        specifier: workspace:*
+        version: link:../stacks
+      '@shardworks/tools-apparatus':
+        specifier: workspace:*
+        version: link:../tools
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+
+packages:
+
+  '@hono/node-server@1.19.11':
+    resolution: {integrity: sha512-dr8/3zEaB+p0D2n/IUrlPF1HZm586qgJNXK1a9fhg/PzdtkK7Ksd5l312tJX2yBuALqDYBlG20QEbayqPyxn+g==}
+    engines: {node: '>=18.14.1'}
+    peerDependencies:
+      hono: ^4
+
+  '@modelcontextprotocol/sdk@1.27.1':
+    resolution: {integrity: sha512-sr6GbP+4edBwFndLbM60gf07z0FQ79gaExpnsjMGePXqFcSSb7t6iscpjk9DhFhwd+mTEQrzNafGP8/iGGFYaA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@cfworker/json-schema': ^4.1.1
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@cfworker/json-schema':
+        optional: true
+
+  '@tsconfig/node24@24.0.4':
+    resolution: {integrity: sha512-2A933l5P5oCbv6qSxHs7ckKwobs8BDAe9SJ/Xr2Hy+nDlwmLE1GhFh/g/vXGRZWgxBg9nX/5piDtHR9Dkw/XuA==}
+
+  '@types/better-sqlite3@7.6.13':
+    resolution: {integrity: sha512-NMv9ASNARoKksWtsq/SHakpYAYnhBrQgGD8zkLYk/jaK8jUGn08CfEdTRgYhMypUQAfzSP8W6gNLe0q19/t4VA==}
+
+  '@types/node@25.5.0':
+    resolution: {integrity: sha512-jp2P3tQMSxWugkCUKLRPVUpGaL5MVFwF8RDuSRztfwgN1wmqJeMSbKlnEtQqU8UrhTmzEmZdu2I6v2dpp7XIxw==}
+
+  accepts@2.0.0:
+    resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
+    engines: {node: '>= 0.6'}
+
+  ajv-formats@3.0.1:
+    resolution: {integrity: sha512-8iUql50EUR+uUcdRQ3HDqa6EVyo3docL8g5WJ3FNcWmu62IbkGUue/pEyLBW8VGKKucTPgqeks4fIU1DA4yowQ==}
+    peerDependencies:
+      ajv: ^8.0.0
+    peerDependenciesMeta:
+      ajv:
+        optional: true
+
+  ajv@8.18.0:
+    resolution: {integrity: sha512-PlXPeEWMXMZ7sPYOHqmDyCJzcfNrUr3fGNKtezX14ykXOEIvyK81d+qydx89KY5O71FKMPaQ2vBfBFI5NHR63A==}
+
+  base64-js@1.5.1:
+    resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
+
+  better-sqlite3@12.8.0:
+    resolution: {integrity: sha512-RxD2Vd96sQDjQr20kdP+F+dK/1OUNiVOl200vKBZY8u0vTwysfolF6Hq+3ZK2+h8My9YvZhHsF+RSGZW2VYrPQ==}
+    engines: {node: 20.x || 22.x || 23.x || 24.x || 25.x}
+
+  bindings@1.5.0:
+    resolution: {integrity: sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==}
+
+  bl@4.1.0:
+    resolution: {integrity: sha512-1W07cM9gS6DcLperZfFSj+bWLtaPGSOHWhPiGzXmvVJbRLdG82sH/Kn8EtW1VqWVA54AKf2h5k5BbnIbwF3h6w==}
+
+  body-parser@2.2.2:
+    resolution: {integrity: sha512-oP5VkATKlNwcgvxi0vM0p/D3n2C3EReYVX+DNYs5TjZFn/oQt2j+4sVJtSMr18pdRr8wjTcBl6LoV+FUwzPmNA==}
+    engines: {node: '>=18'}
+
+  buffer@5.7.1:
+    resolution: {integrity: sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ==}
+
+  bytes@3.1.2:
+    resolution: {integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==}
+    engines: {node: '>= 0.8'}
+
+  call-bind-apply-helpers@1.0.2:
+    resolution: {integrity: sha512-Sp1ablJ0ivDkSzjcaJdxEunN5/XvksFJ2sMBFfq6x0ryhQV/2b/KwFe21cMpmHtPOSij8K99/wSfoEuTObmuMQ==}
+    engines: {node: '>= 0.4'}
+
+  call-bound@1.0.4:
+    resolution: {integrity: sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg==}
+    engines: {node: '>= 0.4'}
+
+  chownr@1.1.4:
+    resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
+
+  commander@14.0.3:
+    resolution: {integrity: sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw==}
+    engines: {node: '>=20'}
+
+  content-disposition@1.0.1:
+    resolution: {integrity: sha512-oIXISMynqSqm241k6kcQ5UwttDILMK4BiurCfGEREw6+X9jkkpEe5T9FZaApyLGGOnFuyMWZpdolTXMtvEJ08Q==}
+    engines: {node: '>=18'}
+
+  content-type@1.0.5:
+    resolution: {integrity: sha512-nTjqfcBFEipKdXCv4YDQWCfmcLZKm81ldF0pAopTvyrFGVbcR6P/VAAd5G7N+0tTr8QqiU0tFadD6FK4NtJwOA==}
+    engines: {node: '>= 0.6'}
+
+  cookie-signature@1.2.2:
+    resolution: {integrity: sha512-D76uU73ulSXrD1UXF4KE2TMxVVwhsnCgfAyTg9k8P6KGZjlXKrOLe4dJQKI3Bxi5wjesZoFXJWElNWBjPZMbhg==}
+    engines: {node: '>=6.6.0'}
+
+  cookie@0.7.2:
+    resolution: {integrity: sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w==}
+    engines: {node: '>= 0.6'}
+
+  cors@2.8.6:
+    resolution: {integrity: sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw==}
+    engines: {node: '>= 0.10'}
+
+  cross-spawn@7.0.6:
+    resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
+    engines: {node: '>= 8'}
+
+  debug@4.4.3:
+    resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
+    engines: {node: '>=6.0'}
+    peerDependencies:
+      supports-color: '*'
+    peerDependenciesMeta:
+      supports-color:
+        optional: true
+
+  decompress-response@6.0.0:
+    resolution: {integrity: sha512-aW35yZM6Bb/4oJlZncMH2LCoZtJXTRxES17vE3hoRiowU2kWHaJKFkSBDnDR+cm9J+9QhXmREyIfv0pji9ejCQ==}
+    engines: {node: '>=10'}
+
+  deep-extend@0.6.0:
+    resolution: {integrity: sha512-LOHxIOaPYdHlJRtCQfDIVZtfw/ufM8+rVj649RIHzcm/vGwQRXFt6OPqIFWsm2XEMrNIEtWR64sY1LEKD2vAOA==}
+    engines: {node: '>=4.0.0'}
+
+  depd@2.0.0:
+    resolution: {integrity: sha512-g7nH6P6dyDioJogAAGprGpCtVImJhpPk/roCzdb3fIh61/s/nPsfR6onyMwkCAR/OlC3yBC0lESvUoQEAssIrw==}
+    engines: {node: '>= 0.8'}
+
+  detect-libc@2.1.2:
+    resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
+    engines: {node: '>=8'}
+
+  dunder-proto@1.0.1:
+    resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
+    engines: {node: '>= 0.4'}
+
+  ee-first@1.1.1:
+    resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
+
+  encodeurl@2.0.0:
+    resolution: {integrity: sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg==}
+    engines: {node: '>= 0.8'}
+
+  end-of-stream@1.4.5:
+    resolution: {integrity: sha512-ooEGc6HP26xXq/N+GCGOT0JKCLDGrq2bQUZrQ7gyrJiZANJ/8YDTxTpQBXGMn+WbIQXNVpyWymm7KYVICQnyOg==}
+
+  es-define-property@1.0.1:
+    resolution: {integrity: sha512-e3nRfgfUZ4rNGL232gUgX06QNyyez04KdjFrF+LTRoOXmrOgFKDg4BCdsjW8EnT69eqdYGmRpJwiPVYNrCaW3g==}
+    engines: {node: '>= 0.4'}
+
+  es-errors@1.3.0:
+    resolution: {integrity: sha512-Zf5H2Kxt2xjTvbJvP2ZWLEICxA6j+hAmMzIlypy4xcBg1vKVnx89Wy0GbS+kf5cwCVFFzdCFh2XSCFNULS6csw==}
+    engines: {node: '>= 0.4'}
+
+  es-object-atoms@1.1.1:
+    resolution: {integrity: sha512-FGgH2h8zKNim9ljj7dankFPcICIK9Cp5bm+c2gQSYePhpaG5+esrLODihIorn+Pe6FGJzWhXQotPv73jTaldXA==}
+    engines: {node: '>= 0.4'}
+
+  escape-html@1.0.3:
+    resolution: {integrity: sha512-NiSupZ4OeuGwr68lGIeym/ksIZMJodUGOSCZ/FSnTxcrekbvqrgdUxlJOMpijaKZVjAJrWrGs/6Jy8OMuyj9ow==}
+
+  etag@1.8.1:
+    resolution: {integrity: sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==}
+    engines: {node: '>= 0.6'}
+
+  eventsource-parser@3.0.6:
+    resolution: {integrity: sha512-Vo1ab+QXPzZ4tCa8SwIHJFaSzy4R6SHf7BY79rFBDf0idraZWAkYrDjDj8uWaSm3S2TK+hJ7/t1CEmZ7jXw+pg==}
+    engines: {node: '>=18.0.0'}
+
+  eventsource@3.0.7:
+    resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
+    engines: {node: '>=18.0.0'}
+
+  expand-template@2.0.3:
+    resolution: {integrity: sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==}
+    engines: {node: '>=6'}
+
+  express-rate-limit@8.3.1:
+    resolution: {integrity: sha512-D1dKN+cmyPWuvB+G2SREQDzPY1agpBIcTa9sJxOPMCNeH3gwzhqJRDWCXW3gg0y//+LQ/8j52JbMROWyrKdMdw==}
+    engines: {node: '>= 16'}
+    peerDependencies:
+      express: '>= 4.11'
+
+  express@5.2.1:
+    resolution: {integrity: sha512-hIS4idWWai69NezIdRt2xFVofaF4j+6INOpJlVOLDO8zXGpUVEVzIYk12UUi2JzjEzWL3IOAxcTubgz9Po0yXw==}
+    engines: {node: '>= 18'}
+
+  fast-deep-equal@3.1.3:
+    resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
+
+  fast-uri@3.1.0:
+    resolution: {integrity: sha512-iPeeDKJSWf4IEOasVVrknXpaBV0IApz/gp7S2bb7Z4Lljbl2MGJRqInZiUrQwV16cpzw/D3S5j5Julj/gT52AA==}
+
+  file-uri-to-path@1.0.0:
+    resolution: {integrity: sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==}
+
+  finalhandler@2.1.1:
+    resolution: {integrity: sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==}
+    engines: {node: '>= 18.0.0'}
+
+  forwarded@0.2.0:
+    resolution: {integrity: sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==}
+    engines: {node: '>= 0.6'}
+
+  fresh@2.0.0:
+    resolution: {integrity: sha512-Rx/WycZ60HOaqLKAi6cHRKKI7zxWbJ31MhntmtwMoaTeF7XFH9hhBp8vITaMidfljRQ6eYWCKkaTK+ykVJHP2A==}
+    engines: {node: '>= 0.8'}
+
+  fs-constants@1.0.0:
+    resolution: {integrity: sha512-y6OAwoSIf7FyjMIv94u+b5rdheZEjzR63GTyZJm5qh4Bi+2YgwLCcI/fPFZkL5PSixOt6ZNKm+w+Hfp/Bciwow==}
+
+  function-bind@1.1.2:
+    resolution: {integrity: sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==}
+
+  get-intrinsic@1.3.0:
+    resolution: {integrity: sha512-9fSjSaos/fRIVIp+xSJlE6lfwhES7LNtKaCBIamHsjr2na1BiABJPo0mOjjz8GJDURarmCPGqaiVg5mfjb98CQ==}
+    engines: {node: '>= 0.4'}
+
+  get-proto@1.0.1:
+    resolution: {integrity: sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g==}
+    engines: {node: '>= 0.4'}
+
+  github-from-package@0.0.0:
+    resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
+
+  gopd@1.2.0:
+    resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
+    engines: {node: '>= 0.4'}
+
+  has-symbols@1.1.0:
+    resolution: {integrity: sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==}
+    engines: {node: '>= 0.4'}
+
+  hasown@2.0.2:
+    resolution: {integrity: sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==}
+    engines: {node: '>= 0.4'}
+
+  hono@4.12.9:
+    resolution: {integrity: sha512-wy3T8Zm2bsEvxKZM5w21VdHDDcwVS1yUFFY6i8UobSsKfFceT7TOwhbhfKsDyx7tYQlmRM5FLpIuYvNFyjctiA==}
+    engines: {node: '>=16.9.0'}
+
+  http-errors@2.0.1:
+    resolution: {integrity: sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ==}
+    engines: {node: '>= 0.8'}
+
+  iconv-lite@0.7.2:
+    resolution: {integrity: sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==}
+    engines: {node: '>=0.10.0'}
+
+  ieee754@1.2.1:
+    resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
+
+  inherits@2.0.4:
+    resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
+
+  ini@1.3.8:
+    resolution: {integrity: sha512-JV/yugV2uzW5iMRSiZAyDtQd+nxtUnjeLt0acNdw98kKLrvuRVyB80tsREOE7yvGVgalhZ6RNXCmEHkUKBKxew==}
+
+  ip-address@10.1.0:
+    resolution: {integrity: sha512-XXADHxXmvT9+CRxhXg56LJovE+bmWnEWB78LB83VZTprKTmaC5QfruXocxzTZ2Kl0DNwKuBdlIhjL8LeY8Sf8Q==}
+    engines: {node: '>= 12'}
+
+  ipaddr.js@1.9.1:
+    resolution: {integrity: sha512-0KI/607xoxSToH7GjN1FfSbLoU0+btTicjsQSWQlh/hZykN8KpmMf7uYwPW3R+akZ6R/w18ZlXSHBYXiYUPO3g==}
+    engines: {node: '>= 0.10'}
+
+  is-promise@4.0.0:
+    resolution: {integrity: sha512-hvpoI6korhJMnej285dSg6nu1+e6uxs7zG3BYAm5byqDsgJNWwxzM6z6iZiAgQR4TJ30JmBTOwqZUw3WlyH3AQ==}
+
+  isexe@2.0.0:
+    resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
+
+  jose@6.2.2:
+    resolution: {integrity: sha512-d7kPDd34KO/YnzaDOlikGpOurfF0ByC2sEV4cANCtdqLlTfBlw2p14O/5d/zv40gJPbIQxfES3nSx1/oYNyuZQ==}
+
+  json-schema-traverse@1.0.0:
+    resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
+
+  json-schema-typed@8.0.2:
+    resolution: {integrity: sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA==}
+
+  math-intrinsics@1.1.0:
+    resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
+    engines: {node: '>= 0.4'}
+
+  media-typer@1.1.0:
+    resolution: {integrity: sha512-aisnrDP4GNe06UcKFnV5bfMNPBUw4jsLGaWwWfnH3v02GnBuXX2MCVn5RbrWo0j3pczUilYblq7fQ7Nw2t5XKw==}
+    engines: {node: '>= 0.8'}
+
+  merge-descriptors@2.0.0:
+    resolution: {integrity: sha512-Snk314V5ayFLhp3fkUREub6WtjBfPdCPY1Ln8/8munuLuiYhsABgBVWsozAG+MWMbVEvcdcpbi9R7ww22l9Q3g==}
+    engines: {node: '>=18'}
+
+  mime-db@1.54.0:
+    resolution: {integrity: sha512-aU5EJuIN2WDemCcAp2vFBfp/m4EAhWJnUNSSw0ixs7/kXbd6Pg64EmwJkNdFhB8aWt1sH2CTXrLxo/iAGV3oPQ==}
+    engines: {node: '>= 0.6'}
+
+  mime-types@3.0.2:
+    resolution: {integrity: sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A==}
+    engines: {node: '>=18'}
+
+  mimic-response@3.1.0:
+    resolution: {integrity: sha512-z0yWI+4FDrrweS8Zmt4Ej5HdJmky15+L2e6Wgn3+iK5fWzb6T3fhNFq2+MeTRb064c6Wr4N/wv0DzQTjNzHNGQ==}
+    engines: {node: '>=10'}
+
+  minimist@1.2.8:
+    resolution: {integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==}
+
+  mkdirp-classic@0.5.3:
+    resolution: {integrity: sha512-gKLcREMhtuZRwRAfqP3RFW+TK4JqApVBtOIftVgjuABpAtpxhPGaDcfvbhNvD0B8iD1oUr/txX35NjcaY6Ns/A==}
+
+  ms@2.1.3:
+    resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
+
+  napi-build-utils@2.0.0:
+    resolution: {integrity: sha512-GEbrYkbfF7MoNaoh2iGG84Mnf/WZfB0GdGEsM8wz7Expx/LlWf5U8t9nvJKXSp3qr5IsEbK04cBGhol/KwOsWA==}
+
+  negotiator@1.0.0:
+    resolution: {integrity: sha512-8Ofs/AUQh8MaEcrlq5xOX0CQ9ypTF5dl78mjlMNfOK08fzpgTHQRQPBxcPlEtIw0yRpws+Zo/3r+5WRby7u3Gg==}
+    engines: {node: '>= 0.6'}
+
+  node-abi@3.89.0:
+    resolution: {integrity: sha512-6u9UwL0HlAl21+agMN3YAMXcKByMqwGx+pq+P76vii5f7hTPtKDp08/H9py6DY+cfDw7kQNTGEj/rly3IgbNQA==}
+    engines: {node: '>=10'}
+
+  object-assign@4.1.1:
+    resolution: {integrity: sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==}
+    engines: {node: '>=0.10.0'}
+
+  object-inspect@1.13.4:
+    resolution: {integrity: sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==}
+    engines: {node: '>= 0.4'}
+
+  on-finished@2.4.1:
+    resolution: {integrity: sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg==}
+    engines: {node: '>= 0.8'}
+
+  once@1.4.0:
+    resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
+
+  parseurl@1.3.3:
+    resolution: {integrity: sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ==}
+    engines: {node: '>= 0.8'}
+
+  path-key@3.1.1:
+    resolution: {integrity: sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q==}
+    engines: {node: '>=8'}
+
+  path-to-regexp@8.3.0:
+    resolution: {integrity: sha512-7jdwVIRtsP8MYpdXSwOS0YdD0Du+qOoF/AEPIt88PcCFrZCzx41oxku1jD88hZBwbNUIEfpqvuhjFaMAqMTWnA==}
+
+  pkce-challenge@5.0.1:
+    resolution: {integrity: sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==}
+    engines: {node: '>=16.20.0'}
+
+  prebuild-install@7.1.3:
+    resolution: {integrity: sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug==}
+    engines: {node: '>=10'}
+    deprecated: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
+    hasBin: true
+
+  proxy-addr@2.0.7:
+    resolution: {integrity: sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==}
+    engines: {node: '>= 0.10'}
+
+  pump@3.0.4:
+    resolution: {integrity: sha512-VS7sjc6KR7e1ukRFhQSY5LM2uBWAUPiOPa/A3mkKmiMwSmRFUITt0xuj+/lesgnCv+dPIEYlkzrcyXgquIHMcA==}
+
+  qs@6.15.0:
+    resolution: {integrity: sha512-mAZTtNCeetKMH+pSjrb76NAM8V9a05I9aBZOHztWy/UqcJdQYNsf59vrRKWnojAT9Y+GbIvoTBC++CPHqpDBhQ==}
+    engines: {node: '>=0.6'}
+
+  range-parser@1.2.1:
+    resolution: {integrity: sha512-Hrgsx+orqoygnmhFbKaHE6c296J+HTAQXoxEF6gNupROmmGJRoyzfG3ccAveqCBrwr/2yxQ5BVd/GTl5agOwSg==}
+    engines: {node: '>= 0.6'}
+
+  raw-body@3.0.2:
+    resolution: {integrity: sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA==}
+    engines: {node: '>= 0.10'}
+
+  rc@1.2.8:
+    resolution: {integrity: sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw==}
+    hasBin: true
+
+  readable-stream@3.6.2:
+    resolution: {integrity: sha512-9u/sniCrY3D5WdsERHzHE4G2YCXqoG5FTHUiCC4SIbr6XcLZBY05ya9EKjYek9O5xOAwjGq+1JdGBAS7Q9ScoA==}
+    engines: {node: '>= 6'}
+
+  require-from-string@2.0.2:
+    resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
+    engines: {node: '>=0.10.0'}
+
+  router@2.2.0:
+    resolution: {integrity: sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ==}
+    engines: {node: '>= 18'}
+
+  safe-buffer@5.2.1:
+    resolution: {integrity: sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ==}
+
+  safer-buffer@2.1.2:
+    resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
+
+  semver@7.7.4:
+    resolution: {integrity: sha512-vFKC2IEtQnVhpT78h1Yp8wzwrf8CM+MzKMHGJZfBtzhZNycRFnXsHk6E5TxIkkMsgNS7mdX3AGB7x2QM2di4lA==}
+    engines: {node: '>=10'}
+    hasBin: true
+
+  send@1.2.1:
+    resolution: {integrity: sha512-1gnZf7DFcoIcajTjTwjwuDjzuz4PPcY2StKPlsGAQ1+YH20IRVrBaXSWmdjowTJ6u8Rc01PoYOGHXfP1mYcZNQ==}
+    engines: {node: '>= 18'}
+
+  serve-static@2.2.1:
+    resolution: {integrity: sha512-xRXBn0pPqQTVQiC8wyQrKs2MOlX24zQ0POGaj0kultvoOCstBQM5yvOhAVSUwOMjQtTvsPWoNCHfPGwaaQJhTw==}
+    engines: {node: '>= 18'}
+
+  setprototypeof@1.2.0:
+    resolution: {integrity: sha512-E5LDX7Wrp85Kil5bhZv46j8jOeboKq5JMmYM3gVGdGH8xFpPWXUMsNrlODCrkoxMEeNi/XZIwuRvY4XNwYMJpw==}
+
+  shebang-command@2.0.0:
+    resolution: {integrity: sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA==}
+    engines: {node: '>=8'}
+
+  shebang-regex@3.0.0:
+    resolution: {integrity: sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==}
+    engines: {node: '>=8'}
+
+  side-channel-list@1.0.0:
+    resolution: {integrity: sha512-FCLHtRD/gnpCiCHEiJLOwdmFP+wzCmDEkc9y7NsYxeF4u7Btsn1ZuwgwJGxImImHicJArLP4R0yX4c2KCrMrTA==}
+    engines: {node: '>= 0.4'}
+
+  side-channel-map@1.0.1:
+    resolution: {integrity: sha512-VCjCNfgMsby3tTdo02nbjtM/ewra6jPHmpThenkTYh8pG9ucZ/1P8So4u4FGBek/BjpOVsDCMoLA/iuBKIFXRA==}
+    engines: {node: '>= 0.4'}
+
+  side-channel-weakmap@1.0.2:
+    resolution: {integrity: sha512-WPS/HvHQTYnHisLo9McqBHOJk2FkHO/tlpvldyrnem4aeQp4hai3gythswg6p01oSoTl58rcpiFAjF2br2Ak2A==}
+    engines: {node: '>= 0.4'}
+
+  side-channel@1.1.0:
+    resolution: {integrity: sha512-ZX99e6tRweoUXqR+VBrslhda51Nh5MTQwou5tnUDgbtyM0dBgmhEDtWGP/xbKn6hqfPRHujUNwz5fy/wbbhnpw==}
+    engines: {node: '>= 0.4'}
+
+  simple-concat@1.0.1:
+    resolution: {integrity: sha512-cSFtAPtRhljv69IK0hTVZQ+OfE9nePi/rtJmw5UjHeVyVroEqJXP1sFztKUy1qU+xvz3u/sfYJLa947b7nAN2Q==}
+
+  simple-get@4.0.1:
+    resolution: {integrity: sha512-brv7p5WgH0jmQJr1ZDDfKDOSeWWg+OVypG99A/5vYGPqJ6pxiaHLy8nxtFjBA7oMa01ebA9gfh1uMCFqOuXxvA==}
+
+  statuses@2.0.2:
+    resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
+    engines: {node: '>= 0.8'}
+
+  string_decoder@1.3.0:
+    resolution: {integrity: sha512-hkRX8U1WjJFd8LsDJ2yQ/wWWxaopEsABU1XfkM8A+j0+85JAGppt16cr1Whg6KIbb4okU6Mql6BOj+uup/wKeA==}
+
+  strip-json-comments@2.0.1:
+    resolution: {integrity: sha512-4gB8na07fecVVkOI6Rs4e7T6NOTki5EmL7TUduTs6bu3EdnSycntVJ4re8kgZA+wx9IueI2Y11bfbgwtzuE0KQ==}
+    engines: {node: '>=0.10.0'}
+
+  tar-fs@2.1.4:
+    resolution: {integrity: sha512-mDAjwmZdh7LTT6pNleZ05Yt65HC3E+NiQzl672vQG38jIrehtJk/J3mNwIg+vShQPcLF/LV7CMnDW6vjj6sfYQ==}
+
+  tar-stream@2.2.0:
+    resolution: {integrity: sha512-ujeqbceABgwMZxEJnk2HDY2DlnUZ+9oEcb1KzTVfYHio0UE6dG71n60d8D2I4qNvleWrrXpmjpt7vZeF1LnMZQ==}
+    engines: {node: '>=6'}
+
+  toidentifier@1.0.1:
+    resolution: {integrity: sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==}
+    engines: {node: '>=0.6'}
+
+  tunnel-agent@0.6.0:
+    resolution: {integrity: sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w==}
+
+  type-is@2.0.1:
+    resolution: {integrity: sha512-OZs6gsjF4vMp32qrCbiVSkrFmXtG/AZhY3t0iAMrMBiAZyV9oALtXO8hsrHbMXF9x6L3grlFuwW2oAz7cav+Gw==}
+    engines: {node: '>= 0.6'}
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+  undici-types@7.18.2:
+    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
+
+  unpipe@1.0.0:
+    resolution: {integrity: sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==}
+    engines: {node: '>= 0.8'}
+
+  util-deprecate@1.0.2:
+    resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
+
+  vary@1.1.2:
+    resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
+    engines: {node: '>= 0.8'}
+
+  which@2.0.2:
+    resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
+    engines: {node: '>= 8'}
+    hasBin: true
+
+  wrappy@1.0.2:
+    resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
+
+  zod-to-json-schema@3.25.1:
+    resolution: {integrity: sha512-pM/SU9d3YAggzi6MtR4h7ruuQlqKtad8e9S0fmxcMi+ueAK5Korys/aWcV9LIIHTVbj01NdzxcnXSN+O74ZIVA==}
+    peerDependencies:
+      zod: ^3.25 || ^4
+
+  zod@4.3.6:
+    resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
+
+snapshots:
+
+  '@hono/node-server@1.19.11(hono@4.12.9)':
+    dependencies:
+      hono: 4.12.9
+
+  '@modelcontextprotocol/sdk@1.27.1(zod@4.3.6)':
+    dependencies:
+      '@hono/node-server': 1.19.11(hono@4.12.9)
+      ajv: 8.18.0
+      ajv-formats: 3.0.1(ajv@8.18.0)
+      content-type: 1.0.5
+      cors: 2.8.6
+      cross-spawn: 7.0.6
+      eventsource: 3.0.7
+      eventsource-parser: 3.0.6
+      express: 5.2.1
+      express-rate-limit: 8.3.1(express@5.2.1)
+      hono: 4.12.9
+      jose: 6.2.2
+      json-schema-typed: 8.0.2
+      pkce-challenge: 5.0.1
+      raw-body: 3.0.2
+      zod: 4.3.6
+      zod-to-json-schema: 3.25.1(zod@4.3.6)
+    transitivePeerDependencies:
+      - supports-color
+
+  '@tsconfig/node24@24.0.4': {}
+
+  '@types/better-sqlite3@7.6.13':
+    dependencies:
+      '@types/node': 25.5.0
+
+  '@types/node@25.5.0':
+    dependencies:
+      undici-types: 7.18.2
+
+  accepts@2.0.0:
+    dependencies:
+      mime-types: 3.0.2
+      negotiator: 1.0.0
+
+  ajv-formats@3.0.1(ajv@8.18.0):
+    optionalDependencies:
+      ajv: 8.18.0
+
+  ajv@8.18.0:
+    dependencies:
+      fast-deep-equal: 3.1.3
+      fast-uri: 3.1.0
+      json-schema-traverse: 1.0.0
+      require-from-string: 2.0.2
+
+  base64-js@1.5.1: {}
+
+  better-sqlite3@12.8.0:
+    dependencies:
+      bindings: 1.5.0
+      prebuild-install: 7.1.3
+
+  bindings@1.5.0:
+    dependencies:
+      file-uri-to-path: 1.0.0
+
+  bl@4.1.0:
+    dependencies:
+      buffer: 5.7.1
+      inherits: 2.0.4
+      readable-stream: 3.6.2
+
+  body-parser@2.2.2:
+    dependencies:
+      bytes: 3.1.2
+      content-type: 1.0.5
+      debug: 4.4.3
+      http-errors: 2.0.1
+      iconv-lite: 0.7.2
+      on-finished: 2.4.1
+      qs: 6.15.0
+      raw-body: 3.0.2
+      type-is: 2.0.1
+    transitivePeerDependencies:
+      - supports-color
+
+  buffer@5.7.1:
+    dependencies:
+      base64-js: 1.5.1
+      ieee754: 1.2.1
+
+  bytes@3.1.2: {}
+
+  call-bind-apply-helpers@1.0.2:
+    dependencies:
+      es-errors: 1.3.0
+      function-bind: 1.1.2
+
+  call-bound@1.0.4:
+    dependencies:
+      call-bind-apply-helpers: 1.0.2
+      get-intrinsic: 1.3.0
+
+  chownr@1.1.4: {}
+
+  commander@14.0.3: {}
+
+  content-disposition@1.0.1: {}
+
+  content-type@1.0.5: {}
+
+  cookie-signature@1.2.2: {}
+
+  cookie@0.7.2: {}
+
+  cors@2.8.6:
+    dependencies:
+      object-assign: 4.1.1
+      vary: 1.1.2
+
+  cross-spawn@7.0.6:
+    dependencies:
+      path-key: 3.1.1
+      shebang-command: 2.0.0
+      which: 2.0.2
+
+  debug@4.4.3:
+    dependencies:
+      ms: 2.1.3
+
+  decompress-response@6.0.0:
+    dependencies:
+      mimic-response: 3.1.0
+
+  deep-extend@0.6.0: {}
+
+  depd@2.0.0: {}
+
+  detect-libc@2.1.2: {}
+
+  dunder-proto@1.0.1:
+    dependencies:
+      call-bind-apply-helpers: 1.0.2
+      es-errors: 1.3.0
+      gopd: 1.2.0
+
+  ee-first@1.1.1: {}
+
+  encodeurl@2.0.0: {}
+
+  end-of-stream@1.4.5:
+    dependencies:
+      once: 1.4.0
+
+  es-define-property@1.0.1: {}
+
+  es-errors@1.3.0: {}
+
+  es-object-atoms@1.1.1:
+    dependencies:
+      es-errors: 1.3.0
+
+  escape-html@1.0.3: {}
+
+  etag@1.8.1: {}
+
+  eventsource-parser@3.0.6: {}
+
+  eventsource@3.0.7:
+    dependencies:
+      eventsource-parser: 3.0.6
+
+  expand-template@2.0.3: {}
+
+  express-rate-limit@8.3.1(express@5.2.1):
+    dependencies:
+      express: 5.2.1
+      ip-address: 10.1.0
+
+  express@5.2.1:
+    dependencies:
+      accepts: 2.0.0
+      body-parser: 2.2.2
+      content-disposition: 1.0.1
+      content-type: 1.0.5
+      cookie: 0.7.2
+      cookie-signature: 1.2.2
+      debug: 4.4.3
+      depd: 2.0.0
+      encodeurl: 2.0.0
+      escape-html: 1.0.3
+      etag: 1.8.1
+      finalhandler: 2.1.1
+      fresh: 2.0.0
+      http-errors: 2.0.1
+      merge-descriptors: 2.0.0
+      mime-types: 3.0.2
+      on-finished: 2.4.1
+      once: 1.4.0
+      parseurl: 1.3.3
+      proxy-addr: 2.0.7
+      qs: 6.15.0
+      range-parser: 1.2.1
+      router: 2.2.0
+      send: 1.2.1
+      serve-static: 2.2.1
+      statuses: 2.0.2
+      type-is: 2.0.1
+      vary: 1.1.2
+    transitivePeerDependencies:
+      - supports-color
+
+  fast-deep-equal@3.1.3: {}
+
+  fast-uri@3.1.0: {}
+
+  file-uri-to-path@1.0.0: {}
+
+  finalhandler@2.1.1:
+    dependencies:
+      debug: 4.4.3
+      encodeurl: 2.0.0
+      escape-html: 1.0.3
+      on-finished: 2.4.1
+      parseurl: 1.3.3
+      statuses: 2.0.2
+    transitivePeerDependencies:
+      - supports-color
+
+  forwarded@0.2.0: {}
+
+  fresh@2.0.0: {}
+
+  fs-constants@1.0.0: {}
+
+  function-bind@1.1.2: {}
+
+  get-intrinsic@1.3.0:
+    dependencies:
+      call-bind-apply-helpers: 1.0.2
+      es-define-property: 1.0.1
+      es-errors: 1.3.0
+      es-object-atoms: 1.1.1
+      function-bind: 1.1.2
+      get-proto: 1.0.1
+      gopd: 1.2.0
+      has-symbols: 1.1.0
+      hasown: 2.0.2
+      math-intrinsics: 1.1.0
+
+  get-proto@1.0.1:
+    dependencies:
+      dunder-proto: 1.0.1
+      es-object-atoms: 1.1.1
+
+  github-from-package@0.0.0: {}
+
+  gopd@1.2.0: {}
+
+  has-symbols@1.1.0: {}
+
+  hasown@2.0.2:
+    dependencies:
+      function-bind: 1.1.2
+
+  hono@4.12.9: {}
+
+  http-errors@2.0.1:
+    dependencies:
+      depd: 2.0.0
+      inherits: 2.0.4
+      setprototypeof: 1.2.0
+      statuses: 2.0.2
+      toidentifier: 1.0.1
+
+  iconv-lite@0.7.2:
+    dependencies:
+      safer-buffer: 2.1.2
+
+  ieee754@1.2.1: {}
+
+  inherits@2.0.4: {}
+
+  ini@1.3.8: {}
+
+  ip-address@10.1.0: {}
+
+  ipaddr.js@1.9.1: {}
+
+  is-promise@4.0.0: {}
+
+  isexe@2.0.0: {}
+
+  jose@6.2.2: {}
+
+  json-schema-traverse@1.0.0: {}
+
+  json-schema-typed@8.0.2: {}
+
+  math-intrinsics@1.1.0: {}
+
+  media-typer@1.1.0: {}
+
+  merge-descriptors@2.0.0: {}
+
+  mime-db@1.54.0: {}
+
+  mime-types@3.0.2:
+    dependencies:
+      mime-db: 1.54.0
+
+  mimic-response@3.1.0: {}
+
+  minimist@1.2.8: {}
+
+  mkdirp-classic@0.5.3: {}
+
+  ms@2.1.3: {}
+
+  napi-build-utils@2.0.0: {}
+
+  negotiator@1.0.0: {}
+
+  node-abi@3.89.0:
+    dependencies:
+      semver: 7.7.4
+
+  object-assign@4.1.1: {}
+
+  object-inspect@1.13.4: {}
+
+  on-finished@2.4.1:
+    dependencies:
+      ee-first: 1.1.1
+
+  once@1.4.0:
+    dependencies:
+      wrappy: 1.0.2
+
+  parseurl@1.3.3: {}
+
+  path-key@3.1.1: {}
+
+  path-to-regexp@8.3.0: {}
+
+  pkce-challenge@5.0.1: {}
+
+  prebuild-install@7.1.3:
+    dependencies:
+      detect-libc: 2.1.2
+      expand-template: 2.0.3
+      github-from-package: 0.0.0
+      minimist: 1.2.8
+      mkdirp-classic: 0.5.3
+      napi-build-utils: 2.0.0
+      node-abi: 3.89.0
+      pump: 3.0.4
+      rc: 1.2.8
+      simple-get: 4.0.1
+      tar-fs: 2.1.4
+      tunnel-agent: 0.6.0
+
+  proxy-addr@2.0.7:
+    dependencies:
+      forwarded: 0.2.0
+      ipaddr.js: 1.9.1
+
+  pump@3.0.4:
+    dependencies:
+      end-of-stream: 1.4.5
+      once: 1.4.0
+
+  qs@6.15.0:
+    dependencies:
+      side-channel: 1.1.0
+
+  range-parser@1.2.1: {}
+
+  raw-body@3.0.2:
+    dependencies:
+      bytes: 3.1.2
+      http-errors: 2.0.1
+      iconv-lite: 0.7.2
+      unpipe: 1.0.0
+
+  rc@1.2.8:
+    dependencies:
+      deep-extend: 0.6.0
+      ini: 1.3.8
+      minimist: 1.2.8
+      strip-json-comments: 2.0.1
+
+  readable-stream@3.6.2:
+    dependencies:
+      inherits: 2.0.4
+      string_decoder: 1.3.0
+      util-deprecate: 1.0.2
+
+  require-from-string@2.0.2: {}
+
+  router@2.2.0:
+    dependencies:
+      debug: 4.4.3
+      depd: 2.0.0
+      is-promise: 4.0.0
+      parseurl: 1.3.3
+      path-to-regexp: 8.3.0
+    transitivePeerDependencies:
+      - supports-color
+
+  safe-buffer@5.2.1: {}
+
+  safer-buffer@2.1.2: {}
+
+  semver@7.7.4: {}
+
+  send@1.2.1:
+    dependencies:
+      debug: 4.4.3
+      encodeurl: 2.0.0
+      escape-html: 1.0.3
+      etag: 1.8.1
+      fresh: 2.0.0
+      http-errors: 2.0.1
+      mime-types: 3.0.2
+      ms: 2.1.3
+      on-finished: 2.4.1
+      range-parser: 1.2.1
+      statuses: 2.0.2
+    transitivePeerDependencies:
+      - supports-color
+
+  serve-static@2.2.1:
+    dependencies:
+      encodeurl: 2.0.0
+      escape-html: 1.0.3
+      parseurl: 1.3.3
+      send: 1.2.1
+    transitivePeerDependencies:
+      - supports-color
+
+  setprototypeof@1.2.0: {}
+
+  shebang-command@2.0.0:
+    dependencies:
+      shebang-regex: 3.0.0
+
+  shebang-regex@3.0.0: {}
+
+  side-channel-list@1.0.0:
+    dependencies:
+      es-errors: 1.3.0
+      object-inspect: 1.13.4
+
+  side-channel-map@1.0.1:
+    dependencies:
+      call-bound: 1.0.4
+      es-errors: 1.3.0
+      get-intrinsic: 1.3.0
+      object-inspect: 1.13.4
+
+  side-channel-weakmap@1.0.2:
+    dependencies:
+      call-bound: 1.0.4
+      es-errors: 1.3.0
+      get-intrinsic: 1.3.0
+      object-inspect: 1.13.4
+      side-channel-map: 1.0.1
+
+  side-channel@1.1.0:
+    dependencies:
+      es-errors: 1.3.0
+      object-inspect: 1.13.4
+      side-channel-list: 1.0.0
+      side-channel-map: 1.0.1
+      side-channel-weakmap: 1.0.2
+
+  simple-concat@1.0.1: {}
+
+  simple-get@4.0.1:
+    dependencies:
+      decompress-response: 6.0.0
+      once: 1.4.0
+      simple-concat: 1.0.1
+
+  statuses@2.0.2: {}
+
+  string_decoder@1.3.0:
+    dependencies:
+      safe-buffer: 5.2.1
+
+  strip-json-comments@2.0.1: {}
+
+  tar-fs@2.1.4:
+    dependencies:
+      chownr: 1.1.4
+      mkdirp-classic: 0.5.3
+      pump: 3.0.4
+      tar-stream: 2.2.0
+
+  tar-stream@2.2.0:
+    dependencies:
+      bl: 4.1.0
+      end-of-stream: 1.4.5
+      fs-constants: 1.0.0
+      inherits: 2.0.4
+      readable-stream: 3.6.2
+
+  toidentifier@1.0.1: {}
+
+  tunnel-agent@0.6.0:
+    dependencies:
+      safe-buffer: 5.2.1
+
+  type-is@2.0.1:
+    dependencies:
+      content-type: 1.0.5
+      media-typer: 1.1.0
+      mime-types: 3.0.2
+
+  typescript@5.9.3: {}
+
+  undici-types@7.18.2: {}
+
+  unpipe@1.0.0: {}
+
+  util-deprecate@1.0.2: {}
+
+  vary@1.1.2: {}
+
+  which@2.0.2:
+    dependencies:
+      isexe: 2.0.0
+
+  wrappy@1.0.2: {}
+
+  zod-to-json-schema@3.25.1(zod@4.3.6):
+    dependencies:
+      zod: 4.3.6
+
+  zod@4.3.6: {}
+
+
+## Convention Reference (sibling files not modified by this commission)
+
+
+=== CONTEXT FILE: README.md ===
+# Nexus Mk 2.1
+
+A framework for operating multi-agent AI workforces. Nexus provides the guild model: a structured workspace where animas (AI identities) receive commissions, use tools, record work, and collaborate through a shared Books database and event-driven Clockworks.
+
+The framework is plugin-based. Almost everything — tools, engines, database schemas, anima management — is contributed by plugins. The core runtime is intentionally minimal.
+
+---
+
+## For users
+
+### Install the CLI
+
+```sh
+npm install -g @shardworks/nexus
+```
+
+This installs the `nsg` command globally.
+
+### Initialize a guild
+
+A guild is the workspace where animas operate. Create one with `nsg init`:
+
+```sh
+nsg init ./my-guild --name my-guild
+cd my-guild
+```
+
+This writes `guild.json`, `package.json`, `.gitignore`, and the `.nexus/` directory structure. It does not install any plugins or create any animas.
+
+### Install plugins
+
+Plugins are npm packages that contribute tools, engines, database schemas, and other capabilities to your guild. Install them with `nsg rig install`:
+
+```sh
+# Install from npm
+nsg rig install @shardworks/nexus-stdlib
+
+# Pin a version
+nsg rig install @shardworks/nexus-stdlib@1.2.0
+
+# Install from a git repository
+nsg rig install git+https://github.com/acme/my-plugin.git
+
+# Symlink a local directory during development
+nsg rig install ./path/to/my-plugin --type link
+```
+
+By default, a plugin's tools are added to `baseTools` (available to all animas). To assign tools to specific roles instead:
+
+```sh
+nsg rig install @shardworks/nexus-stdlib --roles artificer,scribe
+```
+
+List installed plugins:
+
+```sh
+nsg rig list
+```
+
+Remove a plugin:
+
+```sh
+nsg rig remove nexus-stdlib
+```
+
+### Check guild status
+
+```sh
+nsg status          # guild name, nexus version, installed plugins, roles
+nsg version         # framework version + installed plugin versions
+```
+
+### `guild.json`
+
+The guild's central configuration file. Updated automatically by `nsg rig install` and `nsg rig remove`. Stores the plugin list, role definitions, tool assignments, Clockworks standing orders, and guild settings.
+
+Plugins are listed by their derived plugin id (package name with the `@shardworks/` scope stripped):
+
+```json
+{
+  "name": "my-guild",
+  "nexus": "2.1.0",
+  "plugins": ["nexus-stdlib", "nexus-clockworks"],
+  "baseTools": ["commission", "signal", "list-writs"],
+  "roles": { ... },
+  "settings": { "model": "claude-opus-4-5" }
+}
+```
+
+---
+
+## For plugin authors
+
+Nexus plugins are npm packages that contribute capabilities to a guild. There are two kinds:
+
+- **Kit** — a passive package contributing tools, engines, relays, or other capabilities. No lifecycle; contributions are read at load time and used by consuming apparatuses.
+- **Apparatus** — a package contributing persistent running infrastructure. Has a `start`/`stop` lifecycle, receives `GuildContext` at startup, and exposes a runtime API via `provides`.
+
+Plugin authors import exclusively from `@shardworks/nexus-core`. The arbor runtime (`@shardworks/nexus-arbor`) is an internal concern of the CLI and session provider.
+
+### Key points
+
+- A plugin's **name is inferred from its npm package name** at load time — never declared in the manifest.
+- A **kit** is a plain object exported as `{ kit: { ... } }`. The `tools` field (array of `ToolDefinition`) is the most common contribution.
+- An **apparatus** is exported as `{ apparatus: { start, stop?, provides?, requires?, supportKit?, consumes? } }`.
+- `requires` on a kit names apparatuses whose runtime APIs the kit's tool handlers will call. Hard startup failure if not installed.
+- `requires` on an apparatus names other apparatuses that must be started first. Determines start order.
+- Apparatus `provides` objects are retrieved at handler invocation time via `ctx.apparatus<T>(name)`.
+
+### Authoring tools
+
+The `tool()` function is the primary authoring entry point. Define a name, description, Zod param schema, and a handler:
+
+```typescript
+import { tool } from '@shardworks/nexus-core';
+import { z } from 'zod';
+
+const greet = tool({
+  name: 'greet',
+  description: 'Greet someone by name',
+  params: {
+    name: z.string().describe('Name to greet'),
+  },
+  handler: async ({ name }, ctx) => {
+    return `Hello, ${name}! Guild root: ${ctx.home}`;
+  },
+});
+```
+
+The handler receives:
+- `params` — validated input, typed from your Zod schemas
+- `ctx` — a `HandlerContext` with `home` (guild root path) and `apparatus<T>(name)` for accessing started apparatus APIs
+
+Restrict a tool to specific callers with `callableBy`:
+
+```typescript
+tool({
+  name: 'admin-reset',
+  callableBy: ['cli'],    // CLI only — not available to animas
+  // ...
+});
+```
+
+### Exporting a kit
+
+A kit is the simplest plugin form — a plain object with a `kit` key:
+
+```typescript
+import { tool, type Kit } from '@shardworks/nexus-core';
+
+const myTool = tool({ name: 'lookup', /* ... */ });
+
+export default {
+  kit: {
+    tools: [myTool],
+
+    // Optional: declare required apparatuses whose APIs your handlers call
+    requires: ['nexus-books'],
+
+    // Optional: document contribution fields for consuming apparatuses
+    // (field types are defined by the apparatus packages that consume them)
+    books: {
+      records: { indexes: ['status', 'createdAt'] },
+    },
+  } satisfies Kit,
+};
+```
+
+The `tools` field is the most common kit contribution. Other contribution fields (`engines`, `relays`, etc.) are defined by the apparatus packages that consume them — the framework treats any unknown field as opaque data.
+
+### Exporting an apparatus
+
+An apparatus has a `start`/`stop` lifecycle and can expose a runtime API:
+
+```typescript
+import { type Apparatus, type GuildContext } from '@shardworks/nexus-core';
+
+// The API you expose to other plugins
+interface MyApi {
+  lookup(key: string): string | null;
+}
+
+const store = new Map<string, string>();
+
+export default {
+  apparatus: {
+    // Apparatuses this one requires to be started first
+    requires: ['nexus-books'],
+
+    // The runtime API object exposed via ctx.apparatus<MyApi>('my-plugin')
+    provides: {
+      lookup(key: string) { return store.get(key) ?? null; },
+    } satisfies MyApi,
+
+    async start(ctx: GuildContext) {
+      // ctx.apparatus<BooksApi>('nexus-books') is available here
+      // ctx.kits() — snapshot of all loaded kits
+      // ctx.on('plugin:initialized', handler) — react to kit contributions
+    },
+
+    async stop() {
+      store.clear();
+    },
+  } satisfies Apparatus,
+};
+```
+
+Consumers retrieve your `provides` object via `ctx.apparatus<MyApi>('my-plugin')` — either in their own `start()` or in tool handlers via `HandlerContext.apparatus<T>()`.
+
+An apparatus can also contribute tools via `supportKit`:
+
+```typescript
+export default {
+  apparatus: {
+    supportKit: {
+      tools: [myAdminTool],
+    },
+    // ...
+  },
+};
+```
+
+### `HandlerContext`
+
+Injected into every tool and engine handler at invocation time:
+
+```typescript
+interface HandlerContext {
+  home: string;                        // absolute path to the guild root
+  apparatus<T>(name: string): T;       // access a started apparatus's provides object
+}
+```
+
+### Further reading
+
+- [`packages/arbor/README.md`](packages/arbor/README.md) — runtime API reference (`createArbor`, `Arbor`, `LoadedKit`, `LoadedApparatus`, `derivePluginId`, Books database)
+- [`docs/architecture/plugins.md`](docs/architecture/plugins.md) — full plugin architecture specification
+- [`docs/architecture/apparatus/books.md`](docs/architecture/apparatus/books.md) — Books apparatus design (in progress)
+
+=== CONTEXT FILE: package.json ===
+{
+  "private": true,
+  "packageManager": "pnpm@10.32.1",
+  "version": "0.0.0",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shardworks/nexus-mk2"
+  },
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "nsg": "node --disable-warning=ExperimentalWarning --experimental-transform-types packages/framework/cli/src/cli.ts",
+    "vibe": "node --disable-warning=ExperimentalWarning --experimental-transform-types packages/framework/cli/src/cli.ts --guild-root /workspace/vibers"
+  },
+  "devDependencies": {
+    "@tsconfig/node24": "24.0.4",
+    "typescript": "5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
+}
+
+=== CONTEXT FILE: LICENSE ===
+ISC License
+
+Copyright (c) 2026 Sean Boots
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+=== CONTEXT FILE: packages/plugins/dashboard/src ===
+tree 3bb2b13561decdb363a831daf5efc63b059bb73a:packages/plugins/dashboard/src
+
+dashboard.ts
+html.ts
+index.ts
+rig-types.ts
+server.ts
+tool.ts
+types.ts
+
+
+## Codebase Structure (surrounding directories)
+
+```
+```
+
+=== TREE: ./ ===
+.claude
+.gitattributes
+.github
+.gitignore
+.nvmrc
+LICENSE
+README.md
+bin
+docs
+package.json
+packages-deprecated
+packages
+pnpm-lock.yaml
+pnpm-workspace.yaml
+tsconfig.json
+
+=== TREE: packages/plugins/dashboard/ ===
+package.json
+src
+tsconfig.json
+
+=== TREE: packages/plugins/dashboard/src/ ===
+dashboard.ts
+html.ts
+index.ts
+rig-types.ts
+server.ts
+tool.ts
+types.ts
+
+```
+```

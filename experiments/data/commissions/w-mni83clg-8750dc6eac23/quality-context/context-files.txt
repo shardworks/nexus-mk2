@@ -1,0 +1,193 @@
+
+=== CONTEXT FILE: packages/plugins/walker/src/index.ts ===
+/**
+ * @shardworks/walker-apparatus — The Walker.
+ *
+ * Rig execution engine: spawns rigs for ready writs, drives engine pipelines
+ * to completion, and transitions writs via the Clerk on rig completion/failure.
+ *
+ * Public types (RigDoc, EngineInstance, WalkResult, WalkerApi, etc.) are
+ * re-exported for consumers that inspect walk results or rig state.
+ */
+
+import { createWalker } from './walker.ts';
+
+// ── Public types ──────────────────────────────────────────────────────
+
+export type {
+  EngineStatus,
+  EngineInstance,
+  RigStatus,
+  RigDoc,
+  WalkResult,
+  WalkerApi,
+  WalkerConfig,
+  DraftYields,
+  SealYields,
+} from './types.ts';
+
+// ── Default export: the apparatus plugin ──────────────────────────────
+
+export default createWalker();
+
+=== CONTEXT FILE: packages/plugins/walker/src/engines ===
+tree 906b2d8d7ca059e73ce3449c7cd728305d4d2e7e:packages/plugins/walker/src/engines
+
+draft.ts
+implement.ts
+index.ts
+review.ts
+revise.ts
+seal.ts
+
+=== CONTEXT FILE: packages/plugins/walker/src/tools ===
+tree 906b2d8d7ca059e73ce3449c7cd728305d4d2e7e:packages/plugins/walker/src/tools
+
+index.ts
+walk-continual.ts
+walk.ts
+
+=== CONTEXT FILE: packages/plugins/walker/src/engines/implement.ts ===
+/**
+ * Implement engine — quick (Animator-backed).
+ *
+ * Summons an anima to do the commissioned work. Wraps the writ body with
+ * a commit instruction, then calls animator.summon() with the draft
+ * worktree as the working directory. Returns `{ status: 'launched', sessionId }`
+ * so the Walker's collect step can poll for completion on subsequent walks.
+ */
+
+import { guild } from '@shardworks/nexus-core';
+import type { EngineDesign } from '@shardworks/fabricator-apparatus';
+import type { AnimatorApi } from '@shardworks/animator-apparatus';
+import type { WritDoc } from '@shardworks/clerk-apparatus';
+import type { DraftYields } from '../types.ts';
+
+const implementEngine: EngineDesign = {
+  id: 'implement',
+
+  async run(givens, context) {
+    const animator = guild().apparatus<AnimatorApi>('animator');
+    const writ = givens.writ as WritDoc;
+    const draft = context.upstream['draft'] as DraftYields;
+
+    const prompt = `${writ.body}\n\nCommit all changes before ending your session.`;
+
+    const handle = animator.summon({
+      role: givens.role as string,
+      prompt,
+      cwd: draft.path,
+      environment: { GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local` },
+      metadata: { engineId: context.engineId, writId: writ.id },
+    });
+
+    const sessionResult = await handle.result;
+    return { status: 'launched', sessionId: sessionResult.id };
+  },
+};
+
+export default implementEngine;
+
+=== CONTEXT FILE: packages/plugins/walker/src/engines/seal.ts ===
+/**
+ * Seal engine — clockwork.
+ *
+ * Seals the draft binding via the Scriptorium. Reads the draft branch
+ * from context.upstream['draft'] (the DraftYields from the draft engine).
+ * Returns SealYields with the sealed commit info.
+ */
+
+import { guild } from '@shardworks/nexus-core';
+import type { EngineDesign } from '@shardworks/fabricator-apparatus';
+import type { ScriptoriumApi } from '@shardworks/codexes-apparatus';
+import type { DraftYields, SealYields } from '../types.ts';
+
+const sealEngine: EngineDesign = {
+  id: 'seal',
+
+  async run(_givens, context) {
+    const scriptorium = guild().apparatus<ScriptoriumApi>('codexes');
+    const draftYields = context.upstream['draft'] as DraftYields | undefined;
+
+    if (!draftYields) {
+      throw new Error('Seal engine requires draft yields in context.upstream but none found.');
+    }
+
+    const result = await scriptorium.seal({
+      codexName: draftYields.codexName,
+      sourceBranch: draftYields.branch,
+    });
+
+    const yields: SealYields = {
+      sealedCommit: result.sealedCommit,
+      strategy: result.strategy,
+      retries: result.retries,
+      inscriptionsSealed: result.inscriptionsSealed,
+    };
+
+    return { status: 'completed', yields };
+  },
+};
+
+export default sealEngine;
+
+=== CONTEXT FILE: packages/plugins/walker/src/engines/review.ts ===
+/**
+ * Review engine — stub (Increment 1).
+ *
+ * Returns a completed result with mock yields so the full pipeline can be
+ * tested end-to-end. Increment 3 replaces this with real Animator-backed
+ * quick engine execution.
+ */
+
+import type { EngineDesign } from '@shardworks/fabricator-apparatus';
+
+const reviewEngine: EngineDesign = {
+  id: 'review',
+
+  async run(_givens, _context) {
+    return {
+      status: 'completed',
+      yields: {
+        sessionId: 'stub',
+        passed: true,
+        findings: 'Stub review — no findings.',
+        mechanicalChecks: [],
+      },
+    };
+  },
+};
+
+export default reviewEngine;
+
+=== CONTEXT FILE: packages/plugins/walker/src/tools/walk.ts ===
+/**
+ * walk tool — executes a single step of the walk loop.
+ *
+ * Returns the WalkResult or null (idle) from one walk() call.
+ * Useful for manual step-through or testing.
+ */
+
+import { guild } from '@shardworks/nexus-core';
+import { tool } from '@shardworks/tools-apparatus';
+import type { WalkerApi } from '../types.ts';
+
+export default tool({
+  name: 'walk',
+  description: 'Execute one step of the Walker loop',
+  instructions:
+    'Runs a single walk() step: collect a pending session result, run the next ' +
+    'ready engine, or spawn a rig for a ready writ — in that priority order. ' +
+    'Returns the action taken, or null if there is nothing to do.',
+  params: {},
+  permission: 'walker:write',
+  handler: async () => {
+    const walker = guild().apparatus<WalkerApi>('walker');
+    return walker.walk();
+  },
+});
+
+=== CONTEXT FILE: packages/plugins/walker/src/tools/index.ts ===
+export { default as walkTool } from './walk.ts';
+export { default as walkContinualTool } from './walk-continual.ts';
+
