@@ -6,7 +6,7 @@
 
 ## Overview
 
-When a commission arrives, something must turn it into a rig. That something is the **origination engine** — a guild-configured engine bound to the `commission.posted` signal via a standing order. The origination engine reads the commission, determines what the rig must ultimately achieve, and seeds an initial rig for the Walker to build out.
+When a commission arrives, something must turn it into a rig. That something is the **origination engine** — a guild-configured engine bound to the `commission.posted` signal via a standing order. The origination engine reads the commission, determines what the rig must ultimately achieve, and seeds an initial rig for the Spider to build out.
 
 The Originator is not a named apparatus. It is a standing order and an engine — the guild's choice of engine, configured to meet the guild's needs. A guild that wants autonomous origination configures an autonomous engine. A guild that wants planning judgment configures a staffed engine. The framework provides the signal and the contract; the guild provides the implementation.
 
@@ -29,7 +29,7 @@ Every guild that accepts commissions must define an origination standing order i
 
 When `commission.posted` fires, the Clockworks runs the configured origination engine. The engine receives the commission payload and is expected to produce a rig seed — at minimum, a terminal need and an initial engine chain.
 
-The origination engine's output is the rig's starting point. The Walker takes over from there.
+The origination engine's output is the rig's starting point. The Spider takes over from there.
 
 ---
 
@@ -57,7 +57,7 @@ Whatever engine the guild configures for origination, it must honor this contrac
 }
 ```
 
-The engine may produce a minimal seed — a single engine, a single need — and trust the Walker to extend the rig as it runs. It does not need to plan the whole rig upfront.
+The engine may produce a minimal seed — a single engine, a single need — and trust the Spider to extend the rig as it runs. It does not need to plan the whole rig upfront.
 
 ---
 
@@ -146,13 +146,13 @@ Matches the patron's charge hint (or infers from commission text) against survey
 
 A staffed engine. A sage anima reads the commission, inspects the codex survey, considers the guild's installed kits, and produces a rig seed through judgment. Handles ambiguous commissions, novel charge types, and cases where the survey is incomplete or stale.
 
-The sage is not planning the whole rig — the Walker will extend it. The sage is determining the terminal need and the first meaningful engine chain. This is a bounded planning task, not open-ended reasoning.
+The sage is not planning the whole rig — the Spider will extend it. The sage is determining the terminal need and the first meaningful engine chain. This is a bounded planning task, not open-ended reasoning.
 
 **When to use:** Complex or ambiguous commissions, codices with low survey confidence, guilds that want explicit planning oversight on every commission.
 
 **Example commission:** *"The checkout flow is broken on mobile. Investigate and fix."*
 
-The sage reads this and recognizes it is ambiguous — investigation may reveal the fix is trivial or substantial. The sage seeds a rig with an investigation engine first, leaving the terminal need conditional on what the investigation finds. The Walker extends the rig after investigation completes.
+The sage reads this and recognizes it is ambiguous — investigation may reveal the fix is trivial or substantial. The sage seeds a rig with an investigation engine first, leaving the terminal need conditional on what the investigation finds. The Spider extends the rig after investigation completes.
 
 **Rig seed produced:**
 ```
@@ -161,7 +161,7 @@ The sage reads this and recognizes it is ambiguous — investigation may reveal 
 [conditional: terminal need determined by investigation output]
 ```
 
-The sage inscribes a note in the writ: *"Terminal need to be determined after investigation. Walker will extend rig based on findings."*
+The sage inscribes a note in the writ: *"Terminal need to be determined after investigation. Spider will extend rig based on findings."*
 
 **Standing order:**
 ```json
@@ -352,7 +352,7 @@ The dropdown reflects what the guild actually knows how to do for this codex. A 
 The surveying system introduces a continuous, guild-level concern that doesn't fit cleanly into any existing apparatus:
 
 - The **Clockworks** handles events — it can fire re-survey triggers, but doesn't own survey logic
-- The **Walker** handles rigs — survey management is not a rig concern
+- The **Spider** handles rigs — survey management is not a rig concern
 - The **Originator** (as standing order) handles single commissions — it consumes surveys but doesn't manage them
 
 Surveying is ongoing, proactive, not tied to any single commission or rig. It watches codices, maintains records, runs re-analysis, manages confidence decay. That profile — continuous, guild-level, codex-aware — matches the character of an apparatus.
@@ -371,7 +371,7 @@ The surveying system can be implemented entirely through standing orders and eng
 
 Define the **Surveyor** as a named apparatus. The standing-order-only approach works mechanically but leaves the surveying concern unnamed and therefore invisible — a guild operator has no single place to look when survey quality is degrading. The Surveyor gives the concern identity, makes it inspectable, and provides a natural home for kit-contributed survey engines.
 
-The Surveyor joins the Clockworks and Walker as a core apparatus — always running, codex-aware, predating any individual commission. Unlike the Originator (which was retired as an apparatus), the Surveyor has continuous work to do that justifies its status.
+The Surveyor joins the Clockworks and Spider as a core apparatus — always running, codex-aware, predating any individual commission. Unlike the Originator (which was retired as an apparatus), the Surveyor has continuous work to do that justifies its status.
 
 ---
 

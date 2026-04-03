@@ -372,11 +372,11 @@ The guild's operational fabric is composed of **apparatus** — named, persisten
 
 **Clockworks** — The guild's event-driven nervous system. Standing orders bind event patterns to relays, defining how the guild responds to things that happen. The Summon Relay is the built-in relay that dispatches anima sessions in response to standing order triggers, delegating to the Summoner to launch them.
 
-**Surveyor** — Maintains the guild's knowledge of its codexes — what kinds of work apply to each, and how each is fulfilled for that specific codex. The Walker depends on current survey data when seeding rigs; without the Surveyor, the guild cannot reliably turn a commission's words into a working rig.
+**Surveyor** — Maintains the guild's knowledge of its codexes — what kinds of work apply to each, and how each is fulfilled for that specific codex. The Spider depends on current survey data when seeding rigs; without the Surveyor, the guild cannot reliably turn a commission's words into a working rig.
 
 ### Obligation Layer
 
-**Clerk** — Owns the obligation layer: receives commissions, creates writs, and manages the writ state machine from intake through completion. Signals the Walker when a writ is ready for a rig; receives completion signals when a rig is struck. The Clerk tracks what is owed; the Walker handles what is being worked.
+**Clerk** — Owns the obligation layer: receives commissions, creates writs, and manages the writ state machine from intake through completion. Signals the Spider when a writ is ready for a rig; receives completion signals when a rig is struck. The Clerk tracks what is owed; the Spider handles what is being worked.
 
 ### Composition & Session
 
@@ -386,17 +386,17 @@ The guild's operational fabric is composed of **apparatus** — named, persisten
 
 ### Rig Execution
 
-**Formulary** — The guild's authoritative collection of engine design specifications, contributed by installed kits at startup. Answers the question "what engine chain can satisfy this declared need?" — returning the design chain for the Walker to mount onto the rig. Also consulted directly by planning animas (Sages) when introspecting guild capabilities during commission decomposition.
+**Formulary** — The guild's authoritative collection of engine design specifications, contributed by installed kits at startup. Answers the question "what engine chain can satisfy this declared need?" — returning the design chain for the Spider to mount onto the rig. Also consulted directly by planning animas (Sages) when introspecting guild capabilities during commission decomposition.
 
-**Walker** — Keeps all active rigs in motion. Traverses every active rig, identifies engines whose upstream work is complete, and dispatches them to the Executor. Spawns rigs when the Clerk signals a writ is ready, extends rigs using chains returned by the Formulary, and strikes completed rigs — signaling the Clerk when the obligation is fulfilled.
+**Spider** — Keeps all active rigs in motion. Traverses every active rig, identifies engines whose upstream work is complete, and dispatches them to the Executor. Spawns rigs when the Clerk signals a writ is ready, extends rigs using chains returned by the Formulary, and strikes completed rigs — signaling the Clerk when the obligation is fulfilled.
 
-**Executor** — Runs engine instances in whatever substrate the guild is configured for: in-process, Docker container, remote VM, or others. For clockwork engines, the Executor runs the engine code directly against its substrate. For quick (AI-backed) engines, it calls the Manifester to compose context and the Summoner to launch the session. The Walker calls the Executor for any ready engine without knowledge of the underlying substrate or engine kind.
+**Executor** — Runs engine instances in whatever substrate the guild is configured for: in-process, Docker container, remote VM, or others. For clockwork engines, the Executor runs the engine code directly against its substrate. For quick (AI-backed) engines, it calls the Manifester to compose context and the Summoner to launch the session. The Spider calls the Executor for any ready engine without knowledge of the underlying substrate or engine kind.
 
 ### Observability
 
 **Warden** — Aggregates health signals from all apparatus and exposes guild-wide operational status. Feeds the `nsg status` view and surfaces degraded apparatus before they cause commission failures. Optional — a guild operates without a Warden but loses unified health visibility.
 
-See [The Rigging System](rigging.md) for the detailed execution flow through Walker, Formulary, Executor, and their interactions with Clerk and Summoner.
+See [The Rigging System](rigging.md) for the detailed execution flow through Spider, Formulary, Executor, and their interactions with Clerk and Summoner.
 
 ---
 
