@@ -1,0 +1,62 @@
+# Quality Review: w-mni1acqg-88f5da5b5b04
+# Generated: 2026-04-02T22:38:24Z
+# Prompt version: v1
+# Mode: aware
+# Runs: 3 successful of 3 attempted
+
+commission: "w-mni1acqg-88f5da5b5b04"
+repo: "/workspace/vibers/.nexus/codexes/nexus.git"
+commit: "03d772580aebf7a4b519698b02ee2afd10d9f521"
+reviewed_at: "2026-04-02T22:38:24Z"
+prompt_version: "v1"
+mode: "aware"
+
+aggregate:
+  composite: 2.40
+  composite_sd: 0.00
+  n: 3
+  dimensions:
+    test_quality:
+      mean: 2.67
+      sd: 0.47
+    code_structure:
+      mean: 3.00
+      sd: 0.00
+    error_handling:
+      mean: 2.00
+      sd: 0.00
+    codebase_consistency:
+      mean: 2.33
+      sd: 0.47
+    requirement_coverage:
+      mean: 2.00
+      sd: 0.00
+
+runs:
+  - run: 1
+    test_quality: 3
+    code_structure: 3
+    error_handling: 2
+    codebase_consistency: 2
+    composite: 2.40
+    requirement_coverage: 2
+    notes: |
+      Tests are comprehensive — covering spawn, priority ordering, collect, clockwork execution, failure propagation, givens assembly, full pipeline, and null returns. Missing a dedicated yield serialization failure test (spec explicitly requested it). The `upstream` field changed from `string | null` to `string[]` and `givensSpec` is shared across all engines rather than per-engine as the spec defines (seal should have `givensSpec: {}`; implement/revise get `role`; review gets `role`, `buildCommand`, `testCommand`). The `WalkResult` type uses `type` discriminant instead of the spec's `action` field, and variant names differ (`ran`/`collected`/`launched`/`spawned` vs `engine-completed`/`engine-started`/`rig-spawned`/`rig-completed`). The `RigDoc.status` uses `'running'` instead of spec's `'active'`. The `buildUpstreamMap` collects all completed yields rather than walking the upstream chain as specified in `assembleGivensAndContext`. Code structure is clean with well-separated concerns matching the fabricator's patterns.
+  - run: 2
+    test_quality: 3
+    code_structure: 3
+    error_handling: 2
+    codebase_consistency: 2
+    composite: 2.40
+    requirement_coverage: 2
+    notes: |
+      Tests are thorough — covering spawn, priority ordering, collect/run/spawn phases, failure propagation, CDC-driven writ transitions, givens assembly, full stub pipeline, and idle returns. Good behavioral focus. Code structure is clean with well-decomposed helpers (`tryCollect`, `tryRun`, `trySpawn`, `buildUpstreamMap`, `findRunnableEngine`). Two notable gaps: the spec's `upstream` field is `string | null` (single parent) but the implementation uses `string[]` (array), and the spec's WalkResult uses `action` discriminant with values like `'engine-completed'`/`'rig-spawned'` while the implementation uses `type` with `'ran'`/`'spawned'`/`'collected'`. The `buildStaticEngines` gives all engines the same givensSpec (including writ for seal, which the spec says gets `givensSpec: {}`), diverging from the spec's per-engine givensSpec design. The `buildUpstreamMap` collects all completed upstream yields rather than walking the chain from the current engine as specified. The full pipeline test manually patches seal to completed rather than letting the Walker run seal via the stub engine, weakening end-to-end coverage. Error handling swallows the writ transition error in `trySpawn` silently.
+  - run: 3
+    test_quality: 2
+    code_structure: 3
+    error_handling: 2
+    codebase_consistency: 3
+    composite: 2.40
+    requirement_coverage: 2
+    notes: |
+      Tests cover the main behavioral contract well (spawn, run, collect, priority ordering, failure propagation, CDC writ transitions, idle returns null), but yield serialization validation is not directly tested — no test passes non-JSON-serializable yields to verify the failure path. The full pipeline test manually patches seal to completed rather than letting the Walker run it, side-stepping real end-to-end execution. Code structure is clean: well-decomposed helpers (`buildUpstreamMap`, `findRunnableEngine`, `buildStaticEngines`, `failEngine`), clear separation between collect/run/spawn phases, and the apparatus factory pattern matches the Fabricator's convention exactly. The `upstream` field on EngineInstance is `string[]` rather than the spec's `string | null`, and the `buildStaticEngines` gives all engines an identical givensSpec (including `role` on `seal`) rather than per-engine givensSpec as the spec defines — minor deviations from stated requirements. The WalkResult type uses `type` discriminant with different variant names (`collected`/`ran`/`launched`/`spawned`) versus the spec's `action` field with `engine-completed`/`engine-started`/`rig-spawned`/`rig-completed`, which is a notable divergence.
