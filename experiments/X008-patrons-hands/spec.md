@@ -90,20 +90,7 @@ The current per-commission review pattern (patron + Coco reviewing each output, 
 
 ---
 
-### H6 — The Bootstrap Imprint
-
-*Added 2026-04-03 based on session note patterns.*
-
-The codebase built during the bootstrap period carries characteristic patterns from having been built under interactive steering: architectural pivots mid-implementation, code shaped by Coco's capabilities and the conversational cadence, fast iteration without the verification discipline of autonomous dispatch. As autonomous agents work on the bootstrap codebase, they encounter friction points that reflect its origin — not necessarily bad code, but code with a different texture than agent-produced code.
-
-**If true:** Revisions and failures will cluster in modules built during the bootstrap period, particularly those built in high-velocity Coco sessions. The bootstrap imprint is measurable in the commission log over time.
-
-**If false:** The bootstrap codebase is not systematically harder for autonomous agents to work on. Any failures distribute across the codebase without correlation to origin.
-
----
-
-
-### H7 — The Mountain-to-Spec Path
+### H6 — The Mountain-to-Spec Path
 
 *Added 2026-04-03 based on patron target-state clarification.*
 
@@ -132,8 +119,7 @@ The ethnographer should probe this theme during regular interviews. Specific pro
 - *After autonomous agents are running:* "Are you harsher or more forgiving when you can't see the work happening?"
 - *For H4:* "Is there a category of work that used to trigger the anxiety signal that now feels routine to dispatch?"
 - *For H5:* "As the commission volume grows, is the review load getting heavier or is the infrastructure absorbing it? What would it take for per-commission review to feel unnecessary?"
-- *For H6:* "When you review a commission touching code from the early build period, does it feel different from code built more recently?"
-- *For H7:* "Walk me through how you wrote the last commission spec. How much of it was direction vs. detail work? What parts could the system have filled in without you?"
+- *For H6:* "Walk me through how you wrote the last commission spec. How much of it was direction vs. detail work? What parts could the system have filled in without you?"
 
 ### Secondary: Session Note Analysis
 
@@ -153,8 +139,7 @@ When autonomous agents come online, actively observe:
 - How long before async delivery feels normal?
 - *For H4:* Which task categories have crossed from "anxiety signal" to "routine dispatch"?
 - *For H5:* Is per-commission review declining as criteria propagate into the pipeline? Is self-auditing surfacing the right set of cases?
-- *For H6:* Do revisions and failures cluster in bootstrap-era modules?
-- *For H7:* Is the patron's spec authorship time declining? Are mountain-level inputs producing adequate specs without iteration?
+- *For H6:* Is the patron's spec authorship time declining? Are mountain-level inputs producing adequate specs without iteration?
 
 ## Closing Condition
 
@@ -199,4 +184,4 @@ X008 reaches its natural end when the transition has stabilized — specifically
 
 **H4 — fear-based heuristic still operating.** High-risk architectural work (engine collect callback, 11 files, 230 lines) continued to route through Coco as of April 3. The heuristic is intact; calibration against the new commission history has not yet visibly shifted it.
 
-**H7 — input side still iterative.** Spec authorship remains a patron + Coco collaborative process as of April 3. Coco drafts specs from design conversations, Sean reviews and dispatches. Mountain-level inputs do not yet reliably produce dispatch-ready specs without iteration. The target state (patron direction + system-generated spec, patron review limited to unknowns and preferences) is articulated but not yet tested.
+**H6 — input side still iterative.** Spec authorship remains a patron + Coco collaborative process as of April 3. Coco drafts specs from design conversations, Sean reviews and dispatches. Mountain-level inputs do not yet reliably produce dispatch-ready specs without iteration. The target state (patron direction + system-generated spec, patron review limited to unknowns and preferences) is articulated but not yet tested.

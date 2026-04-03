@@ -104,10 +104,6 @@ these questions selectively — pick what's relevant to what Sean has been worki
   Is that something that could be built into the system?
 - What would have to be true for a commission result to land without any Coco involvement in the review?
 
-**Bootstrap imprint (H6):**
-- When you review a commission touching code from the early build period, does it feel different
-  from code built more recently?
-
 **Earlier bootstrap period (if relevant historical context is needed):**
 - You've been working through Coco to get things built. What's that experience like?
 - When you directed Coco to do implementation, did you think about posting it as a commission instead?
@@ -161,7 +157,7 @@ Tag with relevant themes for later analysis:
 - engagement, frustration, vocabulary-adoption, boundary-discipline, agent-identity,
   metaphor-fit, metaphor-friction, comparison-to-mk2, bootstrap-gap, tight-loop,
   transition-to-autonomous, first-dispatch, commission-writing, seeing-vs-judging,
-  calibration-curve, criteria-internalization, bootstrap-imprint, mountain-to-spec,
+  calibration-curve, criteria-internalization, mountain-to-spec,
   input-side-autonomy, self-auditing, dispatch-heuristic, etc.
 ```
 
