@@ -20,7 +20,7 @@ When the guild boots, Arbor starts the Laboratory after The Stacks (its only dep
 | CDC Event | Action |
 |-----------|--------|
 | `create` | Creates `<commissionsDataDir>/<writ-id>/` directory. Writes `commission.md` (the writ body/prompt). Writes a `review.md` template for the patron. Appends a skeleton entry to the commission log with judgment fields as `null`. Auto-commits. |
-| `update` → `completed` or `failed` | Fires `bin/quality-review-full.sh` as a detached child process (fire-and-forget). The script auto-detects commits from git log and writes `quality-blind.yaml` and `quality-aware.yaml` to the commission data directory. |
+| `update` → `completed` or `failed` | Fires `bin/instrument-review.sh` as a detached child process (fire-and-forget). The script runs the instrument suite (quality scorers + integration scorer) and writes results to `instruments/` subdirectories. |
 | `update` → `active` or `cancelled` | No action — these transitions are observable in the Stacks if needed later. |
 
 ### Watcher 2: Sessions (`animator` → `sessions` book)
@@ -42,8 +42,16 @@ experiments/data/commissions/<writ-id>/
   review.md                  # Patron review template — written by Laboratory
   sessions/                  # Per-session records — written by Laboratory
     <session-id>.yaml        #   Start, end, duration, cost, tokens
-  quality-blind.yaml         # Written by quality-review script (triggered by Laboratory)
-  quality-aware.yaml         # Written by quality-review script (triggered by Laboratory)
+  instruments/               # Written by instrument-review.sh (triggered by Laboratory)
+    spec-blind-quality-scorer/
+      result.yaml
+      context/
+    spec-aware-quality-scorer/
+      result.yaml
+      context/
+    codebase-integration-scorer/
+      result.yaml
+      context/
 ```
 
 ### Commission Log
@@ -76,9 +84,9 @@ Commits are best-effort — if a commit fails (merge conflict, dirty index), the
 
 ### Quality Assessment
 
-When a writ reaches `completed` or `failed`, the Laboratory shells out to `bin/quality-review-full.sh`. This is fire-and-forget — the review runs 6 parallel API calls and takes minutes. The Laboratory does not wait for or process the results.
+When a writ reaches `completed` or `failed`, the Laboratory shells out to `bin/instrument-review.sh`. This is fire-and-forget — the review runs the full instrument suite (spec-blind quality scorer, spec-aware quality scorer, and codebase integration scorer) in sequence. Each instrument runs multiple parallel LLM calls internally. The Laboratory does not wait for or process the results.
 
-The script resolves the codex repo via the guild's bare clone at `.nexus/codexes/<codex>.git` and uses `commission.md` as the spec file for aware-mode review.
+The script resolves the codex repo via the guild's bare clone at `.nexus/codexes/<codex>.git` and uses `commission.md` as the spec file for spec-aware and integration scoring.
 
 ## Configuration
 
@@ -127,7 +135,7 @@ src/
   laboratory.ts         Config resolution, CDC handler registration, event routing
   yaml-writer.ts        Commission log append, commission.md, review.md template,
                         session record YAML
-  quality-trigger.ts    Shell out to quality-review-full.sh (fire-and-forget)
+  quality-trigger.ts    Shell out to instrument-review.sh (fire-and-forget)
   git.ts                Best-effort auto-commit to sanctum repo
   laboratory.test.ts    Config resolution tests
   yaml-writer.test.ts   Commission log, commission.md, review.md, session record tests

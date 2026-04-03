@@ -29,11 +29,7 @@ export function triggerQualityReview(
   guildHome: string,
   writ: WritLike,
 ): void {
-  const reviewScript = path.join(config.sanctumHome, 'bin', 'instrument-review.sh');
-
-  // Fall back to legacy script name for backward compatibility
-  const legacyScript = path.join(config.sanctumHome, 'bin', 'quality-review-v2.sh');
-  const scriptPath = fs.existsSync(reviewScript) ? reviewScript : legacyScript;
+  const scriptPath = path.join(config.sanctumHome, 'bin', 'instrument-review.sh');
 
   if (!fs.existsSync(scriptPath)) {
     // Script not present — silently skip

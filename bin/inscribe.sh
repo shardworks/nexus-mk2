@@ -27,7 +27,7 @@
 #   Phase 3 — Dispatch: dispatch-next via the Dispatch apparatus
 #             (accept writ → open draft → summon → seal → push → complete/fail)
 #   Phase 4 — Record: pull session.json, scaffold commission-log entry
-#   Phase 5 — Score: run quality-review-full.sh (unless --no-score)
+#   Phase 5 — Score: run instrument-review.sh (unless --no-score)
 #
 # Scoring:
 #   Quality scoring uses the guild's bare clone for the codex, so no
@@ -381,7 +381,7 @@ if $SCORE; then
     log "Warning: no new commits detected — skipping quality scoring"
   else
     log "Running quality scoring..."
-    if "$SCRIPT_DIR/quality-review-full.sh" \
+    if "$SCRIPT_DIR/instrument-review.sh" \
         --commission "$WRIT_ID" \
         --repo "$BARE_CLONE" \
         --spec-file "$COMMISSION_DIR/commission.md" \
