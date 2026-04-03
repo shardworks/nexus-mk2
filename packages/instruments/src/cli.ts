@@ -139,7 +139,7 @@ async function main(): Promise<void> {
 
   // Save context for reproducibility (before execution, in case it fails)
   writeContext(outputDir, config, systemPrompt, userMessage, inputs);
-  console.log(`  Context saved to: ${outputDir}/quality-context/`);
+  console.log(`  Context saved to: ${outputDir}/instruments/${config.name}/context/`);
 
   if (dryRun) {
     console.log('');

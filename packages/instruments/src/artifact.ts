@@ -50,10 +50,14 @@ export function writeArtifact(
     ...run.qualitative,
   }));
 
-  const artifactPath = join(outputDir, `quality-${config.name}.yaml`);
+  // Output to instruments/{name}/result.yaml
+  const instrumentDir = join(outputDir, 'instruments', config.name);
+  mkdirSync(instrumentDir, { recursive: true });
+
+  const artifactPath = join(instrumentDir, 'result.yaml');
   const header = [
-    `# Quality Review: ${result.params.commission ?? 'unknown'}`,
     `# Instrument: ${config.name} ${config.version}`,
+    `# Commission: ${result.params.commission ?? 'unknown'}`,
     `# Generated: ${result.reviewed_at}`,
     `# Runs: ${result.aggregate.n} successful of ${config.execution.runs} attempted`,
     '',
@@ -73,11 +77,12 @@ export function writeContext(
   userMessage: string,
   extractedInputs: Record<string, string>,
 ): void {
-  const contextDir = join(outputDir, 'quality-context');
+  // Output to instruments/{name}/context/
+  const contextDir = join(outputDir, 'instruments', config.name, 'context');
   mkdirSync(contextDir, { recursive: true });
 
-  writeFileSync(join(contextDir, `system-prompt-${config.name}.md`), systemPrompt);
-  writeFileSync(join(contextDir, `user-message-${config.name}.md`), userMessage);
+  writeFileSync(join(contextDir, 'system-prompt.md'), systemPrompt);
+  writeFileSync(join(contextDir, 'user-message.md'), userMessage);
 
   // Save each extracted input separately
   for (const [name, value] of Object.entries(extractedInputs)) {
