@@ -136,6 +136,31 @@ or hold spec constant when comparing agents.*
 
 ## Data Collection
 
+### Data Architecture
+
+Commission data is split across two tiers, optimized for different
+access patterns:
+
+1. **Commission log** (`experiments/data/commission-log.yaml`) — a lean,
+   human-navigable YAML file containing patron-subjective judgments and
+   dispatch metadata. This is the primary instrument for browsing,
+   annotating, and discussing commissions interactively.
+
+2. **Per-commission artifacts** (`experiments/data/commissions/<id>/`) —
+   the full evidentiary record: session telemetry, quality scorer output,
+   commission body, dispatch log, review notes, and scoring context.
+   These are the source of truth for objective/automated data.
+
+The unified analytical dataset is assembled on demand by joining the
+commission log with per-commission artifacts. The log's `id` field is
+the join key to the per-commission folder name. See the
+[commissions README](../data/commissions/README.md) for the artifact
+schema and join documentation.
+
+This separation is deliberate: the commission log stays small enough
+for a human or agent to read end-to-end, while the full data richness
+is available for analysis without cluttering the navigable instrument.
+
 ### Commission Log (Standing Research Instrument)
 
 The commission log lives at `experiments/data/commission-log.yaml`.
@@ -153,23 +178,17 @@ producing artificial correlation.
 
 #### At Dispatch
 
-Fields marked `auto` are populated by a guild engine when a patron writ
+Fields marked `auto` are populated by `inscribe.sh` when a commission
 is posted. Fields marked `patron` must be filled in by Sean at dispatch
-time — this is the contamination-safe window. Fields marked `anima` are
-populated by the spec scorer if commissioned; they are not subject to
-the timing problem and can be backfilled on older entries.
+time — this is the contamination-safe window.
 
 | Field | Source | Values | Notes |
 |---|---|---|---|
-| `writ_id` | auto | string | from engine stub |
-| `date_posted` | auto | timestamp | from engine stub |
-| `title` | auto | string | from engine stub |
-| `anima` | auto | name | from engine stub |
+| `id` | auto | string | writ ID from Clerk |
+| `title` | auto | string | extracted from commission body |
+| `codex` | auto | string | target codex name |
 | `complexity` | patron | 1 / 2 / 3 / 5 / 8 / 13 / 21 | **rate now, before outcome is known** |
 | `spec_quality_pre` | patron | strong / adequate / weak | **rate now, before outcome is known** |
-| `spec_note` | patron | string | optional; one line on what the spec covers or lacks |
-| `spec_quality_anima` | anima | strong / adequate / weak | auto-populated if spec scorer is active |
-| `complexity_anima` | anima | 1 / 2 / 3 / 5 / 8 / 13 / 21 | auto-populated if spec scorer is active |
 
 **Complexity (Fibonacci scale — patron self-assessment):**
 
@@ -178,9 +197,6 @@ Use Scrum story point intuition. Rough anchors:
 - *3–5* — multiple touch points, moderate cross-system interaction
 - *8–13* — core lifecycle, dispatch logic, event chains, or broad behavioral changes
 - *21* — system-wide; touches core abstractions with broad downstream effects
-
-The spec scorer anima uses the same scale, enabling direct comparison
-between patron and anima estimates. Consistent divergence is itself a signal.
 
 **Spec quality criteria (at dispatch — mountain-spec adequacy):**
 
@@ -197,33 +213,18 @@ nothing about the codebase is a well-formed spec.
 - *Weak* — unclear what success looks like, ambiguous scope, or
   missing key context
 
-Spec quality scoring has three intended sources that will develop
-progressively: patron self-assessment (this field), spec scorer anima
-(see Depends On), and automated text heuristics if suitable ones can
-be identified. When multiple signals are available, agreement increases
-confidence; divergence is data.
-
 #### At Outcome Review
 
-Fields marked `system` are populated from the writ record and become
-automated as system infrastructure builds out (see Progressive
-Automation). Fields marked `patron` are filled in by Sean at review
-time. The field exists in the log regardless of how it is populated —
-manually or automatically.
+All fields are filled in by Sean at review time.
 
 | Field | Source | Values | Notes |
 |---|---|---|---|
-| `writ_status` | system | completed / failed / abandoned | read from writ record |
-| `token_cost` | system | integer | read from writ record |
-| `outcome` | system | success / partial / wrong / abandoned | read from `patronAssessment` on writ; see Progressive Automation |
-| `revision_required` | system | boolean | computed from inbound `revises` writ relationship; see Progressive Automation |
+| `outcome` | patron | success / partial / wrong / abandoned | patron assessment of the commission result |
+| `revision_required` | patron | boolean | whether follow-up work was needed |
 | `spec_quality_post` | patron | strong / adequate / weak | retrospective — record separately from `spec_quality_pre`; divergence is data |
-| `failure_mode` | patron | spec_ambiguous / requirement_wrong / execution_error / complexity_overrun | optional; best guess at root cause |
-| `notes` | patron | string | optional; what failed, what surprised |
+| `failure_mode` | patron | spec_ambiguous / requirement_wrong / execution_error / complexity_overrun / broken / incomplete | optional; best guess at root cause |
 | `reviewed_by_ethnographer` | ethnographer | boolean | mark after ethnographer has probed this case |
-| `code_quality_agent` | quality scorer | 1.0–3.0 | composite score from autonomous reviewer; see Quality Scorer |
-| `code_quality_variance` | quality scorer | float | SD of composite across runs; high = ambiguous quality |
-| `code_quality_n` | quality scorer | integer | number of review runs |
+| `note` | patron | string | optional; meta info about the record itself |
 
 **Outcome criteria:**
 - *Success* — did what was asked, shippable with minimal or no fixes
@@ -231,54 +232,43 @@ manually or automatically.
 - *Wrong* — completed but missed the point; required rework or redo
 - *Abandoned* — never executed, got stuck, or was cancelled
 
-### Progressive Automation
+### Per-Commission Artifacts (Objective Data)
 
-The commission log starts as a mostly-manual artifact and becomes
-progressively automated as system infrastructure builds out. The data
-model is designed to accommodate both states — fields exist in the log
-regardless of whether they are populated manually or by the system.
+Objective and automated data lives in per-commission artifact folders
+rather than the commission log. This keeps the log lean while
+preserving full data richness for analysis. Key artifacts:
 
-**Phase 1 — Manual (now)**
+| Artifact | Source | Content |
+|---|---|---|
+| `sessions/*.yaml` | The Laboratory (auto) | Session telemetry: cost, duration, token usage, timing |
+| `quality-blind.yaml` | Quality scorer (auto) | Code quality scores without spec context |
+| `quality-aware.yaml` | Quality scorer (auto) | Code quality scores with spec and requirement coverage |
+| `commission.md` | `inscribe.sh` (auto) | The writ body as dispatched |
+| `dispatch.log` | `inscribe.sh` (auto) | Timestamped dispatch lifecycle log |
+| `review.md` | Patron (manual) | Patron review notes and scorer summary |
+| `quality-context/` | Quality scorer (auto) | Diff, changed files, context — makes scoring reproducible |
 
-The guild engine auto-stubs an entry (writ_id, date_posted, title,
-anima) when a patron commission is posted. Sean fills in `complexity`
-and `spec_quality_pre` at dispatch. At outcome review, Sean fills in
-`outcome`, `revision_required`, `spec_quality_post`, and optionally
-`failure_mode` and `notes`.
+The quality scorer runs post-commission as part of `inscribe.sh`
+(Phase 5). It is independent of patron assessment and not subject to
+timing contamination. See the Quality Scorer section below.
 
-**Phase 2 — Partial automation (after writ relationships + patron assessment ship)**
+Session telemetry provides `cost_usd`, `duration_ms`, and token
+breakdowns. These are available for analysis via the per-commission
+artifacts without needing to be duplicated in the log.
 
-- `outcome` becomes system-populated: patron calls `assess-writ <id>
-  --outcome <value>` rather than editing the YAML directly. The
-  commission log engine reads `patronAssessment` from the writ record.
-- `revision_required` becomes computed: patron calls `link-writ <newId>
-  <originalId> --type revises` when dispatching a fix. The commission
-  log engine checks for inbound `revises` relationships rather than
-  relying on a manual boolean.
+The patron's manual dispatch-time annotation (`complexity`,
+`spec_quality_pre`) remains the primary experimental input — it
+captures Sean's subjective assessment at the moment of dispatch, which
+is itself a data point. Automated data supplements and validates it;
+it does not replace it.
 
-Phase 2 eliminates the two most friction-prone manual steps at outcome
-review and ensures `revision_required` is structurally reliable.
+### Future Automation
 
-**Phase 3 — Code quality scoring (operational now)**
-
-- `code_quality_agent`, `code_quality_variance`, and `code_quality_n`
-  are populated by the autonomous quality scorer
-  (`bin/quality-review.sh`). Runs post-commission, after seal and
-  before patron review. Independent of patron assessment and not
-  subject to timing contamination. Backfillable on existing entries.
-
-**Phase 4 — Parallel signals (after spec scorer ships)**
-
-- `spec_quality_anima` and `complexity_anima` are auto-populated by the
-  spec scorer anima running against the commission spec text. These
-  provide an independent, objective signal not subject to the pre/post
-  timing problem. They can also be backfilled on existing log entries.
-
-Across phases, the patron's manual dispatch-time annotation
-(`complexity`, `spec_quality_pre`) remains the primary experimental
-input — it captures Sean's subjective assessment at the moment of
-dispatch, which is itself a data point. Automation supplements and
-validates it; it does not replace it.
+**Spec scorer anima** — reads commission spec text and produces
+structured quality and complexity scores using the same criteria and
+Fibonacci scale as patron self-assessment. Independent of timing
+contamination; backfillable. Output would land in per-commission
+artifacts alongside quality scorer output. See Depends On — Future.
 
 ### Ethnographer Access and Interview Practice
 
@@ -322,8 +312,9 @@ claim about requirement fulfillment. The quality scorer closes this
 gap.
 
 **Instrument design:** See
-`instruments/anima-quality-scorer/proposal.md` for full motivation
-and design rationale. Key properties:
+`instruments/anima-quality-scorer/proposal.md` (relative to X013
+experiment directory) for full motivation and design rationale.
+Key properties:
 
 - **Four dimensions, 3-point scale:** test quality, code structure,
   error handling, codebase consistency. Composite score 1.0–3.0.
@@ -348,11 +339,8 @@ and design rationale. Key properties:
 
 - `bin/quality-review.sh` — run a single-mode review (blind or aware)
 - `bin/quality-review-full.sh` — run both modes in parallel
-- Artifacts land at `artifacts/reviews/quality/<commission-id>/`
-
-**Commission log fields:** `code_quality_agent` (composite),
-`code_quality_variance` (SD), `code_quality_n` (run count). Per-
-dimension detail lives in the review artifact, not the log.
+- Artifacts land in per-commission folders: `quality-blind.yaml`,
+  `quality-aware.yaml`, and `quality-context/`
 
 ### Revision Rate Tracking
 
@@ -381,46 +369,41 @@ points are not.
 
 ### Required (experiment cannot start without these)
 
-- **Commission log file** — create `experiments/data/commission-log.yaml`
-  as a standing instrument; update ethnographer instructions to read it
-  at session startup; update Coco instructions to scan for unfilled
-  dispatch-time entries and prompt Sean to fill them at session start.
-- **Guild engine: commission log stub** — engine that creates a partial
-  commission log entry (writ_id, date_posted, title, anima) for each
-  patron-sourced commission when posted. Sean completes the dispatch-time
-  fields; remaining fields accumulate as the commission progresses.
+- **Commission log file** — `experiments/data/commission-log.yaml`,
+  a standing instrument. Coco scans for unfilled dispatch-time entries
+  and prompts Sean to fill them at session start.
+- **Dispatch pipeline** — `inscribe.sh` orchestrates the full cycle:
+  post → dispatch → capture session record → scaffold log entry →
+  quality scoring. Auto-populates per-commission artifacts.
 - Minimum ~10 commissions for initial pattern analysis; ~30 for
   meaningful regression.
 
-### Commissioned (ship to enable automated data flow)
-
-- **Writ relationships** — typed directed relationships between writs
-  (`revises`, `blocks`, `depends-on`). Enables `revision_required` to
-  be computed from the writ graph and enables richer revision rate
-  analysis. See commission spec.
-- **Patron assessment** — `patronAssessment` field on writ record,
-  populated via `assess-writ` tool. Enables `outcome` to be
-  system-populated rather than manually entered in the log. See
-  commission spec.
-
-### Operational (built, ready to run)
+### Operational (built, running)
 
 - **Quality scorer** — autonomous code quality reviewer. Rubric,
   prompts, and runner script at
-  `instruments/anima-quality-scorer/`. Produces `code_quality_agent`
-  field for the commission log. Strengthens H1 by providing a code
-  quality signal independent of requirement satisfaction. See
+  `experiments/X013-commission-outcomes/instruments/anima-quality-scorer/`.
+  Output lands in per-commission artifacts (`quality-blind.yaml`,
+  `quality-aware.yaml`). Strengthens H1 by providing a code quality
+  signal independent of requirement satisfaction. See
   Data Collection — Quality Scorer.
+- **Session telemetry** — The Laboratory auto-generates session YAML
+  with cost, duration, and token usage. Lands in per-commission
+  `sessions/` directory.
 
-### Potential (would strengthen the experiment; not required)
+### Future (would strengthen the experiment; not required)
 
 - **Spec scorer anima** — reads commission spec text and produces
   structured quality and complexity scores using the same criteria and
   Fibonacci scale as patron self-assessment. Independent of timing
-  contamination; backfillable. If calibrated against empirical outcomes,
-  could eventually be used to automatically flag or reject deficient
-  specs before dispatch. Commission after the data model is stable —
-  patron assessment should ship first.
+  contamination; backfillable. Output would land in per-commission
+  artifacts. See Future Automation in Data Collection.
+- **Writ relationships** — typed directed relationships between writs
+  (`revises`, `blocks`, `depends-on`). Would enable `revision_required`
+  to be computed from the writ graph rather than a manual boolean, and
+  richer revision rate analysis (fix-of-fix chains, remediation volume).
+- **Patron assessment tool** — `assess-writ` CLI command to record
+  outcome on the writ record directly, reducing manual log editing.
 
 ## Risks
 
@@ -448,12 +431,8 @@ points are not.
   as hypotheses to revisit as N grows.
 
 - **Scope creep.** This experiment generates data that could answer
-  many questions. Keep analysis focused on the four hypotheses. Two
-  additions beyond the original scope have specific purposes:
-  `failure_mode` (fourth failure cause in H4) and
-  `code_quality_agent` (strengthens H1 by measuring code quality
-  independent of requirement satisfaction). Resist adding further
-  fields without a hypothesis to test.
+  many questions. Keep analysis focused on the four hypotheses. Resist
+  adding new data collection without a hypothesis to test.
 
 ## Future Work
 
