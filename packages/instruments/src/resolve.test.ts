@@ -31,13 +31,13 @@ describe('resolveInstrumentDir', () => {
     assert.equal(result, join(INSTRUMENTS_ROOT, 'spec-blind-quality-scorer/v1'));
   });
 
-  it('auto-selects single version', () => {
+  it('auto-selects latest version when multiple exist', () => {
     const result = resolveInstrumentDir({
       instrumentRoot: INSTRUMENTS_ROOT,
       instrumentName: 'spec-blind-quality-scorer',
-      // no version — should auto-select v1 (the only one)
+      // no version — should auto-select v2 (latest)
     });
-    assert.equal(result, join(INSTRUMENTS_ROOT, 'spec-blind-quality-scorer/v1'));
+    assert.equal(result, join(INSTRUMENTS_ROOT, 'spec-blind-quality-scorer/v2'));
   });
 
   it('throws on unknown instrument name', () => {

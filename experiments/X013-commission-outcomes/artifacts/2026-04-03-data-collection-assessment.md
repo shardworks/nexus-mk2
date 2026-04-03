@@ -94,7 +94,7 @@ which is informative rather than problematic.
 Poorly anchored intermediate levels could introduce noise rather than
 signal.
 
-**Disposition:** pending
+**Disposition:** accepted — implemented as v2
 
 ---
 
@@ -374,7 +374,7 @@ for all completed commissions.
 
 | ID | Change | Instrument | Status |
 |---|---|---|---|
-| QS-1 | Expand to 5-point scale | Quality scorer | pending |
+| QS-1 | Expand to 5-point scale | Quality scorer | accepted |
 | QS-2 | Add structured concern list | Quality scorer | pending |
 | QS-3 | Replace saturated dimensions | Quality scorer | deferred |
 | QS-4 | Version as v2 | Quality scorer | accepted |

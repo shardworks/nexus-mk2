@@ -1,0 +1,45 @@
+name: spec-aware-quality-scorer
+version: v2
+
+execution:
+  model: claude-opus-4-6
+  effort: medium
+  max_turns: 1
+  tools: disabled
+  runs: 3
+  min_successful_runs: 2
+
+parameters:
+  commission:  { required: true, description: "Commission/writ ID" }
+  repo:        { required: true, description: "Path to git repo" }
+  spec_file:   { required: true, description: "Path to commission spec file" }
+  base_commit: { required: false, description: "Override: start of commit range" }
+  commit:      { required: false, description: "Override: end of commit range" }
+
+setup: extractors/resolve-commits.sh
+
+inputs:
+  SPEC:              { extractor: extractors/spec.sh }
+  REFERENCED_FILES:  { extractor: extractors/referenced-files.sh, optional: true }
+  DIFF:              { extractor: extractors/diff.sh }
+  FULL_FILES:        { extractor: extractors/full-files.sh }
+  CONTEXT_FILES:     { extractor: extractors/context-files.sh }
+  FILE_TREE:         { extractor: extractors/file-tree.sh }
+
+prompts:
+  system: prompts/system.md
+  user: prompts/user.md
+
+output:
+  format: yaml
+  dimensions:
+    - { name: test_quality,         type: integer, range: [1, 5] }
+    - { name: code_structure,       type: integer, range: [1, 5] }
+    - { name: error_handling,       type: integer, range: [1, 5] }
+    - { name: codebase_consistency, type: integer, range: [1, 5] }
+    - { name: requirement_coverage, type: integer, range: [1, 5] }
+  qualitative:
+    - { name: notes, type: block_scalar }
+  composite:
+    method: mean
+    dimensions: all

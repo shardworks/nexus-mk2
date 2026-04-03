@@ -6,7 +6,7 @@
  *   2. Name + version: --instrument-name foo --instrument-version v1
  *      resolves to {root}/foo/v1
  *   3. Name only: --instrument-name foo
- *      auto-selects version if exactly one exists; errors if multiple
+ *      auto-selects the latest version (last in sorted order)
  *
  * The instrument root defaults to experiments/instruments/ relative
  * to the project root, overridable via --instrument-root.
@@ -77,21 +77,15 @@ export function resolveInstrumentDir(opts: ResolveOptions): string {
     return versionDir;
   }
 
-  // Strategy 3: auto-select version
+  // Strategy 3: auto-select latest version (last in sorted order)
   const versions = listVersions(instrumentDir);
   if (versions.length === 0) {
     throw new Error(
       `No versions found for instrument '${opts.instrumentName}' in ${instrumentDir}`,
     );
   }
-  if (versions.length > 1) {
-    throw new Error(
-      `Multiple versions found for '${opts.instrumentName}': ${versions.join(', ')}\n` +
-        `Specify one with --instrument-version`,
-    );
-  }
 
-  return join(instrumentDir, versions[0]);
+  return join(instrumentDir, versions[versions.length - 1]);
 }
 
 /**
