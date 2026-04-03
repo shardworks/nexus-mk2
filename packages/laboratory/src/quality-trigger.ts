@@ -2,7 +2,8 @@
  * Quality assessment trigger.
  *
  * When a writ reaches a terminal state (completed or failed), fire off
- * the quality review script. This is fire-and-forget — the review takes
+ * the quality review wrapper (quality-review-v2.sh), which delegates to
+ * the generic instrument runner. Fire-and-forget — the review takes
  * minutes (6 parallel API calls) and writes its own artifacts.
  */
 
@@ -14,9 +15,9 @@ import type { ResolvedConfig, WritLike } from './types.ts';
 /**
  * Trigger quality assessment for a completed/failed writ.
  *
- * Shells out to bin/quality-review-full.sh. Fire-and-forget — we don't
- * await the result. The script writes quality-blind.yaml and
- * quality-aware.yaml directly to the commission data directory.
+ * Shells out to bin/quality-review-v2.sh, which runs the spec-blind
+ * and spec-aware quality scorer instruments via the generic runner.
+ * Fire-and-forget — we don't await the result.
  *
  * @param config - Resolved Laboratory config
  * @param guildHome - Absolute path to the guild root
@@ -27,7 +28,7 @@ export function triggerQualityReview(
   guildHome: string,
   writ: WritLike,
 ): void {
-  const reviewScript = path.join(config.sanctumHome, 'bin', 'quality-review-full.sh');
+  const reviewScript = path.join(config.sanctumHome, 'bin', 'quality-review-v2.sh');
 
   if (!fs.existsSync(reviewScript)) {
     // Script not present — silently skip
@@ -46,10 +47,11 @@ export function triggerQualityReview(
   if (!fs.existsSync(bareClone)) return; // No bare clone — can't run
 
   // Build arguments
+  const outputDir = path.join(config.commissionsDataDir, writ.id);
   const args: string[] = [
     '--commission', writ.id,
     '--repo', bareClone,
-    '--output-dir', config.commissionsDataDir,
+    '--output-dir', outputDir,
   ];
 
   if (hasSpec) {
