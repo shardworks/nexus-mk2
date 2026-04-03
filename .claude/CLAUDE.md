@@ -40,7 +40,7 @@ nexus-mk2/  (the sanctum)
 ## Related Repositories
 
 - **`/workspace/nexus/`** — the framework source code (TypeScript packages, published to npm)
-- **`/workspace/shardworks/`** — the live guild workspace where animas operate
+- **`/workspace/vibers/`** — the live guild workspace where animas operate
 
 ## Key Concepts
 
