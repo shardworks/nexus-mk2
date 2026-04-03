@@ -24,12 +24,8 @@ Tracked limitations and missing features in the Nexus framework.
 
 **Workaround:** `inscribe.sh` appends a commit instruction to every writ body automatically.
 
-## MCP server module not yet wired into session lifecycle
+## ~~MCP server module not yet wired into session lifecycle~~ ✅ RESOLVED
 
 **Added:** 2026-04-01
-**Updated:** 2026-04-01 — modernized API and exported from barrel
-**Context:** `packages/plugins/claude-code/src/mcp-server.ts` has been modernized: `createMcpServer()` now accepts `ToolDefinition[]` directly (no more module-path-based loading), the legacy `ToolSpec`/`McpServerConfig`/`loadTool`/`resolveToolFromExport` code has been removed, `startMcpServer()` is the new process entry point that boots a guild and resolves tools via the Instrumentarium, and `createMcpServer` is exported from the barrel.
-
-**Impact:** The MCP server module is functional and tested, but not yet wired into the session lifecycle. The claude-code provider's `prepareSession()` does not write `--mcp-config` arguments. Tool-equipped sessions require additional plumbing in The Animator (Instrumentarium integration), The Loom (permission resolution), and the provider (MCP config generation).
-
-**What's needed:** See `.scratch/tool-integration-progress.md` for the phased integration plan. Remaining work: Animator gains tool resolution (Phase 2), provider writes `--mcp-config` (Phase 3), Loom resolves permissions from roles (Phase 4).
+**Resolved:** 2026-04-03
+**Resolution:** The full pipeline is now wired end-to-end. The Loom resolves role → permissions → tools via the Instrumentarium. The Animator passes resolved tools through to the session provider. The claude-code provider starts an in-process MCP HTTP server (`startMcpHttpServer()`), writes `--mcp-config` + `--strict-mcp-config`, and tears it down after the session exits. One MCP server per session, SSE transport on ephemeral localhost port.
