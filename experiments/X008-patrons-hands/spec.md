@@ -64,11 +64,15 @@ This review layer is a transitional state, not the target. The goal is criteria 
 
 *Added 2026-04-03 based on H1 data.*
 
-Dispatch confidence follows a learning curve rather than a step function. The fear-based heuristic that emerged from the bootstrap period updates incrementally with each successful commission in a given task category, eventually reaching a threshold where that category stops triggering the anxiety signal and autonomous dispatch becomes routine.
+Dispatch confidence follows a learning curve rather than a step function. The fear-based heuristic that emerged from the bootstrap period updates incrementally with successful commissions — but the mechanism of that updating is itself an open question with meaningfully different implications:
 
-**If true:** The most useful investment is breadth of commission types — getting a success record in each major risk category (framework changes, cross-cutting refactors, architectural additions) — rather than additional successes in already-familiar categories. A calibration log (tracking which categories have crossed the threshold) would be a useful instrument.
+**Category-specific updating:** Anxiety is partitioned by task type. Successes in framework changes reduce anxiety for framework changes; successes in refactors reduce anxiety for refactors. Each category needs its own evidence base before the heuristic loosens for that category. If this is the mechanism, breadth matters: the most useful investment is a success record across the major risk categories, not just volume in familiar territory.
 
-**If false:** The heuristic doesn't update meaningfully with evidence; fear-based avoidance persists even after repeated successful autonomous work. In that case, the organizing principle is temperament, not calibration.
+**Global updating:** Anxiety is a universal setting, not partitioned. Any successful commission — regardless of category — contributes to an overall confidence level that lowers the anxiety floor across all categories. If this is the mechanism, volume matters more than breadth: accumulating wins in any area (including easy, familiar ones) loosens the heuristic everywhere.
+
+**Neither:** The heuristic doesn't update meaningfully with evidence. Fear-based avoidance persists even after repeated successful autonomous work. In that case, the organizing principle is temperament or structural distrust, not calibration — and the path to change is architectural (better failure recovery, lower blast radius) rather than experiential.
+
+*What to watch for:* After a run of successes in one category, does the patron's dispatch confidence shift for that category specifically, for adjacent categories, or broadly? Does he start commissioning work he would previously have held back — and is the released work similar to what succeeded, or different?
 
 ---
 
