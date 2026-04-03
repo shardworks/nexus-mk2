@@ -1,0 +1,92 @@
+# Instrument Definition — Anima Quality Scorer v1
+#
+# This file is the authoritative record of what "v1" means as a
+# scoring configuration. Per-commission output artifacts reference
+# this version; the full definition lives here.
+#
+# Created retroactively on 2026-04-03 to document parameters that
+# were in effect for all v1 scoring runs (first run: 2026-04-02).
+
+version: v1
+
+# ── Model & Inference ────────────────────────────────────────
+#
+# v1 did not explicitly pin model or effort — it used CLI defaults.
+# These are the defaults that were in effect during the v1 period.
+
+model: claude-opus-4-6          # CLI default; not passed via --model
+effort: medium                   # CLI default for Opus 4.6; not passed via --effort
+temperature: unknown             # Claude Code CLI does not expose temperature;
+                                 # API default applies (not controllable)
+
+# ── Scoring Parameters ───────────────────────────────────────
+
+scale: 3                         # 1 (Weak), 2 (Adequate), 3 (Strong)
+runs: 3                          # independent scoring runs per review
+min_successful_runs: 2           # minimum runs required for valid aggregate
+composite: mean                  # composite = arithmetic mean of dimensions
+
+# ── Dimensions ───────────────────────────────────────────────
+
+dimensions:
+  blind:
+    - test_quality
+    - code_structure
+    - error_handling
+    - codebase_consistency
+  aware:
+    - test_quality
+    - code_structure
+    - error_handling
+    - codebase_consistency
+    - requirement_coverage       # aware mode adds spec-based coverage
+
+# ── Prompts ──────────────────────────────────────────────────
+
+prompts:
+  system_blind: system-prompt-blind.md
+  system_aware: system-prompt-aware.md
+  user_blind: user-template-blind.md
+  user_aware: user-template-aware.md
+
+# ── Execution Environment ────────────────────────────────────
+#
+# The scorer runs as a pure text-in/text-out instrument with no
+# access to the filesystem, tools, or project configuration.
+
+execution:
+  cli: claude --print
+  max_turns: 1
+  tools: disabled                # --tools "" --disallowed-tools "Bash,Read,Write,Edit,Glob,Grep"
+  setting_sources: user          # no project CLAUDE.md; --setting-sources user
+  working_directory: empty_tmpdir
+  output_format: text
+
+# ── Context Assembly ─────────────────────────────────────────
+#
+# What the scorer sees, assembled from git and the commission spec.
+
+context:
+  diff: git diff of commission commits (author-email discovery or explicit range)
+  full_files: complete contents of each file modified in the diff
+  context_files: sibling files in the same directories (convention reference)
+  file_tree: directory listing of surrounding codebase
+  spec: commission body text (aware mode only)
+  referenced_files: documents referenced by the spec, pre-commission state (aware mode only)
+
+# ── Known Limitations ────────────────────────────────────────
+#
+# Documented here for transparency; see data-collection-assessment
+# for full analysis.
+
+limitations:
+  - Model not explicitly pinned; relied on CLI default. A CLI update
+    changing the default model would silently change the instrument.
+  - Effort not explicitly pinned; same risk as model.
+  - Temperature not controllable via Claude Code CLI. Sampling behavior
+    is determined by the API and cannot be reproduced exactly.
+  - 3-point scale produces near-zero inter-run variance (SD=0.00 on
+    20/22 commissions). Instrument is reliable but has poor discriminant
+    validity on saturated dimensions (code_structure, codebase_consistency).
+  - Commit range discovery uses author-email convention; pre-identity
+    commissions require manual --base-commit/--commit overrides.
