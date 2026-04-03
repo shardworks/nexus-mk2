@@ -1,5 +1,5 @@
 ---
-status: ready
+status: active
 ---
 
 # X010 — Staged Sessions
