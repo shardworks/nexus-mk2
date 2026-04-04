@@ -1,0 +1,930 @@
+=== CONTEXT FILE: docs/reference/schema.md ===
+# Schema Reference
+
+The guild's Books database (``.nexus/nexus.db``) — SQLite, WAL mode, foreign keys enforced. All entity IDs are TEXT using prefixed hex format.
+
+---
+
+## Entity Relationship Diagram
+
+```
+                            ┌─────────────────────┐
+                            │    commissions       │
+                            │─────────────────────│
+                            │ id (c-)              │
+                            │ content              │
+                            │ status               │
+                            │ workshop             │
+                            └──────┬──────┬────────┘
+                                   │      │
+                    ┌──────────────┘      └──────────────┐
+                    │                                    │
+        ┌───────────┴──────────┐          ┌──────────────┴──────────┐
+        │ commission_assignments│          │  commission_sessions    │
+        │──────────────────────│          │─────────────────────────│
+        │ commission_id ←──────│          │ commission_id ←─────────│
+        │ anima_id ────────────│──┐       │ session_id ─────────────│──┐
+        └──────────────────────┘  │       └─────────────────────────┘  │
+                                  │                                    │
+        ┌─────────────────────────┘                                    │
+        │                                                              │
+   ┌────┴──────────────┐                                ┌──────────────┴──────┐
+   │     animas        │                                │      sessions       │
+   │───────────────────│                                │─────────────────────│
+   │ id (a-)           │                                │ id (ses-)           │
+   │ name (unique)     │                                │ anima_id ───────────│──→ animas
+   │ status            │                                │ provider, model     │
+   └────┬──────────────┘                                │ trigger, workshop   │
+        │                                               │ token usage, cost   │
+        │                                               └─────────────────────┘
+   ┌────┴──────────────────┐
+   │  anima_compositions   │     ┌───────────────┐
+   │───────────────────────│     │    roster      │
+   │ anima_id (unique) ────│     │───────────────│
+   │ curriculum snapshot   │     │ anima_id ──────│──→ animas
+   │ temperament snapshot  │     │ role           │
+   └───────────────────────┘     └───────────────┘
+
+
+   ┌─────────────────────┐
+   │       writs         │
+   │─────────────────────│
+   │ id (wrt-)           │
+   │ type, title         │
+   │ status              │
+   │ parent_id ──────────│──→ writs (self-ref, optional)
+   │ session_id          │
+   └─────────────────────┘
+        ↑                    ↑
+        │                    │
+   commissions.writ_id   sessions.writ_id
+
+
+   ┌─────────────────────┐          ┌──────────────────────┐
+   │      events         │          │   event_dispatches   │
+   │─────────────────────│          │──────────────────────│
+   │ id (evt-)           │          │ id (ed-)             │
+   │ name, payload       │←─────────│ event_id             │
+   │ emitter, fired_at   │          │ handler_type/name    │
+   │ processed           │          │ target_role          │
+   └─────────────────────┘          │ status, error        │
+                                    └──────────────────────┘
+
+   ┌─────────────────────┐
+   │    audit_log        │
+   │─────────────────────│
+   │ id (aud-)           │
+   │ actor, action       │
+   │ target_type/id      │
+   │ detail, timestamp   │
+   └─────────────────────┘
+```
+
+---
+
+## Table-by-Table Reference
+
+### `animas`
+
+The Register — anima identity records.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (a-) |
+| `name` | TEXT | NOT NULL, UNIQUE | Human-readable name |
+| `status` | TEXT | NOT NULL, CHECK | One of: `aspirant`, `active`, `retired` |
+| `created_at` | TEXT | NOT NULL, DEFAULT now | ISO-8601 timestamp |
+| `updated_at` | TEXT | NOT NULL, DEFAULT now | ISO-8601 timestamp |
+
+### `anima_compositions`
+
+Frozen snapshots of an anima's training content at instantiation time.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID |
+| `anima_id` | TEXT | NOT NULL, UNIQUE, FK → animas | One composition per anima |
+| `curriculum_name` | TEXT | NOT NULL | Curriculum name at instantiation |
+| `curriculum_version` | TEXT | NOT NULL | Curriculum version at instantiation |
+| `temperament_name` | TEXT | NOT NULL | Temperament name at instantiation |
+| `temperament_version` | TEXT | NOT NULL | Temperament version at instantiation |
+| `curriculum_snapshot` | TEXT | NOT NULL | Full curriculum content (frozen) |
+| `temperament_snapshot` | TEXT | NOT NULL | Full temperament content (frozen) |
+| `composed_at` | TEXT | NOT NULL, DEFAULT now | When the composition was created |
+
+### `roster`
+
+Role assignments — which animas hold which roles.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID |
+| `anima_id` | TEXT | NOT NULL, FK → animas | The anima |
+| `role` | TEXT | NOT NULL | Role name (must match guild.json roles) |
+| `standing` | INTEGER | NOT NULL, DEFAULT 0 | Reserved for future use |
+| `assigned_at` | TEXT | NOT NULL, DEFAULT now | When the role was assigned |
+
+### `commissions`
+
+Patron-posted work orders.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (c-) |
+| `content` | TEXT | NOT NULL | The commission specification |
+| `status` | TEXT | NOT NULL, CHECK | One of: `posted`, `assigned`, `in_progress`, `completed`, `failed` |
+| `workshop` | TEXT | NOT NULL | Target workshop name |
+| `status_reason` | TEXT | | Human-readable reason for current status |
+| `writ_id` | TEXT | FK → writs | The commission's mandate writ (set on posting) |
+| `created_at` | TEXT | NOT NULL, DEFAULT now | |
+| `updated_at` | TEXT | NOT NULL, DEFAULT now | |
+
+### `commission_assignments`
+
+Join table — which animas are assigned to which commissions.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | |
+| `commission_id` | TEXT | NOT NULL, FK → commissions | |
+| `anima_id` | TEXT | NOT NULL, FK → animas | |
+| `assigned_at` | TEXT | NOT NULL, DEFAULT now | |
+
+UNIQUE constraint on `(commission_id, anima_id)`.
+
+### `writs`
+
+Tracked work items — the Ledger's core table. Writs are typed, tree-structured obligations that replace the earlier four-level hierarchy (works, pieces, jobs, strokes).
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (wrt-) |
+| `type` | TEXT | NOT NULL | Writ type — guild-defined (e.g. `task`, `feature`) or built-in (`mandate`, `summon`) |
+| `title` | TEXT | NOT NULL | Human-readable summary |
+| `description` | TEXT | | Full description, acceptance criteria, etc. |
+| `status` | TEXT | NOT NULL, DEFAULT 'ready', CHECK | One of: `ready`, `active`, `pending`, `completed`, `failed`, `cancelled` |
+| `parent_id` | TEXT | FK → writs | Parent writ (null for root writs) |
+| `session_id` | TEXT | | Currently bound session (cleared on completion/interruption) |
+| `created_at` | TEXT | NOT NULL, DEFAULT now | |
+| `updated_at` | TEXT | NOT NULL, DEFAULT now | |
+
+Indexes: `idx_writs_parent`, `idx_writs_status`, `idx_writs_type_status`.
+
+**Cross-references:** `commissions.writ_id` points to the commission's mandate writ. `sessions.writ_id` points to the writ the session is working on.
+
+### `audit_log`
+
+The Daybook audit trail — records of all significant actions.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (aud-) |
+| `actor` | TEXT | NOT NULL | Who did it: `patron`, `operator`, `framework`, `instantiate`, anima name |
+| `action` | TEXT | NOT NULL | What happened: `commission_posted`, `anima_updated`, `writ_created`, etc. |
+| `target_type` | TEXT | | Entity type: `commission`, `anima`, `writ`, `session`, `conversation` |
+| `target_id` | TEXT | | Entity ID |
+| `detail` | TEXT | | JSON-encoded additional context |
+| `timestamp` | TEXT | NOT NULL, DEFAULT now | |
+
+### `events`
+
+The Clockworks event queue.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (evt-) |
+| `name` | TEXT | NOT NULL | Event name (e.g. `commission.posted`, `code.reviewed`) |
+| `payload` | TEXT | | JSON-encoded event data |
+| `emitter` | TEXT | NOT NULL | Who signaled it |
+| `fired_at` | TEXT | NOT NULL, DEFAULT now | |
+| `processed` | INTEGER | NOT NULL, DEFAULT 0 | 0 = pending, 1 = processed |
+
+### `event_dispatches`
+
+Dispatch records — what happened when a standing order executed.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (ed-) |
+| `event_id` | TEXT | NOT NULL, FK → events | The triggering event |
+| `handler_type` | TEXT | NOT NULL | `engine` or `anima` |
+| `handler_name` | TEXT | NOT NULL | Engine name or anima name |
+| `target_role` | TEXT | | Role name (for anima dispatches) |
+| `notice_type` | TEXT | | `summon` or `brief` (for anima dispatches) |
+| `started_at` | TEXT | | |
+| `ended_at` | TEXT | | |
+| `status` | TEXT | | `success` or `error` |
+| `error` | TEXT | | Error message if status is error |
+
+### `sessions`
+
+Session records — every session launched through the funnel.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (ses-) |
+| `anima_id` | TEXT | NOT NULL, FK → animas | |
+| `provider` | TEXT | NOT NULL | Session provider name (e.g. `claude-code`) |
+| `model` | TEXT | | Model identifier |
+| `trigger` | TEXT | NOT NULL | `consult`, `summon`, `brief`, or `convene` |
+| `workshop` | TEXT | | Workshop name (null for guildhall sessions) |
+| `workspace_kind` | TEXT | NOT NULL | `guildhall`, `workshop-temp`, or `workshop-managed` |
+| `curriculum_name` | TEXT | | |
+| `curriculum_version` | TEXT | | |
+| `temperament_name` | TEXT | | |
+| `temperament_version` | TEXT | | |
+| `roles` | TEXT | | JSON array of role names |
+| `started_at` | TEXT | NOT NULL | |
+| `ended_at` | TEXT | | Null while session is active |
+| `exit_code` | INTEGER | | |
+| `input_tokens` | INTEGER | | |
+| `output_tokens` | INTEGER | | |
+| `cache_read_tokens` | INTEGER | | |
+| `cache_write_tokens` | INTEGER | | |
+| `cost_usd` | REAL | | |
+| `duration_ms` | INTEGER | | |
+| `provider_session_id` | TEXT | | Provider's own session identifier |
+| `record_path` | TEXT | | Path to the SessionRecord JSON file (relative to guild root) |
+| `conversation_id` | TEXT | FK → conversations | Conversation this turn belongs to (null for standalone sessions) |
+| `turn_number` | INTEGER | | Position within the conversation (1-indexed) |
+| `writ_id` | TEXT | FK → writs | Bound writ (set by clockworks for writ-driven sessions; null for conversations) |
+
+### `conversations`
+
+Multi-turn interactions grouping multiple sessions.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (conv-) |
+| `status` | TEXT | NOT NULL, DEFAULT 'active', CHECK | One of: `active`, `concluded`, `abandoned` |
+| `kind` | TEXT | NOT NULL, CHECK | `consult` or `convene` |
+| `topic` | TEXT | | Seeding prompt or subject |
+| `turn_limit` | INTEGER | | Maximum total turns (null = unlimited) |
+| `created_at` | TEXT | NOT NULL, DEFAULT now | |
+| `ended_at` | TEXT | | |
+| `event_id` | TEXT | | For convene: the triggering event ID |
+
+### `conversation_participants`
+
+Participants in a conversation — human or anima.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | TEXT | PRIMARY KEY | Prefixed hex ID (cpart-) |
+| `conversation_id` | TEXT | NOT NULL, FK → conversations | |
+| `kind` | TEXT | NOT NULL, CHECK | `anima` or `human` |
+| `name` | TEXT | NOT NULL | Anima name or `'patron'` |
+| `anima_id` | TEXT | | FK to animas (null for humans) |
+| `claude_session_id` | TEXT | | Provider session ID for `--resume` threading |
+
+### `commission_sessions`
+
+Join table — which sessions are linked to which commissions.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `commission_id` | TEXT | NOT NULL, FK → commissions | |
+| `session_id` | TEXT | NOT NULL, FK → sessions | |
+
+PRIMARY KEY on `(commission_id, session_id)`.
+
+### `_migrations`
+
+Internal tracking table for the migration system. Not part of the regular schema.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `sequence` | INTEGER | PRIMARY KEY | Migration sequence number |
+| `filename` | TEXT | NOT NULL | Migration filename |
+| `applied_at` | TEXT | NOT NULL, DEFAULT now | |
+| `bundle` | TEXT | | Bundle that delivered this migration |
+| `original_name` | TEXT | | Original filename before renumbering |
+
+---
+
+## Status Lifecycles
+
+### Anima
+
+```
+aspirant → active → retired
+```
+
+- **aspirant** — created but not yet activated (not currently used by `instantiate()`, which creates directly as `active`)
+- **active** — manifested for sessions, holds roles, can be dispatched
+- **retired** — removed from service, roster entries deleted
+
+### Commission
+
+```
+posted → assigned → in_progress → completed
+                                → failed
+```
+
+- **posted** — created by patron, waiting for dispatch. A mandate writ is created and linked.
+- **assigned** — (manual transition) an anima has been assigned
+- **in_progress** — the Clockworks has summoned an anima (automatic on `summon` dispatch)
+- **completed** — the mandate writ is fulfilled
+- **failed** — manually set when the commission cannot be completed
+
+### Writ
+
+```
+ready → active → completed
+               → failed → cancelled (cascade)
+               → pending → ready (when children complete)
+                         → completed (auto, if no standing order)
+ready → cancelled
+```
+
+- **ready** — available for dispatch. Signals `{type}.ready` (e.g. `mandate.ready`, `task.ready`)
+- **active** — an anima is working on it (session bound)
+- **pending** — the anima called `complete-session` but child writs are still incomplete. Automatically transitions back to `ready` (or auto-completes) when all children finish.
+- **completed** — obligation fulfilled. Signals `{type}.completed`. Triggers completion rollup on parent.
+- **failed** — unrecoverable failure. Signals `{type}.failed`. Cascades cancellation to incomplete children.
+- **cancelled** — withdrawn, either directly or by cascade from a failed parent.
+
+### Conversation
+
+```
+active → concluded
+       → abandoned
+```
+
+- **active** — conversation is in progress, turns can be taken
+- **concluded** — conversation ended normally (turn limit reached or explicitly concluded)
+- **abandoned** — conversation ended abnormally (browser disconnect, timeout)
+
+---
+
+## ID Conventions
+
+All entity IDs use the format `{prefix}-{8 hex chars}` where the hex is generated from 4 random bytes (`crypto.randomBytes(4)`).
+
+| Prefix | Entity | Example |
+|--------|--------|---------|
+| `a-` | Anima | `a-5e6f7a8b` |
+| `c-` | Commission | `c-a3f7b2c1` |
+| `conv-` | Conversation | `conv-1a2b3c4d` |
+| `cpart-` | Conversation participant | `cpart-5e6f7a8b` |
+| `evt-` | Event | `evt-1a2b3c4d` |
+| `ses-` | Session | `ses-deadbeef` |
+| `wrt-` | Writ | `wrt-12345678` |
+| `aud-` | Audit log entry | `aud-aabbccdd` |
+| `ed-` | Event dispatch | `ed-55667788` |
+| `r-` | Roster entry | `r-99aabbcc` |
+| `ac-` | Anima composition | `ac-ddeeff00` |
+| `ca-` | Commission assignment | `ca-11223344` |
+
+8 hex characters = 4 random bytes ≈ 4.3 billion possibilities per prefix. Sufficient for a single-guild system.
+
+Generation: `generateId(prefix)` from `@shardworks/nexus-core`.
+
+=== CONTEXT FILE: docs/reference/event-catalog.md ===
+# Event Catalog
+
+The Clockworks event system — every framework event, custom event rules, and standing order wiring.
+
+---
+
+## Framework Events
+
+Framework events are signaled by core modules and the Clockworks runner. They use reserved namespaces (`commission.`, `session.`, `standing-order.`) and **cannot** be signaled by animas or operators.
+
+### Commission Events
+
+| Event | Payload | Emitter | When |
+|-------|---------|---------|------|
+| `commission.posted` | `{ commissionId, workshop }` | `framework` | A new commission is posted via `commission()` |
+| `commission.session.ended` | `{ commissionId, workshop?, exitCode }` | `framework` | A session launched for a commission completes (success or failure) |
+| `commission.completed` | `{ commissionId }` | `framework` | `completeCommissionIfReady()` transitions status to `completed` |
+
+**`commission.posted`** is the primary entry point for the commission pipeline. The framework creates a `mandate` writ and signals `mandate.ready` — standing orders typically wire that to summon an anima (e.g. `{ on: "mandate.ready", summon: "artificer" }`).
+
+**`commission.session.ended`** fires when any session associated with a commission finishes. Useful for post-session automation (merge worktrees, check completion, notify).
+
+**`commission.completed`** fires when the commission's mandate writ is fulfilled. This is a terminal event — no further work expected.
+
+### Session Events
+
+| Event | Payload | Emitter | When |
+|-------|---------|---------|------|
+| `session.started` | `{ sessionId, anima, trigger, workshop, workspaceKind }` | `framework` | A session begins (after Daybook row is inserted) |
+| `session.ended` | `{ sessionId, anima, trigger, workshop, exitCode, durationMs, costUsd, error }` | `framework` | A session completes (even if the provider threw) |
+| `session.record-failed` | `{ sessionId?, error, phase, anima? }` | `framework` | Failed to write session record to Daybook or disk |
+
+**`session.ended`** fires **guaranteed** — the session funnel wraps the provider call in try/finally. The `error` field is non-null if the provider threw. The `costUsd` field may be null if the provider doesn't report cost.
+
+**`session.record-failed`** is a diagnostic event. The `phase` field indicates where the failure occurred: `"insert"` (initial row), `"write-record"` (JSON to disk), or `"update-row"` (final metrics).
+
+### Writ Lifecycle Events
+
+Writ lifecycle events use the writ's **type** as the event namespace. For example, a writ of type `mandate` emits `mandate.ready`, `mandate.completed`, etc. A guild-defined type like `task` emits `task.ready`, `task.completed`, etc.
+
+| Event Pattern | Payload | Emitter | When |
+|---------------|---------|---------|------|
+| `{type}.ready` | `{ writId, parentId?, commissionId? }` | `framework` | Writ transitions to `ready` — available for dispatch |
+| `{type}.completed` | `{ writId, parentId?, commissionId? }` | `framework` | Writ transitions to `completed` |
+| `{type}.failed` | `{ writId, parentId?, commissionId? }` | `framework` | Writ transitions to `failed` |
+
+**`{type}.ready`** is the primary dispatch signal. Standing orders wire these to summon animas (e.g. `{ on: "mandate.ready", summon: "artificer" }`). When a commission is posted, the framework creates a `mandate` writ and signals `mandate.ready`.
+
+**Completion rollup:** When all children of a writ complete, the parent transitions from `pending` to `ready` (if a standing order exists for `{type}.ready`) or auto-completes (if not). This cascades upward through the tree — child completion can ripple up to fulfill the root mandate and complete the commission.
+
+**Failure cascade:** When a writ fails, all its incomplete children are cancelled.
+
+#### Event namespace and validation
+
+Writ lifecycle events are **framework-emitted** but use **guild-defined type names** as their namespace. A guild with a `task` writ type gets `task.ready` events — these aren't in the reserved framework namespaces, and they aren't declared in `clockworks.events` either. This is intentional:
+
+- The framework emits them freely (it calls `signalEvent()` directly, bypassing validation).
+- An anima calling `signal('task.ready')` will be **rejected** by `validateCustomEvent()` — the event isn't declared in `clockworks.events`, and animas can't spoof writ state transitions.
+
+This asymmetry is a feature: the framework controls writ lifecycle events; animas cannot forge them.
+
+### Clockworks Events
+
+| Event | Payload | Emitter | When |
+|-------|---------|---------|------|
+| `standing-order.failed` | `{ standingOrder, triggeringEvent: { id, name }, error }` | `framework` | A standing order execution fails (engine throws or anima session fails) |
+
+**Loop guard:** If a `standing-order.failed` event was itself triggered by another `standing-order.failed` event, the Clockworks runner skips processing to prevent infinite cascades.
+
+### Reserved Namespaces
+
+The following namespaces are reserved for framework events. Animas cannot signal events in these namespaces via the `signal` tool — `validateCustomEvent()` will throw.
+
+```
+anima.
+commission.
+tool.
+migration.
+guild.
+standing-order.
+session.
+```
+
+**Note:** Writ lifecycle events (e.g. `mandate.ready`, `task.completed`) use guild-defined type names as namespaces, which are *not* in this reserved list. They are still framework-only — see [Writ Lifecycle Events](#writ-lifecycle-events) for how validation handles this.
+
+---
+
+## Custom Events
+
+Custom events are declared in `guild.json` and can be signaled by animas (via the `signal` MCP tool) or by engines.
+
+### Declaring Custom Events
+
+Add events to `guild.json` under `clockworks.events`:
+
+```json
+{
+  "clockworks": {
+    "events": {
+      "code.reviewed": {
+        "description": "A code review has been completed",
+        "schema": { "prUrl": "string", "approved": "boolean" }
+      },
+      "deploy.requested": {
+        "description": "A deployment was requested"
+      }
+    }
+  }
+}
+```
+
+- `description` — human-readable purpose (optional but recommended)
+- `schema` — payload schema hint (informational only, not enforced at runtime)
+
+### Validation Rules
+
+1. The event name must **not** start with a reserved namespace prefix
+2. The event name **must** be declared in `guild.json` `clockworks.events`
+3. Both rules are enforced by `validateCustomEvent()`, which is called by the `signal` MCP tool
+
+### Signaling Custom Events
+
+From an anima (via the `signal` tool):
+```
+signal code.reviewed { "prUrl": "https://...", "approved": true }
+```
+
+From an engine:
+```typescript
+import { signalEvent } from '@shardworks/nexus-core';
+signalEvent(home, 'code.reviewed', { prUrl: '...', approved: true }, 'my-engine');
+```
+
+Framework events bypass `validateCustomEvent()` — they call `signalEvent()` directly.
+
+---
+
+## Standing Order Wiring
+
+Standing orders connect events to actions. They are declared in `guild.json` under `clockworks.standingOrders`.
+
+### Order Types
+
+#### `run` — Execute an engine
+
+```json
+{ "on": "session.ended", "run": "completion-rollup" }
+```
+
+The Clockworks runner imports the engine by name from `guild.json.engines`, calls its handler with the triggering event, and records a dispatch.
+
+#### `summon` — Launch an anima session
+
+```json
+{ "on": "commission.posted", "summon": "artificer" }
+```
+
+Resolves the role to an active anima, manifests it, and launches a full session through the session funnel. For commission events, also writes commission assignments and updates commission status to `"in_progress"`.
+
+The `prompt` for the session comes from the commission content (for commission events) or the event payload's `brief` field.
+
+#### `brief` — Launch an anima session (lightweight)
+
+```json
+{ "on": "code.reviewed", "brief": "steward" }
+```
+
+Same as `summon` but semantically lighter — no commission lifecycle updates.
+
+### Dispatch Lifecycle
+
+When the Clockworks runner processes an event:
+
+1. Find all standing orders where `on` matches the event name
+2. For each matching order:
+   a. Execute the action (`run` engine, or `summon`/`brief` anima)
+   b. Record a dispatch in `event_dispatches` (started_at, ended_at, status, error)
+   c. If the action failed, signal `standing-order.failed`
+3. Mark the event as processed
+
+### Role Resolution
+
+For `summon` and `brief` orders, the role name is resolved to a specific anima:
+- Query the roster for active animas holding the role
+- If multiple animas share the role, the one with the lowest ID is selected
+- If no active anima holds the role, the dispatch fails with an error
+
+### No-Provider Behavior
+
+If no session provider is registered (e.g. during testing or CLI-only operation), `summon` and `brief` orders are recorded as **skipped** — the intent is logged but no session is launched.
+
+---
+
+## Cookbook
+
+Common patterns for wiring events to actions.
+
+### Standard Commission Pipeline
+
+The default commission flow: patron posts → workshop prepared → mandate dispatched → session runs → workshop merged.
+
+```json
+{
+  "clockworks": {
+    "standingOrders": [
+      { "on": "commission.posted", "run": "workshop-prepare" },
+      { "on": "mandate.ready", "summon": "artificer", "prompt": "You have been assigned a commission.\n\n{{writ.title}}\n\n{{writ.description}}" },
+      { "on": "mandate.completed", "run": "workshop-merge" }
+    ]
+  }
+}
+```
+
+When a commission is posted, the framework creates a `mandate` writ and signals `mandate.ready`. The standing order summons an artificer. When the artificer calls `complete-session`, the mandate completes (or enters `pending` if child writs exist), and `mandate.completed` triggers the merge engine.
+
+### Multi-Level Writ Decomposition
+
+An artificer can decompose a mandate into child writs, each dispatched independently:
+
+```json
+{
+  "clockworks": {
+    "standingOrders": [
+      { "on": "commission.posted", "run": "workshop-prepare" },
+      { "on": "mandate.ready", "summon": "sage", "prompt": "Plan this commission.\n\n{{writ.title}}\n\n{{writ.description}}" },
+      { "on": "task.ready", "summon": "artificer", "prompt": "{{writ.title}}\n\n{{writ.description}}" },
+      { "on": "mandate.completed", "run": "workshop-merge" }
+    ]
+  }
+}
+```
+
+The sage receives the mandate, creates `task` child writs, and calls `complete-session`. The mandate enters `pending`. Each `task.ready` event summons an artificer. When all tasks complete, the mandate auto-transitions to `ready` → completes → triggers the merge.
+
+### Custom Writ Types
+
+Guilds declare custom writ types in `guild.json` to match their workflow vocabulary:
+
+```json
+{
+  "writTypes": {
+    "task": { "description": "A concrete unit of work" },
+    "feature": { "description": "A user-facing capability" },
+    "bug": { "description": "A defect to fix" }
+  }
+}
+```
+
+Each type gets its own lifecycle events (`task.ready`, `feature.completed`, `bug.failed`) and can be wired to different standing orders.
+
+Multiple standing orders can match the same event — they execute in declaration order.
+
+=== CONTEXT FILE: docs/reference/conversations.md ===
+# Conversations API Reference
+
+Multi-turn interaction with animas — web consultation and convene sessions.
+
+Conversations group multiple sessions (turns) into a single logical interaction. Each turn is a full `launchSession()` call through the standard session funnel — same manifest pipeline, same metrics, same session records. The conversation layer is thin: it groups sessions, threads claude session IDs for `--resume`, and tracks overall conversation state.
+
+---
+
+## Concepts
+
+### Kinds
+
+| Kind | Description | Participants |
+|------|-------------|-------------|
+| `consult` | Human talks to an anima (from dashboard or CLI) | 1 human + 1 anima |
+| `convene` | Multiple animas hold a turn-limited dialogue | N animas |
+
+### Turns and Sessions
+
+Each turn in a conversation produces a session row in the `sessions` table. All per-turn metrics (cost, tokens, duration, transcript) live in the existing session infrastructure. The conversation tables add grouping and state on top.
+
+**Human turns** in a consult do not produce sessions. The human's message is passed as the `prompt` to the anima's `takeTurn()` call and appears in the anima's session record as `userPrompt`. This means cost/token analytics are always agent-side — which is what you want for budget tracking. For dialogue reconstruction, `showConversation()` interleaves the anima's prompt (the human's message) with the anima's response.
+
+### Session Threading
+
+Conversation turns use claude's `--resume` flag to maintain conversational continuity. The first turn for each anima participant starts a fresh claude session. Subsequent turns resume it with the `providerSessionId` captured from the previous turn's result. This ID is stored on the `conversation_participants` record and passed through `launchSession()` → provider.
+
+### Manifest at Turn Time
+
+Animas are manifested via `manifest()` on each turn, not at conversation creation time. This means the anima's system prompt, tools, and MCP config reflect the current guild state when the turn is taken. If a tool is installed mid-conversation, the next turn picks it up.
+
+---
+
+## Database Schema
+
+### New Tables
+
+```sql
+-- Conversation: one logical multi-turn interaction
+CREATE TABLE conversations (
+    id          TEXT PRIMARY KEY,               -- conv_xxxx
+    status      TEXT NOT NULL DEFAULT 'active', -- active | concluded | abandoned
+    kind        TEXT NOT NULL,                  -- consult | convene
+    topic       TEXT,                           -- seeding prompt / subject
+    turn_limit  INTEGER,                        -- max total turns (null = unlimited)
+    created_at  TEXT NOT NULL,
+    ended_at    TEXT,
+    event_id    TEXT                            -- for convene: triggering event
+);
+
+-- Participant in a conversation (human or anima)
+CREATE TABLE conversation_participants (
+    id                TEXT PRIMARY KEY,          -- cpart_xxxx
+    conversation_id   TEXT NOT NULL REFERENCES conversations(id),
+    kind              TEXT NOT NULL,             -- anima | human
+    name              TEXT NOT NULL,             -- anima name or 'patron'
+    anima_id          TEXT,                      -- FK to animas (null for humans)
+    claude_session_id TEXT                       -- threaded via --resume
+);
+```
+
+### Sessions Table Extensions
+
+```sql
+ALTER TABLE sessions ADD COLUMN conversation_id TEXT REFERENCES conversations(id);
+ALTER TABLE sessions ADD COLUMN turn_number     INTEGER;
+```
+
+- **`conversation_id`** — groups turns. Null for standalone sessions (summon, brief, terminal consult).
+- **`turn_number`** — 1-indexed position within the conversation. Useful for analytics: cost-per-turn curves, cache efficiency trends.
+
+### Analytics Queries
+
+```sql
+-- Total cost of a conversation
+SELECT SUM(cost_usd) FROM sessions WHERE conversation_id = ?;
+
+-- Per-participant cost breakdown
+SELECT a.name, SUM(s.cost_usd), SUM(s.input_tokens), SUM(s.output_tokens)
+FROM sessions s JOIN animas a ON a.id = s.anima_id
+WHERE s.conversation_id = ?
+GROUP BY a.name;
+
+-- Cost per turn (do later turns get cheaper from caching?)
+SELECT turn_number, cost_usd, cache_read_tokens
+FROM sessions WHERE conversation_id = ?
+ORDER BY turn_number;
+```
+
+---
+
+## Session Infrastructure Changes
+
+### SessionProviderLaunchOptions
+
+Added field:
+
+```ts
+claudeSessionId?: string
+```
+
+When provided, the provider uses `--resume SESSION_ID` to continue an existing conversation instead of starting a fresh session.
+
+### SessionProvider Interface
+
+Added optional method:
+
+```ts
+launchStreaming?(options: SessionProviderLaunchOptions): {
+  chunks: AsyncIterable<SessionChunk>;
+  result: Promise<SessionProviderResult>;
+}
+```
+
+Returns an async iterable of `SessionChunk` for real-time streaming AND a promise for the final result. Used by `takeTurn()` to stream responses to the dashboard. Falls back to `launch()` when not implemented.
+
+### SessionChunk
+
+```ts
+type SessionChunk =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; tool: string }
+  | { type: 'tool_result'; tool: string }
+```
+
+### SessionLaunchOptions
+
+Added fields:
+
+```ts
+conversationId?: string   // written to sessions.conversation_id
+turnNumber?: number       // written to sessions.turn_number
+claudeSessionId?: string  // passed through to provider for --resume
+onChunk?: (chunk: SessionChunk) => void  // streaming callback
+```
+
+The trigger type union is extended: `'consult' | 'summon' | 'brief' | 'convene'`.
+
+---
+
+## Conversation API
+
+All functions take `home: string` (the guild root path) as their first argument.
+
+### `createConversation(home, options): CreateConversationResult`
+
+Create a new conversation with participant records. Does NOT take a first turn.
+
+**Options (`CreateConversationOptions`):**
+- `kind: 'consult' | 'convene'`
+- `topic?: string` — seeding prompt or subject
+- `turnLimit?: number` — max total turns (null = unlimited)
+- `participants: Array<{ kind: 'anima' | 'human'; name: string }>` — at least one participant
+- `eventId?: string` — for convene: the triggering event ID
+
+**Returns (`CreateConversationResult`):**
+- `conversationId: string` — the new conversation ID (`conv_xxxx`)
+- `participants: Array<{ id: string; name: string; kind: string }>` — with generated IDs
+
+### `takeTurn(home, conversationId, participantId, message): AsyncGenerator<ConversationChunk>`
+
+Take a turn in a conversation. The core primitive.
+
+For anima participants:
+1. Reads conversation state (checks active, turn limit)
+2. Manifests the anima via `manifest()` — standard pipeline
+3. Calls `launchSession()` with `claudeSessionId` for `--resume`
+4. Streams `ConversationChunk`s as they arrive from the provider
+5. Updates participant's `claude_session_id` for next turn
+6. Auto-concludes if turn limit reached
+
+For human participants: no-op (returns immediately). The human's message should be passed as the `message` argument to the next anima `takeTurn()` call.
+
+**ConversationChunk:**
+```ts
+type ConversationChunk =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; tool: string }
+  | { type: 'tool_result'; tool: string }
+  | { type: 'turn_complete'; turnNumber: number; costUsd?: number }
+```
+
+**Throws** if conversation is not active or turn limit reached.
+
+### `endConversation(home, conversationId, reason?): void`
+
+End a conversation explicitly. Sets status to `'concluded'` (default) or `'abandoned'`. Idempotent — no-op if already ended.
+
+### `nextParticipant(home, conversationId): { participantId, name } | null`
+
+Get the next participant in a convene rotation (round-robin by creation order). Returns `null` if conversation is not active, turn limit reached, or no anima participants.
+
+### `formatConveneMessage(home, conversationId, participantId): string`
+
+Format the message for the next participant in a convene. Returns only what happened since their last turn (other participants' responses), avoiding duplicate context with `--resume`. Returns the conversation topic if it's the participant's first turn.
+
+### `listConversations(home, opts?): ConversationSummary[]`
+
+List conversations with optional filters.
+
+**Options (`ListConversationsOptions`):**
+- `status?: string` — `'active'`, `'concluded'`, or `'abandoned'`
+- `kind?: string` — `'consult'` or `'convene'`
+- `limit?: number`
+
+**Returns (`ConversationSummary`):**
+- `id, status, kind, topic, turnLimit, createdAt, endedAt`
+- `participants: Array<{ id, name, kind }>`
+- `turnCount: number` — computed from sessions table
+- `totalCostUsd: number` — computed from sessions table
+
+### `showConversation(home, conversationId): ConversationDetail | null`
+
+Full conversation detail including all turns.
+
+**Returns (`ConversationDetail`):** extends `ConversationSummary` with:
+- `turns: Array<{ sessionId, turnNumber, participant, prompt, exitCode, costUsd, durationMs, startedAt, endedAt }>`
+
+The `prompt` field on each turn is the input message (in a consult, this is the human's message). Together with the session's transcript, this reconstructs the full dialogue.
+
+---
+
+## Integration Patterns
+
+### Dashboard — Web Consultation
+
+```ts
+// Start a consultation
+const { conversationId, participants } = createConversation(home, {
+  kind: 'consult',
+  participants: [
+    { kind: 'human', name: 'patron' },
+    { kind: 'anima', name: 'steward' },
+  ],
+});
+
+const animaPart = participants.find(p => p.name === 'steward')!;
+
+// On each message from browser:
+for await (const chunk of takeTurn(home, conversationId, animaPart.id, userMessage)) {
+  ws.send(JSON.stringify(chunk));
+}
+
+// On disconnect:
+endConversation(home, conversationId, 'abandoned');
+
+// On reconnect with stored conversationId:
+const state = showConversation(home, conversationId);
+// Restore UI from state.turns
+```
+
+### Clockworks — Convene
+
+```ts
+const { conversationId } = createConversation(home, {
+  kind: 'convene',
+  topic: hydratedPrompt,
+  turnLimit: 10,
+  participants: standingOrder.participants.map(name => ({ kind: 'anima', name })),
+  eventId,
+});
+
+while (true) {
+  const next = nextParticipant(home, conversationId);
+  if (!next) break;
+
+  const message = formatConveneMessage(home, conversationId, next.participantId);
+  for await (const chunk of takeTurn(home, conversationId, next.participantId, message)) {
+    // stream to dashboard, log, etc.
+  }
+}
+```
+
+---
+
+## Types Summary
+
+| Type | Description |
+|------|-------------|
+| `ConversationChunk` | Union: text, tool_use, tool_result, turn_complete |
+| `SessionChunk` | Union: text, tool_use, tool_result (without turn_complete) |
+| `CreateConversationOptions` | Options for `createConversation()` |
+| `CreateConversationResult` | `{ conversationId, participants[] }` |
+| `ConversationSummary` | List view with computed turnCount and totalCostUsd |
+| `ConversationDetail` | Full view with turns array |
+| `ListConversationsOptions` | Filters for `listConversations()` |
+
+## ID Prefixes
+
+| Prefix | Entity |
+|--------|--------|
+| `conv-` | conversation |
+| `cpart-` | conversation participant |
+
