@@ -1,0 +1,75 @@
+decisions:
+  - id: D1
+    scope: [S1]
+    category: product
+    observable: true
+    question: "What should the scriptorium.md Dependencies section say about storage, given that `requires: []` and no Stacks is used?"
+    context: "The current doc has a `requires: ['stacks']` block and a bullet describing Stacks as the persistence layer. The code uses `guild().config()` / `guild().writeConfig()` for the codex registry and an in-memory Map for draft tracking. The 'Future State: Draft Persistence via Stacks' section (lines 684-697) already describes the planned migration."
+    options:
+      a: "Set `requires: []`, remove the Stacks bullet entirely, and add a brief note: codex registry is persisted via guild.json config; draft tracking is in-memory, reconstructed from filesystem at startup. Link to the Future State section for the Stacks plan."
+      b: "Set `requires: []`, replace the Stacks bullet with a description of the current storage approach but keep no forward reference — let the Future State section stand alone."
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "Linking to the Future State section explains why Stacks appeared here and signals the planned direction — prevents a future reader from re-adding the aspirational dependency."
+
+  - id: D2
+    scope: [S2]
+    category: product
+    observable: true
+    question: "How should the lifecycle diagram steps that reference Stacks be rewritten?"
+    context: "Three lifecycle steps reference Stacks: codex-add step 3 ('Record clone status in Stacks'), draft-open step 3 ('Record draft in Stacks'), codex-remove step 4 ('Clean up Stacks records'). The code does: codex-add stores CodexState in an in-memory Map; draft-open stores DraftRecord in an in-memory Map; codex-remove deletes from both Maps."
+    options:
+      a: "Replace each Stacks step with what the code does: 'Track clone status in memory', 'Track draft in memory', 'Remove in-memory tracking'. Keep the same step numbering and diagram structure."
+      b: "Remove the Stacks steps entirely (they're implementation details that other lifecycle steps don't document at this granularity)."
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "The lifecycle diagram documents the complete sequence of operations for each command. Removing steps would leave gaps. Replacing with the accurate description maintains the diagram's completeness."
+
+  - id: D3
+    scope: [S4]
+    category: product
+    observable: true
+    question: "What should spider.md line 284 say about seal and push?"
+    context: "Current text: 'Field names mirror the Scriptorium's SealResult type. The Scriptorium's seal() method pushes the target branch to the remote after sealing.' The brief says this line reads 'Push is a separate Scriptorium operation — the seal engine seals but does not push' — but that text is not in the current file. The current text is accurate: scriptorium-core.ts seal() does push internally (lines 522-526, 559-563). The seal engine calls only scriptorium.seal() and does not call push separately."
+    options:
+      a: "Keep the current text as-is — it's already accurate. No change needed."
+      b: "Lightly clarify: 'Field names mirror the Scriptorium's SealResult type. The seal engine delegates to scriptorium.seal(), which handles both the merge and the push to remote.' — makes the single-call nature explicit."
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "The current text is factually correct. The brief's quoted text doesn't match the file — the issue may already be resolved. Changing accurate text risks introducing new inaccuracies or churning stable docs."
+
+  - id: D4
+    scope: [S1, S2, S3]
+    category: product
+    observable: true
+    question: "Should the 'Future State: Draft Persistence via Stacks' section be updated to note that the Dependencies section no longer pre-declares the Stacks dependency?"
+    context: "The Future State section (lines 684-697) correctly describes draft persistence via Stacks as future work. After fixing the Dependencies section, there's no inconsistency — but a reader might wonder why requires doesn't list stacks if this section describes an upcoming Stacks dependency."
+    options:
+      a: "Leave the Future State section as-is. It already says 'A future iteration should persist DraftRecord entries to a Stacks book' — the word 'future' is sufficient."
+      b: "Add a one-line note: 'When this is implemented, the apparatus declaration will add stacks to its requires list.'"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "The section is clearly labeled 'Future State' and uses future tense throughout. Adding a note about requires is unnecessary scaffolding — the dependency declaration update is a mechanical consequence of the implementation, not a design detail worth calling out."
+
+  - id: D5
+    scope: [S2]
+    category: implementation
+    observable: false
+    question: "In the codex-add lifecycle, should step ordering change now that step 3 is 'track in memory' rather than 'record in Stacks'?"
+    context: "Current codex-add steps: 1. Write entry to guild.json config, 2. git clone --bare, 3. Record clone status in Stacks. The code actually does: set in-memory state first, clone, update in-memory status, then write guild.json. The doc's step order doesn't match the code's execution order even for the non-Stacks steps."
+    options:
+      a: "Reorder to match actual code: 1. Track codex in memory (cloning status), 2. git clone --bare, 3. Update clone status to ready, 4. Write entry to guild.json config."
+      b: "Keep the current step order (guild.json first, clone second, tracking third) — the lifecycle diagram shows logical phases, not execution order."
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: medium
+      rationale: "The lifecycle diagram across all operations uses a 'logical phases' style (config → git → tracking), not strict execution order. Switching codex-add to execution order would be inconsistent with how the other operations are documented. The brief is about fixing Stacks references, not reordering lifecycle steps."
