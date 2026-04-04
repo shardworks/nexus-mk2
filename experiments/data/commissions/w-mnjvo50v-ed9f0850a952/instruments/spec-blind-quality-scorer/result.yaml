@@ -1,0 +1,72 @@
+# Instrument: spec-blind-quality-scorer v2
+# Commission: w-mnjvo50v-ed9f0850a952
+# Generated: 2026-04-04T06:33:47.801Z
+# Runs: 3 successful of 3 attempted
+instrument:
+  name: spec-blind-quality-scorer
+  version: v2
+reviewed_at: '2026-04-04T06:33:47.801Z'
+params:
+  commission: w-mnjvo50v-ed9f0850a952
+  repo: /workspace/vibers/.nexus/codexes/nexus.git
+aggregate:
+  composite: 4.75
+  composite_sd: 0
+  'n': 3
+  dimensions:
+    test_quality:
+      mean: 5
+      sd: 0
+    code_structure:
+      mean: 5
+      sd: 0
+    error_handling:
+      mean: 4
+      sd: 0
+    codebase_consistency:
+      mean: 5
+      sd: 0
+runs:
+  - run: 1
+    test_quality: 5
+    code_structure: 5
+    error_handling: 4
+    codebase_consistency: 5
+    composite: 4.75
+    notes: >-
+      Excellent test coverage across multiple failure scenarios: first-engine failure, mid-pipeline failure,
+      running-engine preservation, and explicit assertions that cancelled engines receive neither `completedAt` nor
+      `error`. The implementation change in `failEngine` is minimal and clean — a single map operation handles both the
+      failed engine and pending→cancelled transitions atomically. The dedicated cancellation test suite (cases a/b/c
+      plus property tests) exercises the exact boundary conditions specified in the doc update. Existing tests were
+      augmented with cancellation assertions rather than left stale. The only minor gap is that error handling doesn't
+      explicitly address what happens if a `cancelled` engine is somehow encountered by the collect or run phases,
+      though the existing status checks (`!== 'pending'`, `!== 'running'`) implicitly handle this.
+  - run: 2
+    test_quality: 5
+    code_structure: 5
+    error_handling: 4
+    codebase_consistency: 5
+    composite: 4.75
+    notes: >-
+      Excellent commission. The production change in `failEngine` is minimal and correct — a clean map over engines that
+      marks the failed one and cancels all pending. Tests are thorough: dedicated `downstream engine cancellation`
+      describe block covers first-engine failure, mid-pipeline failure, running-engine preservation, and verifies
+      cancelled engines lack both `completedAt` and `error`. Existing failure tests were also augmented with
+      cancellation assertions. The only minor gap is that `failEngine` in `spider.ts` doesn't distinguish between
+      engines genuinely downstream of the failed one vs. all pending engines — but per the spec ("All engines in the rig
+      with `status === 'pending'`"), this is intentional and correct for the static pipeline.
+  - run: 3
+    test_quality: 5
+    code_structure: 5
+    error_handling: 4
+    codebase_consistency: 5
+    composite: 4.75
+    notes: >-
+      Excellent commission. The implementation change in `failEngine` is minimal and correct — a single map pass marks
+      the failed engine and cancels all pending ones atomically. Tests are thorough: dedicated `downstream engine
+      cancellation` describe block covers first-engine failure, mid-pipeline failure, running-engine preservation, and
+      property checks (no completedAt, no error on cancelled). Existing failure tests were also augmented with
+      cancellation assertions. The only minor gap is that error handling doesn't explicitly address the edge case where
+      `failEngine` itself might throw (though the existing catch block in `tryRun` covers this). Documentation, types,
+      and implementation are perfectly aligned.

@@ -1,0 +1,176 @@
+ docs/architecture/apparatus/spider.md              | 17 +++++-------
+ packages/plugins/spider/src/spider.ts              |  4 +--
+ .../plugins/spider/src/tools/crawl-continual.ts    | 30 ++++++++++------------
+ .../spider/src/tools/{crawl.ts => crawl-one.ts}    |  4 +--
+ packages/plugins/spider/src/tools/index.ts         |  2 +-
+ 5 files changed, 25 insertions(+), 32 deletions(-)
+
+diff --git a/docs/architecture/apparatus/spider.md b/docs/architecture/apparatus/spider.md
+index cfc4906..e1024a9 100644
+--- a/docs/architecture/apparatus/spider.md
++++ b/docs/architecture/apparatus/spider.md
+@@ -59,15 +59,10 @@ supportKit: {
+     revise:    reviseEngine,
+     seal:      sealEngine,
+   },
+-  tools: {
+-    walk:          crawlTool,           // single step — do one thing and return
+-    crawlContinual: crawlContinualTool,  // polling loop — walk every ~5s until stopped
+-  },
++  tools: [crawlOneTool, crawlContinualTool],
+ },
+ ```
+ 
+-**Tool naming note:** Hyphenated tool names (e.g. `start-walking`) have known issues with CLI argument parsing and tool grouping in `nsg`. The names above use camelCase in code; the CLI surface (`nsg crawl`, `nsg crawl-continual`) needs to work cleanly with the Instrumentarium's tool registration. Final CLI naming TBD — may need to revisit how the Instrumentarium maps tool IDs to CLI commands.
+-
+ The Fabricator scans kit `engines` contributions at startup (same pattern as the Instrumentarium scanning tools). The Spider contributes its engines like any other kit — no special registration path.
+ 
+ ---
+@@ -100,16 +95,16 @@ Each `crawl()` call does exactly one thing. The priority ordering:
+ 
+ If nothing qualifies at any level, return null (the guild is idle or all work is blocked on running quick engines).
+ 
+-### Operational model: `start-walking`
++### Operational model
+ 
+-The Spider exports a `start-walking` tool that runs the crawl loop:
++The Spider exports two tools:
+ 
+ ```
+-nsg start-crawling    # starts polling loop, walks every ~5s
+-nsg crawl             # single step (useful for debugging/testing)
++nsg crawl-continual   # starts polling loop, crawls every ~5s, runs indefinitely
++nsg crawl-one         # single step (useful for debugging/testing)
+ ```
+ 
+-The loop: call `crawl()`, sleep `pollIntervalMs` (default 5000), repeat. When `crawl()` returns null, the loop doesn't stop — it keeps polling. New writs posted via `nsg commission-post` from a separate terminal are picked up on the next poll cycle.
++The `crawl-continual` loop: call `crawl()`, sleep `pollIntervalMs` (default 5000), repeat. When `crawl()` returns null, the loop doesn't stop — it keeps polling. New writs posted via `nsg commission-post` from a separate terminal are picked up on the next poll cycle. Pass `--maxIdleCycles N` to stop after N consecutive idle cycles.
+ 
+ ---
+ 
+diff --git a/packages/plugins/spider/src/spider.ts b/packages/plugins/spider/src/spider.ts
+index 0554c1d..d3128a4 100644
+--- a/packages/plugins/spider/src/spider.ts
++++ b/packages/plugins/spider/src/spider.ts
+@@ -40,7 +40,7 @@ import {
+   sealEngine,
+ } from './engines/index.ts';
+ 
+-import { crawlTool, crawlContinualTool, rigShowTool, rigListTool, rigForWritTool } from './tools/index.ts';
++import { crawlOneTool, crawlContinualTool, rigShowTool, rigListTool, rigForWritTool } from './tools/index.ts';
+ 
+ // ── Helpers ────────────────────────────────────────────────────────────
+ 
+@@ -408,7 +408,7 @@ export function createSpider(): Plugin {
+           revise:    reviseEngine,
+           seal:      sealEngine,
+         },
+-        tools: [crawlTool, crawlContinualTool, rigShowTool, rigListTool, rigForWritTool],
++        tools: [crawlOneTool, crawlContinualTool, rigShowTool, rigListTool, rigForWritTool],
+       },
+ 
+       provides: api,
+diff --git a/packages/plugins/spider/src/tools/crawl-continual.ts b/packages/plugins/spider/src/tools/crawl-continual.ts
+index 54b7605..8b2d1e7 100644
+--- a/packages/plugins/spider/src/tools/crawl-continual.ts
++++ b/packages/plugins/spider/src/tools/crawl-continual.ts
+@@ -1,8 +1,9 @@
+ /**
+- * crawlContinual tool — runs the crawl loop continuously.
++ * crawl-continual tool — runs the crawl loop continuously.
+  *
+- * Polls crawl() on a configurable interval until stopped or no remaining
+- * work exists for the configured number of consecutive idle cycles.
++ * Polls crawl() on a configurable interval. By default the loop runs
++ * indefinitely; pass a positive maxIdleCycles to enable auto-stop after
++ * that many consecutive idle cycles.
+  */
+ 
+ import { z } from 'zod';
+@@ -11,19 +12,20 @@ import { tool } from '@shardworks/tools-apparatus';
+ import type { SpiderApi, SpiderConfig } from '../types.ts';
+ 
+ export default tool({
+-  name: 'crawlContinual',
+-  description: "Run the Spider's crawl loop continuously until idle",
++  name: 'crawl-continual',
++  description: "Run the Spider's crawl loop continuously",
+   instructions:
+     'Polls crawl() in a loop, sleeping between steps when idle. ' +
+-    'Stops when the configured number of consecutive idle cycles is reached. ' +
++    'By default the loop runs indefinitely. Pass a positive maxIdleCycles ' +
++    'to stop after that many consecutive idle cycles. ' +
+     'Returns a summary of all actions taken.',
+   params: {
+     maxIdleCycles: z
+       .number()
+       .optional()
+-      .default(3)
++      .default(0)
+       .describe(
+-        'Number of consecutive idle crawl() calls before stopping (default: 3)',
++        'Max consecutive idle cycles before stopping. Pass a positive number to enable auto-stop (default: runs indefinitely)',
+       ),
+     pollIntervalMs: z
+       .number()
+@@ -43,23 +45,19 @@ export default tool({
+     const actions: unknown[] = [];
+     let idleCount = 0;
+ 
+-    while (idleCount < maxIdle) {
++    while (maxIdle === 0 || idleCount < maxIdle) {
+       let result: Awaited<ReturnType<typeof spider.crawl>>;
+       try {
+         result = await spider.crawl();
+       } catch (err) {
+-        console.error('[crawlContinual] crawl() error:', err instanceof Error ? err.message : String(err));
++        console.error('[crawl-continual] crawl() error:', err instanceof Error ? err.message : String(err));
+         idleCount++;
+-        if (idleCount < maxIdle) {
+-          await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+-        }
++        await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+         continue;
+       }
+       if (result === null) {
+         idleCount++;
+-        if (idleCount < maxIdle) {
+-          await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+-        }
++        await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+       } else {
+         idleCount = 0;
+         actions.push(result);
+diff --git a/packages/plugins/spider/src/tools/crawl.ts b/packages/plugins/spider/src/tools/crawl-one.ts
+similarity index 90%
+rename from packages/plugins/spider/src/tools/crawl.ts
+rename to packages/plugins/spider/src/tools/crawl-one.ts
+index 4354d8d..9461eea 100644
+--- a/packages/plugins/spider/src/tools/crawl.ts
++++ b/packages/plugins/spider/src/tools/crawl-one.ts
+@@ -1,5 +1,5 @@
+ /**
+- * crawl tool — executes a single step of the crawl loop.
++ * crawl-one tool — executes a single step of the crawl loop.
+  *
+  * Returns the CrawlResult or null (idle) from one crawl() call.
+  * Useful for manual step-through or testing.
+@@ -10,7 +10,7 @@ import { tool } from '@shardworks/tools-apparatus';
+ import type { SpiderApi } from '../types.ts';
+ 
+ export default tool({
+-  name: 'crawl',
++  name: 'crawl-one',
+   description: "Execute one step of the Spider's crawl loop",
+   instructions:
+     'Runs a single crawl() step: collect a pending session result, run the next ' +
+diff --git a/packages/plugins/spider/src/tools/index.ts b/packages/plugins/spider/src/tools/index.ts
+index 5324f0d..66a27bb 100644
+--- a/packages/plugins/spider/src/tools/index.ts
++++ b/packages/plugins/spider/src/tools/index.ts
+@@ -1,4 +1,4 @@
+-export { default as crawlTool } from './crawl.ts';
++export { default as crawlOneTool } from './crawl-one.ts';
+ export { default as crawlContinualTool } from './crawl-continual.ts';
+ export { default as rigShowTool } from './rig-show.ts';
+ export { default as rigListTool } from './rig-list.ts';

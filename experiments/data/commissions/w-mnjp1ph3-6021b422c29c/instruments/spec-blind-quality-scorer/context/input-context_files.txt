@@ -1,0 +1,120 @@
+=== CONTEXT FILE: packages/plugins/spider/src/tools ===
+tree 394cd0a7b9aa8fda78f87b2f496cd0ab3dd5d373:packages/plugins/spider/src/tools
+
+crawl-continual.ts
+crawl.ts
+index.ts
+rig-for-writ.ts
+rig-list.ts
+rig-show.ts
+
+=== CONTEXT FILE: packages/plugins/spider/src/engines ===
+tree 394cd0a7b9aa8fda78f87b2f496cd0ab3dd5d373:packages/plugins/spider/src/engines
+
+draft.ts
+implement.ts
+index.ts
+review.ts
+revise.ts
+seal.ts
+
+=== CONTEXT FILE: packages/plugins/spider/src/tools/crawl-continual.ts ===
+/**
+ * crawlContinual tool — runs the crawl loop continuously.
+ *
+ * Polls crawl() on a configurable interval until stopped or no remaining
+ * work exists for the configured number of consecutive idle cycles.
+ */
+
+import { z } from 'zod';
+import { guild } from '@shardworks/nexus-core';
+import { tool } from '@shardworks/tools-apparatus';
+import type { SpiderApi, SpiderConfig } from '../types.ts';
+
+export default tool({
+  name: 'crawlContinual',
+  description: "Run the Spider's crawl loop continuously until idle",
+  instructions:
+    'Polls crawl() in a loop, sleeping between steps when idle. ' +
+    'Stops when the configured number of consecutive idle cycles is reached. ' +
+    'Returns a summary of all actions taken.',
+  params: {
+    maxIdleCycles: z
+      .number()
+      .optional()
+      .default(3)
+      .describe(
+        'Number of consecutive idle crawl() calls before stopping (default: 3)',
+      ),
+    pollIntervalMs: z
+      .number()
+      .optional()
+      .describe(
+        'Override the configured poll interval in milliseconds',
+      ),
+  },
+  permission: 'spider:write',
+  handler: async (params) => {
+    const g = guild();
+    const spider = g.apparatus<SpiderApi>('spider');
+    const config = g.guildConfig().spider ?? {} as SpiderConfig;
+    const intervalMs = params.pollIntervalMs ?? config.pollIntervalMs ?? 5000;
+    const maxIdle = params.maxIdleCycles;
+
+    const actions: unknown[] = [];
+    let idleCount = 0;
+
+    while (idleCount < maxIdle) {
+      let result: Awaited<ReturnType<typeof spider.crawl>>;
+      try {
+        result = await spider.crawl();
+      } catch (err) {
+        console.error('[crawlContinual] crawl() error:', err instanceof Error ? err.message : String(err));
+        idleCount++;
+        if (idleCount < maxIdle) {
+          await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+        }
+        continue;
+      }
+      if (result === null) {
+        idleCount++;
+        if (idleCount < maxIdle) {
+          await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+        }
+      } else {
+        idleCount = 0;
+        actions.push(result);
+      }
+    }
+
+    return { actions, totalActions: actions.length };
+  },
+});
+
+=== CONTEXT FILE: packages/plugins/spider/src/tools/crawl.ts ===
+/**
+ * crawl tool — executes a single step of the crawl loop.
+ *
+ * Returns the CrawlResult or null (idle) from one crawl() call.
+ * Useful for manual step-through or testing.
+ */
+
+import { guild } from '@shardworks/nexus-core';
+import { tool } from '@shardworks/tools-apparatus';
+import type { SpiderApi } from '../types.ts';
+
+export default tool({
+  name: 'crawl',
+  description: "Execute one step of the Spider's crawl loop",
+  instructions:
+    'Runs a single crawl() step: collect a pending session result, run the next ' +
+    'ready engine, or spawn a rig for a ready writ — in that priority order. ' +
+    'Returns the action taken, or null if there is nothing to do.',
+  params: {},
+  permission: 'spider:write',
+  handler: async () => {
+    const spider = guild().apparatus<SpiderApi>('spider');
+    return spider.crawl();
+  },
+});
+

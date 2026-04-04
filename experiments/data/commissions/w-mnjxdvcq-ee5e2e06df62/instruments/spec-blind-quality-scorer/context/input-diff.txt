@@ -1,0 +1,2126 @@
+ docs/architecture/apparatus/animator.md            |   2 +-
+ docs/architecture/apparatus/clerk.md               |  12 +-
+ docs/architecture/apparatus/dispatch.md            | 229 --------
+ docs/architecture/apparatus/review-loop.md         | 212 +------
+ docs/architecture/apparatus/scriptorium.md         |  54 +-
+ docs/architecture/apparatus/spider.md              |   4 +-
+ .../plugins/codexes/src/scriptorium-core.test.ts   | 103 +++-
+ packages/plugins/codexes/src/scriptorium-core.ts   |  18 +
+ packages/plugins/dispatch/README.md                | 166 ------
+ packages/plugins/dispatch/package.json             |  44 --
+ packages/plugins/dispatch/src/dispatch.test.ts     | 606 ---------------------
+ packages/plugins/dispatch/src/dispatch.ts          | 175 ------
+ packages/plugins/dispatch/src/index.ts             |  27 -
+ .../plugins/dispatch/src/tools/dispatch-next.ts    |  51 --
+ packages/plugins/dispatch/src/tools/index.ts       |   5 -
+ packages/plugins/dispatch/src/types.ts             |  54 --
+ packages/plugins/dispatch/tsconfig.json            |  13 -
+ pnpm-lock.yaml                                     |  53 --
+ 18 files changed, 134 insertions(+), 1694 deletions(-)
+
+diff --git a/docs/architecture/apparatus/animator.md b/docs/architecture/apparatus/animator.md
+index 2261a24..cd3aa9d 100644
+--- a/docs/architecture/apparatus/animator.md
++++ b/docs/architecture/apparatus/animator.md
+@@ -446,7 +446,7 @@ The Animator supports environment variable injection into the spawned session pr
+ Environment variables come from two sources, merged at session launch time:
+ 
+ 1. **AnimaWeave** (`context.environment`) — identity-layer defaults from The Loom. Set per-role. Example: `GIT_AUTHOR_NAME=Artificer`, `GIT_AUTHOR_EMAIL=artificer@nexus.local`.
+-2. **Request** (`request.environment`) — per-task overrides from the caller. Example: the Dispatch sets `GIT_AUTHOR_EMAIL=w-{writId}@nexus.local` for per-commission git attribution.
++2. **Request** (`request.environment`) — per-task overrides from the caller. Example: the implement engine sets `GIT_AUTHOR_EMAIL=w-{writId}@nexus.local` for per-commission git attribution.
+ 
+ The merge is simple: `{ ...weave.environment, ...request.environment }`. Request values override weave values for the same key. The merged result is passed to the session provider as `SessionProviderConfig.environment`, which the provider spreads into the child process environment (`{ ...process.env, ...config.environment }`).
+ 
+diff --git a/docs/architecture/apparatus/clerk.md b/docs/architecture/apparatus/clerk.md
+index c6ea948..7cb2af8 100644
+--- a/docs/architecture/apparatus/clerk.md
++++ b/docs/architecture/apparatus/clerk.md
+@@ -12,7 +12,7 @@ Package: `@shardworks/clerk-apparatus` · Plugin id: `clerk`
+ 
+ The Clerk is the guild's obligation authority. It receives commissions from the patron, issues writs that formally record what is owed, manages the lifecycle of those writs through to completion or failure, and maintains the Ledger — the guild's book of work.
+ 
+-The Clerk owns the boundary between "what is asked for" and "how it gets done." A commission arrives; the Clerk creates a mandate writ. When work completes, the Clerk records the outcome. Connecting writs to sessions is the job of the dispatch layer — currently [The Dispatch](dispatch.md), eventually the full rigging system (Spider, Executor, Fabricator). The Clerk tracks the obligation, not the execution.
++The Clerk owns the boundary between "what is asked for" and "how it gets done." A commission arrives; the Clerk creates a mandate writ. When work completes, the Clerk records the outcome. Connecting writs to sessions is the job of the rigging system — the Spider assembles rigs, and engines execute the work. The Clerk tracks the obligation, not the execution.
+ 
+ The Clerk does **not** execute work. It does not launch sessions, manage rigs, or orchestrate engines. It tracks obligations: what has been commissioned, what state each obligation is in, and whether the guild has fulfilled its commitments. When the Clockworks and rigging system exist, the Clerk will integrate with them via lifecycle events and signals.
+ 
+@@ -347,7 +347,7 @@ Commission intake is a single synchronous step:
+ └─ 4. Returns WritDoc to caller
+ ```
+ 
+-One commission = one mandate writ. No planning, no decomposition. Dispatch is handled by [The Dispatch](dispatch.md) — a separate apparatus that reads ready writs and runs them through the guild's session machinery.
++One commission = one mandate writ. No planning, no decomposition. Execution is handled by the Spider, which spawns a rig for each ready writ and drives it through the engine pipeline.
+ 
+ ---
+ 
+@@ -405,13 +405,13 @@ A new method on `ClerkApi`:
+ signal(id: string): Promise<void>
+ ```
+ 
+-### Dispatch Integration
++### Execution Integration
+ 
+-The Clerk integrates with the dispatch layer at two points:
++The Clerk integrates with the execution layer at two points:
+ 
+-**Outbound: Ready Signal.** When a writ is signaled ready, the Clockworks event stream carries it to standing orders. The summon relay (or the Spider, for rig-based execution) picks it up and begins work. The Clerk does not know or care which dispatch path handles the writ — it signals readiness; the guild's configuration determines the response.
++**Outbound: Ready Signal.** When a writ is signaled ready, the Clockworks event stream carries it to standing orders. The Spider picks it up and spawns a rig to begin work. The Clerk does not know or care how the writ is executed — it signals readiness; the guild's configuration determines the response.
+ 
+-**Inbound: Completion Signal.** When work completes (session ends, rig strikes), the completing apparatus calls `clerk.transition(id, 'completed', { outcome })`. For rig-based execution, the Spider calls this when it strikes a completed rig. For direct-summon execution, the anima calls `writ-complete` (which wraps `clerk.transition()`). Both paths converge on the same Clerk API.
++**Inbound: Completion Signal.** When work completes, the completing apparatus calls `clerk.transition(id, 'completed', { outcome })`. The Spider calls this when it strikes a completed rig. For direct-summon execution (standing orders), the anima calls `writ-complete` (which wraps `clerk.transition()`). Both paths converge on the same Clerk API.
+ 
+ ### Intake with Planning
+ 
+diff --git a/docs/architecture/apparatus/dispatch.md b/docs/architecture/apparatus/dispatch.md
+deleted file mode 100644
+index f3b2e29..0000000
+--- a/docs/architecture/apparatus/dispatch.md
++++ /dev/null
+@@ -1,229 +0,0 @@
+-# The Dispatch — API Contract
+-
+-Status: **Draft**
+-
+-Package: `@shardworks/dispatch-apparatus` · Plugin id: `dispatch`
+-
+-> **⚠️ Temporary rigging.** This apparatus is a stand-in for the full rigging system (Spider, Fabricator, Executor). It provides a single dispatch tool that takes the oldest ready writ and runs it through the guild's existing machinery. When the full rigging system exists, this apparatus is retired and its responsibilities absorbed by the Spider and summon relay. Designed to be disposable.
+-
+----
+-
+-## Purpose
+-
+-The Dispatch is the guild's interim work runner. It bridges the gap between the Clerk (which tracks obligations) and the session machinery (which runs animas) — without the full rigging system.
+-
+-It does one thing: find a ready writ and execute it. "Execute" means open a draft binding on the target codex, compose context for an anima via the Loom, launch a session via the Animator, and handle the aftermath (seal the draft, transition the writ). This is the minimum viable loop that turns a commission into delivered work.
+-
+-The Dispatch does **not** decompose writs, manage engine chains, or run multiple steps. One writ, one session. If the session completes, the draft is sealed and the writ is completed. If it fails, the writ is failed. That's the whole lifecycle.
+-
+----
+-
+-## Dependencies
+-
+-```
+-requires: ['stacks', 'clerk', 'codexes', 'animator']
+-recommends: ['loom']
+-```
+-
+-- **The Stacks** (required) — reads writs via the Clerk's book.
+-- **The Clerk** (required) — queries ready writs and transitions their status.
+-- **The Scriptorium** (required) — opens and seals draft bindings on the target codex.
+-- **The Animator** (required) — launches anima sessions. Uses `summon()` (high-level, Loom-composed) when the Loom is available, `animate()` (low-level) otherwise.
+-- **The Loom** (recommended) — composes session context (system prompt, tools, role instructions). Resolved at dispatch time via the Animator's `summon()`. Not a direct dependency of the Dispatch — it's the Animator that calls the Loom.
+-
+----
+-
+-## Kit Interface
+-
+-The Dispatch does not consume kit contributions. No `consumes` declaration.
+-
+----
+-
+-## Support Kit
+-
+-```typescript
+-supportKit: {
+-  tools: [dispatchNext],
+-},
+-```
+-
+-### `dispatch-next` tool
+-
+-Find the oldest ready writ and dispatch it. This is the primary entry point — callable from the CLI via `nsg dispatch-next` or programmatically.
+-
+-| Parameter | Type | Required | Description |
+-|-----------|------|----------|-------------|
+-| `role` | `string` | no | Role to summon (default: `"artificer"`) |
+-| `dryRun` | `boolean` | no | If true, find and report the writ but don't dispatch |
+-
+-Returns a dispatch summary: writ id, session id, outcome.
+-
+-Permission: `dispatch:write`
+-
+-Callable by: `cli` (patron-side operation, not an anima tool)
+-
+----
+-
+-## `DispatchApi` Interface (`provides`)
+-
+-```typescript
+-interface DispatchApi {
+-  /**
+-   * Find the oldest ready writ and execute it.
+-   *
+-   * The full dispatch lifecycle:
+-   *   1. Query the Clerk for the oldest ready writ
+-   *   2. Transition the writ to active
+-   *   3. Open a draft binding on the writ's codex (if specified)
+-   *   4. Summon an anima session with the writ context as prompt
+-   *   5. Wait for session completion
+-   *   6. On success: seal the draft, push, transition writ to completed
+-   *   7. On failure: abandon the draft, transition writ to failed
+-   *
+-   * Returns null if no ready writs exist.
+-   *
+-   * If the writ has no codex, steps 3/6/7 (draft lifecycle) are
+-   * skipped — the session runs in the guild home directory with
+-   * no codex binding.
+-   */
+-  next(request?: DispatchRequest): Promise<DispatchResult | null>
+-}
+-
+-interface DispatchRequest {
+-  /** Role to summon. Default: 'artificer'. */
+-  role?: string
+-  /** If true, find and report the writ but don't dispatch. */
+-  dryRun?: boolean
+-}
+-
+-interface DispatchResult {
+-  /** The writ that was dispatched. */
+-  writId: string
+-  /** The session id (from the Animator). Absent if dryRun. */
+-  sessionId?: string
+-  /** Terminal writ status after dispatch. Absent if dryRun. */
+-  outcome?: 'completed' | 'failed'
+-  /** Resolution text set on the writ. Absent if dryRun. */
+-  resolution?: string
+-  /** Whether this was a dry run. */
+-  dryRun: boolean
+-}
+-```
+-
+----
+-
+-## Dispatch Lifecycle
+-
+-```
+-dispatch.next({ role: 'artificer' })
+-│
+-├─ 1. Query Clerk: oldest writ where status = 'ready', ordered by createdAt asc
+-│     → if none found, return null
+-│
+-├─ 2. Clerk: transition writ ready → active
+-│
+-├─ 3. [if writ.codex] Scriptorium: openDraft({ codex: writ.codex })
+-│     → draftRecord (worktree path = session cwd)
+-│     → if no codex on writ, cwd = guild home
+-│
+-├─ 4. Animator: summon({
+-│       role,
+-│       prompt: <assembled from writ title + body>,
+-│       cwd: draftRecord.path (or guild home),
+-│       environment: {
+-│         GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local`,
+-│       },
+-│       metadata: { writId: writ.id, trigger: 'dispatch' }
+-│     })
+-│     → { chunks, result }
+-│
+-├─ 5. Await result
+-│
+-├─ 6a. [success] Session completed normally
+-│      ├─ [if codex] Scriptorium: seal({ codex, branch: draft.branch })
+-│      ├─ [if codex] Scriptorium: push({ codex })
+-│      ├─ Clerk: transition writ active → completed
+-│      │    resolution = session result summary
+-│      └─ return DispatchResult { outcome: 'completed' }
+-│
+-└─ 6b. [failure] Session failed or errored
+-       ├─ [if codex] Scriptorium: abandonDraft({ codex, branch: draft.branch, force: true })
+-       ├─ Clerk: transition writ active → failed
+-       │    resolution = failure reason from session
+-       └─ return DispatchResult { outcome: 'failed' }
+-```
+-
+-### Prompt Assembly
+-
+-The dispatch prompt is assembled from the writ's fields. The anima receives enough context to understand its assignment and use the `writ-show` tool for full details:
+-
+-```
+-You have been dispatched to fulfill a commission.
+-
+-## Assignment
+-
+-**Title:** {writ.title}
+-
+-**Writ ID:** {writ.id}
+-
+-{writ.body}
+-```
+-
+-The prompt is intentionally minimal — the anima's curriculum and role instructions carry the craft knowledge. The Dispatch just delivers the assignment.
+-
+-The Dispatch owns the writ transition — the anima does not call `writ-complete` or `writ-fail`. The Dispatch observes the session outcome and transitions the writ accordingly. This keeps writ lifecycle management out of the anima's instructions, which simplifies the prompt and avoids relying on animas to self-report correctly.
+-
+-### Git Identity
+-
+-The Dispatch sets per-writ git identity via the `environment` field on the summon request. The Loom provides role-level defaults (e.g. `GIT_AUTHOR_NAME=Artificer`, `GIT_AUTHOR_EMAIL=artificer@nexus.local`). The Dispatch overrides the email with the writ ID for per-commission attribution:
+-
+-```typescript
+-environment: {
+-  GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local`,
+-}
+-```
+-
+-This produces commits authored by `Artificer <w-{writId}@nexus.local>`, enabling commit-level tracing back to the originating commission. The committer identity is left to the system default so that commit signatures remain verified on GitHub. The Animator merges these overrides with the Loom's defaults (request overrides weave) and passes the result to the session provider.
+-
+-### Error Handling
+-
+-- **No ready writs:** `next()` returns null. Not an error.
+-- **Draft open fails:** Writ transitions to `failed` with resolution describing the Scriptorium error. No session launched.
+-- **Session fails:** Draft abandoned, writ failed. The Animator already records the session result to the Stacks.
+-- **Seal fails (contention):** Writ transitions to `failed`. The draft is NOT abandoned — the inscriptions are preserved for manual recovery or re-dispatch. Resolution describes the seal failure.
+-- **Push fails:** Same as seal failure — writ failed, draft preserved.
+-
+----
+-
+-## Configuration
+-
+-No configuration. The Dispatch reads writs from the Clerk and uses default behaviors for all apparatus calls. The role is specified per dispatch via the tool parameter.
+-
+----
+-
+-## Open Questions
+-
+-- **Should dispatch-next accept a specific writ id?** The current design always picks the oldest ready writ. An `id` parameter would let the patron dispatch a specific commission. Probably useful — but adds complexity (what if the writ isn't ready? what if it doesn't exist?). Could add later.
+-
+----
+-
+-## Future: Retirement
+-
+-When the full rigging system (Spider, Fabricator, Executor) is implemented, the Dispatch apparatus is retired:
+-
+-- The Spider takes over rig spawning and engine traversal
+-- The summon relay handles anima dispatch from standing orders
+-- The Fabricator resolves engine chains (draft-open → session → seal is just one possible chain)
+-- `dispatch-next` is replaced by the Clockworks processing `mandate.ready` events
+-
+-The Dispatch is designed to be removable with zero impact on the Clerk, Scriptorium, Animator, or Loom. It is a consumer of their APIs, not a provider of anything they depend on.
+-
+----
+-
+-## Implementation Notes
+-
+-- Small apparatus — types, core dispatch logic, one tool, barrel. ~5 source files.
+-- The `next()` method is the entire API surface. No books, no state, no CDC. Pure orchestration.
+-- The Dispatch queries the Clerk's writs book via `clerk.list({ status: 'ready' })` with a limit of 1 and ordered by `createdAt` asc. The `['status', 'createdAt']` compound index on the writs book makes this efficient.
+-- Session `cwd` is the draft worktree path when a codex is specified, or the guild home directory otherwise.
+-- The prompt template is hardcoded in the apparatus, not configurable. This is disposable infrastructure — configurability is wasted investment.
+diff --git a/docs/architecture/apparatus/review-loop.md b/docs/architecture/apparatus/review-loop.md
+index 64038e0..2dbca75 100644
+--- a/docs/architecture/apparatus/review-loop.md
++++ b/docs/architecture/apparatus/review-loop.md
+@@ -2,7 +2,7 @@
+ 
+ Status: **Design** (not yet implemented)
+ 
+-> **Not a traditional apparatus.** The review loop does not have a `start()`/`stop()` lifecycle or a persistent runtime API. It is a composition pattern — a pair of engine designs and a rig structure — that lives at the intersection of the Spider, the Executor, and the Dispatch apparatus. This document specifies the full design, including an MVP path that works before the Spider exists.
++> **Not a traditional apparatus.** The review loop does not have a `start()`/`stop()` lifecycle or a persistent runtime API. It is a composition pattern — a pair of engine designs and a rig structure — within the rigging system. This document specifies the design as implemented in the Spider.
+ 
+ ---
+ 
+@@ -14,7 +14,7 @@ This is not a general-purpose test harness. The review loop does one thing: catc
+ 
+ **What the review loop is not:**
+ - A replacement for spec quality. A bad spec produces bad work; the review loop helps only when the anima had the information to succeed but failed in execution.
+-- A Clockworks-dependent system. The loop runs entirely within the dispatch pipeline using existing apparatus.
++- A Clockworks-dependent system. The loop runs entirely within the rigging pipeline using existing apparatus.
+ - A complete quality gate. The MVP catches mechanical failures; richer review criteria are future scope.
+ 
+ ---
+@@ -42,19 +42,11 @@ Both are catchable with cheap, mechanical review criteria. Neither requires an L
+ 
+ Three candidate locations were considered:
+ 
+-### Option A: Dispatch-level wrapper (MVP path)
+-
+-The Dispatch apparatus (`dispatch-next`) runs the implementation session, then runs a review pass, then optionally a revision session — all within a single dispatch call. No new apparatus; no Spider dependency.
+-
+-**Pros:** Implementable now. Works with existing infrastructure. Dispatch is already the single entry point for writ execution.
+-
+-**Cons:** The Dispatch is temporary infrastructure, scheduled for retirement when the Spider is implemented. Any logic added to Dispatch must be migrated. Also, the dispatch-level wrapper can only retry the entire session; it cannot retry a subcomponent.
+-
+ ### Option B: Review engine in every rig (full design)
+ 
+ The Spider seeds every rig with an `implement → review → [revise → review]*N` chain by default. The review engine is a clockwork engine; the revise engine is a quick engine. Both are standard engine designs contributed by a kit.
+ 
+-**Pros:** Architecturally clean. Composes naturally with Spider's traversal. Reusable engine designs. No migration from Dispatch required — Dispatch simply dispatches, and the rig handles iteration.
++**Pros:** Architecturally clean. Composes naturally with Spider's traversal. Reusable engine designs. Composes naturally with the Spider — the rig handles iteration natively.
+ 
+ **Cons:** Requires the Spider. Not implementable until the rigging system exists.
+ 
+@@ -68,173 +60,13 @@ The origination engine seeds rigs with review chains by default. Superficially s
+ 
+ ### Decision
+ 
+-**Adopt both Option A (MVP) and Option B (full design).**
+-
+-The Dispatch-level wrapper is the MVP: implementable now, catches the known failure modes, produces data on review loop effectiveness. When the Spider is implemented, the review logic migrates to engine designs (Option B), and the Dispatch drops its review wrapping entirely. The rig pattern (Option C) governs per-commission review configuration as a future enhancement.
++**Option B (review engines in the rig) is the chosen design.**
+ 
+-The two designs share the same review criteria and artifact schemas — the MVP is a direct precursor to the full design, not a throwaway.
++The Spider seeds every rig with an `implement → review → revise → seal` chain. The review engine is a clockwork engine that runs mechanical checks and a reviewer session; the revise engine is a quick engine. Both are standard engine designs contributed by the Spider's support kit. The rig pattern (Option C) governs per-commission review configuration as a future enhancement.
+ 
+ ---
+ 
+-## MVP: Dispatch-Level Review Loop
+-
+-The Dispatch `next()` method gains an optional `review` configuration. When enabled, after the implementation session completes, the Dispatch runs a review pass and conditionally launches a revision session.
+-
+-### Data Flow
+-
+-```
+-dispatch.next({ role: 'artificer', review: { enabled: true, maxRetries: 2 } })
+-│
+-├─ 1. Claim oldest ready writ (existing Dispatch logic)
+-├─ 2. Open draft binding (existing)
+-├─ 3. Launch implementation session (existing)
+-├─ 4. Await session completion
+-│
+-├─ [loop: up to maxRetries times]
+-│   ├─ 5. Run review pass against worktree
+-│   │      → ReviewResult { passed: boolean, failures: ReviewFailure[] }
+-│   │
+-│   ├─ [if passed] → break loop, proceed to seal
+-│   │
+-│   └─ [if failed]
+-│       ├─ 6. Write review artifact to commission data dir
+-│       ├─ 7. Launch revision session
+-│       │      context: original writ + review failures + git status/diff
+-│       └─ 8. Await revision session completion
+-│
+-├─ [if loop exhausted without passing]
+-│   ├─ 9. Write escalation artifact
+-│   ├─ 10. Abandon draft
+-│   └─ 11. Fail writ with resolution: "Review loop exhausted after N retries. See review artifacts."
+-│
+-└─ [if passed] → seal, push, complete writ (existing logic)
+-```
+-
+-### Review Pass
+-
+-The review pass is a synchronous, in-process check — not an anima session. It runs directly against the worktree. For MVP, three checks:
+-
+-**Check 1: Uncommitted changes** (always enabled)
+-
+-```
+-git -C <worktree> status --porcelain
+-```
+-
+-Fails if output is non-empty. This catches the most common failure mode: the anima did the work but did not commit. Cheap, fast, definitive.
+-
+-**Check 2: Build** (enabled if `guild.json` declares `review.buildCommand`)
+-
+-```
+-<buildCommand> run in worktree
+-```
+-
+-Fails if exit code is non-zero. Catches regressions introduced during implementation.
+-
+-**Check 3: Tests** (enabled if `guild.json` declares `review.testCommand`)
+-
+-```
+-<testCommand> run in worktree
+-```
+-
+-Fails if exit code is non-zero. Captures stdout/stderr for inclusion in revision context.
+-
+-Each check produces a `ReviewFailure`:
+-
+-```typescript
+-interface ReviewFailure {
+-  check: 'uncommitted_changes' | 'build' | 'test'
+-  message: string        // human-readable summary
+-  detail?: string        // command output (truncated to 4KB)
+-}
+-
+-interface ReviewResult {
+-  passed: boolean
+-  attempt: number        // 1-based: which attempt produced this result
+-  checks: ReviewCheck[]  // all checks run (pass or fail)
+-  failures: ReviewFailure[]
+-}
+-
+-interface ReviewCheck {
+-  check: 'uncommitted_changes' | 'build' | 'test'
+-  passed: boolean
+-  durationMs: number
+-}
+-```
+-
+-### Revision Context
+-
+-When review fails, the revising anima receives a prompt assembled from:
+-
+-1. **Original writ** — the full writ title and body (same as initial dispatch)
+-2. **Review failure report** — structured description of what checks failed and why
+-3. **Worktree state** — output of `git status` and `git diff HEAD` (if there are staged/unstaged changes)
+-
+-The prompt template:
+-
+-```
+-You have been dispatched to revise prior work on a commission.
+-
+-## Assignment
+-
+-**Title:** {writ.title}
+-
+-**Writ ID:** {writ.id}
+-
+-{writ.body}
+-
+----
+-
+-## Review Findings (Attempt {attempt})
+-
+-The previous implementation attempt did not pass automated review.
+-The following checks failed:
+-
+-{for each failure}
+-### {check name}
+-{message}
+-
+-{detail (if present)}
+-{end for}
+-
+----
+-
+-## Current Worktree State
+-
+-### git status
+-{git status output}
+-
+-### git diff HEAD
+-{git diff HEAD output, truncated to 8KB}
+-
+----
+-
+-Revise the work to address the review findings. Commit all changes before your session ends.
+-```
+-
+-The revision session runs in the same worktree as the original implementation. It can see the prior work and build on it, not start from scratch.
+-
+-### Iteration Cap
+-
+-`maxRetries` defaults to 2. This means at most 3 sessions per writ: 1 implementation + 2 revisions. The cap is hard — the Dispatch does not exceed it regardless of review outcome.
+-
+-Rationale: a third failed attempt almost always indicates a spec problem, an environment problem, or a complexity overrun — none of which another revision pass will fix. Escalating to the patron is the right call.
+-
+-### Escalation
+-
+-When the loop exhausts its retry budget without passing review:
+-
+-1. The draft is abandoned (preserving the inscriptions for patron inspection)
+-2. The writ is transitioned to `failed`
+-3. The writ resolution is set to: `"Review loop exhausted after {N} retries. See review artifacts in commission data directory."`
+-4. All review artifacts are preserved (see Artifact Schema below)
+-
+-The patron can inspect the artifacts, diagnose the failure mode, and either rewrite the spec or manually review the worktree before re-dispatching.
+-
+----
+-
+-## Full Design: Review Engines in the Rig
+-
+-When the Spider is implemented, the review loop migrates from Dispatch into the rig as two engine designs. The Dispatch drops all review logic.
++## Review Engines in the Rig
+ 
+ ### Engine Designs
+ 
+@@ -323,7 +155,7 @@ The Spider traverses this graph naturally. Each engine completes and propagates
+ 
+ The Spider needs no changes to support the review loop. It already:
+ - Traverses all engines whose upstream is complete
+-- Dispatches ready engines to the Executor
++- Routes ready engines to the Executor
+ - Handles both clockwork and quick engine kinds
+ 
+ The review loop is just a graph shape that Spider happens to traverse. The `escalate` clockwork engine signals the Clerk with a `failed` transition; the `seal` clockwork engine signals completion. The Spider itself is agnostic.
+@@ -379,7 +211,7 @@ experiments/data/commissions/<writ-id>/
+     escalation.md        (if loop exhausted; patron-facing summary)
+ ```
+ 
+-For the MVP (Dispatch-level), the Dispatch writes these artifacts directly. For the full design (Spider-level), the review engine writes them via the Stacks or directly to the commission data directory.
++The review engine writes these artifacts via the Stacks or directly to the commission data directory.
+ 
+ ### `review.md` Schema
+ 
+@@ -441,7 +273,7 @@ achieving a passing review. The draft has been abandoned.
+ 
+ ## Configuration
+ 
+-For the MVP (Dispatch-level), review configuration lives in `guild.json`:
++Review configuration lives in `guild.json`:
+ 
+ ```json
+ {
+@@ -454,9 +286,7 @@ For the MVP (Dispatch-level), review configuration lives in `guild.json`:
+ }
+ ```
+ 
+-All fields are optional. `enabled` defaults to `false` for the MVP (opt-in). The intent is to make it default-on once the loop has been validated in practice.
+-
+-For the full design (Spider-level), the same configuration is consumed by the origination engine to decide whether to seed the review graph and what configuration to pass to the review engine.
++All fields are optional. `enabled` defaults to `false` (opt-in). The intent is to make it default-on once the loop has been validated in practice. This configuration is consumed by the origination engine to decide whether to seed the review graph and what configuration to pass to the review engine.
+ 
+ ---
+ 
+@@ -506,13 +336,6 @@ This commission is itself a spec-writing commission. There's no build command to
+ 
+ ## Future Evolution
+ 
+-### Phase 1 (MVP — Dispatch-level)
+-- `uncommitted_changes` check always enabled
+-- `build` and `test` checks opt-in via `guild.json`
+-- `maxRetries: 2` hard cap
+-- Artifacts written to commission data directory
+-- Opt-in via `review.enabled: true` in `guild.json`
+-
+ ### Phase 2 (Spider-level engine designs)
+ - `review` clockwork engine contributed by a kit
+ - `revise` quick engine contributed by the same kit
+@@ -531,18 +354,3 @@ This commission is itself a spec-writing commission. There's no build command to
+ - Arbitrary retry depth (or patron-configured per-commission)
+ - Review loop data feeds Surveyor codex profiles (this codex has a 60% first-try rate → seed richer review graph by default)
+ 
+----
+-
+-## Implementation Notes for MVP
+-
+-The MVP requires changes to the Dispatch apparatus only:
+-
+-1. **Add `ReviewConfig` to `DispatchRequest`** — optional field, all checks disabled by default
+-2. **Add `runReviewPass(worktreePath, config)` function** — pure function, no apparatus dependencies, runs git/build/test checks, returns `ReviewResult`
+-3. **Add `assembleRevisionPrompt(writ, reviewResult, worktreeState)` function** — pure function, returns string
+-4. **Extend `dispatch.next()` loop** — after implementation session, call `runReviewPass`; if failed and retries remain, launch revision session via `animator.summon()` with the revision prompt
+-5. **Write artifacts** — write `review-loop/attempt-N/review.md` and supporting files after each review pass. The commission data directory path is owned by the Laboratory; the Dispatch needs to know where it is, or the Laboratory's CDC hook writes these based on session metadata.
+-
+-> **Artifact writing ownership:** The Laboratory currently auto-writes commission artifacts via CDC on session completion. It does not know about individual review passes within a dispatch. Two options: (a) Dispatch writes review artifacts directly to the commission data directory (requires Dispatch to know the Laboratory's path convention), or (b) review pass results are stored in the Stacks (a `review-passes` book) and the Laboratory's CDC picks them up. Option (b) is architecturally cleaner — the Stacks is the record of everything, and the Laboratory writes files from it. This is a detail for the implementing session to resolve.
+-
+-The implementing session should also update the `DispatchResult` type to include `reviewAttempts?: number` and surface this in the dispatch summary.
+diff --git a/docs/architecture/apparatus/scriptorium.md b/docs/architecture/apparatus/scriptorium.md
+index 8195bf1..09f339a 100644
+--- a/docs/architecture/apparatus/scriptorium.md
++++ b/docs/architecture/apparatus/scriptorium.md
+@@ -500,14 +500,11 @@ The binding between a session and a draft is the caller's responsibility. The ty
+     │     → session runs, anima inscribes in the draft
+     │     → session exits
+     │
+-    ├─ 3. scriptorium.seal({ codexName, sourceBranch })
+-    │     → draft sealed into codex
+-    │
+-    └─ 4. scriptorium.push({ codexName })
+-          → sealed binding pushed to remote
++    └─ 3. scriptorium.seal({ codexName, sourceBranch })
++          → draft sealed into codex and pushed to remote
+ ```
+ 
+-The anima never touches draft lifecycle — it is launched *inside* the draft's working directory and inscribes there naturally. Infrastructure steps (open, seal, push) happen outside the session, ensuring they execute even if the session crashes or times out.
++The anima never touches draft lifecycle — it is launched *inside* the draft's working directory and inscribes there naturally. Infrastructure steps (open, seal) happen outside the session, ensuring they execute even if the session crashes or times out.
+ 
+ ### The `DraftRecord` as handoff object
+ 
+@@ -526,48 +523,6 @@ Animas cannot reliably manage their own draft lifecycle. A session's working dir
+ 
+ ---
+ 
+-## Interim Dispatch Pattern
+-
+-Before rig engines and the Clockworks exist, a shell script orchestrates the open → session → seal → push lifecycle. This is the recommended interim pattern:
+-
+-```bash
+-#!/usr/bin/env bash
+-# dispatch-commission.sh — open a draft, run a session, seal and push
+-set -euo pipefail
+-
+-CODEX="${1:?codex name required}"
+-ROLE="${2:?role required}"
+-PROMPT="${3:?prompt required}"
+-
+-# 1. Open a draft binding (branch auto-generated)
+-DRAFT=$(nsg codex draft-open --codexName "$CODEX")
+-
+-DRAFT_PATH=$(echo "$DRAFT" | jq -r '.path')
+-DRAFT_BRANCH=$(echo "$DRAFT" | jq -r '.branch')
+-
+-# 2. Run the session in the draft
+-nsg summon \
+-  --role "$ROLE" \
+-  --cwd "$DRAFT_PATH" \
+-  --prompt "$PROMPT" \
+-  --metadata "{\"codex\": \"$CODEX\", \"branch\": \"$DRAFT_BRANCH\"}"
+-
+-# 3. Seal the draft into the codex
+-nsg codex draft-seal \
+-  --codexName "$CODEX" \
+-  --sourceBranch "$DRAFT_BRANCH"
+-
+-# 4. Push the sealed binding to the remote
+-nsg codex codex-push \
+-  --codexName "$CODEX"
+-
+-echo "Commission sealed and pushed for $CODEX ($DRAFT_BRANCH)"
+-```
+-
+-This script is intentionally simple — no error recovery, no retry logic beyond what `draft-seal` provides internally. A failed seal leaves the draft in place for manual inspection. A failed push leaves the sealed binding local — re-running `codex-push` is safe. The auto-generated branch name flows through the `DraftRecord` — the orchestrator never needs to invent one.
+-
+----
+-
+ ## Bare Clone Architecture
+ 
+ The Scriptorium maintains **bare clones** of each codex under `.nexus/codexes/<name>.git`. This is the local git infrastructure that makes draft operations fast and network-efficient.
+@@ -616,7 +571,8 @@ draft-seal
+   │        └─ If rebase conflicts: FAIL (no auto-resolution)
+   │        └─ If rebase succeeds: retry ff (up to maxRetries)
+   ├─ 4. Update target branch ref in bare clone
+-  └─ 5. Abandon draft (unless keepDraft)
++  ├─ 5. Push target branch to remote (git push origin <branch>)
++  └─ 6. Abandon draft (unless keepDraft)
+ 
+ codex-push
+   ├─ 1. git push origin <branch> (from bare clone)
+diff --git a/docs/architecture/apparatus/spider.md b/docs/architecture/apparatus/spider.md
+index d1cdb51..119a43e 100644
+--- a/docs/architecture/apparatus/spider.md
++++ b/docs/architecture/apparatus/spider.md
+@@ -10,7 +10,7 @@ Package: `@shardworks/spider-apparatus` · Plugin id: `spider`
+ 
+ ## Purpose
+ 
+-The Spider is the spine of the guild's rigging system. It replaces the Dispatch apparatus, which ran one writ in one session with no review. The Spider runs a structured engine pipeline for each commission, advancing the rig one step at a time via a `crawl()` step function.
++The Spider is the spine of the guild's rigging system. It runs a structured engine pipeline for each commission, advancing the rig one step at a time via a `crawl()` step function.
+ 
+ The Spider owns the rig's structural lifecycle — spawn, traverse, complete — and delegates everything else. Engine designs come from the Fabricator. Sessions come from the Animator. Draft bindings come from the Scriptorium. Writ transitions are handled by a CDC handler, not inline. The Spider itself is stateless between `crawl()` calls; all state lives in the Stacks.
+ 
+@@ -281,7 +281,7 @@ interface SealYields {
+ **Produced by:** `seal` engine
+ **Consumed by:** nothing (terminal). Used by the CDC handler for the writ transition resolution message.
+ 
+-> **Note:** Field names mirror the Scriptorium's `SealResult` type. Push is a separate Scriptorium operation — the seal engine seals but does not push.
++> **Note:** Field names mirror the Scriptorium's `SealResult` type. The Scriptorium's `seal()` method pushes the target branch to the remote after sealing.
+ 
+ ---
+ 
+diff --git a/packages/plugins/codexes/src/scriptorium-core.test.ts b/packages/plugins/codexes/src/scriptorium-core.test.ts
+index 5c68e70..bb1bf0c 100644
+--- a/packages/plugins/codexes/src/scriptorium-core.test.ts
++++ b/packages/plugins/codexes/src/scriptorium-core.test.ts
+@@ -1003,19 +1003,102 @@ describe('ScriptoriumCore', () => {
+       // External push advances remote
+       pushExternalCommit(remote.url, 'external.txt', 'external\n');
+ 
+-      // Seal — must rebase onto the remote-advanced main
++      // Seal — must rebase onto the remote-advanced main; seal now also pushes
+       const result = await api.seal({ codexName: 'test-codex', sourceBranch: 'my-draft' });
+       assert.equal(result.strategy, 'rebase');
+ 
+-      // Push should fast-forward cleanly (the sealed binding is rebased on remote's latest)
+-      await assert.doesNotReject(
+-        () => api.push({ codexName: 'test-codex' }),
+-        'Push should succeed after sealing against diverged remote',
+-      );
++      // Confirm remote has the sealed commit (seal() pushed it)
++      const remoteHead = gitSync(['rev-parse', 'main'], remote.path);
++      assert.equal(remoteHead, result.sealedCommit);
++    });
++
++    it('seal pushes to remote', async () => {
++      const remote = createRemoteRepo();
++      const { core } = createStartedCore();
++      const api = core.createApi();
++
++      await api.add('test-codex', remote.url);
++      const draft = await api.openDraft({ codexName: 'test-codex', branch: 'my-draft' });
++
++      gitSync(['config', 'user.email', 'test@test.com'], draft.path);
++      gitSync(['config', 'user.name', 'Test'], draft.path);
++      fs.writeFileSync(path.join(draft.path, 'seal-push.txt'), 'seal push\n');
++      gitSync(['add', 'seal-push.txt'], draft.path);
++      gitSync(['commit', '-m', 'Seal push test'], draft.path);
++
++      // seal() should push automatically — no explicit push() call
++      const result = await api.seal({ codexName: 'test-codex', sourceBranch: 'my-draft' });
++      assert.equal(result.success, true);
++
++      // Remote must have the sealed commit without a separate push()
++      const remoteHead = gitSync(['rev-parse', 'main'], remote.path);
++      assert.equal(remoteHead, result.sealedCommit);
++    });
++
++    it('seal pushes on no-op seal', async () => {
++      const remote = createRemoteRepo();
++      const { core } = createStartedCore();
++      const api = core.createApi();
++
++      await api.add('test-codex', remote.url);
++      // Open a draft but make no commits — sealing is a no-op
++      const draft = await api.openDraft({ codexName: 'test-codex', branch: 'my-draft' });
+ 
+-      // Confirm remote has the sealed commit
++      const result = await api.seal({ codexName: 'test-codex', sourceBranch: 'my-draft' });
++      assert.equal(result.success, true);
++      assert.equal(result.inscriptionsSealed, 0);
++
++      // Remote must match the sealed commit even on a no-op seal
+       const remoteHead = gitSync(['rev-parse', 'main'], remote.path);
+       assert.equal(remoteHead, result.sealedCommit);
++
++      void draft; // suppress unused warning
++    });
++
++    it('push failure after seal throws with distinct message', async () => {
++      const remote = createRemoteRepo();
++      const { core } = createStartedCore();
++      const api = core.createApi();
++
++      await api.add('test-codex', remote.url);
++      const draft = await api.openDraft({ codexName: 'test-codex', branch: 'my-draft' });
++
++      gitSync(['config', 'user.email', 'test@test.com'], draft.path);
++      gitSync(['config', 'user.name', 'Test'], draft.path);
++      fs.writeFileSync(path.join(draft.path, 'push-fail.txt'), 'push fail\n');
++      gitSync(['add', 'push-fail.txt'], draft.path);
++      gitSync(['commit', '-m', 'Push fail test'], draft.path);
++
++      // Find the bare clone path via the draft's gitdir.
++      // The gitdir is something like /tmp/.../codexes/test-codex.git/worktrees/my-draft
++      // Go up two levels to get the bare clone root.
++      const gitDir = gitSync(['rev-parse', '--git-dir'], draft.path);
++      const cloneGitDir = path.resolve(path.join(gitDir, '..', '..'));
++
++      // Set a push-only URL to an invalid location so fetch still works but push fails.
++      // git remote set-url --push only overrides the push URL, leaving fetch URL intact.
++      gitSync(['remote', 'set-url', '--push', 'origin', 'file:///nonexistent/path.git'], cloneGitDir);
++
++      // seal() should fail with a push error, not a seal error
++      await assert.rejects(
++        () => api.seal({ codexName: 'test-codex', sourceBranch: 'my-draft' }),
++        (err: unknown) => {
++          assert.ok(err instanceof Error, 'Expected an Error');
++          assert.match(err.message, /Push failed after successful seal/,
++            `Expected push-failure message, got: ${err instanceof Error ? err.message : err}`);
++          return true;
++        },
++      );
++
++      // The local bare clone's ref should have been updated (seal succeeded locally)
++      const localRef = gitSync(['rev-parse', 'main'], cloneGitDir);
++      // The draft's HEAD should match the local sealed ref
++      const draftHead = gitSync(['rev-parse', 'HEAD'], draft.path);
++      assert.equal(localRef, draftHead);
++
++      // The draft must still exist (push runs before abandonDraft)
++      const drafts = await api.listDrafts();
++      assert.equal(drafts.length, 1, 'Draft should still exist after push failure');
+     });
+   });
+ 
+@@ -1082,12 +1165,10 @@ describe('ScriptoriumCore', () => {
+       gitSync(['config', 'user.name', 'Test'], draft.path);
+       gitSync(['commit', '-m', 'Add pushed feature'], draft.path);
+ 
++      // seal() now pushes automatically — no explicit push() call needed
+       const sealResult = await api.seal({ codexName: 'test-codex', sourceBranch: 'my-draft' });
+ 
+-      // Push to remote
+-      await api.push({ codexName: 'test-codex' });
+-
+-      // Verify the remote has the commit
++      // Verify the remote has the commit (pushed by seal())
+       const remoteHead = gitSync(['rev-parse', 'main'], remote.path);
+       assert.equal(remoteHead, sealResult.sealedCommit);
+     });
+diff --git a/packages/plugins/codexes/src/scriptorium-core.ts b/packages/plugins/codexes/src/scriptorium-core.ts
+index 2715966..d655a4c 100644
+--- a/packages/plugins/codexes/src/scriptorium-core.ts
++++ b/packages/plugins/codexes/src/scriptorium-core.ts
+@@ -517,6 +517,15 @@ export class ScriptoriumCore {
+ 
+         // Check if source is already at target (nothing to seal)
+         if (targetRef === sourceRef) {
++          // Push before abandoning draft — if push fails the draft survives for inspection
++          try {
++            await git(['push', 'origin', targetBranch], clonePath);
++          } catch (pushErr) {
++            throw new Error(
++              `Push failed after successful seal: ${pushErr instanceof Error ? pushErr.message : pushErr}`,
++            );
++          }
++
+           // Clean up draft unless keepDraft
+           if (!request.keepDraft) {
+             await this.abandonDraft({
+@@ -547,6 +556,15 @@ export class ScriptoriumCore {
+             clonePath,
+           );
+ 
++          // Push before abandoning draft — if push fails the draft survives for inspection
++          try {
++            await git(['push', 'origin', targetBranch], clonePath);
++          } catch (pushErr) {
++            throw new Error(
++              `Push failed after successful seal: ${pushErr instanceof Error ? pushErr.message : pushErr}`,
++            );
++          }
++
+           // Clean up draft unless keepDraft
+           if (!request.keepDraft) {
+             await this.abandonDraft({
+diff --git a/packages/plugins/dispatch/README.md b/packages/plugins/dispatch/README.md
+deleted file mode 100644
+index 53e5a6e..0000000
+--- a/packages/plugins/dispatch/README.md
++++ /dev/null
+@@ -1,166 +0,0 @@
+-# `@shardworks/dispatch-apparatus`
+-
+-> **⚠️ Temporary rigging.** The Dispatch is a stand-in for the full rigging system (Spider, Fabricator, Executor). When that system exists, this apparatus is retired.
+-
+-The Dispatch is the guild's interim work runner. It bridges the gap between the Clerk (which tracks obligations) and the session machinery (which runs animas). It does one thing: find the oldest ready writ and execute it.
+-
+-The Dispatch sits downstream of the Clerk and Animator:
+-`clerk ← dispatch → animator → (codexes)`
+-
+----
+-
+-## Installation
+-
+-Add to your package's dependencies:
+-
+-```json
+-{
+-  "@shardworks/dispatch-apparatus": "workspace:*"
+-}
+-```
+-
+-The Dispatch requires the Clerk, Scriptorium (codexes), and Animator to be installed in the guild. The Loom is recommended (used indirectly via `Animator.summon()`). The Stacks is used internally by the Clerk but is not a direct dependency of the Dispatch.
+-
+----
+-
+-## API
+-
+-The Dispatch exposes a `DispatchApi` via its `provides` interface, retrieved at runtime:
+-
+-```typescript
+-import type { DispatchApi } from '@shardworks/dispatch-apparatus';
+-
+-const dispatch = guild().apparatus<DispatchApi>('dispatch');
+-```
+-
+-### `next(request?): Promise<DispatchResult | null>`
+-
+-Find the oldest ready writ and execute it.
+-
+-```typescript
+-// Dispatch with defaults (role: 'artificer')
+-const result = await dispatch.next();
+-
+-// Dispatch with a specific role
+-const result = await dispatch.next({ role: 'scribe' });
+-
+-// Dry run — preview without dispatching
+-const result = await dispatch.next({ dryRun: true });
+-
+-if (!result) {
+-  console.log('No ready writs.');
+-} else {
+-  console.log(result.outcome); // 'completed' | 'failed' | undefined (dryRun)
+-}
+-```
+-
+-| Parameter | Type | Description |
+-|---|---|---|
+-| `role` | `string` | Role to summon (default: `"artificer"`) |
+-| `dryRun` | `boolean` | If true, find and report the writ but don't dispatch |
+-
+-Returns `null` if no ready writs exist.
+-
+----
+-
+-## Dispatch Lifecycle
+-
+-```
+-next({ role: 'artificer' })
+-│
+-├─ 1. Query Clerk: clerk.list({ status: 'ready' }), take oldest (last in desc list)
+-│     → if none found, return null
+-│
+-├─ 2. Clerk: transition writ ready → active
+-│
+-├─ 3. [if writ.codex] Scriptorium: openDraft({ codexName: writ.codex })
+-│     → draftRecord (worktree path = session cwd)
+-│     → if no codex on writ, cwd = guild home
+-│
+-├─ 4. Animator: summon({
+-│       role, prompt, cwd,
+-│       environment: { GIT_*_EMAIL: `${writ.id}@nexus.local` },
+-│       metadata: { writId, trigger: 'dispatch' }
+-│     })
+-│     → { chunks, result }
+-│
+-├─ 5. Await result
+-│
+-├─ 6a. [success] Session completed normally
+-│      ├─ [if codex] Scriptorium: seal({ codexName, sourceBranch: draft.branch })
+-│      ├─ [if codex] Scriptorium: push({ codexName })
+-│      ├─ Clerk: transition writ active → completed
+-│      └─ return DispatchResult { outcome: 'completed' }
+-│
+-└─ 6b. [failure] Session failed or timed out
+-       ├─ [if codex] Scriptorium: abandonDraft({ codexName, branch, force: true })
+-       ├─ Clerk: transition writ active → failed
+-       └─ return DispatchResult { outcome: 'failed' }
+-```
+-
+-### Error Handling
+-
+-| Failure | Writ transition | Draft |
+-|---|---|---|
+-| No ready writs | none | n/a |
+-| Draft open fails | → `failed` | n/a (never opened) |
+-| Session fails | → `failed` | abandoned (force) |
+-| Seal fails | → `failed` | **preserved** (for recovery) |
+-| Push fails | → `failed` | **preserved** (for recovery) |
+-
+-The Dispatch owns writ transitions — the anima does **not** call `writ-complete` or `writ-fail`. This keeps writ lifecycle management out of anima instructions.
+-
+----
+-
+-## Support Kit
+-
+-The Dispatch contributes one tool:
+-
+-### Tools
+-
+-| Tool | Permission | Callable by | Description |
+-|---|---|---|---|
+-| `dispatch-next` | `dispatch:write` | `cli` | Find and dispatch the oldest ready writ |
+-
+----
+-
+-## Key Types
+-
+-```typescript
+-interface DispatchApi {
+-  next(request?: DispatchRequest): Promise<DispatchResult | null>;
+-}
+-
+-interface DispatchRequest {
+-  role?: string;    // default: 'artificer'
+-  dryRun?: boolean;
+-}
+-
+-interface DispatchResult {
+-  writId: string;
+-  sessionId?: string;                    // absent if dryRun
+-  outcome?: 'completed' | 'failed';     // absent if dryRun
+-  resolution?: string;                  // absent if dryRun
+-  dryRun: boolean;
+-}
+-```
+-
+-See `src/types.ts` for the complete type definitions.
+-
+----
+-
+-## Configuration
+-
+-No configuration. The Dispatch reads writs from the Clerk and uses default behaviors for all apparatus calls. The role is specified per dispatch via the tool parameter.
+-
+----
+-
+-## Exports
+-
+-The package exports all public types and the `createDispatch()` factory:
+-
+-```typescript
+-import dispatchPlugin, { createDispatch, type DispatchApi } from '@shardworks/dispatch-apparatus';
+-```
+-
+-The default export is a pre-built plugin instance, ready for guild installation.
+diff --git a/packages/plugins/dispatch/package.json b/packages/plugins/dispatch/package.json
+deleted file mode 100644
+index 8d26daf..0000000
+--- a/packages/plugins/dispatch/package.json
++++ /dev/null
+@@ -1,44 +0,0 @@
+-{
+-  "name": "@shardworks/dispatch-apparatus",
+-  "version": "0.0.0",
+-  "license": "ISC",
+-  "repository": {
+-    "type": "git",
+-    "url": "https://github.com/shardworks/nexus",
+-    "directory": "packages/plugins/dispatch"
+-  },
+-  "description": "The Dispatch — interim work runner: find the oldest ready writ and execute it",
+-  "type": "module",
+-  "exports": {
+-    ".": "./src/index.ts"
+-  },
+-  "scripts": {
+-    "build": "tsc",
+-    "test": "node --disable-warning=ExperimentalWarning --experimental-transform-types --test 'src/**/*.test.ts'",
+-    "typecheck": "tsc --noEmit"
+-  },
+-  "dependencies": {
+-    "@shardworks/animator-apparatus": "workspace:*",
+-    "@shardworks/clerk-apparatus": "workspace:*",
+-    "@shardworks/codexes-apparatus": "workspace:*",
+-    "@shardworks/loom-apparatus": "workspace:*",
+-    "@shardworks/nexus-core": "workspace:*",
+-    "@shardworks/tools-apparatus": "workspace:*",
+-    "zod": "4.3.6"
+-  },
+-  "devDependencies": {
+-    "@shardworks/stacks-apparatus": "workspace:*",
+-    "@types/node": "25.5.0"
+-  },
+-  "files": [
+-    "dist"
+-  ],
+-  "publishConfig": {
+-    "exports": {
+-      ".": {
+-        "types": "./dist/index.d.ts",
+-        "import": "./dist/index.js"
+-      }
+-    }
+-  }
+-}
+diff --git a/packages/plugins/dispatch/src/dispatch.test.ts b/packages/plugins/dispatch/src/dispatch.test.ts
+deleted file mode 100644
+index 3bf68da..0000000
+--- a/packages/plugins/dispatch/src/dispatch.test.ts
++++ /dev/null
+@@ -1,606 +0,0 @@
+-/**
+- * Dispatch apparatus tests.
+- *
+- * Uses a fake session provider, in-memory Stacks, real Clerk, real Animator,
+- * real Loom, and a fake Scriptorium to test the full dispatch lifecycle
+- * without spawning real AI processes or touching git.
+- */
+-
+-import { describe, it, beforeEach, afterEach } from 'node:test';
+-import assert from 'node:assert/strict';
+-
+-import { setGuild, clearGuild } from '@shardworks/nexus-core';
+-import type { Guild, GuildConfig } from '@shardworks/nexus-core';
+-import { createStacksApparatus } from '@shardworks/stacks-apparatus';
+-import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
+-import type { StacksApi } from '@shardworks/stacks-apparatus';
+-import { createLoom } from '@shardworks/loom-apparatus';
+-import { createAnimator } from '@shardworks/animator-apparatus';
+-import type {
+-  AnimatorSessionProvider,
+-  SessionProviderConfig,
+-  SessionChunk,
+-} from '@shardworks/animator-apparatus';
+-import { createClerk } from '@shardworks/clerk-apparatus';
+-import type { ClerkApi } from '@shardworks/clerk-apparatus';
+-import type { ScriptoriumApi, DraftRecord, SealResult } from '@shardworks/codexes-apparatus';
+-
+-import { createDispatch } from './dispatch.ts';
+-import type { DispatchApi } from './types.ts';
+-
+-// ── Shared empty chunks ───────────────────────────────────────────────
+-
+-const emptyChunks: AsyncIterable<SessionChunk> = {
+-  [Symbol.asyncIterator]() {
+-    return {
+-      async next() {
+-        return { value: undefined as unknown as SessionChunk, done: true as const };
+-      },
+-    };
+-  },
+-};
+-
+-// ── Fake session provider ─────────────────────────────────────────────
+-
+-interface FakeProviderOptions {
+-  status?: 'completed' | 'failed' | 'timeout';
+-  error?: string;
+-}
+-
+-function createFakeProvider(options: FakeProviderOptions = {}): AnimatorSessionProvider {
+-  let callCount = 0;
+-
+-  return {
+-    name: 'fake',
+-    launch(_config: SessionProviderConfig) {
+-      callCount++;
+-      const status = options.status ?? 'completed';
+-      return {
+-        chunks: emptyChunks,
+-        result: Promise.resolve({
+-          status,
+-          exitCode: status === 'completed' ? 0 : 1,
+-          providerSessionId: `fake-sess-${callCount}`,
+-          error: options.error,
+-        }),
+-      };
+-    },
+-  };
+-}
+-
+-// ── Fake Scriptorium ──────────────────────────────────────────────────
+-
+-interface FakeScriptoriumOptions {
+-  openDraftFails?: boolean;
+-  sealFails?: boolean;
+-  pushFails?: boolean;
+-}
+-
+-function createFakeScriptorium(options: FakeScriptoriumOptions = {}): ScriptoriumApi {
+-  let draftCounter = 0;
+-
+-  return {
+-    async openDraft({ codexName, associatedWith }): Promise<DraftRecord> {
+-      if (options.openDraftFails) throw new Error('openDraft: bare clone not ready');
+-      draftCounter++;
+-      return {
+-        id: `draft-${draftCounter}`,
+-        codexName,
+-        branch: `draft-test-${draftCounter}`,
+-        path: `/tmp/worktrees/${codexName}/draft-${draftCounter}`,
+-        createdAt: new Date().toISOString(),
+-        associatedWith,
+-      };
+-    },
+-    async seal(): Promise<SealResult> {
+-      if (options.sealFails) throw new Error('seal: merge conflict');
+-      return { success: true, strategy: 'fast-forward', retries: 0, sealedCommit: 'abc123def' };
+-    },
+-    async push(): Promise<void> {
+-      if (options.pushFails) throw new Error('push: remote rejected');
+-    },
+-    async abandonDraft(): Promise<void> {
+-      // no-op
+-    },
+-    async add() { throw new Error('not implemented'); },
+-    async list() { return []; },
+-    async show() { throw new Error('not implemented'); },
+-    async remove() {},
+-    async fetch() {},
+-    async listDrafts() { return []; },
+-  };
+-}
+-
+-// ── Spy fake provider (captures SessionProviderConfig) ───────────────
+-
+-function createSpyFakeProvider(): {
+-  provider: AnimatorSessionProvider;
+-  getCapturedConfig: () => SessionProviderConfig | null;
+-} {
+-  let capturedConfig: SessionProviderConfig | null = null;
+-  return {
+-    provider: {
+-      name: 'fake-spy',
+-      launch(config: SessionProviderConfig) {
+-        capturedConfig = config;
+-        return {
+-          chunks: emptyChunks,
+-          result: Promise.resolve({
+-            status: 'completed' as const,
+-            exitCode: 0,
+-            providerSessionId: 'fake-spy-sess',
+-          }),
+-        };
+-      },
+-    },
+-    getCapturedConfig: () => capturedConfig,
+-  };
+-}
+-
+-// ── Test harness ──────────────────────────────────────────────────────
+-
+-interface SetupOptions {
+-  provider?: AnimatorSessionProvider;
+-  scriptorium?: ScriptoriumApi;
+-}
+-
+-interface TestContext {
+-  dispatch: DispatchApi;
+-  clerk: ClerkApi;
+-  scriptorium: ScriptoriumApi;
+-}
+-
+-function setup(options: SetupOptions = {}): TestContext {
+-  const memBackend = new MemoryBackend();
+-  const stacksPlugin = createStacksApparatus(memBackend);
+-  const loomPlugin = createLoom();
+-  const animatorPlugin = createAnimator();
+-  const clerkPlugin = createClerk();
+-  const dispatchPlugin = createDispatch();
+-
+-  const provider = options.provider ?? createFakeProvider();
+-  const scriptorium = options.scriptorium ?? createFakeScriptorium();
+-
+-  const apparatusMap = new Map<string, unknown>();
+-  apparatusMap.set('fake-provider', provider);
+-  apparatusMap.set('codexes', scriptorium);
+-
+-  const fakeGuildConfig: GuildConfig = {
+-    name: 'test-guild',
+-    nexus: '0.0.0',
+-    plugins: [],
+-    settings: { model: 'sonnet' },
+-    animator: { sessionProvider: 'fake-provider' },
+-  };
+-
+-  const fakeGuild: Guild = {
+-    home: '/tmp/fake-guild',
+-    apparatus<T>(name: string): T {
+-      const api = apparatusMap.get(name);
+-      if (!api) throw new Error(`Apparatus "${name}" not installed`);
+-      return api as T;
+-    },
+-    config<T>(pluginId: string): T {
+-      if (pluginId === 'animator') {
+-        return { sessionProvider: 'fake-provider' } as T;
+-      }
+-      return {} as T;
+-    },
+-    writeConfig() {},
+-    guildConfig() { return fakeGuildConfig; },
+-    kits: () => [],
+-    apparatuses: () => [],
+-  };
+-
+-  setGuild(fakeGuild);
+-
+-  // Start stacks
+-  const stacksApparatus = (stacksPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+-  stacksApparatus.start({ on: () => {} });
+-  const stacks = stacksApparatus.provides as StacksApi;
+-  apparatusMap.set('stacks', stacks);
+-
+-  // Ensure books
+-  memBackend.ensureBook({ ownerId: 'clerk', book: 'writs' }, {
+-    indexes: ['status', 'type', 'createdAt'],
+-  });
+-  memBackend.ensureBook({ ownerId: 'animator', book: 'sessions' }, {
+-    indexes: ['startedAt', 'status', 'conversationId', 'provider'],
+-  });
+-
+-  // Start loom
+-  const loomApparatus = (loomPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+-  loomApparatus.start({ on: () => {} });
+-  apparatusMap.set('loom', loomApparatus.provides);
+-
+-  // Start animator
+-  const animatorApparatus = (animatorPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+-  animatorApparatus.start({ on: () => {} });
+-  apparatusMap.set('animator', animatorApparatus.provides);
+-
+-  // Start clerk
+-  const clerkApparatus = (clerkPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+-  clerkApparatus.start({ on: () => {} });
+-  const clerk = clerkApparatus.provides as ClerkApi;
+-  apparatusMap.set('clerk', clerk);
+-
+-  // Start dispatch
+-  const dispatchApparatus = (dispatchPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+-  dispatchApparatus.start({ on: () => {} });
+-  const dispatch = dispatchApparatus.provides as DispatchApi;
+-  apparatusMap.set('dispatch', dispatch);
+-
+-  return { dispatch, clerk, scriptorium };
+-}
+-
+-// ── Tests ─────────────────────────────────────────────────────────────
+-
+-describe('Dispatch', () => {
+-  afterEach(() => {
+-    clearGuild();
+-  });
+-
+-  // ── No ready writs ────────────────────────────────────────────────
+-
+-  describe('next() — empty queue', () => {
+-    it('returns null when there are no ready writs', async () => {
+-      const { dispatch } = setup();
+-      const result = await dispatch.next();
+-      assert.equal(result, null);
+-    });
+-
+-    it('returns null when all writs are in terminal states', async () => {
+-      const { dispatch, clerk } = setup();
+-      const writ = await clerk.post({ title: 'Already done', body: '' });
+-      await clerk.transition(writ.id, 'active');
+-      await clerk.transition(writ.id, 'completed');
+-
+-      const result = await dispatch.next();
+-      assert.equal(result, null);
+-    });
+-  });
+-
+-  // ── Dry run ───────────────────────────────────────────────────────
+-
+-  describe('next({ dryRun: true })', () => {
+-    it('returns the writ id without dispatching', async () => {
+-      const { dispatch, clerk } = setup();
+-      const writ = await clerk.post({ title: 'Dry run target', body: '' });
+-
+-      const result = await dispatch.next({ dryRun: true });
+-
+-      assert.ok(result);
+-      assert.equal(result.writId, writ.id);
+-      assert.equal(result.dryRun, true);
+-      assert.equal(result.sessionId, undefined);
+-      assert.equal(result.outcome, undefined);
+-    });
+-
+-    it('does not transition the writ on dry run', async () => {
+-      const { dispatch, clerk } = setup();
+-      const writ = await clerk.post({ title: 'Stay ready', body: '' });
+-
+-      await dispatch.next({ dryRun: true });
+-
+-      const after = await clerk.show(writ.id);
+-      assert.equal(after?.status, 'ready');
+-    });
+-
+-    it('returns null on dry run when no ready writs exist', async () => {
+-      const { dispatch } = setup();
+-      const result = await dispatch.next({ dryRun: true });
+-      assert.equal(result, null);
+-    });
+-  });
+-
+-  // ── Success path — no codex ───────────────────────────────────────
+-
+-  describe('next() — successful session, no codex', () => {
+-    it('transitions writ ready → active → completed', async () => {
+-      const { dispatch, clerk } = setup();
+-      const writ = await clerk.post({ title: 'No codex work', body: '' });
+-
+-      const result = await dispatch.next();
+-
+-      assert.ok(result);
+-      assert.equal(result.writId, writ.id);
+-      assert.equal(result.outcome, 'completed');
+-      assert.equal(result.dryRun, false);
+-      assert.ok(result.sessionId);
+-      assert.ok(result.resolution);
+-
+-      const after = await clerk.show(writ.id);
+-      assert.equal(after?.status, 'completed');
+-    });
+-
+-    it('uses the default role "artificer" when none specified', async () => {
+-      // Verifies no error from omitting role
+-      const { dispatch, clerk } = setup();
+-      await clerk.post({ title: 'Default role test', body: '' });
+-
+-      const result = await dispatch.next();
+-      assert.ok(result);
+-      assert.equal(result.outcome, 'completed');
+-    });
+-
+-    it('accepts an explicit role', async () => {
+-      const { dispatch, clerk } = setup();
+-      await clerk.post({ title: 'Scribe work', body: '' });
+-
+-      const result = await dispatch.next({ role: 'scribe' });
+-      assert.ok(result);
+-      assert.equal(result.outcome, 'completed');
+-    });
+-  });
+-
+-  // ── Success path — with codex ─────────────────────────────────────
+-
+-  describe('next() — successful session, with codex', () => {
+-    it('opens draft, seals, pushes, and completes the writ', async () => {
+-      const openCalls: string[] = [];
+-      const sealCalls: string[] = [];
+-      const pushCalls: string[] = [];
+-
+-      const scriptorium = createFakeScriptorium();
+-      // Wrap to track calls
+-      const trackingScriptorium: ScriptoriumApi = {
+-        ...scriptorium,
+-        async openDraft(req) {
+-          openCalls.push(req.codexName);
+-          return scriptorium.openDraft(req);
+-        },
+-        async seal(req) {
+-          sealCalls.push(req.codexName);
+-          return scriptorium.seal(req);
+-        },
+-        async push(req) {
+-          pushCalls.push(req.codexName);
+-          return scriptorium.push(req);
+-        },
+-      };
+-
+-      const { dispatch, clerk } = setup({ scriptorium: trackingScriptorium });
+-
+-      // Post a writ with a codex field (via index signature)
+-      const writ = await clerk.post({ title: 'Codex work', body: '' });
+-      // Patch the codex field onto the writ — WritDoc allows arbitrary fields
+-      // The Clerk doesn't expose codex patching, so we rely on the index signature
+-      // and test the no-codex path for Clerk-created writs.
+-      // For codex-bound writs, we test the Dispatch internals directly.
+-      // (A real commission-post would include codex; the Clerk API accepts it via [key: string]: unknown)
+-
+-      // Dispatch the writ without codex (standard path)
+-      const result = await dispatch.next();
+-      assert.ok(result);
+-      assert.equal(result.outcome, 'completed');
+-
+-      // No codex on the writ, so no draft ops expected
+-      assert.equal(openCalls.length, 0);
+-      assert.equal(sealCalls.length, 0);
+-      assert.equal(pushCalls.length, 0);
+-
+-      const after = await clerk.show(writ.id);
+-      assert.equal(after?.status, 'completed');
+-    });
+-  });
+-
+-  // ── Failure path — session fails ──────────────────────────────────
+-
+-  describe('next() — session fails', () => {
+-    it('transitions writ to failed when session fails', async () => {
+-      const { dispatch, clerk } = setup({
+-        provider: createFakeProvider({ status: 'failed', error: 'Claude exited with code 1' }),
+-      });
+-
+-      const writ = await clerk.post({ title: 'Doomed commission', body: '' });
+-
+-      const result = await dispatch.next();
+-
+-      assert.ok(result);
+-      assert.equal(result.writId, writ.id);
+-      assert.equal(result.outcome, 'failed');
+-      assert.ok(result.resolution);
+-      assert.equal(result.dryRun, false);
+-
+-      const after = await clerk.show(writ.id);
+-      assert.equal(after?.status, 'failed');
+-    });
+-
+-    it('records the session error as the failure resolution', async () => {
+-      const { dispatch, clerk } = setup({
+-        provider: createFakeProvider({ status: 'failed', error: 'Out of tokens' }),
+-      });
+-
+-      await clerk.post({ title: 'Token fail', body: '' });
+-
+-      const result = await dispatch.next();
+-      assert.ok(result);
+-      assert.equal(result.resolution, 'Out of tokens');
+-    });
+-
+-    it('uses session status as resolution when no error message', async () => {
+-      const { dispatch, clerk } = setup({
+-        provider: createFakeProvider({ status: 'timeout' }),
+-      });
+-
+-      await clerk.post({ title: 'Timeout commission', body: '' });
+-
+-      const result = await dispatch.next();
+-      assert.ok(result);
+-      assert.equal(result.resolution, 'Session timeout');
+-    });
+-  });
+-
+-  // ── FIFO ordering ─────────────────────────────────────────────────
+-
+-  describe('next() — FIFO dispatch ordering', () => {
+-    it('dispatches the oldest ready writ first', async () => {
+-      const { dispatch, clerk } = setup();
+-
+-      // Create writs with small delays to ensure different createdAt timestamps
+-      const w1 = await clerk.post({ title: 'First posted', body: '' });
+-      await new Promise((r) => setTimeout(r, 5));
+-      const w2 = await clerk.post({ title: 'Second posted', body: '' });
+-      await new Promise((r) => setTimeout(r, 5));
+-      const w3 = await clerk.post({ title: 'Third posted', body: '' });
+-
+-      // First dispatch should take w1 (oldest)
+-      const r1 = await dispatch.next();
+-      assert.ok(r1);
+-      assert.equal(r1.writId, w1.id);
+-
+-      // Second dispatch should take w2
+-      const r2 = await dispatch.next();
+-      assert.ok(r2);
+-      assert.equal(r2.writId, w2.id);
+-
+-      // Third dispatch should take w3
+-      const r3 = await dispatch.next();
+-      assert.ok(r3);
+-      assert.equal(r3.writId, w3.id);
+-
+-      // No more ready writs
+-      const r4 = await dispatch.next();
+-      assert.equal(r4, null);
+-    });
+-  });
+-
+-  // ── Draft open failure ────────────────────────────────────────────
+-
+-  describe('next() — draft open fails', () => {
+-    it('fails the writ and returns without launching a session', async () => {
+-      // We need a writ with a codex field to trigger draft opening.
+-      // Since the Clerk API doesn't expose codex, we test a representative
+-      // scenario: if a future commission-post includes a codex field, it would
+-      // be stored via the index signature and read by the Dispatch.
+-      // For now, verify the no-codex path (draft open is skipped entirely).
+-      // The openDraftFails option is exercised via integration if codex is set.
+-
+-      // This test verifies the fail path when scriptorium.openDraft throws.
+-      // To trigger this path we need a writ with writ.codex set.
+-      // Since WritDoc has [key: string]: unknown, we test by confirming the
+-      // Dispatch gracefully handles the no-codex case (draft not attempted).
+-
+-      const { dispatch, clerk } = setup({
+-        scriptorium: createFakeScriptorium({ openDraftFails: true }),
+-      });
+-
+-      const writ = await clerk.post({ title: 'No codex — draft skip', body: '' });
+-
+-      // Without a codex on the writ, openDraft is never called even if it would fail
+-      const result = await dispatch.next();
+-      assert.ok(result);
+-      assert.equal(result.outcome, 'completed'); // no codex → no draft → proceeds to session
+-
+-      const after = await clerk.show(writ.id);
+-      assert.equal(after?.status, 'completed');
+-    });
+-  });
+-
+-  // ── Seal / push failure ───────────────────────────────────────────
+-
+-  describe('next() — seal fails', () => {
+-    it('fails the writ without abandoning the draft when seal fails', async () => {
+-      // Seal failure only occurs when a codex is present. Without a codex field
+-      // on the writ, the seal path is skipped. This test verifies that the
+-      // no-codex successful path still completes correctly even with a
+-      // sealFails scriptorium (seal is never called).
+-      const abandonCalls: string[] = [];
+-      const scriptorium = createFakeScriptorium({ sealFails: true });
+-      const trackingScriptorium: ScriptoriumApi = {
+-        ...scriptorium,
+-        async abandonDraft(req) {
+-          abandonCalls.push(req.branch);
+-        },
+-      };
+-
+-      const { dispatch, clerk } = setup({ scriptorium: trackingScriptorium });
+-      await clerk.post({ title: 'Seal test — no codex', body: '' });
+-
+-      const result = await dispatch.next();
+-      assert.ok(result);
+-      assert.equal(result.outcome, 'completed'); // no codex — seal never attempted
+-
+-      // abandonDraft was not called (no codex)
+-      assert.equal(abandonCalls.length, 0);
+-    });
+-  });
+-
+-  // ── Writ not taken during dry run ─────────────────────────────────
+-
+-  describe('next() — idempotency', () => {
+-    it('same writ is returned by two consecutive dry runs', async () => {
+-      const { dispatch, clerk } = setup();
+-      const writ = await clerk.post({ title: 'Idempotent check', body: '' });
+-
+-      const r1 = await dispatch.next({ dryRun: true });
+-      const r2 = await dispatch.next({ dryRun: true });
+-
+-      assert.ok(r1);
+-      assert.ok(r2);
+-      assert.equal(r1.writId, writ.id);
+-      assert.equal(r2.writId, writ.id);
+-
+-      // Still ready after two dry runs
+-      const after = await clerk.show(writ.id);
+-      assert.equal(after?.status, 'ready');
+-    });
+-  });
+-
+-  // ── Active writ skipped ───────────────────────────────────────────
+-
+-  describe('next() — skips non-ready writs', () => {
+-    it('skips active and terminal writs, finds only ready ones', async () => {
+-      const { dispatch, clerk } = setup();
+-
+-      // Create a writ and put it in active state
+-      const active = await clerk.post({ title: 'Already active', body: '' });
+-      await clerk.transition(active.id, 'active');
+-
+-      // Create a completed writ
+-      const completed = await clerk.post({ title: 'Already completed', body: '' });
+-      await clerk.transition(completed.id, 'active');
+-      await clerk.transition(completed.id, 'completed');
+-
+-      // The only ready writ
+-      const ready = await clerk.post({ title: 'The ready one', body: '' });
+-
+-      const result = await dispatch.next();
+-      assert.ok(result);
+-      assert.equal(result.writId, ready.id);
+-    });
+-  });
+-
+-  // ── Git identity environment ──────────────────────────────────────
+-
+-  describe('next() — git identity environment', () => {
+-    it('passes writ-scoped GIT_*_EMAIL to the session provider', async () => {
+-      const { provider, getCapturedConfig } = createSpyFakeProvider();
+-      const { dispatch, clerk } = setup({ provider });
+-
+-      const writ = await clerk.post({ title: 'Git identity test', body: '' });
+-
+-      await dispatch.next();
+-
+-      const captured = getCapturedConfig();
+-      assert.ok(captured);
+-      assert.ok(captured!.environment, 'environment should be present');
+-      assert.equal(captured!.environment?.GIT_AUTHOR_EMAIL, `${writ.id}@nexus.local`);
+-      assert.ok(captured!.environment?.GIT_AUTHOR_NAME, 'GIT_AUTHOR_NAME should be present');
+-    });
+-
+-    it('preserves Loom role name in GIT_*_NAME while overriding email', async () => {
+-      const { provider, getCapturedConfig } = createSpyFakeProvider();
+-      const { dispatch, clerk } = setup({ provider });
+-
+-      const writ = await clerk.post({ title: 'Name/email split test', body: '' });
+-
+-      await dispatch.next();
+-
+-      const captured = getCapturedConfig();
+-      assert.ok(captured);
+-      assert.equal(captured!.environment?.GIT_AUTHOR_NAME, 'Artificer');
+-      assert.equal(captured!.environment?.GIT_AUTHOR_EMAIL, `${writ.id}@nexus.local`);
+-    });
+-  });
+-});
+diff --git a/packages/plugins/dispatch/src/dispatch.ts b/packages/plugins/dispatch/src/dispatch.ts
+deleted file mode 100644
+index d883225..0000000
+--- a/packages/plugins/dispatch/src/dispatch.ts
++++ /dev/null
+@@ -1,175 +0,0 @@
+-/**
+- * The Dispatch — interim work runner.
+- *
+- * Bridges the Clerk (which tracks obligations) and the session machinery
+- * (which runs animas). Finds the oldest ready writ and executes it:
+- * opens a draft binding, composes context, launches a session, and handles
+- * the aftermath (seal the draft, transition the writ).
+- *
+- * This apparatus is temporary rigging — designed to be retired when the
+- * full rigging system (Spider, Fabricator, Executor) is implemented.
+- *
+- * See: docs/architecture/apparatus/dispatch.md
+- */
+-
+-import type { Plugin } from '@shardworks/nexus-core';
+-import { guild } from '@shardworks/nexus-core';
+-import type { ClerkApi, WritDoc } from '@shardworks/clerk-apparatus';
+-import type { ScriptoriumApi, DraftRecord } from '@shardworks/codexes-apparatus';
+-import type { AnimatorApi, SessionResult } from '@shardworks/animator-apparatus';
+-
+-import type { DispatchApi, DispatchRequest, DispatchResult } from './types.ts';
+-import { dispatchNext } from './tools/index.ts';
+-
+-// ── Prompt assembly ──────────────────────────────────────────────────
+-
+-function assemblePrompt(writ: WritDoc): string {
+-  const lines = [
+-    'You have been dispatched to fulfill a commission.',
+-    '',
+-    '## Assignment',
+-    '',
+-    `**Title:** ${writ.title}`,
+-    '',
+-    `**Writ ID:** ${writ.id}`,
+-  ];
+-
+-  if (writ.body) {
+-    lines.push('', writ.body);
+-  }
+-
+-  return lines.join('\n');
+-}
+-
+-// ── Apparatus factory ────────────────────────────────────────────────
+-
+-/**
+- * Create the Dispatch apparatus plugin.
+- *
+- * Returns a Plugin with:
+- * - `requires: ['clerk', 'codexes', 'animator']`
+- * - `recommends: ['loom']` — used indirectly via Animator.summon()
+- * - `provides: DispatchApi` — the dispatch API
+- * - `supportKit` — contributes the `dispatch-next` tool
+- */
+-export function createDispatch(): Plugin {
+-  const api: DispatchApi = {
+-    async next(request?: DispatchRequest): Promise<DispatchResult | null> {
+-      const role = request?.role ?? 'artificer';
+-      const dryRun = request?.dryRun ?? false;
+-
+-      const clerk = guild().apparatus<ClerkApi>('clerk');
+-
+-      // 1. Find oldest ready writ (FIFO — list returns desc by createdAt, take last)
+-      const readyWrits = await clerk.list({ status: 'ready' });
+-      const writ = readyWrits[readyWrits.length - 1] ?? null;
+-
+-      if (!writ) return null;
+-
+-      if (dryRun) {
+-        return { writId: writ.id, dryRun: true };
+-      }
+-
+-      const scriptorium = guild().apparatus<ScriptoriumApi>('codexes');
+-      const animator = guild().apparatus<AnimatorApi>('animator');
+-
+-      // 2. Transition writ ready → active
+-      await clerk.transition(writ.id, 'active');
+-
+-      // 3. Open draft if writ has a codex
+-      const codexName = typeof writ.codex === 'string' ? writ.codex : undefined;
+-      let draft: DraftRecord | undefined;
+-
+-      if (codexName) {
+-        try {
+-          draft = await scriptorium.openDraft({ codexName, associatedWith: writ.id });
+-        } catch (err) {
+-          const reason = `Draft open failed: ${String(err)}`;
+-          await clerk.transition(writ.id, 'failed', { resolution: reason });
+-          return { writId: writ.id, outcome: 'failed', resolution: reason, dryRun: false };
+-        }
+-      }
+-
+-      // Session cwd: draft worktree path if codex, otherwise guild home
+-      const cwd = draft?.path ?? guild().home;
+-
+-      // 4. Assemble prompt and summon anima
+-      const prompt = assemblePrompt(writ);
+-      const handle = animator.summon({
+-        role,
+-        prompt,
+-        cwd,
+-        environment: {
+-          GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local`,
+-        },
+-        metadata: { writId: writ.id, trigger: 'dispatch' },
+-      });
+-
+-      // 5. Await session result
+-      let session: SessionResult;
+-      try {
+-        session = await handle.result;
+-      } catch (err) {
+-        // Unexpected rejection (summon normally resolves with a failed status)
+-        const reason = `Session error: ${String(err)}`;
+-        if (codexName && draft) {
+-          await scriptorium.abandonDraft({ codexName, branch: draft.branch, force: true });
+-        }
+-        await clerk.transition(writ.id, 'failed', { resolution: reason });
+-        return { writId: writ.id, outcome: 'failed', resolution: reason, dryRun: false };
+-      }
+-
+-      // 6a. Success path
+-      if (session.status === 'completed') {
+-        if (codexName && draft) {
+-          // Seal the draft — fail writ if seal fails but preserve draft for recovery
+-          try {
+-            await scriptorium.seal({ codexName, sourceBranch: draft.branch });
+-          } catch (err) {
+-            const reason = `Seal failed: ${String(err)}`;
+-            await clerk.transition(writ.id, 'failed', { resolution: reason });
+-            return { writId: writ.id, sessionId: session.id, outcome: 'failed', resolution: reason, dryRun: false };
+-          }
+-
+-          // Push — same treatment as seal failure
+-          try {
+-            await scriptorium.push({ codexName });
+-          } catch (err) {
+-            const reason = `Push failed: ${String(err)}`;
+-            await clerk.transition(writ.id, 'failed', { resolution: reason });
+-            return { writId: writ.id, sessionId: session.id, outcome: 'failed', resolution: reason, dryRun: false };
+-          }
+-        }
+-
+-        const resolution = `Session ${session.id} completed`;
+-        await clerk.transition(writ.id, 'completed', { resolution });
+-        return { writId: writ.id, sessionId: session.id, outcome: 'completed', resolution, dryRun: false };
+-      }
+-
+-      // 6b. Failure path (status: 'failed' | 'timeout')
+-      if (codexName && draft) {
+-        await scriptorium.abandonDraft({ codexName, branch: draft.branch, force: true });
+-      }
+-      const reason = session.error ?? `Session ${session.status}`;
+-      await clerk.transition(writ.id, 'failed', { resolution: reason });
+-      return { writId: writ.id, sessionId: session.id, outcome: 'failed', resolution: reason, dryRun: false };
+-    },
+-  };
+-
+-  return {
+-    apparatus: {
+-      requires: ['clerk', 'codexes', 'animator'],
+-      recommends: ['loom'],
+-
+-      supportKit: {
+-        tools: [dispatchNext],
+-      },
+-
+-      provides: api,
+-
+-      start(): void {
+-        // No initialization needed — clerk is resolved at call time in next().
+-      },
+-    },
+-  };
+-}
+diff --git a/packages/plugins/dispatch/src/index.ts b/packages/plugins/dispatch/src/index.ts
+deleted file mode 100644
+index 321c70e..0000000
+--- a/packages/plugins/dispatch/src/index.ts
++++ /dev/null
+@@ -1,27 +0,0 @@
+-/**
+- * @shardworks/dispatch-apparatus — The Dispatch.
+- *
+- * Interim work runner: finds the oldest ready writ and executes it through
+- * the guild's session machinery. Opens a draft binding on the target codex,
+- * summons an anima via The Animator, and handles the aftermath (seal the
+- * draft, transition the writ). Disposable — retired when the full rigging
+- * system (Spider, Fabricator, Executor) is implemented.
+- *
+- * See: docs/architecture/apparatus/dispatch.md
+- */
+-
+-import { createDispatch } from './dispatch.ts';
+-
+-// ── Dispatch API ──────────────────────────────────────────────────────
+-
+-export {
+-  type DispatchApi,
+-  type DispatchRequest,
+-  type DispatchResult,
+-} from './types.ts';
+-
+-export { createDispatch } from './dispatch.ts';
+-
+-// ── Default export: the apparatus plugin ──────────────────────────────
+-
+-export default createDispatch();
+diff --git a/packages/plugins/dispatch/src/tools/dispatch-next.ts b/packages/plugins/dispatch/src/tools/dispatch-next.ts
+deleted file mode 100644
+index df76010..0000000
+--- a/packages/plugins/dispatch/src/tools/dispatch-next.ts
++++ /dev/null
+@@ -1,51 +0,0 @@
+-/**
+- * dispatch-next tool — find the oldest ready writ and dispatch it.
+- *
+- * The primary entry point for running guild work. Picks the oldest ready
+- * writ (FIFO order), opens a draft on its codex (if any), summons an anima
+- * to fulfill it, and transitions the writ to completed or failed based on
+- * the session outcome.
+- *
+- * Usage:
+- *   nsg dispatch-next
+- *   nsg dispatch-next --role scribe
+- *   nsg dispatch-next --dry-run
+- *
+- * See: docs/architecture/apparatus/dispatch.md
+- */
+-
+-import { tool } from '@shardworks/tools-apparatus';
+-import { guild } from '@shardworks/nexus-core';
+-import { z } from 'zod';
+-import type { DispatchApi } from '../types.ts';
+-
+-export default tool({
+-  name: 'dispatch-next',
+-  description: 'Find the oldest ready writ and dispatch it',
+-  instructions:
+-    'Finds the oldest ready writ (FIFO order), opens a draft binding on its codex ' +
+-    'if specified, summons an anima to fulfill the commission, and transitions the ' +
+-    'writ to completed or failed based on the session outcome. Returns null if no ' +
+-    'ready writs exist. Use dryRun to preview which writ would be dispatched.',
+-  params: {
+-    role: z.string().optional()
+-      .describe('Role to summon (default: "artificer")'),
+-    dryRun: z.boolean().optional().default(false)
+-      .describe('If true, find and report the writ but do not dispatch'),
+-  },
+-  callableBy: 'cli',
+-  permission: 'dispatch:write',
+-  handler: async (params) => {
+-    const dispatch = guild().apparatus<DispatchApi>('dispatch');
+-    const result = await dispatch.next({
+-      role: params.role,
+-      dryRun: params.dryRun,
+-    });
+-
+-    if (!result) {
+-      return { status: 'idle', message: 'No ready writs found.' };
+-    }
+-
+-    return result;
+-  },
+-});
+diff --git a/packages/plugins/dispatch/src/tools/index.ts b/packages/plugins/dispatch/src/tools/index.ts
+deleted file mode 100644
+index 47f0a8c..0000000
+--- a/packages/plugins/dispatch/src/tools/index.ts
++++ /dev/null
+@@ -1,5 +0,0 @@
+-/**
+- * Dispatch tool re-exports.
+- */
+-
+-export { default as dispatchNext } from './dispatch-next.ts';
+diff --git a/packages/plugins/dispatch/src/types.ts b/packages/plugins/dispatch/src/types.ts
+deleted file mode 100644
+index 52d9931..0000000
+--- a/packages/plugins/dispatch/src/types.ts
++++ /dev/null
+@@ -1,54 +0,0 @@
+-/**
+- * The Dispatch — public types.
+- *
+- * These types form the contract between The Dispatch apparatus and all
+- * callers (CLI, clockworks). No implementation details.
+- *
+- * See: docs/architecture/apparatus/dispatch.md
+- */
+-
+-// ── DispatchApi (the `provides` interface) ───────────────────────────
+-
+-export interface DispatchApi {
+-  /**
+-   * Find the oldest ready writ and execute it.
+-   *
+-   * The full dispatch lifecycle:
+-   *   1. Query the Clerk for the oldest ready writ
+-   *   2. Transition the writ to active
+-   *   3. Open a draft binding on the writ's codex (if specified)
+-   *   4. Summon an anima session with the writ context as prompt
+-   *   5. Wait for session completion
+-   *   6. On success: seal the draft, push, transition writ to completed
+-   *   7. On failure: abandon the draft, transition writ to failed
+-   *
+-   * Returns null if no ready writs exist.
+-   *
+-   * If the writ has no codex, steps 3/6/7 (draft lifecycle) are
+-   * skipped — the session runs in the guild home directory with
+-   * no codex binding.
+-   */
+-  next(request?: DispatchRequest): Promise<DispatchResult | null>;
+-}
+-
+-// ── Request / Result ─────────────────────────────────────────────────
+-
+-export interface DispatchRequest {
+-  /** Role to summon. Default: 'artificer'. */
+-  role?: string;
+-  /** If true, find and report the writ but don't dispatch. */
+-  dryRun?: boolean;
+-}
+-
+-export interface DispatchResult {
+-  /** The writ that was dispatched. */
+-  writId: string;
+-  /** The session id (from the Animator). Absent if dryRun. */
+-  sessionId?: string;
+-  /** Terminal writ status after dispatch. Absent if dryRun. */
+-  outcome?: 'completed' | 'failed';
+-  /** Resolution text set on the writ. Absent if dryRun. */
+-  resolution?: string;
+-  /** Whether this was a dry run. */
+-  dryRun: boolean;
+-}
+diff --git a/packages/plugins/dispatch/tsconfig.json b/packages/plugins/dispatch/tsconfig.json
+deleted file mode 100644
+index 4229950..0000000
+--- a/packages/plugins/dispatch/tsconfig.json
++++ /dev/null
+@@ -1,13 +0,0 @@
+-{
+-  "extends": "../../../tsconfig.json",
+-  "compilerOptions": {
+-    "outDir": "dist",
+-    "rootDir": "src"
+-  },
+-  "include": [
+-    "src"
+-  ],
+-  "exclude": [
+-    "src/**/*.test.ts"
+-  ]
+-}
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index d8b8383..a0c2709 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -132,59 +132,6 @@ importers:
+         specifier: 25.5.0
+         version: 25.5.0
+ 
+-  packages/plugins/dashboard:
+-    dependencies:
+-      '@shardworks/clerk-apparatus':
+-        specifier: workspace:*
+-        version: link:../clerk
+-      '@shardworks/nexus-core':
+-        specifier: workspace:*
+-        version: link:../../framework/core
+-      '@shardworks/stacks-apparatus':
+-        specifier: workspace:*
+-        version: link:../stacks
+-      '@shardworks/tools-apparatus':
+-        specifier: workspace:*
+-        version: link:../tools
+-      zod:
+-        specifier: 4.3.6
+-        version: 4.3.6
+-    devDependencies:
+-      '@types/node':
+-        specifier: 25.5.0
+-        version: 25.5.0
+-
+-  packages/plugins/dispatch:
+-    dependencies:
+-      '@shardworks/animator-apparatus':
+-        specifier: workspace:*
+-        version: link:../animator
+-      '@shardworks/clerk-apparatus':
+-        specifier: workspace:*
+-        version: link:../clerk
+-      '@shardworks/codexes-apparatus':
+-        specifier: workspace:*
+-        version: link:../codexes
+-      '@shardworks/loom-apparatus':
+-        specifier: workspace:*
+-        version: link:../loom
+-      '@shardworks/nexus-core':
+-        specifier: workspace:*
+-        version: link:../../framework/core
+-      '@shardworks/tools-apparatus':
+-        specifier: workspace:*
+-        version: link:../tools
+-      zod:
+-        specifier: 4.3.6
+-        version: 4.3.6
+-    devDependencies:
+-      '@shardworks/stacks-apparatus':
+-        specifier: workspace:*
+-        version: link:../stacks
+-      '@types/node':
+-        specifier: 25.5.0
+-        version: 25.5.0
+-
+   packages/plugins/fabricator:
+     dependencies:
+       '@shardworks/nexus-core':
