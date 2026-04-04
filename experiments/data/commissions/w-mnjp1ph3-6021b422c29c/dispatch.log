@@ -1,0 +1,40 @@
+2026-04-04T02:08:51Z [dispatch] Starting dispatch
+2026-04-04T02:08:51Z [dispatch]   guild=/workspace/vibers codex=nexus role=artificer
+2026-04-04T02:08:51Z [dispatch]   title=Add rig-list, rig-show, and rig-for-writ tools to the Spider
+2026-04-04T02:08:51Z [dispatch] Commission posted: w-mnjp1ph3-6021b422c29c
+2026-04-04T02:08:51Z [dispatch] Syncing framework source...
+2026-04-04T02:08:52Z [dispatch] Framework synced.
+2026-04-04T02:08:52Z [dispatch] Dispatching (role=artificer)... this may take a while.
+2026-04-04T02:08:52Z [dispatch] --- anima session output ---
+2026-04-04T02:08:56Z [anima] Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+2026-04-04T02:13:52Z [anima] Good, `WhereClause` is exported from `@shardworks/stacks-apparatus`. Now let me implement all the changes.Now update `spider.ts` — add `WhereClause` import, `RigFilters` to types import, update rig creation, add API methods, update indexes, and add new tools:Now create the three new tool files:Now let me check if the `tool()` helper supports `optional` on params, or if there's a different pattern. Let me look at the crawl-continual tool for reference:The tools use `zod` for params. Let me fix the three new tool files:Now let's check if the `WhereClause` type is compatible with what I'm using. Let me check the stacks types:`WhereClause` is not generic. Let me fix the type annotation in spider.ts:Now let me also check how `find()` query params work — particularly `offset`:The pagination type union may cause issues with post-initialization property assignment. Let me clean up the `list()` method:Now let's add the test cases. First, let me look at the end of the test file to understand the structure:Now let me update the test file to add the `createdAt` index in the fixture and add the new test cases. First, let me update the rigs book initialization:Now let me find the end of the test file to add the new test suite:Now let's build and test:Build passes. Now run tests:The issue is crawl priority — after spawning rig 1, subsequent crawls run rig 1's engines before spawning rig 2. I need to post all writs first, then call crawl twice for spawns:The issue is crawl priority — after spawning rig 1, subsequent crawls run engines rather than spawn new rigs. I'll fix the tests to put rigs directly in the book for pure query tests, mirroring the existing pattern:Now let's check that `rigsBook` helper is defined in the test file and its type signature:Good. The `rigsBook` helper returns a `Book<RigDoc>` which has `put()`. My test puts RigDoc objects with a `createdAt` field — but since `RigDoc.engines` is typed as `EngineInstance[]`, my empty array should be fine. Let me run the tests:All 51 tests pass. Now commit:Done. Here's what was implemented:
+2026-04-04T02:13:52Z [anima] 
+2026-04-04T02:13:52Z [anima] **Types (`types.ts`)**
+2026-04-04T02:13:52Z [anima] - Added `createdAt: string` to `RigDoc`
+2026-04-04T02:13:52Z [anima] - Added `RigFilters` interface with `status`, `limit`, `offset`
+2026-04-04T02:13:52Z [anima] - Extended `SpiderApi` with `show()`, `list()`, `forWrit()`
+2026-04-04T02:13:52Z [anima] 
+2026-04-04T02:13:52Z [anima] **Spider (`spider.ts`)**
+2026-04-04T02:13:52Z [anima] - Imported `WhereClause` from `@shardworks/stacks-apparatus` and `RigFilters` from types
+2026-04-04T02:13:52Z [anima] - Set `createdAt: new Date().toISOString()` on rig creation in `trySpawn()`
+2026-04-04T02:13:52Z [anima] - Implemented all three API methods inline
+2026-04-04T02:13:52Z [anima] - Added `'createdAt'` to the rigs book indexes
+2026-04-04T02:13:52Z [anima] - Imported and registered the three new tools
+2026-04-04T02:13:52Z [anima] 
+2026-04-04T02:13:52Z [anima] **Tools** — three new files in `src/tools/`:
+2026-04-04T02:13:52Z [anima] - `rig-show.ts` — requires `id`, delegates to `spider.show()`
+2026-04-04T02:13:52Z [anima] - `rig-list.ts` — optional `status`/`limit`/`offset`, delegates to `spider.list()`
+2026-04-04T02:13:52Z [anima] - `rig-for-writ.ts` — requires `writId`, delegates to `spider.forWrit()`
+2026-04-04T02:13:52Z [anima] 
+2026-04-04T02:13:53Z [anima] **Tests** — 10 new test cases covering show happy/error paths, list ordering/filtering/pagination/empty, forWrit happy/miss/nonexistent, and createdAt timestamp validation. All 51 tests pass.
+2026-04-04T02:13:54Z [dispatch] --- end session output ---
+2026-04-04T02:13:54Z [dispatch] Dispatch complete: outcome=completed session=ses-mnjp1r6g-e49bfd1e
+2026-04-04T02:13:54Z [dispatch] 
+2026-04-04T02:13:54Z [dispatch] ✓ Dispatch complete
+2026-04-04T02:13:54Z [dispatch]   writ=w-mnjp1ph3-6021b422c29c
+2026-04-04T02:13:54Z [dispatch]   session=ses-mnjp1r6g-e49bfd1e
+2026-04-04T02:13:54Z [dispatch]   outcome=completed
+2026-04-04T02:13:54Z [dispatch]   artifacts=/workspace/nexus-mk2/experiments/data/commissions/w-mnjp1ph3-6021b422c29c
+2026-04-04T02:13:54Z [dispatch] 
+2026-04-04T02:13:54Z [dispatch] The Laboratory handles: commission log, session records, quality scoring.
+2026-04-04T02:13:54Z [dispatch] Dispatch log: /workspace/nexus-mk2/experiments/data/commissions/w-mnjp1ph3-6021b422c29c/dispatch.log

@@ -17,14 +17,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { spawn, ChildProcess, execSync } from 'node:child_process';
+import { spawn, spawnSync, ChildProcess, execSync } from 'node:child_process';
 import { parse, stringify } from 'yaml';
 
 // ── Config ────────────────────────────────────────────────────────────
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, '..');
 const SPECS_DIR = path.join(PROJECT_ROOT, 'specs');
-const PORT = 3847;
+const GUILD_PATH = '/workspace/vibers';
+
+// Parse --port from argv
+const portArgIdx = process.argv.indexOf('--port');
+const PORT = portArgIdx !== -1 && process.argv[portArgIdx + 1] ? parseInt(process.argv[portArgIdx + 1], 10) : 3847;
+
+// nsg CLI for writ queries
+const NSG_CMD = ['node', '--disable-warning=ExperimentalWarning', '--experimental-transform-types',
+  '/workspace/nexus/packages/framework/cli/src/cli.ts', '--guild-root', GUILD_PATH];
 
 // Ensure specs dir exists
 if (!fs.existsSync(SPECS_DIR)) fs.mkdirSync(SPECS_DIR, { recursive: true });
@@ -51,6 +59,58 @@ const sseClients: SSEClient[] = [];
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
+interface SpecMeta {
+  sessionId?: string;
+  writId?: string;
+}
+
+function readMeta(slug: string): SpecMeta {
+  const metaPath = path.join(SPECS_DIR, slug, '.meta.yml');
+  if (!fs.existsSync(metaPath)) {
+    // Migrate from old .session-id file
+    const oldPath = path.join(SPECS_DIR, slug, '.session-id');
+    if (fs.existsSync(oldPath)) {
+      const sessionId = fs.readFileSync(oldPath, 'utf-8').trim();
+      const meta: SpecMeta = { sessionId };
+      writeMeta(slug, meta);
+      fs.unlinkSync(oldPath);
+      return meta;
+    }
+    return {};
+  }
+  try {
+    return parse(fs.readFileSync(metaPath, 'utf-8')) ?? {};
+  } catch { return {}; }
+}
+
+function writeMeta(slug: string, meta: SpecMeta): void {
+  const metaPath = path.join(SPECS_DIR, slug, '.meta.yml');
+  fs.writeFileSync(metaPath, stringify(meta, { lineWidth: 0 }));
+}
+
+// Cache writ status to avoid hammering the CLI on every request
+const writStatusCache = new Map<string, { status: string; resolution?: string; fetchedAt: number }>();
+const WRIT_CACHE_TTL = 15_000; // 15 seconds
+
+function getWritStatus(writId: string): { status: string; resolution?: string } | null {
+  const cached = writStatusCache.get(writId);
+  if (cached && (Date.now() - cached.fetchedAt) < WRIT_CACHE_TTL) {
+    return { status: cached.status, resolution: cached.resolution };
+  }
+  try {
+    const result = spawnSync(NSG_CMD[0], NSG_CMD.slice(1).concat(['writ', 'show', '--id', writId]), {
+      encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore']
+    });
+    if (result.status !== 0 || !result.stdout) return null;
+    const writ = JSON.parse(result.stdout);
+    const entry = { status: writ.status ?? 'unknown', resolution: writ.resolution, fetchedAt: Date.now() };
+    writStatusCache.set(writId, entry);
+    return { status: entry.status, resolution: entry.resolution };
+  } catch {
+    return null;
+  }
+}
+
 function specsList(): Array<{ slug: string; brief: string; status: string; mtime: string }> {
   if (!fs.existsSync(SPECS_DIR)) return [];
   const dirs = fs.readdirSync(SPECS_DIR, { withFileTypes: true })
@@ -72,8 +132,24 @@ function deriveStatus(slug: string): string {
   const r = running.get(slug);
   if (r) return 'running-' + r.step;
 
+  // Check for dispatch running
+  if (running.has(slug + ':dispatch')) return 'dispatching';
+
   const dir = path.join(SPECS_DIR, slug);
   const has = (f: string) => fs.existsSync(path.join(dir, f));
+
+  // If we have a writ ID, check its status for post-dispatch states
+  const meta = readMeta(slug);
+  if (meta.writId) {
+    const writ = getWritStatus(meta.writId);
+    if (writ) {
+      if (writ.status === 'completed') return 'complete';
+      if (writ.status === 'failed') return 'failed';
+      if (writ.status === 'active') return 'implementing';
+      if (writ.status === 'ready') return 'dispatched';
+      if (writ.status === 'cancelled') return 'cancelled';
+    }
+  }
 
   if (has('spec.md')) return 'spec';
   if (has('gaps.yaml')) return 'gaps';
@@ -114,8 +190,14 @@ function getSpecData(slug: string): Record<string, any> {
   const gapsPath = path.join(dir, 'gaps.yaml');
   if (fs.existsSync(gapsPath)) data.gaps = fs.readFileSync(gapsPath, 'utf-8');
 
-  const sessionIdPath = path.join(dir, '.session-id');
-  if (fs.existsSync(sessionIdPath)) data.readerSessionId = fs.readFileSync(sessionIdPath, 'utf-8').trim();
+  // Read meta
+  const meta = readMeta(slug);
+  if (meta.sessionId) data.readerSessionId = meta.sessionId;
+  if (meta.writId) {
+    data.writId = meta.writId;
+    const writ = getWritStatus(meta.writId);
+    if (writ) data.writStatus = writ.status;
+  }
 
   // Include running process info
   const r = running.get(slug);
@@ -230,16 +312,17 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
 function startReader(slug: string, brief: string): void {
   // Pre-create session ID for forking
   const sessionId = crypto.randomUUID();
-  const dir = path.join(SPECS_DIR, slug);
-  fs.writeFileSync(path.join(dir, '.session-id'), sessionId);
+  const meta = readMeta(slug);
+  meta.sessionId = sessionId;
+  writeMeta(slug, meta);
 
   runPipelineStep(slug, 'reader', ['--session-id', sessionId],
     'Brief: ' + brief + '\n\nSlug: ' + slug);
 }
 
 function startAnalyst(slug: string, brief: string): void {
-  const sessionIdPath = path.join(SPECS_DIR, slug, '.session-id');
-  const sessionId = fs.existsSync(sessionIdPath) ? fs.readFileSync(sessionIdPath, 'utf-8').trim() : '';
+  const meta = readMeta(slug);
+  const sessionId = meta.sessionId ?? '';
 
   const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
 
@@ -248,8 +331,8 @@ function startAnalyst(slug: string, brief: string): void {
 }
 
 function startWriter(slug: string, brief: string): void {
-  const sessionIdPath = path.join(SPECS_DIR, slug, '.session-id');
-  const sessionId = fs.existsSync(sessionIdPath) ? fs.readFileSync(sessionIdPath, 'utf-8').trim() : '';
+  const meta = readMeta(slug);
+  const sessionId = meta.sessionId ?? '';
 
   const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
 
@@ -405,14 +488,13 @@ const server = http.createServer(async (req, res) => {
       // Guard against double-dispatch
       if (running.has(slug + ':dispatch')) return jsonResponse(res, { error: 'dispatch already in progress' }, 409);
 
-      const dispatchScript = path.join(PROJECT_ROOT, 'bin', 'dispatch.sh');
+      const commissionScript = path.join(PROJECT_ROOT, 'bin', 'commission.sh');
       const codex = body.codex || '';
-      const role = body.role || 'artificer';
       const complexity = body.complexity || '';
 
       if (!codex) return jsonResponse(res, { error: 'codex is required' }, 400);
 
-      const spawnArgs = [dispatchScript, '--codex', codex, '--role', role];
+      const spawnArgs = [commissionScript, '--codex', codex];
       if (complexity) spawnArgs.push('--complexity', complexity);
       spawnArgs.push('--', '@' + specPath);
 
@@ -430,6 +512,17 @@ const server = http.createServer(async (req, res) => {
         for (const line of lines) {
           pipeline.log.push(line);
           sendSSE(slug, 'log', { line: '[dispatch] ' + line });
+
+          // Capture writ ID from commission.sh output
+          const writMatch = line.match(/Commission posted:\s+(w-[^\s]+)/);
+          if (writMatch) {
+            const writId = writMatch[1];
+            console.log('[workshop] Captured writ ID: ' + writId);
+            const meta = readMeta(slug);
+            meta.writId = writId;
+            writeMeta(slug, meta);
+            sendSSE(slug, 'meta', { writId });
+          }
         }
       });
       proc.stderr!.on('data', (chunk: Buffer) => {
@@ -443,6 +536,9 @@ const server = http.createServer(async (req, res) => {
         running.delete(dispatchKey);
         const elapsed = Math.floor((Date.now() - pipeline.startTime) / 1000);
         console.log('[workshop] dispatch for ' + slug + ' finished (code=' + code + ', ' + elapsed + 's)');
+        // Invalidate writ cache so next status check gets fresh data
+        const meta = readMeta(slug);
+        if (meta.writId) writStatusCache.delete(meta.writId);
         sendSSE(slug, 'status', { step: 'dispatch', state: code === 0 ? 'complete' : 'failed', elapsed, code });
       });
       return;
@@ -543,6 +639,12 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '.badge-spec { background: rgba(158,206,106,0.15); color: var(--green); }\n' +
 '.badge-gaps { background: rgba(247,118,142,0.15); color: var(--red); }\n' +
 '.badge-running { background: rgba(187,154,247,0.15); color: var(--magenta); }\n' +
+'.badge-dispatched { background: rgba(125,207,255,0.15); color: var(--cyan); }\n' +
+'.badge-dispatching { background: rgba(187,154,247,0.15); color: var(--magenta); }\n' +
+'.badge-implementing { background: rgba(224,175,104,0.15); color: var(--yellow); }\n' +
+'.badge-complete { background: rgba(158,206,106,0.15); color: var(--green); }\n' +
+'.badge-failed { background: rgba(247,118,142,0.15); color: var(--red); }\n' +
+'.badge-cancelled { background: rgba(86,95,137,0.3); color: var(--text-dim); }\n' +
 '\n' +
 '/* ── Detail view ── */\n' +
 '.back { color: var(--text-dim); font-size: 12px; margin-bottom: 8px; display: inline-block; }\n' +
@@ -712,7 +814,9 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '      for (var i = 0; i < specs.length; i++) {\n' +
 '        var s = specs[i];\n' +
 '        var badgeClass = "badge-" + (s.status.indexOf("running") === 0 ? "running" : s.status);\n' +
-'        var statusLabel = s.status.indexOf("running") === 0 ? s.status.replace("running-", "&#9672; ") : s.status;\n' +
+'        var statusLabel = s.status;\n' +
+'        if (s.status.indexOf("running") === 0) statusLabel = s.status.replace("running-", "&#9672; ");\n' +
+'        else if (s.status === "implementing" || s.status === "dispatching") statusLabel = "&#9672; " + s.status;\n' +
 '        html += \'<div class="spec-card" data-action="open-spec" data-slug="\' + esc(s.slug) + \'">\';\n' +
 '        html += \'<div class="slug">\' + esc(s.slug) + \'</div>\';\n' +
 '        html += \'<div class="brief">\' + esc(s.brief) + \'</div>\';\n' +
@@ -794,6 +898,7 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    { key: "analyst", label: "Analyst", file: "scope.yaml" },\n' +
 '    { key: "review", label: "Review", file: null },\n' +
 '    { key: "writer", label: "Writer", file: "spec.md" },\n' +
+'    { key: "dispatch", label: "Dispatch", file: null },\n' +
 '  ];\n' +
 '\n' +
 '  for (var i = 0; i < steps.length; i++) {\n' +
@@ -803,7 +908,19 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    var icon = "&#9675;";\n' +
 '    var actionBtn = "";\n' +
 '\n' +
-'    if (d.runningStep === s.key) {\n' +
+'    if (s.key === "dispatch") {\n' +
+'      // Dispatch step derives state from writ status\n' +
+'      if (d.status === "dispatching") { state = "active"; statusText = "dispatching..."; icon = "&#9672;"; }\n' +
+'      else if (d.writId) {\n' +
+'        var ws = d.writStatus || "unknown";\n' +
+'        if (ws === "completed") { state = "done"; statusText = "complete"; icon = "&#10003;"; }\n' +
+'        else if (ws === "failed") { state = "failed"; statusText = "failed"; icon = "&#10007;"; }\n' +
+'        else if (ws === "active") { state = "active"; statusText = "implementing..."; icon = "&#9672;"; }\n' +
+'        else if (ws === "ready") { state = "done"; statusText = "dispatched"; icon = "&#10003;"; }\n' +
+'        else if (ws === "cancelled") { state = "failed"; statusText = "cancelled"; icon = "&#10007;"; }\n' +
+'        else { state = "done"; statusText = ws; icon = "&#10003;"; }\n' +
+'      }\n' +
+'    } else if (d.runningStep === s.key) {\n' +
 '      state = "active"; statusText = "running..."; icon = "&#9672;";\n' +
 '    } else if (s.key === "review") {\n' +
 '      if (d.scope && d.decisions) { state = "done"; statusText = "ready"; icon = "&#10003;"; }\n' +
@@ -811,8 +928,8 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '      state = "done"; statusText = "complete"; icon = "&#10003;";\n' +
 '    }\n' +
 '\n' +
-'    // Show run/re-run buttons\n' +
-'    if (s.key !== "review" && !d.runningStep) {\n' +
+'    // Show run/re-run buttons (not for review or dispatch)\n' +
+'    if (s.key !== "review" && s.key !== "dispatch" && !d.runningStep) {\n' +
 '      if (state === "done") {\n' +
 '        actionBtn = \'<button class="btn btn-dim" data-action="run-step" data-step="\' + s.key + \'">re-run</button>\';\n' +
 '      } else if (state === "pending") {\n' +
@@ -947,11 +1064,26 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '  if (!specData.spec) return \'<div class="empty">No spec.md yet. Run the writer first.</div>\';\n' +
 '  var html = \'<div class="spec-content">\' + esc(specData.spec) + \'</div>\';\n' +
 '\n' +
+'  // Writ status info\n' +
+'  if (specData.writId) {\n' +
+'    var ws = specData.writStatus || "unknown";\n' +
+'    var wsColor = ws === "completed" ? "var(--green)" : ws === "failed" ? "var(--red)" : ws === "active" ? "var(--yellow)" : "var(--text-dim)";\n' +
+'    html += \'<div style="margin-top:12px; padding:10px 14px; background:var(--surface); border:1px solid var(--border); border-radius:8px; display:flex; align-items:center; gap:12px;">\';\n' +
+'    html += \'<span style="color:var(--text-dim)">Writ:</span> \';\n' +
+'    html += \'<code style="color:var(--cyan)">\' + esc(specData.writId) + \'</code>\';\n' +
+'    html += \'<span class="badge badge-\' + ws + \'" style="color:\' + wsColor + \'">\' + esc(ws) + \'</span>\';\n' +
+'    html += \'</div>\';\n' +
+'  }\n' +
+'\n' +
 '  html += \'<div class="dispatch-form">\';\n' +
 '  html += \'<label>Codex:</label> <input id="dispatch-codex" placeholder="codex name">\';\n' +
 '  html += \'<label>Role:</label> <input id="dispatch-role" value="artificer">\';\n' +
 '  html += \'<label>Complexity:</label> <input id="dispatch-complexity" placeholder="1 2 3 5 8 13 21" style="width:80px">\';\n' +
-'  html += \'<button class="btn btn-green" data-action="dispatch">Dispatch &#8594;</button>\';\n' +
+'  if (specData.writId) {\n' +
+'    html += \'<button class="btn btn-yellow" data-action="dispatch">Redispatch &#8634;</button>\';\n' +
+'  } else {\n' +
+'    html += \'<button class="btn btn-green" data-action="dispatch">Dispatch &#8594;</button>\';\n' +
+'  }\n' +
 '  html += \'</div>\';\n' +
 '\n' +
 '  if (specData.gaps) {\n' +
@@ -976,6 +1108,14 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '      var cls = data.line.indexOf("[stderr]") === 0 ? " stderr" : "";\n' +
 '      logEl.innerHTML += \'<div class="log-line\' + cls + \'">\' + esc(data.line) + \'</div>\';\n' +
 '      logEl.scrollTop = logEl.scrollHeight;\n' +
+'    }\n' +
+'  });\n' +
+'\n' +
+'  evtSource.addEventListener("meta", function(e) {\n' +
+'    var data = JSON.parse(e.data);\n' +
+'    if (data.writId && specData) {\n' +
+'      specData.writId = data.writId;\n' +
+'      specData.writStatus = "ready";\n' +
 '    }\n' +
 '  });\n' +
 '\n' +

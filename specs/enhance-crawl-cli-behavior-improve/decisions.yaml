@@ -1,0 +1,152 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    category: product
+    observable: true
+    question: Should the single-step tool be named 'crawl-one' as the brief says, or something else like 'crawl-step'?
+    context: The brief explicitly says 'crawl-one'. The codebase convention is noun-verb or noun-noun hyphenated patterns (writ-list, draft-open, commission-post). 'crawl-one' is slightly unusual — it reads as 'crawl one [thing]' rather than the standard pattern.
+    options:
+      a: Use 'crawl-one' as the brief specifies
+      b: Use 'crawl-step' which better describes the action (execute one step)
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The brief is explicit. 'crawl-one' is clear enough and the patron chose it deliberately.
+  - id: D2
+    scope:
+      - S3
+    category: api
+    observable: true
+    question: How should 'never stop by default' be implemented for maxIdleCycles?
+    context: "Current code: `z.number().optional().default(3)` with loop condition `while (idleCount < maxIdle)`. Three viable approaches exist. The param is part of the tool's public API (visible to CLI users and MCP consumers)."
+    options:
+      a: Use `.default(Infinity)` — idleCount < Infinity is always true, no loop logic change needed
+      b: Use `.default(0)` as sentinel meaning 'no limit', change loop to `while (maxIdle === 0 || idleCount < maxIdle)`
+      c: Make param nullable (z.number().nullable()), where null/undefined means 'no limit', change loop to check for null
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: high
+      rationale: 0-as-unlimited is a well-understood convention (like SQL LIMIT 0). Infinity serializes to null in JSON which creates confusing behavior for MCP consumers inspecting the schema — a Zod default of Infinity would appear as null in JSON schema output. Option B keeps the param as a clean integer with predictable serialization.
+  - id: D3
+    scope:
+      - S3
+    category: product
+    observable: true
+    question: Should the tool description and instructions text change to reflect 'runs indefinitely' semantics?
+    context: "Current description: \"Run the Spider's crawl loop continuously until idle\". Current instructions: 'Stops when the configured number of consecutive idle cycles is reached.' With the new default of never stopping, these are misleading."
+    options:
+      a: Update description to 'Run the Spider's crawl loop continuously' and instructions to explain the opt-in idle limit
+      b: Keep current text, only update the param description
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: User-facing text should reflect actual default behavior. The 'until idle' framing is no longer the default mode.
+  - id: D4
+    scope:
+      - S3
+    category: api
+    observable: true
+    question: What should the maxIdleCycles param description say?
+    context: "Current: 'Number of consecutive idle crawl() calls before stopping (default: 3)'. Needs to communicate that 0 (or whatever sentinel) means no limit."
+    options:
+      a: "'Number of consecutive idle cycles before stopping. 0 means run indefinitely (default: 0)'"
+      b: "'Max consecutive idle cycles before stopping. Pass a positive number to enable auto-stop (default: runs indefinitely)'"
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: medium
+      rationale: Option B leads with the default behavior (indefinite) and frames the positive number as the opt-in, which matches the new mental model. Option A is also fine — this is a minor wording preference.
+  - id: D5
+    scope:
+      - S5
+    category: implementation
+    observable: false
+    question: Should the source file crawl.ts be renamed to crawl-one.ts?
+    context: The file crawl-continual.ts already matches its tool name. After renaming the tool to 'crawl-one', the file crawl.ts would be misaligned. Other tool files in the codebase match their tool names (commission-post.ts, writ-list.ts, etc.).
+    options:
+      a: Rename crawl.ts to crawl-one.ts for consistency
+      b: Keep crawl.ts — it's internal, the tool name is what matters
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Every other tool file in the codebase is named to match its tool name. This is a clear convention.
+  - id: D6
+    scope:
+      - S5
+    category: implementation
+    observable: false
+    question: Should internal export identifiers (crawlTool, crawlContinualTool) be renamed?
+    context: tools/index.ts exports `crawlTool` and `crawlContinualTool`. spider.ts imports them. These are internal identifiers not visible to users. Renaming them (e.g. crawlOneTool, crawlContinualTool) is purely a code clarity choice — the camelCase identifiers can't use hyphens.
+    options:
+      a: Rename to crawlOneTool and crawlContinualTool (crawlContinualTool is already fine)
+      b: Keep current names — they're internal and the churn adds no value
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: medium
+      rationale: crawlTool is ambiguous — it could mean either tool. crawlOneTool makes the referent clear. The change is two files, four lines.
+  - id: D7
+    scope:
+      - S5
+    category: implementation
+    observable: false
+    question: Should the console.error log tag '[crawlContinual]' be updated?
+    context: Line 51 of crawl-continual.ts logs errors with tag '[crawlContinual]'. After renaming the tool, this tag would be stale.
+    options:
+      a: Update to '[crawl-continual]' to match the new tool name
+      b: Keep '[crawlContinual]' — log tags don't need to match CLI names
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Log tags should match the tool name for grep-ability. When an operator sees an error in logs, they should be able to find the tool by name.
+  - id: D8
+    scope:
+      - S5
+    category: implementation
+    observable: false
+    question: Should the JSDoc comment headers in the tool files be updated?
+    context: "crawl.ts line 2: '* crawl tool — executes a single step'. crawl-continual.ts line 2: '* crawlContinual tool — runs the crawl loop continuously'. These are developer-facing comments."
+    options:
+      a: Update to match new tool names
+      b: Leave as-is — comments are internal
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Stale comments are worse than no comments. This is a trivial update that prevents future confusion.
+  - id: D9
+    scope:
+      - S6
+    category: product
+    observable: true
+    question: How much of spider.md should be updated?
+    context: "The doc has multiple stale references: 'walk' (line 63), 'start-walking' (line 103), 'nsg start-crawling' (line 108-109), 'crawlContinual' (line 64), and a naming-TBD note (line 69). Some of these predate the current implementation entirely."
+    options:
+      a: Update only the tool name references to match new names — minimal diff, stay within brief scope
+      b: Rewrite the kit contribution and operational model sections to accurately reflect the implementation
+    selected: b
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The doc has deeper staleness issues beyond just tool names — a full rewrite is a separate concern. Update the names to prevent further drift, log the broader doc issues as observations.
+  - id: D10
+    scope:
+      - S3
+    category: implementation
+    observable: false
+    question: Does the loop sleep logic need adjustment for the indefinite-run case?
+    context: Current code has `if (idleCount < maxIdle)` guards before sleeping — this prevents a useless sleep on the final idle cycle before exit. With maxIdle=0 meaning 'no limit', the guard condition changes. The sleep should always fire when running indefinitely.
+    options:
+      a: Change sleep guards to `if (maxIdle === 0 || idleCount < maxIdle)` to match the loop condition
+      b: "Simplify: always sleep after idle/error, since the while condition handles termination"
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: high
+      rationale: The sleep-before-last-exit optimization saves one sleep interval at tool termination. That's negligible. Always sleeping simplifies the code and eliminates the bug surface of mismatched conditions.

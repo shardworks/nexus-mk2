@@ -57,7 +57,8 @@ The spec must begin with YAML frontmatter:
 
 ```markdown
 ---
-author: plan-writer (2026-04-03)
+author: plan-writer
+author_version: 2026-04-03
 estimated_complexity: {fibonacci}
 ---
 
