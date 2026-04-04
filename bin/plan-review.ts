@@ -17,8 +17,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { spawn, spawnSync, ChildProcess, execSync } from 'node:child_process';
+import { spawn, type ChildProcess, execSync } from 'node:child_process';
 import { parse, stringify } from 'yaml';
+import { createGuild } from '@shardworks/nexus-arbor';
+import type { ClerkApi, WritDoc, WritLinkDoc, WritLinks } from '@shardworks/clerk-apparatus';
 
 // ── Config ────────────────────────────────────────────────────────────
 
@@ -30,9 +32,23 @@ const GUILD_PATH = '/workspace/vibers';
 const portArgIdx = process.argv.indexOf('--port');
 const PORT = portArgIdx !== -1 && process.argv[portArgIdx + 1] ? parseInt(process.argv[portArgIdx + 1], 10) : 3847;
 
-// nsg CLI for writ queries
-const NSG_CMD = ['node', '--disable-warning=ExperimentalWarning', '--experimental-transform-types',
-  '/workspace/nexus/packages/framework/cli/src/cli.ts', '--guild-root', GUILD_PATH];
+// ── Guild connection ─────────────────────────────────────────────────
+
+let clerk: ClerkApi;
+let guildRef: { guildConfig: () => any };
+
+async function bootGuild(): Promise<void> {
+  console.log('[workshop] Booting guild at ' + GUILD_PATH + '...');
+  const guild = await createGuild(GUILD_PATH);
+  clerk = guild.apparatus<ClerkApi>('clerk');
+  guildRef = guild;
+  console.log('[workshop] Guild ready — clerk connected');
+}
+
+function getCodexNames(): string[] {
+  const cfg = guildRef.guildConfig();
+  return Object.keys(cfg.codexes?.registered ?? {});
+}
 
 // Ensure specs dir exists
 if (!fs.existsSync(SPECS_DIR)) fs.mkdirSync(SPECS_DIR, { recursive: true });
@@ -60,6 +76,7 @@ const sseClients: SSEClient[] = [];
 // ── Helpers ───────────────────────────────────────────────────────────
 
 interface SpecMeta {
+  createdAt?: string;
   sessionId?: string;
   writId?: string;
 }
@@ -88,27 +105,94 @@ function writeMeta(slug: string, meta: SpecMeta): void {
   fs.writeFileSync(metaPath, stringify(meta, { lineWidth: 0 }));
 }
 
-// Cache writ status to avoid hammering the CLI on every request
-const writStatusCache = new Map<string, { status: string; resolution?: string; fetchedAt: number }>();
-const WRIT_CACHE_TTL = 15_000; // 15 seconds
+// Cache writ status to avoid redundant queries
+const writStatusCache = new Map<string, { writ: WritDoc; fetchedAt: number }>();
+const WRIT_CACHE_TTL = 10_000; // 10 seconds
 
-function getWritStatus(writId: string): { status: string; resolution?: string } | null {
+async function getWrit(writId: string): Promise<WritDoc | null> {
   const cached = writStatusCache.get(writId);
   if (cached && (Date.now() - cached.fetchedAt) < WRIT_CACHE_TTL) {
-    return { status: cached.status, resolution: cached.resolution };
+    return cached.writ;
   }
   try {
-    const result = spawnSync(NSG_CMD[0], NSG_CMD.slice(1).concat(['writ', 'show', '--id', writId]), {
-      encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore']
-    });
-    if (result.status !== 0 || !result.stdout) return null;
-    const writ = JSON.parse(result.stdout);
-    const entry = { status: writ.status ?? 'unknown', resolution: writ.resolution, fetchedAt: Date.now() };
-    writStatusCache.set(writId, entry);
-    return { status: entry.status, resolution: entry.resolution };
+    const writ = await clerk.show(writId);
+    writStatusCache.set(writId, { writ, fetchedAt: Date.now() });
+    return writ;
   } catch {
     return null;
   }
+}
+
+function getWritSync(writId: string): WritDoc | null {
+  const cached = writStatusCache.get(writId);
+  if (cached) return cached.writ;
+  return null;
+}
+
+// Links cache
+const linksCache = new Map<string, { links: WritLinks; fetchedAt: number }>();
+
+async function getLinks(writId: string): Promise<WritLinks | null> {
+  const cached = linksCache.get(writId);
+  if (cached && (Date.now() - cached.fetchedAt) < WRIT_CACHE_TTL) {
+    return cached.links;
+  }
+  try {
+    const links = await clerk.links(writId);
+    linksCache.set(writId, { links, fetchedAt: Date.now() });
+    return links;
+  } catch {
+    return null;
+  }
+}
+
+function getLinksSync(writId: string): WritLinks | null {
+  const cached = linksCache.get(writId);
+  if (cached) return cached.links;
+  return null;
+}
+
+/** Walk the full retry chain backwards from a writ. Returns newest-first. */
+async function getWritChain(writId: string): Promise<Array<{ id: string; status: string; title: string; linkType?: string }>> {
+  const chain: Array<{ id: string; status: string; title: string; linkType?: string }> = [];
+  const visited = new Set<string>();
+  let currentId: string | null = writId;
+
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    const writ = await getWrit(currentId);
+    if (!writ) break;
+
+    const links = await getLinks(currentId);
+    // Find outbound "retries" link — this writ retries something
+    const retriesLink = links?.outbound.find(l => l.type === 'retries');
+
+    chain.push({
+      id: writ.id,
+      status: writ.status,
+      title: writ.title,
+      linkType: retriesLink ? 'retries' : undefined,
+    });
+
+    currentId = retriesLink?.targetId ?? null;
+  }
+
+  return chain;
+}
+
+/** Pre-warm writ cache for all specs that have a writId in their meta. */
+async function warmWritCache(): Promise<void> {
+  if (!fs.existsSync(SPECS_DIR)) return;
+  const dirs = fs.readdirSync(SPECS_DIR, { withFileTypes: true })
+    .filter(d => d.isDirectory()).map(d => d.name);
+  const fetches: Promise<void>[] = [];
+  for (const slug of dirs) {
+    const meta = readMeta(slug);
+    if (meta.writId) {
+      fetches.push(getWrit(meta.writId).then(() => {}));
+    }
+  }
+  await Promise.all(fetches);
 }
 
 function specsList(): Array<{ slug: string; brief: string; status: string; mtime: string }> {
@@ -123,9 +207,10 @@ function specsList(): Array<{ slug: string; brief: string; status: string; mtime
     const briefPath = path.join(dir, 'brief.md');
     const brief = fs.existsSync(briefPath) ? fs.readFileSync(briefPath, 'utf-8').trim() : '(no brief)';
     const status = deriveStatus(slug);
-    const stat = fs.statSync(dir);
-    return { slug, brief, status, mtime: stat.mtime.toISOString() };
-  });
+    const meta = readMeta(slug);
+    const createdAt = meta.createdAt ?? fs.statSync(dir).mtime.toISOString();
+    return { slug, brief, status, createdAt };
+  }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function deriveStatus(slug: string): string {
@@ -141,7 +226,7 @@ function deriveStatus(slug: string): string {
   // If we have a writ ID, check its status for post-dispatch states
   const meta = readMeta(slug);
   if (meta.writId) {
-    const writ = getWritStatus(meta.writId);
+    const writ = getWritSync(meta.writId);
     if (writ) {
       if (writ.status === 'completed') return 'complete';
       if (writ.status === 'failed') return 'failed';
@@ -195,7 +280,7 @@ function getSpecData(slug: string): Record<string, any> {
   if (meta.sessionId) data.readerSessionId = meta.sessionId;
   if (meta.writId) {
     data.writId = meta.writId;
-    const writ = getWritStatus(meta.writId);
+    const writ = getWritSync(meta.writId);
     if (writ) data.writStatus = writ.status;
   }
 
@@ -306,6 +391,13 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     const elapsed = Math.floor((Date.now() - pipeline.startTime) / 1000);
     console.log('[workshop] ' + step + ' for ' + slug + ' finished (code=' + code + ', ' + elapsed + 's)');
     sendSSE(slug, 'status', { step, state: code === 0 ? 'complete' : 'failed', elapsed, code });
+
+    // Auto-chain: reader → analyst
+    if (code === 0 && step === 'reader') {
+      const brief = readSpecFile(slug, 'brief.md') ?? '';
+      console.log('[workshop] Auto-starting analyst for ' + slug);
+      startAnalyst(slug, brief.trim());
+    }
   });
 }
 
@@ -364,6 +456,7 @@ const server = http.createServer(async (req, res) => {
 
     // GET /api/specs
     if (req.method === 'GET' && url.pathname === '/api/specs') {
+      await warmWritCache();
       return jsonResponse(res, specsList());
     }
 
@@ -380,6 +473,7 @@ const server = http.createServer(async (req, res) => {
 
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, 'brief.md'), brief + '\n');
+      writeMeta(slug, { createdAt: new Date().toISOString() });
 
       // Auto-start the reader
       startReader(slug, brief);
@@ -392,7 +486,13 @@ const server = http.createServer(async (req, res) => {
       const slug = parts[2];
       const dir = path.join(SPECS_DIR, slug);
       if (!fs.existsSync(dir)) return jsonResponse(res, { error: 'not found' }, 404);
-      return jsonResponse(res, getSpecData(slug));
+      const meta = readMeta(slug);
+      if (meta.writId) await getWrit(meta.writId);
+      const data = getSpecData(slug);
+      if (meta.writId) {
+        data.writChain = await getWritChain(meta.writId);
+      }
+      return jsonResponse(res, data);
     }
 
     // PATCH /api/specs/:slug/scope
@@ -488,6 +588,9 @@ const server = http.createServer(async (req, res) => {
       // Guard against double-dispatch
       if (running.has(slug + ':dispatch')) return jsonResponse(res, { error: 'dispatch already in progress' }, 409);
 
+      // Capture previous writ ID for retry linking
+      const prevWritId = readMeta(slug).writId ?? null;
+
       const commissionScript = path.join(PROJECT_ROOT, 'bin', 'commission.sh');
       const codex = body.codex || '';
       const complexity = body.complexity || '';
@@ -537,11 +640,26 @@ const server = http.createServer(async (req, res) => {
         const elapsed = Math.floor((Date.now() - pipeline.startTime) / 1000);
         console.log('[workshop] dispatch for ' + slug + ' finished (code=' + code + ', ' + elapsed + 's)');
         // Invalidate writ cache so next status check gets fresh data
-        const meta = readMeta(slug);
-        if (meta.writId) writStatusCache.delete(meta.writId);
+        const dmeta = readMeta(slug);
+        if (dmeta.writId) writStatusCache.delete(dmeta.writId);
+
+        // Link new writ to previous writ if this is a redispatch
+        if (code === 0 && dmeta.writId && prevWritId && dmeta.writId !== prevWritId) {
+          clerk.link(dmeta.writId, prevWritId, 'retries').then(() => {
+            console.log('[workshop] Linked ' + dmeta.writId + ' --retries--> ' + prevWritId);
+          }).catch((err: any) => {
+            console.error('[workshop] Failed to link writs:', err.message);
+          });
+        }
+
         sendSSE(slug, 'status', { step: 'dispatch', state: code === 0 ? 'complete' : 'failed', elapsed, code });
       });
       return;
+    }
+
+    // GET /api/codexes
+    if (req.method === 'GET' && url.pathname === '/api/codexes') {
+      return jsonResponse(res, getCodexNames());
     }
 
     // PATCH /api/specs/:slug/spec — edit spec content
@@ -570,18 +688,25 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  const initialSlug = process.argv[2];
-  const url = 'http://localhost:' + PORT + (initialSlug ? '/#/' + path.basename(initialSlug) : '');
-  console.log('\n  plan-workshop serving at ' + url);
-  console.log('  specs dir: ' + SPECS_DIR);
-  console.log('  Press Ctrl+C to quit\n');
+// Boot guild, then start server
+bootGuild().then(() => {
+  server.listen(PORT, () => {
+    const initialSlug = process.argv[2];
+    const url = 'http://localhost:' + PORT + (initialSlug ? '/#/' + path.basename(initialSlug) : '');
+    console.log('\n  plan-workshop serving at ' + url);
+    console.log('  specs dir: ' + SPECS_DIR);
+    console.log('  guild: ' + GUILD_PATH);
+    console.log('  Press Ctrl+C to quit\n');
 
-  try {
-    const platform = process.platform;
-    if (platform === 'darwin') execSync('open ' + url);
-    else if (platform === 'linux') execSync('xdg-open ' + url + ' 2>/dev/null || true');
-  } catch { /* silent */ }
+    try {
+      const platform = process.platform;
+      if (platform === 'darwin') execSync('open ' + url);
+      else if (platform === 'linux') execSync('xdg-open ' + url + ' 2>/dev/null || true');
+    } catch { /* silent */ }
+  });
+}).catch((err) => {
+  console.error('[workshop] Failed to boot guild:', err.message);
+  process.exit(1);
 });
 
 // ── HTML ──────────────────────────────────────────────────────────────
@@ -772,6 +897,8 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 'var logLines = [];\n' +
 'var elapsedTimer = null;\n' +
 'var filters = { product: true, api: true, implementation: true };\n' +
+'var codexList = [];\n' +
+'api("GET", "/codexes").then(function(c) { codexList = c || []; });\n' +
 '\n' +
 '// ── Router ──\n' +
 'function route() {\n' +
@@ -831,7 +958,8 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    var slugEl = document.getElementById("new-slug");\n' +
 '    if (briefEl && slugEl) {\n' +
 '      briefEl.addEventListener("input", function() {\n' +
-'        var words = briefEl.value.toLowerCase().replace(/[^a-z0-9\\s-]/g, "").split(/\\s+/).slice(0, 6);\n' +
+'        var firstLine = briefEl.value.split("\\n")[0] || "";\n' +
+'        var words = firstLine.toLowerCase().replace(/[^a-z0-9\\s-]/g, "").split(/\\s+/).slice(0, 6);\n' +
 '        slugEl.value = words.join("-").replace(/-+/g, "-").replace(/^-|-$/g, "");\n' +
 '      });\n' +
 '    }\n' +
@@ -885,6 +1013,17 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '  // Scroll log to bottom\n' +
 '  var logEl = document.getElementById("log-area");\n' +
 '  if (logEl) logEl.scrollTop = logEl.scrollHeight;\n' +
+'\n' +
+'  // Populate codex dropdown\n' +
+'  var codexEl = document.getElementById("dispatch-codex");\n' +
+'  if (codexEl && codexList.length > 0) {\n' +
+'    var defaultVal = codexList.length === 1 ? codexList[0] : "";\n' +
+'    codexEl.innerHTML = codexList.length === 1 ? "" : \'<option value="">-- select --</option>\';\n' +
+'    for (var ci = 0; ci < codexList.length; ci++) {\n' +
+'      var sel = codexList[ci] === defaultVal ? " selected" : "";\n' +
+'      codexEl.innerHTML += \'<option value="\' + codexList[ci] + \'"\' + sel + \'>\' + codexList[ci] + \'</option>\';\n' +
+'    }\n' +
+'  }\n' +
 '\n' +
 '  startElapsedTimer();\n' +
 '}\n' +
@@ -1064,19 +1203,34 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '  if (!specData.spec) return \'<div class="empty">No spec.md yet. Run the writer first.</div>\';\n' +
 '  var html = \'<div class="spec-content">\' + esc(specData.spec) + \'</div>\';\n' +
 '\n' +
-'  // Writ status info\n' +
-'  if (specData.writId) {\n' +
+'  // Writ history chain\n' +
+'  if (specData.writChain && specData.writChain.length > 0) {\n' +
+'    html += \'<div style="margin-top:12px; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden;">\';\n' +
+'    html += \'<div style="padding:8px 14px; border-bottom:1px solid var(--border); color:var(--text-dim); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Writ History</div>\';\n' +
+'    for (var wi = 0; wi < specData.writChain.length; wi++) {\n' +
+'      var w = specData.writChain[wi];\n' +
+'      var wColor = w.status === "completed" ? "var(--green)" : w.status === "failed" ? "var(--red)" : w.status === "active" ? "var(--yellow)" : w.status === "cancelled" ? "var(--text-dim)" : "var(--cyan)";\n' +
+'      var isCurrent = wi === 0;\n' +
+'      html += \'<div style="display:flex; align-items:center; gap:10px; padding:8px 14px;\' + (wi > 0 ? " border-top:1px solid var(--border); opacity:0.7;" : "") + \'">\';\n' +
+'      if (wi > 0) html += \'<span style="color:var(--text-dim); font-size:11px;">&#8627; retried from</span>\';\n' +
+'      if (isCurrent) html += \'<span style="color:var(--text-dim); font-size:11px;">current</span>\';\n' +
+'      html += \'<code style="color:var(--cyan); font-size:12px;">\' + esc(w.id) + \'</code>\';\n' +
+'      html += \'<span style="color:\' + wColor + \'; font-size:12px; font-weight:500;">\' + esc(w.status) + \'</span>\';\n' +
+'      html += \'</div>\';\n' +
+'    }\n' +
+'    html += \'</div>\';\n' +
+'  } else if (specData.writId) {\n' +
 '    var ws = specData.writStatus || "unknown";\n' +
 '    var wsColor = ws === "completed" ? "var(--green)" : ws === "failed" ? "var(--red)" : ws === "active" ? "var(--yellow)" : "var(--text-dim)";\n' +
 '    html += \'<div style="margin-top:12px; padding:10px 14px; background:var(--surface); border:1px solid var(--border); border-radius:8px; display:flex; align-items:center; gap:12px;">\';\n' +
 '    html += \'<span style="color:var(--text-dim)">Writ:</span> \';\n' +
 '    html += \'<code style="color:var(--cyan)">\' + esc(specData.writId) + \'</code>\';\n' +
-'    html += \'<span class="badge badge-\' + ws + \'" style="color:\' + wsColor + \'">\' + esc(ws) + \'</span>\';\n' +
+'    html += \'<span style="color:\' + wsColor + \'">\' + esc(ws) + \'</span>\';\n' +
 '    html += \'</div>\';\n' +
 '  }\n' +
 '\n' +
 '  html += \'<div class="dispatch-form">\';\n' +
-'  html += \'<label>Codex:</label> <input id="dispatch-codex" placeholder="codex name">\';\n' +
+'  html += \'<label>Codex:</label> <select id="dispatch-codex"><option value="">-- select --</option></select>\';\n' +
 '  html += \'<label>Role:</label> <input id="dispatch-role" value="artificer">\';\n' +
 '  html += \'<label>Complexity:</label> <input id="dispatch-complexity" placeholder="1 2 3 5 8 13 21" style="width:80px">\';\n' +
 '  if (specData.writId) {\n' +

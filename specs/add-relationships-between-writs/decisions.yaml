@@ -1,0 +1,242 @@
+decisions:
+  - id: D1
+    scope: [S1, S2]
+    category: product
+    observable: true
+    question: "What naming convention should the link tool follow?"
+    context: >
+      The X013 instrument calls it `link-writ`. All existing Clerk tools use the `writ-*` prefix:
+      writ-show, writ-list, writ-accept, writ-complete, writ-fail, writ-cancel. The only outlier
+      is `commission-post`, which is the entry point, not a writ operation.
+    options:
+      a: "`writ-link` — matches the established writ-* naming convention in the Clerk"
+      b: "`link-writ` — matches the X013 instrument spec and reads as verb-noun"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "Consistency with the six existing writ-* tools outweighs the X013 instrument's naming — the instrument is a draft, the tools are shipped code."
+
+  - id: D2
+    scope: [S1]
+    category: product
+    observable: true
+    question: "Should relationship types be validated against a declared set, or are they open strings?"
+    context: >
+      The Clerk validates writ types strictly (built-in + guild-declared in config). Writ types
+      drive event routing (type.ready, type.completed), which is why validation matters.
+      Relationship types are labels — they don't drive system behavior. The brief gives example
+      types (fixes, retries, supersedes, duplicates) without implying a closed set.
+    options:
+      a: "Open strings — any non-empty string is a valid relationship type"
+      b: "Built-in set only — a fixed enum (fixes, retries, supersedes, duplicates)"
+      c: "Built-in + guild-declared custom types — mirrors the writTypes config pattern"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: medium
+      rationale: "Relationship types are labels, not routing keys. Validation adds complexity for little gain — a typo is annoying but not dangerous. Validation can be added later without breaking existing links."
+
+  - id: D3
+    scope: [S1]
+    category: api
+    observable: true
+    question: "Should both source and target writ IDs be validated to exist when creating a link?"
+    context: >
+      The X013 instrument says 'Relationships may be created after both writs exist, in any state.'
+      This implies both must exist at link-creation time. The alternative would be allowing links
+      to writs that don't exist yet (forward references), which adds complexity.
+    options:
+      a: "Validate both — throw if either writ ID is not found"
+      b: "Validate source only — target is unchecked (allows forward references)"
+      c: "No validation — neither ID is checked (pure edge storage)"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "Both writs should exist. Forward references add complexity for no clear use case — the brief's examples all describe linking existing writs."
+
+  - id: D4
+    scope: [S1]
+    category: api
+    observable: true
+    question: "What happens when creating a link that already exists (same source, target, and type)?"
+    context: >
+      Animas may attempt to create the same link multiple times across sessions. The Clerk's
+      existing API doesn't have a precedent for idempotent creates — post() always creates a
+      new writ with a new ID.
+    options:
+      a: "Error — throw if the (source, target, type) triple already exists"
+      b: "Idempotent — if duplicate exists, return the existing link without error"
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: high
+      rationale: "Idempotent creates are friendlier for agent callers who shouldn't need to check-then-create. A deterministic ID (D8) makes this free."
+
+  - id: D5
+    scope: [S1]
+    category: api
+    observable: true
+    question: "Should a writ be allowed to link to itself?"
+    context: >
+      A writ 'fixing itself' or 'retrying itself' is semantically meaningless. No explicit
+      precedent in the codebase — the Clerk doesn't have any self-referential constraints today.
+    options:
+      a: "Prevent — throw if sourceId === targetId"
+      b: "Allow — no constraint on self-links"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "Self-links are meaningless for every relationship type in the brief. A cheap guard prevents confusion."
+
+  - id: D6
+    scope: [S1, S2]
+    category: api
+    observable: true
+    question: "What should the ClerkApi method signatures be for link operations?"
+    context: >
+      The Clerk currently has five methods: post, show, list, count, transition. New methods
+      are needed for creating links and querying them. The query method must support both
+      directions (outbound from a writ, inbound to a writ) since the brief's examples imply
+      reading from both sides.
+    options:
+      a: "`link(sourceId, targetId, type)` for creation + `links(writId, opts?: { direction })` for querying"
+      b: "`link(sourceId, targetId, type)` for creation + separate `outboundLinks(id)` and `inboundLinks(id)` methods"
+      c: "`link(sourceId, targetId, type)` for creation + `links(writId)` returning `{ outbound, inbound }` in one call"
+    selected: c
+    analysis:
+      recommendation: c
+      confidence: medium
+      rationale: "Single call returning both directions is simplest for the common case (writ-show needs both). Avoids two round-trips and keeps the API surface minimal."
+
+  - id: D7
+    scope: [S2]
+    category: api
+    observable: true
+    question: "Should the show() API method return relationships, or should writ-show compose them separately?"
+    context: >
+      The current show() returns a WritDoc — the stored document. Relationships are either in a
+      separate book or are computed (inbound requires a reverse query). Mixing stored and computed
+      data in show() would change its contract. The writ-show tool handler currently just calls
+      `clerk.show(params.id)` and returns the result.
+    options:
+      a: "Keep show() pure — returns WritDoc only. The writ-show tool calls show() + links() and composes the result."
+      b: "Enrich show() — add an optional `includeLinks` parameter that attaches relationship data to the returned object."
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "show() is a data accessor; enriching it conflates stored state with computed queries. The tool layer is the right place to compose a richer view."
+
+  - id: D8
+    scope: [S1]
+    category: implementation
+    observable: false
+    question: "How should link documents be stored — embedded in WritDoc or in a separate Stacks book?"
+    context: >
+      Stacks patch() does top-level merge only. Embedding relationships as an array in WritDoc
+      means every link-add requires read-modify-write of the array, and reverse queries ('find
+      all writs linking TO writ X') require scanning all writs. A separate book enables indexed
+      queries in both directions. The Clerk currently declares one book ('writs').
+    options:
+      a: "Separate book — each link is its own document in a 'links' book, indexed on sourceId, targetId, and type"
+      b: "Embed in WritDoc — add `relationships: WritLink[]` array field, query via dot-notation"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "Separate book enables clean bidirectional indexed queries, avoids read-modify-write for every link, and doesn't complicate WritDoc or transition() field stripping."
+
+  - id: D9
+    scope: [S1]
+    category: implementation
+    observable: false
+    question: "Should link document IDs be generated or deterministic?"
+    context: >
+      Stacks put() is an upsert — if the ID exists, it replaces. A deterministic ID derived from
+      (sourceId, targetId, type) makes idempotent creates free: put() with the same ID is a no-op
+      if the content hasn't changed. Generated IDs (like `wl-{timestamp}{random}`) follow the
+      convention used by writs (`w-{timestamp}{random}`) but require a separate duplicate check.
+    options:
+      a: "Deterministic composite key — e.g. `{sourceId}:{targetId}:{type}` — makes idempotency trivial via upsert"
+      b: "Generated ID with `wl-` prefix — follows writ ID convention, requires explicit duplicate check before insert"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "Deterministic ID makes idempotency free (D4), makes delete trivial (construct the ID from the triple), and is the natural key for an edge in a graph."
+
+  - id: D10
+    scope: [S2]
+    category: product
+    observable: true
+    question: "Should writ-show display both outbound and inbound links, or only outbound?"
+    context: >
+      The brief's examples imply reading from both sides: 'this writ fixes that one' (outbound)
+      and implicitly 'that one was fixed by this one' (inbound). The X013 instrument explicitly
+      calls for surfacing inbound revises relationships ('this writ has been revised by [writ X]').
+    options:
+      a: "Both outbound and inbound — show the full picture in one view"
+      b: "Outbound only — what this writ links to. Inbound requires a separate query."
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "The brief's use cases require seeing both directions. Showing only outbound would miss 'this writ was fixed by W-xyz', which is the most useful direction for a patron reviewing work."
+
+  - id: D11
+    scope: [S1]
+    category: api
+    observable: true
+    question: "Should creating or removing a link update the writ's updatedAt timestamp?"
+    context: >
+      With a separate book (D8), links don't modify the writ document. Updating updatedAt would
+      require an explicit patch to the writ. The current updatedAt tracks status transitions and
+      field changes — mutations to the writ's own data.
+    options:
+      a: "Don't update — links are separate metadata, not mutations to the writ itself"
+      b: "Update both writs' updatedAt — linking is a meaningful change worth tracking on the writ timeline"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: medium
+      rationale: "updatedAt tracks the writ's own lifecycle. Links are inter-writ metadata stored separately. Keeping them decoupled avoids surprising updatedAt changes that don't correspond to any writ field change."
+
+  - id: D12
+    scope: [S3]
+    category: product
+    observable: true
+    question: "What naming convention should the unlink tool follow?"
+    context: >
+      If the link tool is `writ-link` (D1), the unlink should follow the same pattern. Existing
+      Clerk tools don't have a remove/undo pattern to follow — all transitions are forward-only.
+    options:
+      a: "`writ-unlink` — symmetric with writ-link"
+      b: "`writ-link` with a `--remove` flag — single tool handles both directions"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "Separate tools are clearer for anima callers — each tool does one thing. Flags add cognitive load to the common (create) path."
+
+  - id: D13
+    scope: [S4]
+    category: implementation
+    observable: false
+    question: "How should the writ.linked event be fired — via Stacks CDC on the links book, or explicitly by the Clerk?"
+    context: >
+      The Clerk currently fires no events. Stacks CDC fires create/update/delete events on book
+      mutations, but these are internal to Stacks — they don't map to clockworks events. A
+      writ.linked event would need to be a clockworks event for standing orders to react to it.
+      The Clerk doesn't currently depend on the clockworks apparatus.
+    options:
+      a: "Explicit — the Clerk's link() method fires the event directly via the clockworks API, adding clockworks as a dependency"
+      b: "CDC bridge — watch the links book via Stacks CDC and translate create events into clockworks events"
+      c: "Defer event firing — ship link storage and tooling first; add the event in a follow-up when clockworks integration patterns are established"
+    selected: c
+    analysis:
+      recommendation: c
+      confidence: medium
+      rationale: "The Clerk has no event-firing precedent. Adding clockworks as a dependency for one event is disproportionate. The core value (storing and displaying links) ships without it. Event firing can be added when the Clerk gets broader event support."

@@ -17,3 +17,15 @@
 6. **No maxIdleCycles in SpiderConfig.** The idle cycle limit is only a tool param, not a guild config option. An operator who always wants `maxIdleCycles: 10` must pass it every invocation. Adding it to `SpiderConfig` (with tool param as override) would follow the `pollIntervalMs` pattern which already works this way.
 
 7. **Error handling resets idle count the same as true idle.** In crawl-continual, a `crawl()` error increments `idleCount` the same as a null result. This means N consecutive errors cause the same termination as N consecutive idle cycles. This may be intentional (errors = "nothing useful happened") but could also mask persistent errors by silently exiting. Worth a future review.
+
+---
+
+## Spec Verification Log (plan-writer, 2026-04-04)
+
+Coverage verification passed with no gaps:
+
+- **Scope coverage:** All 6 scope items (S1–S6) mapped to at least one requirement.
+- **Decision coverage:** All 10 decisions (D1–D10) reflected in the spec's Design section.
+- **Inventory coverage:** All 8 inventoried files accounted for — 5 modified, 3 confirmed unaffected.
+- **R↔V bidirectional check:** All 14 requirements appear in at least one validation item; all 15 validation items reference at least one requirement.
+- **Implementer readability:** Full replacement file contents provided for all modified tool files. Loop logic shown in full. Doc replacement text provided verbatim. No ambiguous instructions.

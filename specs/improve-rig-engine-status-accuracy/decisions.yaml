@@ -1,0 +1,109 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    category: product
+    observable: true
+    question: What status value should downstream engines receive when a rig fails?
+    context: The Clerk already uses 'cancelled' as a terminal WritStatus. The engine status enum currently has 'pending', 'running', 'completed', 'failed'. The brief says 'cancelled or some other suitable term'.
+    options:
+      a: "'cancelled' — matches the existing WritStatus vocabulary and common intuition"
+      b: "'skipped' — emphasizes that the engine never ran, rather than that it was actively stopped"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "'cancelled' is already established in the Clerk's WritStatus and carries the right semantic — work that was possible but will not happen due to an external decision."
+  - id: D2
+    scope:
+      - S1
+    category: implementation
+    observable: false
+    question: Where should the cancellation logic live — inside failEngine() or in a CDC handler?
+    context: The brief says 'use the stacks CDC for this.' failEngine() currently patches the rig doc (engines + rig status) in a single call, which fires the existing CDC handler that transitions the writ. The Stacks supports cascading writes within Phase 1 handlers (MAX_CASCADE_DEPTH = 16), so a CDC handler could write back to the rigs book. However, failEngine() already has all the information needed.
+    options:
+      a: Modify failEngine() to include cancelled engines in the same patch() call — simplest, single write, CDC fires once with the complete picture
+      b: "Add a second CDC handler on the rigs book that watches for engine status changing to 'failed' and patches the same rig to cancel downstream engines — architecturally purer (reactive), but cascades: the patch fires the existing CDC handler again, adding complexity"
+      c: Add a CDC handler on the rigs book that watches for rig status changing to 'failed' and patches the same rig to cancel downstream engines — avoids engine-level watching but still cascades
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: failEngine() already computes the full engine list in a map — adding cancellation to the same map is a one-line change. CDC options add a cascade write to the same book for no behavioral gain, and the resulting CDC event from option (a) already contains the correct engine data for the downstream writ-transition handler.
+  - id: D3
+    scope:
+      - S1
+    category: implementation
+    observable: false
+    question: Which engines should be cancelled — only graph-downstream of the failed engine, or all non-terminal engines?
+    context: "The static pipeline is linear: draft → implement → review → revise → seal. In a linear chain, 'downstream of the failed engine' and 'all engines after it in order' are equivalent. But the rig data model supports arbitrary DAGs (each engine has an upstream[] array). Future dynamic rigs could have parallel branches where a failure in one branch doesn't affect the other."
+    options:
+      a: Cancel only engines that are transitively downstream of the failed engine (graph walk using upstream[] arrays)
+      b: Cancel all engines still in 'pending' status (simple filter, no graph walk needed)
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: high
+      rationale: When a rig fails, it is terminal — no engine in the rig will ever run again. Cancelling all pending engines is correct regardless of graph shape, simpler to implement, and doesn't require a graph traversal. A pending engine in a parallel branch is equally dead once the rig is failed.
+  - id: D4
+    scope:
+      - S1
+    category: implementation
+    observable: false
+    question: Should engines in 'running' status also be cancelled?
+    context: In the static pipeline, only one engine runs at a time — when an engine fails, no other engine should be running. But the data model permits it, and future dynamic rigs with parallel branches could have a running engine alongside a failed one. The brief specifically mentions 'downstream engines' and statuses like 'ready' or 'pending'.
+    options:
+      a: Only cancel 'pending' engines — leave 'running' engines untouched (they will be collected on a future crawl, but since the rig is failed, they won't be)
+      b: Cancel both 'pending' and 'running' engines — ensures the rig snapshot is fully resolved with no ambiguous in-progress state
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: A running engine has an active session — marking it 'cancelled' would be inaccurate since the session is still running externally. In practice this case doesn't arise in the static pipeline. If it arises in future dynamic rigs, the session collection logic would need its own handling regardless.
+  - id: D5
+    scope:
+      - S1
+    category: api
+    observable: true
+    question: Should cancelled engines have a timestamp field set (e.g. completedAt)?
+    context: Failed engines get completedAt set to the failure time. Completed engines also get completedAt. The EngineInstance interface uses completedAt as 'ISO timestamp when execution completed (or failed)'. Cancelled engines never started or completed execution.
+    options:
+      a: Set completedAt to the cancellation time — reuse the existing field for 'when this engine reached a terminal state'
+      b: Leave completedAt undefined — the engine was never started, so no completion time is meaningful
+      c: Add a new cancelledAt field to EngineInstance
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: high
+      rationale: completedAt semantically means 'when execution finished' — a cancelled engine never executed. Adding a new field is over-engineering for a status that carries no interesting timing data. The rig's own patch timestamp serves as the implicit cancellation time if anyone needs it.
+  - id: D6
+    scope:
+      - S2
+    category: implementation
+    observable: false
+    question: Should existing failure tests be updated in-place to add downstream assertions, or should new dedicated tests be added?
+    context: There are 5 existing tests that exercise failure paths. They currently assert the failed engine and rig status but not downstream engines. The test file uses standard node:test describe/it blocks.
+    options:
+      a: Update existing tests to also assert downstream engine cancellation — keeps failure assertions co-located
+      b: Add a new describe block with dedicated cancellation tests, leave existing tests unchanged
+      c: Both — update existing tests for basic assertions and add a new block for edge cases
+    selected: c
+    analysis:
+      recommendation: c
+      confidence: high
+      rationale: "Existing tests should assert the full picture (including downstream engines) since they already set up the failure scenario. A separate block covers the specific scenarios the brief implies: first-engine failure, mid-pipeline failure, and completed-engines-preserved."
+  - id: D7
+    scope:
+      - S3
+    category: product
+    observable: true
+    question: How extensively should the Spider API contract doc be updated?
+    context: The spider.md spec has an 'Engine Failure' section (lines 592-603) that describes the failure flow in 4 numbered steps. The EngineStatus type is referenced in the data model section. The walk function description (lines 92-93) mentions failure handling inline.
+    options:
+      a: Update only the 'Engine Failure' section to add a step about downstream cancellation and update the EngineStatus enum reference
+      b: Update the Engine Failure section, the EngineStatus type definition, and the walk function description
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The Engine Failure section is the canonical place for this behavior. The walk function description is already long and the cancellation is an implementation detail of failure handling, not a new walk priority. The EngineStatus type definition in the doc should also be updated if it's enumerated there.
