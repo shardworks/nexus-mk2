@@ -397,24 +397,30 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     return;
   }
 
-  const agentPath = path.join(PROJECT_ROOT, '.claude', 'agents', 'plan-' + step + '.md');
+  const promptPath = path.join(PROJECT_ROOT, 'bin', 'plan-prompts', step + '.md');
 
   const cliArgs = [
-    '--agent', agentPath,
-    '--print',
-    '--dangerously-skip-permissions',
+    '--print', '-',
+    '--system-prompt-file', promptPath,
+    '--model', 'opus',
+    '--tools', 'Read,Glob,Grep,Write',
+    '--setting-sources', 'user',
+    '--permission-mode', 'acceptEdits',
     '--add-dir', SPECS_DIR,
     '--max-budget-usd', step === 'writer' ? '5' : '3',
     ...args,
-    prompt,
   ];
 
   console.log('[workshop] Starting ' + step + ' for ' + slug + ' (cwd=' + cloneDir + ')');
 
   const proc = spawn('claude', cliArgs, {
     cwd: cloneDir,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
+
+  // Send prompt via stdin to avoid arg-length limits and dash-prefix parsing issues
+  proc.stdin!.write(prompt);
+  proc.stdin!.end();
 
   const pipeline: PipelineProcess = {
     step,
@@ -462,6 +468,27 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     console.log('[workshop] ' + step + ' for ' + slug + ' finished (code=' + code + ', ' + elapsed + 's)');
     sendSSE(slug, 'status', { step, state: code === 0 ? 'complete' : 'failed', elapsed, code });
 
+    // Copy session transcripts before cleaning up
+    try {
+      const projectKey = cloneDir.replace(/\//g, '-');
+      const claudeProjectDir = path.join(os.homedir(), '.claude', 'projects', projectKey);
+      if (fs.existsSync(claudeProjectDir)) {
+        const transcriptDir = path.join(SPECS_DIR, slug, 'planner-transcripts');
+        fs.mkdirSync(transcriptDir, { recursive: true });
+        const jsonlFiles = fs.readdirSync(claudeProjectDir).filter(f => f.endsWith('.jsonl'));
+        for (const f of jsonlFiles) {
+          const sessionId = f.replace('.jsonl', '');
+          const dest = path.join(transcriptDir, step + '-' + sessionId + '.jsonl');
+          fs.copyFileSync(path.join(claudeProjectDir, f), dest);
+        }
+        if (jsonlFiles.length > 0) {
+          console.log('[workshop] Saved ' + jsonlFiles.length + ' transcript(s) for ' + step + '/' + slug);
+        }
+      }
+    } catch (err: any) {
+      console.warn('[workshop] Failed to copy transcripts: ' + err.message);
+    }
+
     // Clean up the temp clone
     try {
       fs.rmSync(cloneDir, { recursive: true, force: true });
@@ -470,11 +497,17 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
       console.warn('[workshop] Failed to clean up temp clone: ' + err.message);
     }
 
-    // Auto-chain: reader → analyst
+    // Auto-chain: reader → analyst (only if reader produced inventory)
     if (code === 0 && step === 'reader') {
-      const brief = readSpecFile(slug, 'brief.md') ?? '';
-      console.log('[workshop] Auto-starting analyst for ' + slug);
-      startAnalyst(slug, brief.trim());
+      const inventoryPath = path.join(SPECS_DIR, slug, 'inventory.md');
+      if (fs.existsSync(inventoryPath)) {
+        const brief = readSpecFile(slug, 'brief.md') ?? '';
+        console.log('[workshop] Auto-starting analyst for ' + slug);
+        startAnalyst(slug, brief.trim());
+      } else {
+        console.warn('[workshop] Reader finished but no inventory.md produced — skipping analyst for ' + slug);
+        sendSSE(slug, 'status', { step: 'reader', state: 'failed', error: 'no inventory produced' });
+      }
     }
 
     // Auto-commit when writer produces the finished spec
@@ -491,28 +524,42 @@ function startReader(slug: string, brief: string): void {
   meta.sessionId = sessionId;
   writeMeta(slug, meta);
 
+  const outputPath = path.join(SPECS_DIR, slug, 'inventory.md');
   runPipelineStep(slug, 'reader', ['--session-id', sessionId],
-    'Brief: ' + brief + '\n\nSlug: ' + slug + '\n\nSpecs directory: ' + SPECS_DIR);
+    'Here is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug + '\n\nFollowing your instructions, read the codebase and create an inventory at: ' + outputPath);
 }
 
 function startAnalyst(slug: string, brief: string): void {
   const meta = readMeta(slug);
   const sessionId = meta.sessionId ?? '';
+  const specDir = path.join(SPECS_DIR, slug);
 
   const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
 
   runPipelineStep(slug, 'analyst', args,
-    'Brief: ' + brief + '\n\nSlug: ' + slug + '\n\nSpecs directory: ' + SPECS_DIR + '\n\nThe inventory has been written. Produce scope and decisions.');
+    'Here is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
+    '\n\nThe inventory has been written. Read it at: ' + path.join(specDir, 'inventory.md') +
+    '\n\nFollowing your instructions, produce scope and decisions. Write output files to:' +
+    '\n- ' + path.join(specDir, 'scope.yaml') +
+    '\n- ' + path.join(specDir, 'decisions.yaml') +
+    '\n- ' + path.join(specDir, 'observations.md'));
 }
 
 function startWriter(slug: string, brief: string): void {
   const meta = readMeta(slug);
   const sessionId = meta.sessionId ?? '';
+  const specDir = path.join(SPECS_DIR, slug);
 
   const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
 
   runPipelineStep(slug, 'writer', args,
-    'Brief: ' + brief + '\n\nSlug: ' + slug + '\n\nSpecs directory: ' + SPECS_DIR + '\n\nThe analyst has written scope.yaml and decisions.yaml, and the patron has reviewed and locked them. Read those files plus inventory.md, then produce the spec.');
+    'Here is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
+    '\n\nThe analyst has written scope and decisions, and the patron has reviewed and locked them. Read these input files:' +
+    '\n- ' + path.join(specDir, 'scope.yaml') +
+    '\n- ' + path.join(specDir, 'decisions.yaml') +
+    '\n- ' + path.join(specDir, 'inventory.md') +
+    '\n\nFollowing your instructions, produce the spec. Write output to: ' + path.join(specDir, 'spec.md') +
+    '\nIf gaps are found, write: ' + path.join(specDir, 'gaps.yaml'));
 }
 
 // ── HTTP Server ───────────────────────────────────────────────────────
