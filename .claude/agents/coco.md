@@ -107,7 +107,9 @@ Coco maintains `experiments/data/coco-log.yaml` — a running log of every unit 
 - `date` — today's date (YYYY-MM-DD)
 - `item` — one-line description of the work
 - `commissionable` — boolean: could this work have been an autonomous commission?
-- `justification` — required when `commissionable: false`. Pick from: `interactive`, `sanctum`, `decisional`
+- `justification` — required when `commissionable: false`. Pick from: 
+  - `sanctum`: any changes to /workspace/nexus-mk2 should use this
+  - **NO OTHER JUSTIFICATIONS ARE ALLOWED**
 
 Commits are recoverable from the git log via the Session trailer — no need to record SHAs in the log.
 
