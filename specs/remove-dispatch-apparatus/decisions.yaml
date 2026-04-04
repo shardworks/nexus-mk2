@@ -1,0 +1,121 @@
+decisions:
+  - id: D1
+    scope: [S1]
+    category: implementation
+    observable: false
+    question: "Delete the package directory outright, or move it to a packages-deprecated/ holding area?"
+    context: "A vibers worktree snapshot shows a packages-deprecated/ directory existed at some point, suggesting deprecated packages have been parked before deletion. However, the current framework root has no such directory. The Dispatch was explicitly designed as disposable ('designed to be removable with zero impact')."
+    options:
+      a: "Delete packages/plugins/dispatch/ outright via git rm -r"
+      b: "Move to packages-deprecated/dispatch/ first, delete in a follow-up"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "The apparatus has zero downstream dependents, its own docs say it's disposable, and git history preserves the code. A deprecation holding area adds process without value."
+
+  - id: D2
+    scope: [S3]
+    category: product
+    observable: true
+    question: "Delete the dispatch.md architecture doc, or move it to a docs/archive/ location?"
+    context: "The framework has no docs/archive/ directory. The sanctum (nexus-mk2) has docs/archive/ for completed commissions. The dispatch.md doc is an API contract for a now-removed package — it has no ongoing reference value beyond git history."
+    options:
+      a: "Delete docs/architecture/apparatus/dispatch.md outright"
+      b: "Move to docs/archive/apparatus/dispatch.md"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "No archive directory exists in the framework; creating one for a single disposable apparatus doc isn't warranted. Git history preserves the content."
+
+  - id: D3
+    scope: [S5]
+    category: product
+    observable: true
+    question: "How to handle the review-loop.md doc's extensive Dispatch references?"
+    context: "review-loop.md is a design spec (status: 'Design — not yet implemented'). About half the doc is the 'MVP: Dispatch-Level Review Loop' section which was never implemented. The Spider is now live, making Option B (review engine in every rig) the canonical path. Option A (Dispatch-level) is dead design."
+    options:
+      a: "Surgically remove Dispatch-specific sections (Option A, MVP section) and update remaining references to reflect Spider as canonical"
+      b: "Delete the entire review-loop.md — it's an unimplemented design doc and the Spider-level review loop may warrant a fresh spec"
+      c: "Leave review-loop.md untouched — it's a design doc, not operational, and its status already says 'not yet implemented'"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: medium
+      rationale: "The doc contains valuable design thinking (review criteria, artifact schemas, empirical motivation) that applies to the Spider path. Deleting it loses that context. But leaving dead Dispatch sections creates confusion about what's current."
+
+  - id: D4
+    scope: [S4]
+    category: product
+    observable: true
+    question: "How to update clerk.md's 'Dispatch Integration' section and references to 'The Dispatch'?"
+    context: "clerk.md line 15 says 'Connecting writs to sessions is the job of the dispatch layer — currently The Dispatch, eventually the full rigging system.' Line 350 references Dispatch. Lines 408+ have a 'Dispatch Integration' section describing how the Clerk integrates with 'the dispatch layer.' The section's content is about the ready signal and completion signal — both are still valid concepts, just now handled by Spider, not Dispatch."
+    options:
+      a: "Rewrite references to say 'the Spider' or 'the rigging system' instead of 'The Dispatch' — keep the Dispatch Integration section but rename/reword it"
+      b: "Remove all Dispatch-specific text and let the Spider doc be the canonical reference for how writs become work"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "The integration section describes valid Clerk behavior (ready signal out, completion signal in) that applies regardless of the dispatch mechanism. Rewording to reference Spider preserves useful architectural context."
+
+  - id: D5
+    scope: [S4]
+    category: product
+    observable: true
+    question: "How to handle scriptorium.md's 'Interim Dispatch Pattern' section?"
+    context: "Scriptorium doc lines 529+ show a shell script pattern for open → session → seal → push that predates both the Dispatch apparatus and Spider. The section header says 'Before rig engines and the Clockworks exist.' Both now exist."
+    options:
+      a: "Remove the 'Interim Dispatch Pattern' section entirely — the Spider engines now handle this flow"
+      b: "Keep the section but add a note that it's historical — the Spider now handles this"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "The section explicitly says it's for 'before rig engines and the Clockworks exist.' Both exist. Keeping it as historical clutter adds no value — the Spider engines doc is the canonical reference."
+
+  - id: D6
+    scope: [S4]
+    category: implementation
+    observable: false
+    question: "Should spider.md's 'replaces the Dispatch apparatus' sentence be updated?"
+    context: "Spider.md line 13 says 'It replaces the Dispatch apparatus, which ran one writ in one session with no review.' Once the Dispatch package is deleted, this reference points at nothing."
+    options:
+      a: "Remove the comparison sentence — the Spider stands on its own now"
+      b: "Keep the sentence as historical context for readers who encounter 'Dispatch' in git history"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "The sentence was useful when both existed simultaneously; after removal, it's a reference to something that no longer exists. The Spider doc should describe what the Spider is, not what it replaced."
+
+  - id: D7
+    scope: [S2]
+    category: product
+    observable: true
+    question: "Should the guild be verified to start cleanly after removing the dispatch plugin?"
+    context: "Arbor validates the dependency graph at startup. The Dispatch requires clerk, codexes, and animator — no other plugin requires Dispatch. Removing it from the plugins list should be clean, but Arbor's validation behavior on missing-but-referenced plugins should be confirmed."
+    options:
+      a: "Run nsg status (or equivalent guild startup) after removal to verify clean startup"
+      b: "Trust the dependency analysis — no verification needed"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "This is a 30-second smoke test that catches any hidden coupling the static analysis missed. Always verify removals."
+
+  - id: D8
+    scope: [S6]
+    category: implementation
+    observable: false
+    question: "Lockfile regeneration approach — manual or automated?"
+    context: "The framework uses pnpm with a workspace config (packages/framework/*, packages/plugins/*). The vibers guild uses npm. Removing a workspace package requires pnpm install to regenerate pnpm-lock.yaml. Removing a dependency from vibers requires npm install to regenerate package-lock.json."
+    options:
+      a: "Run pnpm install in the framework root and npm install in vibers after removing the package/dependency"
+      b: "Manually edit the lockfiles to remove dispatch entries"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "Lockfiles should never be hand-edited. Let the package managers regenerate them."

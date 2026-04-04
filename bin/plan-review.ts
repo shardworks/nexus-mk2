@@ -70,6 +70,25 @@ function cloneCodex(codexName: string): string {
 // Ensure specs dir exists
 if (!fs.existsSync(SPECS_DIR)) fs.mkdirSync(SPECS_DIR, { recursive: true });
 
+// ── Git auto-commit ──────────────────────────────────────────────────
+
+/** Commit spec files and push, non-blocking. Logs errors but never throws. */
+function autoCommitSpec(slug: string, message: string): void {
+  const specDir = path.join(SPECS_DIR, slug);
+  const proc = spawn('bash', ['-c', `git add "${specDir}" && git commit -m "${message}" && git push`], {
+    cwd: PROJECT_ROOT,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  proc.on('close', (code) => {
+    if (code === 0) console.log('[workshop] Auto-committed: ' + message);
+    else console.warn('[workshop] Auto-commit failed (code=' + code + '): ' + message);
+  });
+  proc.stderr!.on('data', (chunk: Buffer) => {
+    const msg = chunk.toString().trim();
+    if (msg) console.warn('[workshop] git: ' + msg);
+  });
+}
+
 // ── Types ─────────────────────────────────────────────────────────────
 
 interface PipelineProcess {
@@ -449,6 +468,11 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
       console.log('[workshop] Auto-starting analyst for ' + slug);
       startAnalyst(slug, brief.trim());
     }
+
+    // Auto-commit when writer produces the finished spec
+    if (code === 0 && step === 'writer') {
+      autoCommitSpec(slug, `specs: finalize spec for ${slug}`);
+    }
   });
 }
 
@@ -541,6 +565,8 @@ const server = http.createServer(async (req, res) => {
         meta.link = { type: link.type, targetId: link.targetId };
       }
       writeMeta(slug, meta);
+
+      autoCommitSpec(slug, `specs: create brief for ${slug}`);
 
       // Auto-start the reader
       startReader(slug, brief);
@@ -727,6 +753,10 @@ const server = http.createServer(async (req, res) => {
           }).catch((err: any) => {
             console.error('[workshop] Failed to create patron link:', err.message);
           });
+        }
+
+        if (code === 0) {
+          autoCommitSpec(slug, `specs: dispatch ${slug}` + (dmeta.writId ? ` (${dmeta.writId})` : ''));
         }
 
         sendSSE(slug, 'status', { step: 'dispatch', state: code === 0 ? 'complete' : 'failed', elapsed, code });

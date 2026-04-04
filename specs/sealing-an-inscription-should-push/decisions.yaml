@@ -1,0 +1,152 @@
+decisions:
+  - id: D1
+    scope: [S1]
+    category: implementation
+    observable: false
+    question: "Where does the push call go — inside ScriptoriumCore.seal() or in the seal engine?"
+    context: "The brief says 'update the Scriptorium's seal method'. The alternative is adding push to the seal engine (spider/engines/seal.ts). The Dispatch also calls seal() and currently needs a separate push — putting push in seal() fixes both callers at once."
+    options:
+      a: "Add push inside ScriptoriumCore.seal(), after the update-ref succeeds"
+      b: "Add push to the seal engine (spider/engines/seal.ts) and leave seal() unchanged"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "The brief explicitly says 'update the Scriptorium's seal method'; putting it in seal() fixes all callers (seal engine, Dispatch, draft-seal tool, future callers) without each needing to remember push."
+
+  - id: D2
+    scope: [S1]
+    category: product
+    observable: true
+    question: "Should no-op seals (source and target at the same commit) also push?"
+    context: "seal() has two success exits: (1) no-op when targetRef === sourceRef, and (2) after ff-merge via update-ref. A no-op seal means no new inscriptions were incorporated, but there could be previously-sealed-but-unpushed commits from contention scenarios. Pushing on no-op is safe (git push of an already-pushed ref is a no-op itself)."
+    options:
+      a: "Push on every successful seal, including no-ops"
+      b: "Only push when inscriptionsSealed > 0 (skip push for no-op seals)"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "Pushing on no-op is harmless (git push is idempotent), keeps the logic simple with a single push point before return, and handles the edge case of previously-unpushed seals from contention."
+
+  - id: D3
+    scope: [S1]
+    category: product
+    observable: true
+    question: "How should push failure be handled within seal()?"
+    context: "Currently seal() can fail from git errors (rebase conflicts, ref resolution). Push can fail from network errors or remote rejection. The seal has already succeeded locally (update-ref completed) when push runs. The Dispatch currently handles push failure separately from seal failure, transitioning the writ to failed with a distinct 'Push failed' message."
+    options:
+      a: "Let push errors propagate — seal() throws, caller sees a combined seal+push failure"
+      b: "Catch push errors and include push status in SealResult — seal succeeds but reports push failed"
+      c: "Let push errors propagate but with a distinct error message so callers can distinguish seal failure from push failure"
+    selected: c
+    analysis:
+      recommendation: c
+      confidence: high
+      rationale: "Push failure after a successful seal is a different failure mode than seal failure — the local state is correct, only the remote is stale. A distinct error message ('Push failed after successful seal') lets callers (like the Dispatch) distinguish and potentially retry just the push."
+
+  - id: D4
+    scope: [S1]
+    category: api
+    observable: true
+    question: "Should SealResult gain a 'pushed' field to indicate push success?"
+    context: "SealResult currently has: success, strategy, retries, sealedCommit, inscriptionsSealed. SealYields (spider) mirrors these fields. Adding a pushed field would make the push outcome explicit in the return type. However, if push failure throws (D3), a successful return always means pushed=true, making the field redundant."
+    options:
+      a: "No change to SealResult — successful return implies push succeeded"
+      b: "Add pushed: boolean to SealResult and SealYields"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "If push failure throws (per D3), a successful SealResult always means push succeeded. Adding a field that is always true carries no information. Keep the type clean."
+
+  - id: D5
+    scope: [S1]
+    category: api
+    observable: true
+    question: "Should SealRequest gain an option to skip push (e.g. push?: boolean)?"
+    context: "Adding push to seal() changes the method's contract. Some callers (tests, offline scenarios) might want to seal without pushing. The existing push() API stays available for manual push. However, the brief frames this as a bug fix — seal should always push — not as an optional behavior."
+    options:
+      a: "No opt-out — seal always pushes"
+      b: "Add push?: boolean to SealRequest (default true), allowing callers to skip push"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "The brief treats the missing push as a bug, not a feature request. Adding an opt-out adds API surface for a case no current caller needs. If a future caller needs seal-without-push, it can be added then."
+
+  - id: D6
+    scope: [S1]
+    category: implementation
+    observable: false
+    question: "Should seal() call the existing this.push() method or inline the git push command?"
+    context: "The existing push() method does ensureReady + resolveDefaultBranch + git push. Inside seal(), the codex is already ensureReady'd and the target branch is already resolved. Calling push() re-does that work; inlining avoids it."
+    options:
+      a: "Call this.push({ codexName: request.codexName, branch: targetBranch }) — reuse existing method"
+      b: "Inline: await git(['push', 'origin', targetBranch], clonePath) — avoid redundant work"
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: high
+      rationale: "seal() already has clonePath and targetBranch resolved. Calling push() would redundantly call ensureReady() and resolveDefaultBranch(). A single git push line is clearer and avoids the overhead."
+
+  - id: D7
+    scope: [S1]
+    category: implementation
+    observable: false
+    question: "Where exactly in the seal() method should the push be placed — before or after draft cleanup?"
+    context: "seal() has two success paths. Both optionally abandon the draft before returning. Push should happen after the ref is updated but the question is whether it goes before or after the abandonDraft call. If push fails, keeping the draft around could help with debugging."
+    options:
+      a: "Push after update-ref, before abandonDraft — draft survives if push fails"
+      b: "Push after abandonDraft, before return — draft is already cleaned up"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "If push fails and throws (per D3), the draft should remain for inspection and potential retry. Pushing before cleanup means a push failure leaves the system in a recoverable state — the seal is local, the draft is intact, and the caller can retry or manually push."
+
+  - id: D8
+    scope: [S2]
+    category: implementation
+    observable: false
+    question: "How should existing seal tests be updated to verify push behavior?"
+    context: "scriptorium-core.test.ts uses file:// remote URLs. After seal, tests can verify the remote bare repo's HEAD matches the sealedCommit. Two existing tests explicitly call push() after seal() — 'push succeeds after sealing against a diverged remote' (line 988) and 'pushes sealed commits to the remote' (line 1070)."
+    options:
+      a: "Add remote-head verification to key seal tests; consolidate the two push-after-seal tests into the seal describe block"
+      b: "Add a single new test 'seal pushes to remote' and update the two existing push-after-seal tests to remove the explicit push call"
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: high
+      rationale: "A dedicated test for the new behavior is clearest. The two existing tests that call push() after seal() should be updated to verify push happened automatically — removing the explicit push call and asserting the remote has the commit after seal alone."
+
+  - id: D9
+    scope: [S4]
+    category: product
+    observable: true
+    question: "Should the Dispatch's explicit push() call be removed or left as a harmless no-op?"
+    context: "The Dispatch (dispatch.ts lines 134–141) calls scriptorium.push() after seal(). If seal auto-pushes, this becomes a no-op. The Dispatch is documented as 'temporary rigging — designed to be retired when the full rigging system (Spider, Fabricator, Executor) is implemented.' Removing the call simplifies the code; leaving it is safe but misleading."
+    options:
+      a: "Remove the explicit push() call and its try/catch block from the Dispatch"
+      b: "Leave it — the Dispatch is temporary and the redundant push is harmless"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "Dead code is misleading code. Removing it is a one-line change and keeps the Dispatch honest about what it does. The push error handling in the Dispatch is also now unnecessary since seal() handles push failure."
+
+  - id: D10
+    scope: [S3]
+    category: product
+    observable: true
+    question: "How extensively should docs be updated?"
+    context: "Three doc locations reference seal and push as separate operations: spider.md (one note), scriptorium.md (session integration section, interim dispatch pattern, bare clone lifecycle), and dispatch types (one comment). The Scriptorium doc is the most detailed — it shows a 4-step flow (open → summon → seal → push) that would become 3 steps."
+    options:
+      a: "Update all three doc locations to reflect seal-includes-push"
+      b: "Update spider.md and scriptorium.md only — dispatch docs are for temporary rigging"
+      c: "Update spider.md only — minimal doc change, scriptorium doc still accurately describes the push() API"
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: high
+      rationale: "spider.md and scriptorium.md are the authoritative architecture docs that developers read. The Dispatch types comment is internal and the Dispatch is temporary. Updating the two architecture docs keeps the docs honest without busywork on temporary code."

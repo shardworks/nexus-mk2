@@ -1,0 +1,2 @@
+# docs/reference/core-api.md describes pre-Stacks Clockworks API
+The core-api.md references `recordDispatch`, `listDispatches`, and `DispatchRecord` — these are Clockworks event dispatch records, not the Dispatch apparatus. However, this API surface appears to predate the Stacks rewrite (it references raw SQL tables like `event_dispatches`). The entire core-api.md may need updating to reflect the Stacks-based Clockworks implementation.
