@@ -97,6 +97,7 @@ interface SpecMeta {
   sessionId?: string;
   writId?: string;
   codex?: string;
+  link?: { type: string; targetId: string };
 }
 
 function readMeta(slug: string): SpecMeta {
@@ -520,12 +521,26 @@ const server = http.createServer(async (req, res) => {
       if (!slug || !brief) return jsonResponse(res, { error: 'brief and slug required' }, 400);
       if (!codex) return jsonResponse(res, { error: 'codex is required' }, 400);
 
+      // Validate optional writ link
+      const link = body.link as { type?: string; targetId?: string } | undefined;
+      if (link?.targetId) {
+        try {
+          await clerk.show(link.targetId);
+        } catch {
+          return jsonResponse(res, { error: 'Linked writ not found: ' + link.targetId }, 400);
+        }
+      }
+
       const dir = path.join(SPECS_DIR, slug);
       if (fs.existsSync(dir)) return jsonResponse(res, { error: 'spec already exists' }, 409);
 
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, 'brief.md'), brief + '\n');
-      writeMeta(slug, { createdAt: new Date().toISOString(), codex });
+      const meta: SpecMeta = { createdAt: new Date().toISOString(), codex };
+      if (link?.type && link?.targetId) {
+        meta.link = { type: link.type, targetId: link.targetId };
+      }
+      writeMeta(slug, meta);
 
       // Auto-start the reader
       startReader(slug, brief);
@@ -705,9 +720,35 @@ const server = http.createServer(async (req, res) => {
           });
         }
 
+        // Link new writ per patron-specified link from the brief form
+        if (code === 0 && dmeta.writId && dmeta.link?.type && dmeta.link?.targetId) {
+          clerk.link(dmeta.writId, dmeta.link.targetId, dmeta.link.type).then(() => {
+            console.log('[workshop] Linked ' + dmeta.writId + ' --' + dmeta.link!.type + '--> ' + dmeta.link!.targetId);
+          }).catch((err: any) => {
+            console.error('[workshop] Failed to create patron link:', err.message);
+          });
+        }
+
         sendSSE(slug, 'status', { step: 'dispatch', state: code === 0 ? 'complete' : 'failed', elapsed, code });
       });
       return;
+    }
+
+    // GET /api/writs — recent writs for linking dropdown
+    if (req.method === 'GET' && url.pathname === '/api/writs') {
+      const writs = await clerk.list({ limit: 15 });
+      return jsonResponse(res, writs.map(w => ({ id: w.id, title: w.title, status: w.status })));
+    }
+
+    // GET /api/writs/:id/exists — validate a writ ID
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'writs' && parts[3] === 'exists') {
+      const writId = parts[2];
+      try {
+        await clerk.show(writId);
+        return jsonResponse(res, { exists: true });
+      } catch {
+        return jsonResponse(res, { exists: false });
+      }
     }
 
     // GET /api/codexes
@@ -798,6 +839,15 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '.new-spec input { flex: 1; }\n' +
 '.new-spec select { min-width: 120px; }\n' +
 '.new-spec input:focus, .new-spec select:focus { border-color: var(--cyan); }\n' +
+'.new-spec .link-row { display: flex; gap: 10px; margin-top: 10px; align-items: center; }\n' +
+'.new-spec .link-row .link-label { color: var(--text-dim); font-size: 12px; white-space: nowrap; }\n' +
+'.new-spec .link-row input { flex: 1; min-width: 0; }\n' +
+'.new-spec .link-row .link-type-input { max-width: 140px; }\n' +
+'.new-spec .link-row .link-writ-input { flex: 2; }\n' +
+'.new-spec .link-row .link-status { font-size: 11px; white-space: nowrap; min-width: 16px; }\n' +
+'.new-spec .link-row .link-status.valid { color: var(--green); }\n' +
+'.new-spec .link-row .link-status.invalid { color: var(--red, #f44); }\n' +
+'.new-spec .link-row .link-status.checking { color: var(--text-dim); }\n' +
 '.btn { padding: 8px 20px; border: none; border-radius: 6px; font-family: inherit; font-size: 13px;\n' +
 '  font-weight: 600; cursor: pointer; transition: opacity 0.15s; }\n' +
 '.btn:hover { opacity: 0.85; }\n' +
@@ -953,7 +1003,33 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 'var elapsedTimer = null;\n' +
 'var filters = { product: true, api: true, implementation: true };\n' +
 'var codexList = [];\n' +
+'var writList = [];\n' +
 'api("GET", "/codexes").then(function(c) { codexList = c || []; });\n' +
+'api("GET", "/writs").then(function(w) { writList = w || []; });\n' +
+'\n' +
+'var linkValidationTimer = null;\n' +
+'var lastValidatedWrit = "";\n' +
+'\n' +
+'function validateWritId(value) {\n' +
+'  var statusEl = document.getElementById("link-writ-status");\n' +
+'  if (!statusEl) return;\n' +
+'  if (!value) { statusEl.textContent = ""; statusEl.className = "link-status"; return; }\n' +
+'  // Check if it matches a known writ from the list\n' +
+'  var known = writList.find(function(w) { return w.id === value; });\n' +
+'  if (known) { statusEl.textContent = "\\u2713"; statusEl.className = "link-status valid"; return; }\n' +
+'  // Debounced server validation for freetext IDs\n' +
+'  if (value === lastValidatedWrit) return;\n' +
+'  statusEl.textContent = "\\u22EF"; statusEl.className = "link-status checking";\n' +
+'  clearTimeout(linkValidationTimer);\n' +
+'  linkValidationTimer = setTimeout(function() {\n' +
+'    lastValidatedWrit = value;\n' +
+'    api("GET", "/writs/" + encodeURIComponent(value) + "/exists").then(function(r) {\n' +
+'      if (document.getElementById("new-link-writ").value.trim() !== value) return;\n' +
+'      statusEl.textContent = r.exists ? "\\u2713" : "\\u2717";\n' +
+'      statusEl.className = "link-status " + (r.exists ? "valid" : "invalid");\n' +
+'    });\n' +
+'  }, 400);\n' +
+'}\n' +
 '\n' +
 '// ── Router ──\n' +
 'function route() {\n' +
@@ -989,7 +1065,16 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    html += \'<input id="new-slug" placeholder="slug (auto-generated from brief)">\';\n' +
 '    html += \'<select id="new-codex"><option value="">codex...</option></select>\';\n' +
 '    html += \'<button class="btn btn-primary" data-action="create-spec">Start Pipeline &#8594;</button>\';\n' +
-'    html += \'</div></div>\';\n' +
+'    html += \'</div>\';\n' +
+'    html += \'<div class="link-row">\';\n' +
+'    html += \'<span class="link-label">Link:</span>\';\n' +
+'    html += \'<input id="new-link-type" class="link-type-input" list="link-types" placeholder="link type...">\';\n' +
+'    html += \'<datalist id="link-types"><option value="fixes"><option value="depends on"></datalist>\';\n' +
+'    html += \'<input id="new-link-writ" class="link-writ-input" list="link-writs" placeholder="writ id...">\';\n' +
+'    html += \'<span id="link-writ-status" class="link-status"></span>\';\n' +
+'    html += \'<datalist id="link-writs"></datalist>\';\n' +
+'    html += \'</div>\';\n' +
+'    html += \'</div>\';\n' +
 '\n' +
 '    if (specs.length === 0) {\n' +
 '      html += \'<div class="empty">No specs yet. Write a brief above to get started.</div>\';\n' +
@@ -1029,6 +1114,21 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '        var sel = codexList[ci] === defaultVal ? " selected" : "";\n' +
 '        newCodexEl.innerHTML += \'<option value="\' + codexList[ci] + \'"\' + sel + \'>\' + codexList[ci] + \'</option>\';\n' +
 '      }\n' +
+'    }\n' +
+'\n' +
+'    // Populate writ datalist and attach validation\n' +
+'    var writDatalist = document.getElementById("link-writs");\n' +
+'    if (writDatalist && writList.length > 0) {\n' +
+'      var dlHtml = "";\n' +
+'      for (var wi = 0; wi < writList.length; wi++) {\n' +
+'        dlHtml += \'<option value="\' + escAttr(writList[wi].id) + \'">\' + esc(writList[wi].title) + \'</option>\';\n' +
+'      }\n' +
+'      writDatalist.innerHTML = dlHtml;\n' +
+'    }\n' +
+'    var linkWritEl = document.getElementById("new-link-writ");\n' +
+'    if (linkWritEl) {\n' +
+'      linkWritEl.addEventListener("input", function() { validateWritId(linkWritEl.value.trim()); });\n' +
+'      linkWritEl.addEventListener("change", function() { validateWritId(linkWritEl.value.trim()); });\n' +
 '    }\n' +
 '  });\n' +
 '}\n' +
@@ -1371,9 +1471,20 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    var brief = document.getElementById("new-brief").value.trim();\n' +
 '    var slug = document.getElementById("new-slug").value.trim();\n' +
 '    var codex = document.getElementById("new-codex").value.trim();\n' +
+'    var linkType = document.getElementById("new-link-type").value.trim();\n' +
+'    var linkWrit = document.getElementById("new-link-writ").value.trim();\n' +
 '    if (!brief) return;\n' +
 '    if (!codex) { alert("Codex is required"); return; }\n' +
-'    api("POST", "/specs", { brief: brief, slug: slug, codex: codex }).then(function(result) {\n' +
+'    // If one link field is filled, both are required\n' +
+'    if ((linkType && !linkWrit) || (!linkType && linkWrit)) {\n' +
+'      alert("Link requires both a type and a writ ID"); return;\n' +
+'    }\n' +
+'    var payload = { brief: brief, slug: slug, codex: codex };\n' +
+'    if (linkType && linkWrit) {\n' +
+'      payload.link = { type: linkType, targetId: linkWrit };\n' +
+'    }\n' +
+'    api("POST", "/specs", payload).then(function(result) {\n' +
+'      if (result.error) { alert(result.error); return; }\n' +
 '      if (result.slug) { location.hash = "#/" + result.slug; }\n' +
 '    });\n' +
 '  }\n' +
