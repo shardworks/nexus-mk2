@@ -62,7 +62,7 @@ The plan workshop runs three specialized agents sequentially — reader (invento
 | `--add-dir` for the output directory | Grants read but not necessarily write |
 | Removing `--dangerously-skip-permissions` | Broke writes entirely in non-interactive mode |
 
-## What We're Testing Now
+## Solution (confirmed working)
 
 **Approach:** Replace `--agent` with `--system-prompt-file` + targeted CLI flags:
 
@@ -73,7 +73,9 @@ The plan workshop runs three specialized agents sequentially — reader (invento
 - `--print -` with stdin prompt — avoids arg-length limits and dash-prefix parsing
 - Explicit output paths in the user prompt: "Following your instructions, create an inventory at: /full/path/to/inventory.md"
 
-**Rationale:** Every failure traced back to the agent receiving mixed signals — role instructions competing with default system prompt, tool restrictions not enforced, identity context from the wrong CLAUDE.md. The fix eliminates all ambient context and makes every instruction explicit.
+**Result:** Full pipeline (reader → analyst → writer) completed successfully on first run. Reader produced 118-line inventory, analyst produced scope/decisions/observations, writer produced spec. All files written to correct locations.
+
+**Why it works:** Every failure traced back to the agent receiving mixed signals — role instructions competing with default system prompt, tool restrictions not enforced, identity context from the wrong CLAUDE.md. The fix eliminates all ambient context and makes every instruction explicit.
 
 ## Broader Implications for X003
 
