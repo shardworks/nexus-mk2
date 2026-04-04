@@ -59,9 +59,17 @@ function getCodexRemoteUrl(codexName: string): string {
 }
 
 /** Shallow-clone a codex to a temp directory. Returns the clone path. */
-function cloneCodex(codexName: string): string {
+function cloneCodex(codexName: string, sessionId?: string): string {
   const remoteUrl = getCodexRemoteUrl(codexName);
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `plan-${codexName}-`));
+  // Use a stable directory name based on session ID so that Claude's per-directory
+  // session store survives across pipeline steps (reader → analyst → writer).
+  // Each step deletes and re-clones, but the path stays the same, so --resume works.
+  const dirName = sessionId
+    ? `plan-${codexName}-${sessionId}`
+    : `plan-${codexName}-${crypto.randomUUID()}`;
+  const tmpDir = path.join(os.tmpdir(), dirName);
+  if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.mkdirSync(tmpDir, { recursive: true });
   console.log(`[workshop] Cloning ${codexName} (${remoteUrl}) → ${tmpDir}`);
   execSync(`git clone --depth 1 ${remoteUrl} ${tmpDir}`, { stdio: 'pipe' });
   return tmpDir;
@@ -382,7 +390,7 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
 
   let cloneDir: string;
   try {
-    cloneDir = cloneCodex(codexName);
+    cloneDir = cloneCodex(codexName, meta.sessionId);
   } catch (err: any) {
     console.error('[workshop] Clone failed for ' + codexName + ': ' + err.message);
     sendSSE(slug, 'status', { step, state: 'failed', error: 'clone failed: ' + err.message });
