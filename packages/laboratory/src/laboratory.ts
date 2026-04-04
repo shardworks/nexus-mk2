@@ -17,10 +17,12 @@ import type {
   LaboratoryConfig,
   ResolvedConfig,
   WritLike,
+  WritLinkLike,
   SessionLike,
 } from './types.ts';
 import {
   appendCommissionLogEntry,
+  markRevisionRequired,
   writeCommissionMd,
   writeReviewTemplate,
   writeSessionRecord,
@@ -64,6 +66,11 @@ export function startLaboratory(_ctx: StartupContext): void {
   // Watch sessions (owned by Animator)
   stacks.watch('animator', 'sessions', (event: ChangeEvent<BookEntry>) => {
     handleSessionEvent(config, event);
+  }, { failOnError: false });
+
+  // Watch writ links (owned by Clerk)
+  stacks.watch('clerk', 'links', (event: ChangeEvent<BookEntry>) => {
+    handleLinkEvent(config, event);
   }, { failOnError: false });
 }
 
@@ -136,6 +143,32 @@ function onWritStatusChanged(
       // No action needed — status is observable in the Stacks
       break;
   }
+}
+
+// ── Link CDC handler ────────────────────────────────────────────────
+
+function handleLinkEvent(config: ResolvedConfig, event: ChangeEvent<BookEntry>): void {
+  if (event.type !== 'create') return;
+
+  const link = event.entry as unknown as WritLinkLike;
+
+  // A "fixes" link means the source writ is a revision of the target writ
+  if (link.type !== 'fixes') return;
+
+  onFixesLinkCreated(config, link);
+}
+
+function onFixesLinkCreated(config: ResolvedConfig, link: WritLinkLike): void {
+  // Mark the original (target) writ as requiring revision
+  const updated = markRevisionRequired(config.commissionLogPath, link.targetId);
+  if (!updated) return;
+
+  const relLogPath = path.relative(config.sanctumHome, config.commissionLogPath);
+  autoCommit(
+    config.sanctumHome,
+    `laboratory: mark ${link.targetId} revision_required (fixed by ${link.sourceId})`,
+    [relLogPath],
+  );
 }
 
 // ── Session CDC handler ──────────────────────────────────────────────

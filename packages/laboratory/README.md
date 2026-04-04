@@ -23,7 +23,15 @@ When the guild boots, Arbor starts the Laboratory after The Stacks (its only dep
 | `update` → `completed` or `failed` | Fires `bin/instrument-review.sh` as a detached child process (fire-and-forget). The script runs the instrument suite (quality scorers + integration scorer) and writes results to `instruments/` subdirectories. |
 | `update` → `active` or `cancelled` | No action — these transitions are observable in the Stacks if needed later. |
 
-### Watcher 2: Sessions (`animator` → `sessions` book)
+### Watcher 2: Writ Links (`clerk` → `links` book)
+
+| CDC Event | Action |
+|-----------|--------|
+| `create` where `type === "fixes"` | Sets `revision_required: true` on the target writ's commission log entry. Auto-commits. |
+| `create` (other types) | No action. |
+| `update` / `delete` | No action. |
+
+### Watcher 3: Sessions (`animator` → `sessions` book)
 
 Only acts on writ-bound sessions (those with `metadata.writId`). Unbound sessions (e.g. `nsg consult`) are silently skipped.
 

@@ -39,6 +39,32 @@ ${codexLine}
   fs.appendFileSync(logPath, entry, 'utf-8');
 }
 
+/**
+ * Set revision_required: true on an existing commission log entry.
+ * Finds the entry by writ ID and replaces its `revision_required: null`
+ * (or `revision_required: false`) with `revision_required: true`.
+ *
+ * No-op if the entry is not found or already marked true.
+ */
+export function markRevisionRequired(logPath: string, writId: string): boolean {
+  if (!fs.existsSync(logPath)) return false;
+
+  const content = fs.readFileSync(logPath, 'utf-8');
+
+  // Find the entry block for this writ ID and replace revision_required
+  // We look for the id line followed (within a few lines) by revision_required
+  const idPattern = new RegExp(
+    `(- id: ${writId}\\n(?:    .*\\n)*?    revision_required: )(null|false)`,
+  );
+
+  const match = content.match(idPattern);
+  if (!match) return false;
+
+  const updated = content.replace(idPattern, '$1true');
+  fs.writeFileSync(logPath, updated, 'utf-8');
+  return true;
+}
+
 // ── Commission artifacts ─────────────────────────────────────────────
 
 /**

@@ -62,6 +62,16 @@ export interface WritLike {
   resolution?: string;
 }
 
+// ── Link document shape (mirrors clerk WritLinkDoc, fields we use) ──
+
+export interface WritLinkLike {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  type: string;
+  createdAt: string;
+}
+
 // ── Session document shape (mirrors animator SessionDoc, fields we use)
 
 export interface SessionLike {

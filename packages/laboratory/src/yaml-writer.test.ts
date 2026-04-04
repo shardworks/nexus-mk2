@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {
   appendCommissionLogEntry,
+  markRevisionRequired,
   writeCommissionMd,
   writeReviewTemplate,
   writeSessionRecord,
@@ -80,6 +81,107 @@ describe('appendCommissionLogEntry', () => {
     assert.ok(content.startsWith('# This is a comment'));
     assert.ok(content.includes('id: w-existing'));
     assert.ok(content.includes('id: w-new'));
+  });
+});
+
+describe('markRevisionRequired', () => {
+  it('sets revision_required from null to true', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-abc123',
+      '    title: "Test"',
+      '    codex: nexus',
+      '    complexity: 3',
+      '    spec_quality_pre: strong',
+      '    outcome: partial',
+      '    revision_required: null',
+      '    spec_quality_post: null',
+      '',
+    ].join('\n'));
+
+    const result = markRevisionRequired(logPath, 'w-abc123');
+    assert.equal(result, true);
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    assert.ok(content.includes('revision_required: true'));
+    assert.ok(!content.includes('revision_required: null'));
+  });
+
+  it('sets revision_required from false to true', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-abc123',
+      '    title: "Test"',
+      '    codex: nexus',
+      '    revision_required: false',
+      '',
+    ].join('\n'));
+
+    const result = markRevisionRequired(logPath, 'w-abc123');
+    assert.equal(result, true);
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    assert.ok(content.includes('revision_required: true'));
+  });
+
+  it('returns false when entry not found', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-other',
+      '    title: "Other"',
+      '    revision_required: null',
+      '',
+    ].join('\n'));
+
+    const result = markRevisionRequired(logPath, 'w-nonexistent');
+    assert.equal(result, false);
+  });
+
+  it('returns false when already true', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-abc123',
+      '    title: "Test"',
+      '    revision_required: true',
+      '',
+    ].join('\n'));
+
+    const result = markRevisionRequired(logPath, 'w-abc123');
+    assert.equal(result, false);
+  });
+
+  it('only modifies the targeted entry', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-first',
+      '    title: "First"',
+      '    revision_required: null',
+      '',
+      '  - id: w-second',
+      '    title: "Second"',
+      '    revision_required: null',
+      '',
+    ].join('\n'));
+
+    markRevisionRequired(logPath, 'w-second');
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    // First entry still null
+    const firstEntry = content.substring(0, content.indexOf('w-second'));
+    assert.ok(firstEntry.includes('revision_required: null'));
+    // Second entry updated
+    const secondEntry = content.substring(content.indexOf('w-second'));
+    assert.ok(secondEntry.includes('revision_required: true'));
+  });
+
+  it('returns false when log file does not exist', () => {
+    const result = markRevisionRequired(path.join(tmpDir, 'nonexistent.yaml'), 'w-abc123');
+    assert.equal(result, false);
   });
 });
 
