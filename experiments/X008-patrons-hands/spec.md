@@ -162,6 +162,10 @@ X008 reaches its natural end when the transition has stabilized — specifically
 - **Sample size of one:** This is a case study of one patron. The findings are suggestive, not generalizable — but that's fine for the published narrative.
 - **Observer effect:** Knowing this is being studied might make Sean more self-aware about the transition, which could dampen the effect or amplify it.
 
+## Future Work
+
+- **Task category instrument (H4).** H4 needs task categories to distinguish category-specific from global calibration updating. Neither the commission log nor the coco-log currently captures task type. A lightweight LLM instrument that classifies work by category from the commission spec (or commit message + diff for Coco work) would provide a unified taxonomy across both logs. Fully backfillable — every commission has a spec on file, every coco-log entry has commits. Design the taxonomy and instrument when H4 analysis is ready to begin; don't add a manual field to either log.
+
 ## Observations
 
 ### Session 2026-03-27 (second session)
