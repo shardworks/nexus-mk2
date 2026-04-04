@@ -1,0 +1,142 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+      - S2
+    category: product
+    observable: true
+    question: What should the orchestrator label in the flow diagram (line 494) say after removing stale options?
+    context: "Current label: 'Orchestrator (dispatch script, rig engine, standing order)'. Dispatch scripts are gone. Standing orders don't orchestrate multi-step draft/session/seal flows. The Spider's engines are the only current caller of this exact sequence. However, the Scriptorium is infrastructure that any caller could use — a human could run draft-open/seal tools manually."
+    options:
+      a: Label as 'Caller (Spider engine, direct tool invocation)' — names the two realistic callers
+      b: Label as 'Spider engine (or other caller)' — names the primary caller, acknowledges extensibility
+      c: Label as 'Orchestrator (rig engine, direct invocation)' — keeps generic framing, drops only the stale options
+    selected: b
+    analysis:
+      recommendation: c
+      confidence: high
+      rationale: Matches the Scriptorium's stated philosophy of being caller-agnostic infrastructure. The doc shouldn't couple to the Spider; it should describe who calls it in generic terms.
+  - id: D2
+    scope:
+      - S1
+      - S2
+    category: product
+    observable: true
+    question: How should line 15's orchestrator list be updated?
+    context: "Current: 'the caller's concern — rig engines, dispatch scripts, or direct human invocation'. Same stale pattern as the flow diagram. The Scriptorium doc frames itself as caller-agnostic — it doesn't know or care who orchestrates."
+    options:
+      a: Replace with 'the caller's concern — the Spider's engines, direct tool invocation, or other automation'
+      b: Simplify to 'the caller's concern' with no enumeration of specific callers
+      c: Replace with 'the caller's concern — rig engines or direct invocation'
+    selected: c
+    analysis:
+      recommendation: c
+      confidence: high
+      rationale: "'Rig engines' is accurate and generic (not Spider-specific). 'Direct invocation' covers humans and any future automation. Mirrors D1 option c for consistency."
+  - id: D3
+    scope:
+      - S3
+    category: api
+    observable: true
+    question: "Should the Dependencies section be updated to show the actual requires: [] or should it document a planned Stacks dependency?"
+    context: "The doc says requires: ['stacks']. The code says requires: []. The Scriptorium never imports or uses Stacks. The 'Future State' section explicitly plans to add Stacks persistence for drafts, but that's future work."
+    options:
+      a: "Update to requires: [] with a note that Stacks integration is future work (matches code)"
+      b: "Keep requires: ['stacks'] as aspirational, add a note that it's not yet implemented"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Docs should match code. The aspirational dependency is already documented in the Future State section. The Dependencies section is a contract declaration — it must reflect reality.
+  - id: D4
+    scope:
+      - S3
+    category: product
+    observable: true
+    question: How should the Dependencies section describe what the Scriptorium actually depends on?
+    context: "With requires: [], the Scriptorium has no apparatus dependencies. It uses guild().config() and guild().writeConfig() from nexus-core (framework, not apparatus). The Stacks description is entirely stale."
+    options:
+      a: Remove the Dependencies section entirely — no apparatus dependencies means nothing to document
+      b: "Keep the section with requires: [] and a brief note that the Scriptorium uses guild.json (via framework APIs) for persistence, with Stacks integration planned"
+    selected: a
+    analysis:
+      recommendation: b
+      confidence: high
+      rationale: Other apparatus docs include a Dependencies section even when minimal. Keeping it with the accurate empty declaration and a one-line explanation is consistent and informative.
+  - id: D5
+    scope:
+      - S4
+    category: product
+    observable: true
+    question: Should the MVP scope banner be removed, updated, or replaced?
+    context: The banner says 'Clockworks integration (events, standing orders) is future work' and 'The Surveyor's codex-awareness integration is also out of scope for now.' The Scriptorium is implemented and the Spider drives its lifecycle. The Surveyor still doesn't exist. The Clockworks events remain unimplemented.
+    options:
+      a: Remove the banner entirely — the doc is no longer MVP, it's an implemented API contract
+      b: "Update the banner to reflect current state: Clockworks event emission and Surveyor integration remain future work, but drop the MVP framing"
+      c: Keep the banner but update its content to say the Scriptorium is implemented; future work is Stacks persistence, Clockworks events, and Surveyor integration
+    selected: b
+    analysis:
+      recommendation: c
+      confidence: medium
+      rationale: The banner serves a useful purpose — flagging what's not yet done. Removing it loses that signal. Updating it to reflect the current gap (Stacks persistence, events, Surveyor) is more accurate than the current Clockworks-centric framing.
+  - id: D6
+    scope:
+      - S5
+    category: product
+    observable: true
+    question: "Should the 'Future: Clockworks Events' section be removed, preserved, or reframed?"
+    context: The section lists 7 events the Scriptorium 'should emit' via Clockworks. The Spider uses CDC (Stacks watch) for rig-level reactivity. Clockworks events remain a valid future direction for broader guild integration (e.g. the Surveyor reacting to codex.fetched). The event table itself is useful design thinking.
+    options:
+      a: Keep the section as-is — it's explicitly labeled 'Future' and the events are still plausible
+      b: Keep the section but add a note that the Spider currently uses CDC for rig-level reactivity, and these events would serve broader guild integration
+      c: Remove the section — CDC is the reactive pattern now, and these events may never be implemented via Clockworks
+    selected: a
+    analysis:
+      recommendation: b
+      confidence: medium
+      rationale: The event table captures real design intent. Adding context about CDC as the current pattern prevents readers from thinking there's no reactivity today. Doesn't over-commit to a removal that might lose useful thinking.
+  - id: D7
+    scope:
+      - S6
+    category: product
+    observable: false
+    question: "Should the 'Future State: Draft Persistence via Stacks' section acknowledge that CDC is already operational for rigs?"
+    context: The section frames CDC-driven downstream reactions as entirely future. The Spider's CDC handler on the rigs book already exists and drives writ transitions. The framing 'enabling CDC-driven downstream reactions' implies CDC is aspirational when it's not.
+    options:
+      a: Add a parenthetical noting that CDC is already used by the Spider for rig-level state changes
+      b: Leave as-is — the section is about draft-specific CDC, which is indeed future
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: medium
+      rationale: The section is specifically about persisting DraftRecords to Stacks and reacting to draft state changes via CDC. That specific use case genuinely is future work. Adding a cross-reference to Spider CDC would be helpful but risks scope creep for minimal clarity gain.
+  - id: D8
+    scope:
+      - S7
+    category: product
+    observable: true
+    question: How should the README's stale Stacks dependency claim be fixed?
+    context: "README line 3: 'Depends on @shardworks/stacks-apparatus for state tracking.' The implementation has no Stacks dependency. The README should match the implementation."
+    options:
+      a: Remove the Stacks dependency claim entirely
+      b: Replace with a note about in-memory state tracking with guild.json persistence for the codex registry
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The README's opening paragraph should describe what the apparatus does, not its internal state strategy. Simply removing the false dependency claim is cleaner than replacing it with implementation details.
+  - id: D9
+    scope:
+      - S2
+    category: product
+    observable: true
+    question: Should the 'standing order' reference in the Draft Cleanup section (line 651) be updated?
+    context: "Line 651: 'A future reaper process, standing order, or manual cleanup can use draft-list and draft-abandon.' Standing orders are a valid Clockworks mechanism that could legitimately reap stale drafts — this isn't the same stale pattern as the orchestrator framing."
+    options:
+      a: Leave as-is — standing orders are a plausible reaper mechanism even in the Spider world
+      b: Replace 'standing order' with a more generic term like 'automated process'
+    selected: b
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Unlike the orchestrator framing, this is a plausible future use case. A standing order reacting to a time-based event to reap stale drafts is exactly how Clockworks is designed to work. Not stale.
