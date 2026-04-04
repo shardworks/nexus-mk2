@@ -1,0 +1,251 @@
+decisions:
+  - id: D1
+    scope:
+      - S2
+    category: product
+    observable: true
+    question: What filters should rig-list support?
+    context: The Clerk's writ-list filters by status and type (both indexed). The rigs book has indexes on status, writId, and [status, writId]. RigDoc has no type field — the equivalent secondary filter is writId.
+    options:
+      a: Filter by status and writId (matches indexed fields)
+      b: Filter by status only (minimal, add writId later)
+      c: Filter by status, writId, and a text search on engine status
+    selected: b
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Both fields are indexed, both are useful (status for overview, writId for drill-down from a writ), and it mirrors the Clerk's two-filter pattern.
+  - id: D2
+    scope:
+      - S2
+    category: product
+    observable: true
+    question: What default ordering should rig-list use?
+    context: The Clerk orders by createdAt desc. RigDoc has no createdAt field. The id field uses generateId('rig', 4) which produces a base36-timestamp-prefixed id, making it chronologically sortable — same pattern as writ ids.
+    options:
+      a: Order by id descending (newest first, using the timestamp-sortable id)
+      b: Add a createdAt field to RigDoc and order by it
+      c: No explicit ordering (return in storage order)
+    selected: b
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The id is already timestamp-sortable by design. Adding createdAt would be scope creep — it changes the data model for a cosmetic benefit the id already provides.
+  - id: D3
+    scope:
+      - S1
+    category: product
+    observable: true
+    question: What should rig-show return when the rig is not found?
+    context: The Clerk's show() throws an Error with a descriptive message. The Stacks book.get() returns null on miss.
+    options:
+      a: Throw an Error (mirrors Clerk pattern)
+      b: Return null (mirrors Stacks pattern, let caller decide)
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Clerk pattern is the reference architecture. Throwing gives tool callers (animas, CLI) a clear error message rather than a silent null.
+  - id: D4
+    scope:
+      - S1
+      - S2
+    category: api
+    observable: true
+    question: What permission string should the tools use?
+    context: Existing Spider tools use 'spider:write'. The Clerk's read tools use 'clerk:read'. The convention is {plugin}:{level}.
+    options:
+      a: "'spider:read'"
+      b: "'read' (unscoped, like tools-list uses)"
+    selected: b
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The Spider's existing tools use the scoped 'spider:write' convention. The read tools should follow suit with 'spider:read'.
+  - id: D5
+    scope:
+      - S2
+    category: api
+    observable: true
+    question: What should the default limit be for rig-list?
+    context: The Clerk defaults to 20. Rigs are typically fewer than writs (one rig per writ, only for writs that reach execution). The number of rigs in a guild is likely small.
+    options:
+      a: 20 (match the Clerk convention)
+      b: 50 (rigs are fewer, show more by default)
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Consistency with Clerk trumps optimization for a small data set. 20 is fine for any realistic guild.
+  - id: D6
+    scope:
+      - S3
+    category: api
+    observable: true
+    question: Should the SpiderApi.list() method accept a typed RigFilters object or positional params?
+    context: "The Clerk uses ClerkApi.list(filters?: WritFilters) — a single optional object. The Spider's crawl() takes no params."
+    options:
+      a: Single optional RigFilters object (mirrors Clerk)
+      b: "Individual optional params: list(status?, writId?, limit?, offset?)"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Object pattern matches Clerk, is more extensible, and keeps the method signature clean.
+  - id: D7
+    scope:
+      - S4
+    category: api
+    observable: true
+    question: Where should the RigFilters type be defined?
+    context: WritFilters lives in the Clerk's types.ts alongside WritDoc, ClerkApi, etc. The Spider's types.ts is the equivalent location.
+    options:
+      a: In spider/src/types.ts alongside RigDoc and SpiderApi
+      b: Inline in the tool file, no shared type
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The type is used by both the tool and the API method. Must be shared. types.ts is the established location.
+  - id: D8
+    scope:
+      - S1
+    category: product
+    observable: true
+    question: Should rig-show accept a rig id or a writ id as its lookup key?
+    context: The natural parallel to writ-show is lookup by rig id. But operators often think in terms of writs, not rigs. The writId index exists. A writ has at most one rig.
+    options:
+      a: Accept rig id only (mirrors writ-show exactly)
+      b: Accept rig id or writ id with a discriminator param
+      c: Accept rig id as the primary param, add a separate by-writ lookup to rig-list via writId filter
+    selected: custom
+    analysis:
+      recommendation: c
+      confidence: high
+      rationale: rig-show by rig id keeps the tool simple and parallel to writ-show. Writ-to-rig lookup is naturally expressed as rig-list with a writId filter (returns 0 or 1 result). No need to complicate show.
+    patron_override: rig-show accepts rig only, but create a separate tool and API helper to retrieve 0-1 rigs for a writId
+  - id: D9
+    scope:
+      - S1
+      - S2
+    category: implementation
+    observable: false
+    question: Should the tool handlers call guild().apparatus('spider') or import the api directly?
+    context: Existing Spider tools (crawl, crawlContinual) call guild().apparatus<SpiderApi>('spider'). The Clerk tools call guild().apparatus<ClerkApi>('clerk'). Both follow the same indirect lookup pattern.
+    options:
+      a: guild().apparatus<SpiderApi>('spider') (matches existing Spider tools)
+      b: Direct import of the api object from spider.ts
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Every tool in the codebase uses the guild().apparatus() lookup pattern. Direct import would break the convention and couple the tool to the implementation.
+  - id: D10
+    scope:
+      - S1
+      - S2
+    category: implementation
+    observable: false
+    question: Should the tool files be named rig-list.ts/rig-show.ts or rigList.ts/rigShow.ts?
+    context: Clerk uses kebab-case filenames (writ-list.ts, writ-show.ts). Spider's existing tools use kebab-case (crawl.ts, crawl-continual.ts).
+    options:
+      a: "Kebab-case: rig-list.ts, rig-show.ts"
+      b: "camelCase: rigList.ts, rigShow.ts"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Both the Clerk and the Spider's existing tools use kebab-case filenames. No reason to deviate.
+  - id: D11
+    scope:
+      - S1
+      - S2
+    category: product
+    observable: true
+    question: What tool names should be used (the 'name' field in the tool() call)?
+    context: Clerk uses 'writ-list' and 'writ-show' (kebab-case). Spider's existing tools use 'crawl' and 'crawlContinual' (mixed — one word vs camelCase). The Spider spec notes 'Final CLI naming TBD' for existing tools.
+    options:
+      a: "Kebab-case: 'rig-list', 'rig-show' (mirrors Clerk convention)"
+      b: "camelCase: 'rigList', 'rigShow' (mirrors crawlContinual)"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The brief explicitly says 'rig-list' and 'rig-show'. Kebab-case matches the Clerk's pattern. crawlContinual is the outlier, not the convention.
+  - id: D12
+    scope:
+      - S5
+    category: implementation
+    observable: false
+    question: Should tests exercise the API methods directly or through the tool handlers?
+    context: Existing spider.test.ts tests call spider.crawl() directly (the API method), not through the tool handler. Clerk has no tool-level tests in its test file either.
+    options:
+      a: Test API methods directly (matches existing spider.test.ts pattern)
+      b: Test both API methods and tool handlers
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The tools are trivial wrappers — one line delegating to the API. Testing the API methods provides the coverage that matters. Tool-handler tests would just verify the delegation, which is boilerplate.
+  - id: D13
+    scope:
+      - S2
+    category: implementation
+    observable: false
+    question: Should rig-list build where-clauses inline or via a helper function?
+    context: The Clerk uses a buildWhereClause() helper in clerk.ts that constructs WhereClause arrays from the filters object. The Spider's list is simpler (two filters vs Clerk's two) but the pattern exists.
+    options:
+      a: Helper function (mirrors Clerk pattern)
+      b: Inline construction in the list method body
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: medium
+      rationale: With only two possible conditions (status, writId), a helper adds indirection without reducing complexity. If filters grow, extract then. The Clerk's helper is justified by having more tools that query writs.
+  - id: D14
+    scope:
+      - S1
+    category: product
+    observable: true
+    question: Should rig-show include engine yields in its output, or strip them for a cleaner summary?
+    context: RigDoc.engines[].yields can contain large objects (review findings, draft metadata). writ-show returns the full WritDoc — no stripping.
+    options:
+      a: Return the full RigDoc including all engine yields (mirrors writ-show's full-document approach)
+      b: Strip yields from engine instances, return a summary view
+      c: Return full RigDoc by default, add an optional 'summary' param that strips yields
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: writ-show returns the full document. The whole point of show is full detail. If summary views are needed later, that's a new tool.
+  - id: D15
+    scope:
+      - S2
+    category: product
+    observable: true
+    question: Should rig-list return full RigDoc objects or summaries (omitting engines array)?
+    context: writ-list returns full WritDoc objects. But RigDoc.engines is a nested array of 5 objects each with their own yields — significantly heavier than a flat WritDoc. For a list view, the engines detail is noise.
+    options:
+      a: Return full RigDoc objects (exact mirror of writ-list)
+      b: "Return summary objects: id, writId, status, engine count, and a status rollup of engines"
+      c: Return full RigDoc objects but with engines[].yields and engines[].givensSpec stripped
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: medium
+      rationale: Strict mirror of writ-list keeps the pattern consistent. The engines array is always exactly 5 items — bounded, not unbounded. If verbosity becomes a problem in practice, a summary variant can be added later.
+  - id: D16
+    scope:
+      - S6
+    category: api
+    observable: true
+    question: Should RigFilters be re-exported from the package barrel (index.ts)?
+    context: The Clerk's index.ts re-exports WritFilters along with WritDoc, ClerkApi, etc. The Spider's index.ts re-exports RigDoc, SpiderApi, CrawlResult, etc.
+    options:
+      a: Re-export RigFilters (mirrors Clerk)
+      b: Do not re-export (internal only)
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Any downstream consumer calling SpiderApi.list() programmatically needs the RigFilters type. The Clerk sets the precedent.

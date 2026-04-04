@@ -246,7 +246,3 @@ All tests use real temp directories (via `os.tmpdir()` + `fs.mkdtempSync`) with 
 23. **Git identity unchanged:** `weave({ role: 'artificer' })` still returns `environment` with `GIT_AUTHOR_NAME: 'Artificer'` and `GIT_AUTHOR_EMAIL: 'artificer@nexus.local'`.
 
 24. **Backward compatibility:** `weave({})` on a guild with no charter and no role instructions returns the same shape as today — `systemPrompt: undefined`, `tools: undefined`, `environment: undefined`.
-
----
-
-**Important:** When you are finished, commit all changes in a single commit with a clear, descriptive message. Do not leave uncommitted changes — they will be lost when the session closes.

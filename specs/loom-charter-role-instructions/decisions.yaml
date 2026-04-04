@@ -1,0 +1,224 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    category: product
+    observable: true
+    question: Where does the charter file live and how is it located?
+    context: "The guild metaphor says the charter 'hangs on the wall' of the guildhall. The architecture doc says guild content structure is 'guild-specific, not framework-prescribed.' Two options: a conventional fixed path, or a configurable path in guild.json."
+    options:
+      a: "Convention: always read from `charter.md` at the guild root. No config needed."
+      b: "Configurable: add a `charter` path field to LoomConfig in guild.json, defaulting to `charter.md`."
+      c: "Configurable with no default: require explicit `charter` path in LoomConfig; no file read if absent."
+    selected: custom
+    analysis:
+      recommendation: b
+      confidence: high
+      rationale: Convention-with-override matches the Instrumentarium pattern (tools have a default instructions location but can be configured). Provides zero-config for simple guilds while allowing operators to relocate or rename.
+    patron_override: "`charter.md` at guild root, or concatenate all files in `charter/*.md` in alphabetical order"
+  - id: D2
+    scope:
+      - S1
+    category: implementation
+    observable: false
+    question: When should charter content be read — at startup or at weave time?
+    context: The Instrumentarium reads tool instructions at startup (preloadInstructions in start()). The Loom's start() currently only reads config. Charter content could change between sessions in a long-running process (e.g. Clockworks daemon), but this is unlikely in practice.
+    options:
+      a: Read at startup in start() and cache. Re-reading requires a process restart.
+      b: Read at weave() time on every call. Always fresh, small I/O cost per session.
+      c: Read at startup and cache, with a file watcher or TTL to refresh.
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Matches the Instrumentarium precedent exactly. Charter and role instructions are versioned guild content — they change via git commits, not hot-edits. A process restart between config changes is the expected lifecycle.
+  - id: D3
+    scope:
+      - S2
+      - S5
+    category: product
+    observable: true
+    question: What is the config field name and shape for role instruction file paths?
+    context: "The legacy system used `instructions: 'roles/steward.md'` on role definitions. The current RoleDefinition has `permissions` and `strict`. The path is relative to guild root."
+    options:
+      a: "`instructions: string` — a path relative to guild root, matching the legacy convention exactly."
+      b: "`instructionsFile: string` — following the ToolDefinition naming convention (which uses instructionsFile for file paths and instructions for inline text)."
+    selected: custom
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Role instructions are always files (not inline JSON strings). The ToolDefinition distinction between instructions (inline) and instructionsFile (path) exists because tools are defined in code; role definitions live in guild.json where inline markdown would be unwieldy. The legacy convention `instructions` is simpler and already documented in kit-components.md.
+    patron_override: only use convention -- no explicit configuration
+  - id: D4
+    scope:
+      - S3
+    category: product
+    observable: true
+    question: What is the section format for the composed system prompt?
+    context: "The architecture spec defines composition order: charter → curriculum → temperament → role instructions → tool instructions → writ context. This commission implements charter and role instructions (layers 1 and 4). Future layers will be inserted between them."
+    options:
+      a: "Concatenate with double newlines: `charter + '\\n\\n' + roleInstructions`. No section headers."
+      b: "Use markdown headers to delimit sections: `# Charter\\n\\ncharter_text\\n\\n# Role Instructions\\n\\nrole_text`."
+      c: "Use XML-style tags to delimit sections: `<charter>\\ncontent\\n</charter>\\n<role-instructions>\\ncontent\\n</role-instructions>`."
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: medium
+      rationale: The charter and role instruction files are authored markdown — they should include their own titles if desired. Adding wrapper headers or tags presumes a formatting convention the content authors haven't agreed to. Simple concatenation lets each file own its own formatting. If future layers need delineation, that convention can be established when more layers exist.
+  - id: D5
+    scope:
+      - S4
+    category: implementation
+    observable: false
+    question: How should missing files be handled?
+    context: The Instrumentarium logs a console.warn for missing tool instructions and continues. The Loom currently does no file I/O. A guild might have roles configured without instruction files, or no charter file.
+    options:
+      a: Warn via console.warn and continue — omit the missing layer from the composed prompt. Return undefined systemPrompt only if all layers are missing.
+      b: Silently skip missing layers — no warning. Return undefined systemPrompt only if all layers are missing.
+      c: Throw an error if a configured file is missing (but not for the default charter path).
+    selected: b
+    analysis:
+      recommendation: b
+      confidence: medium
+      rationale: Missing role instructions are a normal state — the live guild has three roles configured with no instruction files. Warnings on every weave() call would be noisy for a guild that simply hasn't written role instructions yet. Different from the Instrumentarium pattern because tool instructions are explicitly declared per-tool, while role instructions are optional config. If the operator configures a path, a missing file at that path could warrant a startup warning (see D8).
+  - id: D6
+    scope:
+      - S3
+    category: api
+    observable: true
+    question: Should systemPrompt remain optional on AnimaWeave, or become required?
+    context: "Currently `systemPrompt?: string`. With charter + role instructions, most weave() calls will produce a value. But a guild with no charter and no role instructions would still produce no system prompt."
+    options:
+      a: "Keep optional (`systemPrompt?: string`). Undefined when no layers produce content."
+      b: "Make required (`systemPrompt: string`). Return empty string when no layers produce content."
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The downstream pipeline (Animator → claude-code provider) already handles undefined correctly — it skips --system-prompt-file. Changing to required would mean passing an empty string, which the provider would write to a file and pass as an empty system prompt. Undefined is semantically correct for 'no system prompt configured.'
+  - id: D7
+    scope:
+      - S2
+    category: implementation
+    observable: false
+    question: When a role has no definition in config (unknown role), should charter still be included?
+    context: "Currently weave({ role: 'unknown' }) resolves no tools but still derives git identity. The Parlour calls weave({ role: undefined }). Charter is guild-wide policy that should apply to all sessions."
+    options:
+      a: Always include charter regardless of role. Only role instructions require a matching role definition.
+      b: Only include charter when a valid role definition exists.
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "The guild metaphor defines charter as 'the governing document all members follow' — it applies universally. The Parlour weaves with role: undefined for interactive sessions; those should still receive institutional policy."
+  - id: D8
+    scope:
+      - S4
+      - S5
+    category: implementation
+    observable: false
+    question: Should file reads happen at startup (with caching) or per-weave?
+    context: D2 decided startup reads for charter. The same question applies to role instruction files. The Instrumentarium preloads all tool instructions at startup. Role instruction files are per-role; reading all at startup means reading files for roles that may never be weaved.
+    options:
+      a: Read all role instruction files at startup alongside charter. Cache in memory.
+      b: Read role instruction files lazily on first weave() for each role. Cache after first read.
+      c: Read role instruction files on every weave() call. No caching.
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Matches the Instrumentarium pattern. The number of roles is small (typically 2-5); reading a few markdown files at startup is negligible. Startup reads also surface missing-file warnings early (before any session attempts), which aids debugging.
+  - id: D9
+    scope:
+      - S1
+      - S2
+    category: implementation
+    observable: false
+    question: Should the Loom use synchronous or asynchronous file reads?
+    context: The Instrumentarium uses fs.readFileSync. The Loom's start() is synchronous (returns void, not Promise<void>). weave() is already async.
+    options:
+      a: Synchronous (fs.readFileSync) in start(), matching the Instrumentarium.
+      b: Asynchronous (fs.promises.readFile) — make start() async.
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: start() runs during sequential apparatus startup, not in a hot path. readFileSync is simpler and matches the Instrumentarium precedent. The Apparatus type allows start() to return Promise<void>, but there's no benefit to async here — the files are local and small.
+  - id: D10
+    scope:
+      - S6
+    category: product
+    observable: true
+    question: Should tool instructions be included in the system prompt in this commission?
+    context: The architecture spec lists tool instructions as composition layer 5. They are already pre-loaded onto ResolvedTool.definition.instructions by the Instrumentarium. Including them is straightforward — iterate resolved tools, collect instructions, append to system prompt.
+    options:
+      a: Include tool instructions (layer 5) in this commission — they are already resolved and available.
+      b: Defer tool instructions to a separate commission — keep this one focused on charter + role instructions only.
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The data is already available on the resolved tools. The marginal implementation cost is a few lines of iteration. Shipping charter and role instructions without tool instructions would mean animas get identity context but not craft guidance for their tools — a half-composed session.
+  - id: D11
+    scope:
+      - S6
+    category: product
+    observable: true
+    question: Where do tool instructions appear in the composed system prompt?
+    context: The architecture spec puts tool instructions at layer 5, after role instructions. The current commission implements layers 1 (charter) and 4 (role instructions), with 2 and 3 (curriculum, temperament) as future gaps.
+    options:
+      a: "After role instructions, matching the documented order: charter → role instructions → tool instructions."
+      b: After charter but before role instructions, so role instructions can reference tools.
+    selected: b
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The documented composition order is deliberate — role instructions define the anima's function, tool instructions teach specific tools. The role instructions may tell an anima 'use the signal tool when you encounter X'; the tool instructions then explain how signal works. Following the documented order preserves coherence when future layers (curriculum, temperament) fill in between.
+  - id: D12
+    scope:
+      - S6
+    category: product
+    observable: true
+    question: How should tool instructions be formatted within the system prompt?
+    context: Each resolved tool has a definition.instructions string (already loaded by the Instrumentarium). Multiple tools may have instructions. The tool name and description are separate fields.
+    options:
+      a: "One section per tool with a header: `## Tool: tool-name\\n\\ninstructions_text`"
+      b: All tool instructions concatenated with separators, no per-tool headers.
+      c: "A grouped section with an outer header: `# Tools\\n\\n## tool-name\\n\\ninstructions_text`"
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: medium
+      rationale: "Per-tool headers make the system prompt scannable and help the LLM associate instructions with the correct tool. A top-level # Tools header (option c) would conflict with the 'no wrapper headers' approach from D4 and impose structure on content the tool author should control."
+  - id: D13
+    scope:
+      - S3
+    category: implementation
+    observable: false
+    question: How should the system prompt handle the gap where curriculum (layer 2) and temperament (layer 3) will eventually go?
+    context: The documented order is charter → curriculum → temperament → role instructions → tool instructions. This commission implements 1, 4, 5 only. Future work adds 2, 3.
+    options:
+      a: Just concatenate the layers we have (charter, role instructions, tool instructions). When curriculum/temperament are added later, they insert between charter and role instructions.
+      b: Leave placeholder comments in the composed prompt for future layers.
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The system prompt is consumed by an LLM, not parsed by code. Placeholder comments would be confusing noise. Simple concatenation of present layers is correct; future layers insert at the right position when they ship.
+  - id: D14
+    scope:
+      - S1
+      - S2
+    category: implementation
+    observable: false
+    question: How should file reading be tested?
+    context: "The existing test suite uses setGuild() with fake guild objects — no real file system. The Instrumentarium tests don't test preloadInstructions directly (it's a private method). Two approaches: real temp dirs or injectable file reader."
+    options:
+      a: Use node:fs/promises and os.tmpdir() to create real temp directories with test files. Clean up in afterEach.
+      b: Inject a file reader function into createLoom() for testability.
+      c: Mock fs.readFileSync via module mocking (e.g., node:test mock).
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Real file system tests are the most reliable and don't couple tests to implementation details. Temp directories are cheap, the test files are tiny, and cleanup is straightforward. The Instrumentarium doesn't inject readers either — following the same pattern keeps the codebase consistent. Node test runner module mocking (option c) is fragile across versions.

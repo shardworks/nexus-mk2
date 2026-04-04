@@ -167,15 +167,17 @@ fi
 
 # ── Extract title ────────────────────────────────────────────
 
-# First line of body, strip markdown header prefixes (# ## ### etc.)
+# Strip YAML frontmatter (--- ... ---) and leading whitespace, then grab
+# the first non-empty line. Strip markdown header prefixes (# ## ### etc.)
 # Truncate to 100 chars to keep commission log and writ titles readable.
-TITLE=$(echo "$BODY" | head -1 | sed 's/^#\+ *//')
+BODY_NO_FM=$(echo "$BODY" | sed '/^---$/,/^---$/d' | sed '/^[[:space:]]*$/d')
+TITLE=$(echo "$BODY_NO_FM" | head -1 | sed 's/^#\+ *//')
 if [[ ${#TITLE} -gt 100 ]]; then
   TITLE="${TITLE:0:100}…"
 fi
 
 if [[ -z "$TITLE" ]]; then
-  echo "Error: could not extract title from commission body (first line is empty)" >&2
+  echo "Error: could not extract title from commission body (first line is empty after stripping frontmatter)" >&2
   exit 1
 fi
 
