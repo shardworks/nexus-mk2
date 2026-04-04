@@ -146,3 +146,21 @@ if [[ "$RUN_INTEGRATION" == true ]]; then
     $DRY_RUN
   echo ""
 fi
+
+# ── Auto-commit & push results ──────────────────────────────
+
+if [[ -z "$DRY_RUN" && -d "$OUTPUT_DIR/instruments" ]]; then
+  echo "── Committing instrument results ──"
+  cd "$PROJECT_ROOT"
+  # Stage only this commission's instrument output
+  git add "$OUTPUT_DIR/instruments/"
+  # Only commit if there's something staged
+  if ! git diff --cached --quiet; then
+    GIT_AUTHOR_NAME=Laboratory GIT_AUTHOR_EMAIL=laboratory@nexus.local \
+    GIT_COMMITTER_NAME=Laboratory GIT_COMMITTER_EMAIL=laboratory@nexus.local \
+    git commit -m "instrument results for $COMMISSION"
+    git push && echo "  Pushed." || echo "  ⚠ Push failed (non-fatal)."
+  else
+    echo "  Nothing new to commit."
+  fi
+fi
