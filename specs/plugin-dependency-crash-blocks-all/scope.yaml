@@ -1,0 +1,27 @@
+brief: Isolate plugin load/validation failures so the nsg CLI remains functional
+slug: plugin-dependency-crash-blocks-all
+scope:
+  - id: S1
+    description: Resilient validation — validateRequires collects all errors as FailedPlugin[] instead of throwing on the first problem found
+    rationale: The original validateRequires throws immediately on missing deps, kit-on-kit requires, or circular dependencies. This prevents operators from seeing the full picture and, combined with the uncaught throw in program.ts, crashes the entire CLI. Collecting all errors lets operators diagnose every problem in one pass.
+    included: true
+  - id: S2
+    description: Cascade filtering — a dedicated filterFailedPlugins function removes transitive dependents of failed plugins before topoSort, with distinct cascaded-failure reasons
+    rationale: If plugin 'db' fails validation, 'web' (which requires 'db') can't start either. Without cascade filtering, topoSort would encounter a broken graph. Eager filtering keeps topoSort unchanged (it continues to assume a valid, acyclic graph) and provides clear causal-chain diagnostics so operators don't debug transitive victims.
+    included: true
+  - id: S3
+    description: CLI error boundary — wrap createGuild in try/catch in program.ts so framework commands (status, plugin install/remove, version) survive guild load failures
+    rationale: Defense in depth. Even with resilient validation in arbor, other errors could occur (guild.json parse error, readGuildPackageJson failure, apparatus start() crash). The try/catch ensures framework commands always work — operators can always run nsg plugin remove to fix the problem.
+    included: true
+  - id: S4
+    description: FailedPlugin type in nexus-core and failedPlugins() on the Guild interface — a first-class representation of plugin failure state accessible via the guild() singleton
+    rationale: FailedPlugin is a peer of LoadedKit and LoadedApparatus — it describes a plugin's load-time state. Placing it in core alongside those types makes it available on the Guild interface, which is the natural access point for the CLI, status command, and any future plugin health inspection.
+    included: true
+  - id: S5
+    description: Status command enhancement — nsg status shows a separate 'Failed plugins' section with id and reason per line, included in both text and JSON output
+    rationale: Operators need a single command to diagnose plugin health. The status command already reports guild identity and plugin list; adding failed plugins with reasons closes the diagnostic loop. A separate section is visually clear and keeps the healthy plugin list uncluttered.
+    included: true
+  - id: S6
+    description: Test updates — convert existing assert.rejects validation tests to positive assertions verifying failedPlugins() and healthy apparatuses(), add filterFailedPlugins and cascade tests
+    rationale: The behavioral contract changed — createGuild no longer throws on validation errors. Tests must reflect the new contract. A strict/compatibility mode would add complexity for no production value.
+    included: true

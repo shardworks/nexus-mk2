@@ -1,0 +1,131 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    category: api
+    observable: false
+    question: Should validateRequires throw on the first error, or collect all errors and return them?
+    context: |
+      The original validateRequires throws on the first problem found (missing dep, cycle). This means operators only see one error at a time — fix it, restart, discover the next. Collecting all errors provides a complete diagnostic picture in one shot.
+    options:
+      a: Collect all — return FailedPlugin[] with every validation error found
+      b: Throw on first — keep existing behavior but catch at a higher level
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Collecting all errors lets operators see the full picture. With throw-on-first, they'd play whack-a-mole restarting after each fix. The return type also naturally integrates with the cascade logic (D2).
+  - id: D2
+    scope:
+      - S2
+    category: implementation
+    observable: false
+    question: How should cascade removal of dependents be handled?
+    context: |
+      If plugin 'db' fails validation, plugin 'web' (which requires 'db') can't start. The cascade could be computed eagerly during validation, or lazily when topoSort encounters a missing dependency.
+    options:
+      a: Eager — a dedicated filterFailedPlugins function walks the graph and removes all transitive dependents before topoSort
+      b: Lazy — topoSort skips apparatuses whose requires includes a missing ID, collecting them as additional failures
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: "Eager filtering keeps topoSort unchanged — it continues to assume a valid, acyclic graph. Separation of concerns: validation/filtering is one phase, ordering is another. Lazy detection would intermix validation logic into the ordering function."
+  - id: D3
+    scope:
+      - S2
+    category: product
+    observable: true
+    question: Should cascaded failures have distinct error messages explaining why they were excluded?
+    context: |
+      When 'web' is excluded because its dependency 'db' failed, the operator needs to understand that 'web' itself isn't broken — it was excluded transitively. Without this, they might try to debug 'web' unnecessarily.
+    options:
+      a: Yes — cascaded failures get a distinct reason like '"web" depends on failed plugin "db"'
+      b: No — cascaded plugins are silently excluded, only root causes are reported
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Operators need to understand the causal chain. Silent exclusion would make 'web' appear to vanish without explanation in nsg status output.
+  - id: D4
+    scope:
+      - S3
+    category: implementation
+    observable: false
+    question: Where should the createGuild error boundary be placed in the CLI bootstrap?
+    context: |
+      program.ts calls createGuild(home) at line 163 (before the change). Framework commands are registered before this call and always work without a guild. The question is whether to catch createGuild errors and continue (allowing framework commands to work), or to let them propagate (crashing the CLI).
+    options:
+      a: Wrap createGuild in try/catch — warn and continue, framework commands still work, plugin-contributed tools unavailable
+      b: Let errors propagate — rely on per-plugin isolation in arbor being sufficient
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: Defense in depth. Even with resilient validation in arbor, other errors could occur (e.g. guild.json parse error, readGuildPackageJson failure). The try/catch ensures framework commands always survive. The cost is zero — plugin tools are simply unavailable.
+  - id: D5
+    scope:
+      - S4
+    category: api
+    observable: true
+    question: Where should the FailedPlugin type live?
+    context: |
+      FailedPlugin needs to be importable by arbor (which creates the instances), the CLI (which displays them), and potentially by plugins that want to inspect guild health. The Guild interface is in @shardworks/nexus-core.
+    options:
+      a: In @shardworks/nexus-core alongside LoadedKit, LoadedApparatus, LoadedPlugin in plugin.ts
+      b: In @shardworks/nexus-arbor as an internal type, not on the Guild interface
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: FailedPlugin is a peer of LoadedKit and LoadedApparatus — it describes a plugin's load-time state. Placing it in core makes it available on the Guild interface, which is the natural place for failedPlugins() since guild() is the universal access point.
+  - id: D6
+    scope:
+      - S5
+    category: product
+    observable: true
+    question: How should failed plugins appear in nsg status output?
+    context: |
+      nsg status currently shows: Guild name, Nexus version, Home path, Model, and a flat list of plugin names. Failed plugins need to appear with their error reasons so operators can diagnose the issue.
+    options:
+      a: Separate 'Failed plugins' section below the healthy plugin list, with id and reason per line
+      b: Inline markers — annotate the plugins list with (FAILED) next to broken ones
+      c: Only in JSON output — text output stays clean, --json includes failedPlugins array
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: A separate section is visually clear and doesn't clutter the healthy list. The reason text is important for diagnosis and would be awkward inline. JSON output also includes the failedPlugins array for programmatic access.
+  - id: D7
+    scope:
+      - S1
+    category: implementation
+    observable: false
+    question: Should cycle detection mark all cycle participants as failed, or just the first one detected?
+    context: |
+      In a cycle A → B → A, both A and B are equally responsible. The original code threw on the first detection, stopping analysis. With return-based validation, there's a choice about which participants to mark.
+    options:
+      a: Mark all participants in the cycle chain as failed
+      b: Mark only the node where the cycle was detected (the revisited node)
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: All participants are equally broken — none of them can start. Marking only one would leave the others to fail at topoSort time with a less informative error.
+  - id: D8
+    scope:
+      - S1
+      - S6
+    category: implementation
+    observable: false
+    question: Should the existing arbor.test.ts validation tests be converted from assert.rejects to positive assertions, or kept as-is with a compatibility shim?
+    context: |
+      The existing tests use assert.rejects() to verify that createGuild throws on missing deps and circular deps. With the new resilient behavior, createGuild no longer throws — it warns and continues. The tests need updating.
+    options:
+      a: Convert to positive assertions — verify createGuild succeeds, check failedPlugins() and healthy apparatuses()
+      b: Add a strict mode to createGuild that preserves throw behavior for tests
+    selected: a
+    analysis:
+      recommendation: a
+      confidence: high
+      rationale: The behavioral contract changed. Tests should reflect the new contract. A strict mode adds complexity for no production value — the whole point is to never throw.
