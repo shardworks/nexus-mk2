@@ -91,17 +91,42 @@ export type ResolvedParams = Record<string, string>;
 /** Extractor outputs keyed by input variable name */
 export type ExtractedInputs = Record<string, string>;
 
+/** Token usage and cost data from a single LLM run */
+export interface RunUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  cost_usd: number;
+  duration_ms: number;
+  session_id: string;
+  model: string;
+}
+
 /** Scores from a single LLM run */
 export interface ParsedRun {
   dimensions: Record<string, number>;
   qualitative: Record<string, string>;
   composite: number;
+  /** Token usage / cost data, present when --output-format json is available */
+  usage?: RunUsage;
 }
 
 /** Aggregated statistics for a single dimension */
 export interface DimensionStats {
   mean: number;
   sd: number;
+}
+
+/** Aggregated cost data across all runs */
+export interface AggregateCost {
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_creation_tokens: number;
+  total_cache_read_tokens: number;
+  total_duration_ms: number;
+  model: string;
 }
 
 /** Full aggregation result */
@@ -119,5 +144,6 @@ export interface InstrumentResult {
   params: ResolvedParams;
   reviewed_at: string;
   aggregate: AggregateResult;
+  cost?: AggregateCost;
   runs: ParsedRun[];
 }

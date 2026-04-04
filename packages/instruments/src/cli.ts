@@ -29,7 +29,7 @@ import { assemblePrompts } from './template.ts';
 import { executeRuns } from './execute.ts';
 import { parseRun } from './parse.ts';
 import { aggregate } from './aggregate.ts';
-import { writeArtifact, writeContext } from './artifact.ts';
+import { writeArtifact, writeContext, writeRunTranscripts, aggregateCost } from './artifact.ts';
 import type { ResolvedParams, ParsedRun } from './types.ts';
 
 // ── Parse CLI arguments ─────────────────────────────────────
@@ -160,7 +160,8 @@ async function main(): Promise<void> {
   const failed = outcomes.filter((o) => !o.success);
 
   for (const o of outcomes) {
-    console.log(`  ${o.success ? '✓' : '✗'} Run ${o.index + 1}${o.error ? ` — ${o.error.split('\n')[0]}` : ''}`);
+    const costStr = o.usage ? ` ($${o.usage.cost_usd.toFixed(4)})` : '';
+    console.log(`  ${o.success ? '✓' : '✗'} Run ${o.index + 1}${costStr}${o.error ? ` — ${o.error.split('\n')[0]}` : ''}`);
   }
 
   if (successful.length < config.execution.min_successful_runs) {
@@ -174,7 +175,11 @@ async function main(): Promise<void> {
     console.log(`\n  Warning: ${failed.length} of ${config.execution.runs} runs failed.`);
   }
 
-  // 5. Parse
+  // 5. Write per-run transcripts (before parsing, so we capture even unparseable runs)
+  writeRunTranscripts(outputDir, config, outcomes);
+  console.log(`  Transcripts saved to: ${outputDir}/instruments/${config.name}/runs/`);
+
+  // 6. Parse
   console.log('');
   console.log('── Parsing responses ──');
 
@@ -182,6 +187,10 @@ async function main(): Promise<void> {
   for (const outcome of successful) {
     const parsed = parseRun(outcome.response, config.output);
     if (parsed) {
+      // Attach usage data to parsed run
+      if (outcome.usage) {
+        parsed.usage = outcome.usage;
+      }
       parsedRuns.push(parsed);
       console.log(`  ✓ Run ${outcome.index + 1}: composite ${parsed.composite}`);
     } else {
@@ -196,15 +205,17 @@ async function main(): Promise<void> {
     process.exit(4);
   }
 
-  // 6. Aggregate
+  // 7. Aggregate
   const agg = aggregate(parsedRuns, config.output.dimensions);
+  const cost = aggregateCost(outcomes);
 
-  // 7. Write artifact
+  // 8. Write artifact
   const result = {
     instrument: { name: config.name, version: config.version },
     params,
     reviewed_at: new Date().toISOString(),
     aggregate: agg,
+    cost,
     runs: parsedRuns,
   };
 
@@ -218,6 +229,12 @@ async function main(): Promise<void> {
   console.log('  Dimensions:');
   for (const [name, stats] of Object.entries(agg.dimensions)) {
     console.log(`    ${name.padEnd(25)} ${stats.mean} (sd: ${stats.sd})`);
+  }
+  if (cost) {
+    console.log('');
+    console.log(`  Cost:       $${cost.total_cost_usd.toFixed(4)} (${cost.model})`);
+    console.log(`  Tokens:     ${cost.total_input_tokens + cost.total_cache_creation_tokens + cost.total_cache_read_tokens} in / ${cost.total_output_tokens} out`);
+    console.log(`  Duration:   ${(cost.total_duration_ms / 1000).toFixed(1)}s`);
   }
   console.log('');
   console.log(`  Artifact: ${artifactPath}`);

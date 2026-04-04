@@ -1,15 +1,17 @@
 /**
  * Write structured YAML artifacts from instrument results.
  *
- * Produces two outputs:
- *   1. The result artifact (scores, aggregate, per-run detail)
+ * Produces three outputs:
+ *   1. The result artifact (scores, aggregate, cost, per-run detail)
  *   2. The context archive (assembled prompts for reproducibility)
+ *   3. Per-run transcript JSON (full LLM response envelopes for forensics)
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
-import type { InstrumentConfig, InstrumentResult, ResolvedParams } from './types.ts';
+import type { InstrumentConfig, InstrumentResult, AggregateCost, ResolvedParams } from './types.ts';
+import type { RunOutcome } from './execute.ts';
 
 /**
  * Write the result artifact to the output directory.
@@ -19,7 +21,8 @@ export function writeArtifact(
   config: InstrumentConfig,
   result: InstrumentResult,
 ): string {
-  mkdirSync(outputDir, { recursive: true });
+  const instrumentDir = join(outputDir, 'instruments', config.name);
+  mkdirSync(instrumentDir, { recursive: true });
 
   // Build the artifact document
   const doc: Record<string, unknown> = {
@@ -42,17 +45,25 @@ export function writeArtifact(
     (doc.aggregate as Record<string, unknown>).high_variance = result.aggregate.high_variance;
   }
 
-  // Per-run detail
-  doc.runs = result.runs.map((run, i) => ({
-    run: i + 1,
-    ...run.dimensions,
-    composite: run.composite,
-    ...run.qualitative,
-  }));
+  // Cost summary (when available)
+  if (result.cost) {
+    doc.cost = result.cost;
+  }
 
-  // Output to instruments/{name}/result.yaml
-  const instrumentDir = join(outputDir, 'instruments', config.name);
-  mkdirSync(instrumentDir, { recursive: true });
+  // Per-run detail
+  doc.runs = result.runs.map((run, i) => {
+    const runDoc: Record<string, unknown> = {
+      run: i + 1,
+      ...run.dimensions,
+      composite: run.composite,
+      ...run.qualitative,
+    };
+    if (run.usage) {
+      runDoc.cost_usd = run.usage.cost_usd;
+      runDoc.duration_ms = run.usage.duration_ms;
+    }
+    return runDoc;
+  });
 
   const artifactPath = join(instrumentDir, 'result.yaml');
   const header = [
@@ -65,6 +76,34 @@ export function writeArtifact(
 
   writeFileSync(artifactPath, header + yaml.dump(doc, { lineWidth: 120, sortKeys: false }));
   return artifactPath;
+}
+
+/**
+ * Write per-run transcript JSON files for forensic analysis.
+ *
+ * Each file contains the full `claude --print --output-format json` envelope,
+ * preserving the raw LLM response, token usage, cost, and session ID.
+ */
+export function writeRunTranscripts(
+  outputDir: string,
+  config: InstrumentConfig,
+  outcomes: RunOutcome[],
+): void {
+  const runsDir = join(outputDir, 'instruments', config.name, 'runs');
+  mkdirSync(runsDir, { recursive: true });
+
+  for (const outcome of outcomes) {
+    const data = outcome.rawJson ?? {
+      // Fallback when JSON envelope wasn't captured
+      response_text: outcome.response,
+      error: outcome.error,
+      success: outcome.success,
+    };
+    writeFileSync(
+      join(runsDir, `run-${outcome.index + 1}.json`),
+      JSON.stringify(data, null, 2) + '\n',
+    );
+  }
 }
 
 /**
@@ -90,4 +129,27 @@ export function writeContext(
       writeFileSync(join(contextDir, `input-${name.toLowerCase()}.txt`), value);
     }
   }
+}
+
+/**
+ * Aggregate cost data across successful runs.
+ */
+export function aggregateCost(outcomes: RunOutcome[]): AggregateCost | undefined {
+  const withUsage = outcomes.filter((o) => o.success && o.usage);
+  if (withUsage.length === 0) return undefined;
+
+  return {
+    total_cost_usd: round(withUsage.reduce((sum, o) => sum + (o.usage?.cost_usd ?? 0), 0), 6),
+    total_input_tokens: withUsage.reduce((sum, o) => sum + (o.usage?.input_tokens ?? 0), 0),
+    total_output_tokens: withUsage.reduce((sum, o) => sum + (o.usage?.output_tokens ?? 0), 0),
+    total_cache_creation_tokens: withUsage.reduce((sum, o) => sum + (o.usage?.cache_creation_input_tokens ?? 0), 0),
+    total_cache_read_tokens: withUsage.reduce((sum, o) => sum + (o.usage?.cache_read_input_tokens ?? 0), 0),
+    total_duration_ms: withUsage.reduce((sum, o) => sum + (o.usage?.duration_ms ?? 0), 0),
+    model: withUsage[0]?.usage?.model ?? 'unknown',
+  };
+}
+
+function round(n: number, decimals: number): number {
+  const factor = 10 ** decimals;
+  return Math.round(n * factor) / factor;
 }

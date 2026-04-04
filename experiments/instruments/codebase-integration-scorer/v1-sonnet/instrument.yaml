@@ -1,0 +1,44 @@
+name: codebase-integration-scorer
+version: v1-sonnet
+
+execution:
+  model: claude-sonnet-4-20250514
+  effort: medium
+  max_turns: 1
+  tools: disabled
+  runs: 3
+  min_successful_runs: 2
+
+parameters:
+  commission:  { required: true, description: "Commission/writ ID" }
+  repo:        { required: true, description: "Path to git repo" }
+  spec_file:   { required: true, description: "Path to commission spec file" }
+  base_commit: { required: false, description: "Override: start of commit range" }
+  commit:      { required: false, description: "Override: end of commit range" }
+
+setup: extractors/resolve-commits.sh
+
+inputs:
+  SPEC:           { extractor: extractors/spec.sh }
+  DIFF:           { extractor: extractors/diff.sh }
+  FULL_FILES:     { extractor: extractors/full-files.sh }
+  CONTEXT_FILES:  { extractor: extractors/context-files.sh }
+  FILE_TREE:      { extractor: extractors/file-tree.sh }
+  API_SURFACE:    { extractor: extractors/api-surface.sh }
+
+prompts:
+  system: prompts/system.md
+  user: prompts/user.md
+
+output:
+  format: yaml
+  dimensions:
+    - { name: utility_reuse,     type: integer, range: [1, 5] }
+    - { name: module_placement,  type: integer, range: [1, 5] }
+    - { name: pattern_coherence, type: integer, range: [1, 5] }
+    - { name: scope_discipline,  type: integer, range: [1, 5] }
+  qualitative:
+    - { name: notes, type: block_scalar }
+  composite:
+    method: mean
+    dimensions: all
