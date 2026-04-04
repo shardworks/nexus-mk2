@@ -1,0 +1,1962 @@
+=== REFERENCED FILE: docs/architecture/apparatus/spider.md (pre-commission state) ===
+# The Spider — API Contract
+
+Status: **Ready — MVP**
+
+Package: `@shardworks/spider-apparatus` · Plugin id: `spider`
+
+> **⚠️ MVP scope.** This spec covers a static rig graph: every commission gets the same five-engine pipeline (`draft → implement → review → revise → seal`). No origination, no dynamic extension, no capability resolution. The Spider runs engines directly — the Executor earns its independence later. See [What This Spec Does NOT Cover](#what-this-spec-does-not-cover) for the full list.
+
+---
+
+## Purpose
+
+The Spider is the spine of the guild's rigging system. It runs a structured engine pipeline for each commission, advancing the rig one step at a time via a `crawl()` step function.
+
+The Spider owns the rig's structural lifecycle — spawn, traverse, complete — and delegates everything else. Engine designs come from the Fabricator. Sessions come from the Animator. Draft bindings come from the Scriptorium. Writ transitions are handled by a CDC handler, not inline. The Spider itself is stateless between `crawl()` calls; all state lives in the Stacks.
+
+---
+
+## Dependencies
+
+```
+requires: ['fabricator', 'clerk', 'stacks']
+```
+
+- **The Fabricator** — resolves engine designs by `designId`.
+- **The Clerk** — queries ready writs; receives writ transitions via CDC.
+- **The Stacks** — persists rigs book, reads sessions book, hosts CDC handler on rigs book.
+
+Engines pull their own apparatus dependencies (Scriptorium, Animator, Loom) via the `guild()` singleton — these are not Spider dependencies.
+
+### Reference docs
+
+- **The Rigging System** (`docs/architecture/rigging.md`) — full rigging architecture (Spider, Fabricator, Executor, Manifester). This spec implements a subset.
+- **The Fabricator** (`docs/architecture/apparatus/fabricator.md`) — engine design registry and `EngineDesign` type definitions.
+- **The Scriptorium** (`docs/architecture/apparatus/scriptorium.md`) — draft binding API (`openDraft`, `seal`, `abandonDraft`).
+- **The Animator** (`docs/architecture/apparatus/animator.md`) — session API (`summon`, `animate`), `AnimateHandle`, `SessionResult`.
+- **The Clerk** (`docs/architecture/apparatus/clerk.md`) — writ lifecycle API.
+- **The Stacks** (`docs/architecture/apparatus/stacks.md`) — CDC phases, cascade vs notification, `watch()` API.
+
+---
+
+## The Engine Interface
+
+Engines are the unit of work in a rig. Each engine implements a standard interface defined by the Fabricator apparatus (`@shardworks/fabricator-apparatus`). The `EngineDesign`, `EngineRunContext`, and `EngineRunResult` types are owned and exported by the Fabricator — see the Fabricator spec (`docs/architecture/apparatus/fabricator.md`) for full type definitions. Engines pull their own apparatus dependencies via `guild().apparatus(...)` — same pattern as tool handlers.
+
+The Spider resolves engine designs by `designId` from the Fabricator at runtime: `fabricator.getEngineDesign(id)`.
+
+### Kit contribution
+
+The Spider contributes its five engine designs via its support kit:
+
+```typescript
+// In spider-apparatus plugin
+supportKit: {
+  engines: {
+    draft:     draftEngine,
+    implement: implementEngine,
+    review:    reviewEngine,
+    revise:    reviseEngine,
+    seal:      sealEngine,
+  },
+  tools: [crawlOneTool, crawlContinualTool],
+},
+```
+
+The Fabricator scans kit `engines` contributions at startup (same pattern as the Instrumentarium scanning tools). The Spider contributes its engines like any other kit — no special registration path.
+
+---
+
+## The Walk Function
+
+The Spider's core is a single step function:
+
+```typescript
+interface SpiderApi {
+  /**
+   * Examine guild state and perform the single highest-priority action.
+   * Returns a description of what was done, or null if there's nothing to do.
+   */
+  crawl(): Promise<CrawlResult | null>
+}
+
+type CrawlResult =
+  | { action: 'engine-completed'; rigId: string; engineId: string }
+  | { action: 'engine-started'; rigId: string; engineId: string }
+  | { action: 'rig-spawned'; rigId: string; writId: string }
+  | { action: 'rig-completed'; rigId: string; writId: string; outcome: 'completed' | 'failed' }
+```
+
+Each `crawl()` call does exactly one thing. The priority ordering:
+
+1. **Collect a completed engine.** Scan all running rigs for an engine with `status === 'running'`. Read the session record from the sessions book by `engine.sessionId`. If the session has reached a terminal status (`completed` or `failed`), update the engine: set its status and populate its yields (or error). **Yield assembly:** look up the `EngineDesign` by `designId` from the Fabricator. If the design defines a `collect(sessionId, givens, context)` method, call it to assemble the yields — passing the same givens and context that were passed to `run()`. Otherwise, use the generic default: `{ sessionId, sessionStatus, output? }`. This keeps engine-specific yield logic (e.g. parsing review findings) in the engine, not the Spider. If the engine failed, mark the rig `failed` (same transaction). If the completed engine is the terminal engine (`seal`), mark the rig `completed` (same transaction). Rig status changes trigger the CDC handler (see below). Returns `rig-completed` if the rig transitioned, otherwise `engine-completed`. This is the first priority because it unblocks downstream engines.
+2. **Run a ready engine.** An engine is ready when `status === 'pending'` and all engines in its `upstream` array have `status === 'completed'`. Look up the `EngineDesign` by `designId` from the Fabricator. Assemble givens (from givensSpec) and context (with upstream yields), then call `design.run(givens, context)`. For clockwork engines (`status: 'completed'` result): store the yields on the engine instance, mark it completed, and check for rig completion (same as step 1). Returns `engine-completed` (or `rig-completed` if this was the terminal engine). For quick engines (`status: 'launched'` result): store the `sessionId`, mark the engine `running`. Returns `engine-started`. Completion is collected on subsequent crawl calls via step 1.
+3. **Spawn a rig.** If there's a ready writ with no rig, spawn the static graph. Returns `rig-spawned`.
+
+If nothing qualifies at any level, return null (the guild is idle or all work is blocked on running quick engines).
+
+### Operational model
+
+The Spider exports two tools:
+
+```
+nsg crawl-continual   # starts polling loop, crawls every ~5s, runs indefinitely
+nsg crawl-one         # single step (useful for debugging/testing)
+```
+
+The `crawl-continual` loop: call `crawl()`, sleep `pollIntervalMs` (default 5000), repeat. When `crawl()` returns null, the loop doesn't stop — it keeps polling. New writs posted via `nsg commission-post` from a separate terminal are picked up on the next poll cycle. Pass `--maxIdleCycles N` to stop after N consecutive idle cycles.
+
+---
+
+## Rig Data Model
+
+### Rig
+
+```typescript
+interface Rig {
+  id: string
+  writId: string
+  status: 'running' | 'completed' | 'failed'
+  engines: EngineInstance[]
+}
+```
+
+Stored in the Stacks `rigs` book. One rig per writ. The Spider reads and updates rigs via normal Stacks `put()`/`patch()` operations.
+
+### Engine Instance
+
+```typescript
+interface EngineInstance {
+  id: string               // unique within the rig, e.g. 'draft', 'implement', 'review', 'revise', 'seal'
+  designId: string         // engine design id — resolved from the Fabricator
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  upstream: string[]       // ids of engines that must complete first (empty = first engine)
+  givensSpec: Record<string, unknown>  // givens specification — literal values now, templates later
+  yields: unknown          // set on completion — the engine's yields (see Yield Types below)
+  error?: string           // set on failure
+  sessionId?: string       // set when run() returns 'launched' — Spider polls for completion
+  startedAt?: string       // ISO-8601, set when engine begins running (enables future timeout detection)
+  completedAt?: string     // ISO-8601, set when engine reaches terminal status
+}
+```
+
+An engine is **ready** when: `status === 'pending'` and all engines in its `upstream` array have `status === 'completed'`.
+
+### The Static Graph
+
+Every spawned rig gets this engine list:
+
+```typescript
+function spawnStaticRig(writ: Writ, config: SpiderConfig): EngineInstance[] {
+  return [
+    { id: 'draft',     designId: 'draft',     status: 'pending', upstream: [],
+      givensSpec: { writ }, yields: null },
+    { id: 'implement', designId: 'implement', status: 'pending', upstream: ['draft'],
+      givensSpec: { writ, role: config.role }, yields: null },
+    { id: 'review',    designId: 'review',    status: 'pending', upstream: ['implement'],
+      givensSpec: { writ, role: 'reviewer', buildCommand: config.buildCommand, testCommand: config.testCommand }, yields: null },
+    { id: 'revise',    designId: 'revise',    status: 'pending', upstream: ['review'],
+      givensSpec: { writ, role: config.role }, yields: null },
+    { id: 'seal',      designId: 'seal',      status: 'pending', upstream: ['revise'],
+      givensSpec: {}, yields: null },
+  ]
+}
+```
+
+The `givensSpec` is populated from the Spider's config at rig spawn time. The rig is self-contained after spawning — no runtime config lookups needed. The `writ` is passed as a given to engines that need it (most do; `seal` doesn't). All engines start with `yields: null` — yields are populated when the engine completes (see [Yield Types](#yield-types-and-data-flow)).
+
+The rig is **completed** when the terminal engine (`seal`) has `status === 'completed'`. The rig is **failed** when any engine has `status === 'failed'`.
+
+---
+
+## Yield Types and Data Flow
+
+Each engine produces typed yields that downstream engines consume. The yields are stored on the `EngineInstance.yields` field in the Stacks.
+
+**Serialization constraint:** Because yields are persisted to the Stacks (JSON-backed), all yield values **must be JSON-serializable**. The Spider should validate this at storage time — if an engine returns a non-serializable value (function, circular reference, etc.), the engine fails with a clear error. This is important because engines are a plugin extension point — kit authors need a hard boundary, not a silent corruption.
+
+When the Spider runs an engine, it assembles givens from the givensSpec only — upstream yields are **not** merged into givens. Engines that need upstream data access it via the `context.upstream` escape hatch:
+
+```typescript
+function assembleGivensAndContext(rig: Rig, engine: EngineInstance) {
+  // Collect all completed engine yields for the context escape hatch.
+  // All completed yields are included regardless of graph distance —
+  // simpler than chain-walking and equivalent for the static graph.
+  const upstream: Record<string, unknown> = {}
+  for (const e of rig.engines) {
+    if (e.status === 'completed' && e.yields !== undefined) {
+      upstream[e.id] = e.yields
+    }
+  }
+
+  // Givens = givensSpec only. Upstream data stays on context.
+  const givens = { ...engine.givensSpec }
+
+  const context: EngineRunContext = {
+    engineId: engine.id,
+    upstream,
+  }
+
+  return { givens, context }
+}
+```
+
+Givens contain only what the givensSpec declares — static values set at rig spawn time (writ, role, buildCommand, etc.). Engines that need upstream data (worktree path, review findings, etc.) pull it from `context.upstream` by engine id. This keeps the givens contract clean: what you see in the givensSpec is exactly what the engine receives.
+
+### `DraftYields`
+
+```typescript
+interface DraftYields {
+  draftId: string         // the draft binding's unique id (from DraftRecord.id)
+  codexName: string       // which codex this draft is on (from DraftRecord.codexName)
+  branch: string          // git branch name for the draft (from DraftRecord.branch)
+  path: string            // absolute path to the draft worktree (from DraftRecord.path)
+  baseSha: string         // commit SHA at draft open — used to compute diffs later
+}
+```
+
+**Produced by:** `draft` engine
+**Consumed by:** all downstream engines. Establishes the physical workspace.
+
+> **Note:** Field names mirror the Scriptorium's `DraftRecord` type (`codexName`, `branch`, `path`) rather than inventing Spider-specific aliases. `baseSha` is the only field the draft engine adds itself — by reading `HEAD` after opening the draft.
+
+### `ImplementYields`
+
+```typescript
+interface ImplementYields {
+  sessionId: string
+  sessionStatus: 'completed' | 'failed'
+}
+```
+
+**Produced by:** `implement` engine (set by Spider's collect step when session completes)
+**Consumed by:** `review` (needs to know the session completed)
+
+### `ReviewYields`
+
+```typescript
+interface ReviewYields {
+  sessionId: string
+  passed: boolean                      // reviewer's overall assessment
+  findings: string                     // structured markdown: what passed, what's missing, what's wrong
+  mechanicalChecks: MechanicalCheck[]  // build/test results run before the reviewer session
+}
+
+interface MechanicalCheck {
+  name: 'build' | 'test'
+  passed: boolean
+  output: string    // stdout+stderr, truncated to 4KB
+  durationMs: number
+}
+```
+
+**Produced by:** `review` engine
+**Consumed by:** `revise` (needs `passed` to decide whether to do work, needs `findings` as context)
+
+The `mechanicalChecks` are run by the engine *before* launching the reviewer session — their results are included in the reviewer's prompt.
+
+### `ReviseYields`
+
+```typescript
+interface ReviseYields {
+  sessionId: string
+  sessionStatus: 'completed' | 'failed'
+}
+```
+
+**Produced by:** `revise` engine (set by Spider's collect step when session completes)
+**Consumed by:** `seal` (no data dependency — seal just needs revise to be done)
+
+### `SealYields`
+
+```typescript
+interface SealYields {
+  sealedCommit: string                     // the commit SHA at head of target after sealing (from SealResult)
+  strategy: 'fast-forward' | 'rebase'      // merge strategy used (from SealResult)
+  retries: number                          // rebase retry attempts needed (from SealResult)
+  inscriptionsSealed: number               // number of commits incorporated (from SealResult)
+}
+```
+
+**Produced by:** `seal` engine
+**Consumed by:** nothing (terminal). Used by the CDC handler for the writ transition resolution message.
+
+> **Note:** Field names mirror the Scriptorium's `SealResult` type. The Scriptorium's `seal()` method pushes the target branch to the remote after sealing.
+
+---
+
+## Engine Implementations
+
+Each engine is an `EngineDesign` contributed by the Spider's support kit. The engine's `run()` method receives assembled givens and a thin context, and returns an `EngineRunResult`. Engines pull apparatus dependencies via `guild().apparatus(...)`.
+
+### `draft` (clockwork)
+
+Opens a draft binding on the commission's target codex.
+
+```typescript
+async run(givens: Record<string, unknown>, _context: EngineRunContext): Promise<EngineRunResult> {
+  const scriptorium = guild().apparatus<ScriptoriumApi>('codexes')
+  const writ = givens.writ as Writ
+  const draft = await scriptorium.openDraft({ codexName: writ.codex, associatedWith: writ.id })
+  const baseSha = await getHeadSha(draft.path)
+
+  return {
+    status: 'completed',
+    yields: { draftId: draft.id, codexName: draft.codexName, branch: draft.branch, path: draft.path, baseSha } satisfies DraftYields,
+  }
+}
+```
+
+### `implement` (quick)
+
+Summons an anima to do the commissioned work.
+
+```typescript
+async run(givens: Record<string, unknown>, context: EngineRunContext): Promise<EngineRunResult> {
+  const animator = guild().apparatus<AnimatorApi>('animator')
+  const writ = givens.writ as Writ
+  const draft = context.upstream.draft as DraftYields
+
+  const prompt = `${writ.body}\n\nCommit all changes before ending your session.`
+
+  const handle = animator.summon({
+    role: givens.role as string,
+    prompt,
+    cwd: draft.path,
+    environment: { GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local` },
+    metadata: { engineId: context.engineId, writId: writ.id },
+  })
+
+  return { status: 'launched', sessionId: handle.sessionId }
+}
+```
+
+The implement engine wraps the writ body with a commit instruction — each engine owns its own prompt contract rather than relying on `dispatch.sh` to append instructions to the writ body.
+
+**Collect step:** The implement engine has no `collect` method — the Spider uses the generic default: `{ sessionId, sessionStatus, output? }`.
+
+### `review` (quick)
+
+Runs mechanical checks, then summons a reviewer anima to assess the implementation.
+
+```typescript
+async run(givens: Record<string, unknown>, context: EngineRunContext): Promise<EngineRunResult> {
+  const animator = guild().apparatus<AnimatorApi>('animator')
+  const writ = givens.writ as Writ
+  const draft = context.upstream.draft as DraftYields
+
+  // 1. Run mechanical checks synchronously
+  const checks: MechanicalCheck[] = []
+  if (givens.buildCommand) {
+    checks.push(await runCheck('build', givens.buildCommand as string, draft.path))
+  }
+  if (givens.testCommand) {
+    checks.push(await runCheck('test', givens.testCommand as string, draft.path))
+  }
+
+  // 2. Compute diff since draft opened
+  const diff = await gitDiff(draft.path, draft.baseSha)
+  const status = await gitStatus(draft.path)
+
+  // 3. Assemble review prompt
+  const prompt = assembleReviewPrompt(writ, diff, status, checks)
+
+  // 4. Launch reviewer session
+  const handle = animator.summon({
+    role: givens.role as string,
+    prompt,
+    cwd: draft.path,
+    metadata: {
+      engineId: context.engineId,
+      writId: writ.id,
+      mechanicalChecks: checks,  // stash for collect step to retrieve
+    },
+  })
+
+  return { status: 'launched', sessionId: handle.sessionId }
+}
+```
+
+**Review prompt template:**
+
+```markdown
+# Code Review
+
+You are reviewing work on a commission. Your job is to assess whether the
+implementation satisfies the spec, identify any gaps or problems, and produce
+a structured findings document.
+
+## The Commission (Spec)
+
+{writ.body}
+
+## Implementation Diff
+
+Changes since the draft was opened:
+
+```diff
+{git diff draft.baseSha..HEAD in worktree}
+```
+
+## Current Worktree State
+
+```
+{git status --porcelain}
+```
+
+## Mechanical Check Results
+
+{for each check}
+### {name}: {PASSED | FAILED}
+```
+{output, truncated to 4KB}
+```
+{end for}
+
+## Instructions
+
+Assess the implementation against the spec. Produce your findings in this format:
+
+### Overall: PASS or FAIL
+
+### Completeness
+- Which spec requirements are addressed?
+- Which are missing or partially addressed?
+
+### Correctness
+- Are there bugs, logic errors, or regressions?
+- Do the tests pass? If not, what fails?
+
+### Quality
+- Code style consistent with the codebase?
+- Appropriate test coverage for new code?
+- Any concerns about the approach?
+
+### Required Changes (if FAIL)
+Numbered list of specific changes needed, in priority order.
+
+Produce your findings as your final message in the format above.
+```
+
+**Collect step:** The review engine defines a `collect` method that the Spider calls when the session completes. The engine looks up the session record itself and parses the reviewer's structured findings. No file is written to the worktree (review artifacts don't belong in the codebase).
+
+```typescript
+async collect(sessionId: string, _givens: Record<string, unknown>, _context: EngineRunContext): Promise<ReviewYields> {
+  const stacks = guild().apparatus<StacksApi>('stacks')
+  const session = await stacks.readBook<SessionDoc>('animator', 'sessions').get(sessionId)
+  const findings = session?.output ?? ''
+  const passed = /^###\s*Overall:\s*PASS/mi.test(findings)
+  const mechanicalChecks = (session?.metadata?.mechanicalChecks as MechanicalCheck[]) ?? []
+  return { sessionId, passed, findings, mechanicalChecks }
+}
+```
+
+**Dependency:** The Animator's `SessionResult.output` field (the final assistant message text) must be available for this to work. See the Animator spec (`docs/architecture/apparatus/animator.md`) — the `output` field is populated from the session provider's transcript at recording time.
+
+### `revise` (quick)
+
+Summons an anima to address review findings.
+
+```typescript
+async run(givens: Record<string, unknown>, context: EngineRunContext): Promise<EngineRunResult> {
+  const animator = guild().apparatus<AnimatorApi>('animator')
+  const writ = givens.writ as Writ
+  const draft = context.upstream.draft as DraftYields
+  const review = context.upstream.review as ReviewYields
+
+  const status = await gitStatus(draft.path)
+  const diff = await gitDiffUncommitted(draft.path)
+  const prompt = assembleRevisionPrompt(writ, review, status, diff)
+
+  const handle = animator.summon({
+    role: givens.role as string,
+    prompt,
+    cwd: draft.path,
+    environment: { GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local` },
+    metadata: { engineId: context.engineId, writId: writ.id },
+  })
+
+  return { status: 'launched', sessionId: handle.sessionId }
+}
+```
+
+**Revision prompt template:**
+
+```markdown
+# Revision Pass
+
+You are revising prior work on a commission based on review findings.
+
+## The Commission (Spec)
+
+{writ.body}
+
+## Review Findings
+
+{review.findings}
+
+## Review Result: {PASS | FAIL}
+
+{if review.passed}
+The review passed. No changes are required. Confirm the work looks correct
+and exit. Do not make unnecessary changes or spend unnecessary time reassessing.
+{else}
+The review identified issues that need to be addressed. See "Required Changes"
+in the findings above. Address each item, then commit your changes.
+{end if}
+
+## Current State
+
+```
+{git status --porcelain}
+```
+
+```diff
+{git diff HEAD, if any uncommitted changes}
+```
+
+Commit all changes before ending your session.
+```
+
+**Collect step:** The revise engine has no `collect` method — the Spider uses the generic default: `{ sessionId, sessionStatus, output? }`.
+
+### `seal` (clockwork)
+
+Seals the draft binding.
+
+```typescript
+async run(_givens: Record<string, unknown>, ctx: EngineRunContext): Promise<EngineRunResult> {
+  const scriptorium = guild().apparatus<ScriptoriumApi>('codexes')
+  const draft = ctx.upstream.draft as DraftYields
+
+  const result = await scriptorium.seal({
+    codexName: draft.codexName,
+    sourceBranch: draft.branch,
+  })
+
+  return {
+    status: 'completed',
+    yields: {
+      sealedCommit: result.sealedCommit,
+      strategy: result.strategy,
+      retries: result.retries,
+      inscriptionsSealed: result.inscriptionsSealed,
+    } satisfies SealYields,
+  }
+}
+```
+
+The seal engine does **not** transition the writ — that's handled by the CDC handler on the rigs book.
+
+---
+
+## CDC Handler
+
+The Spider registers one CDC handler at startup:
+
+### Rig terminal state → writ transition
+
+**Book:** `rigs`
+**Phase:** Phase 1 (cascade) — the writ transition joins the same transaction as the rig update
+**Trigger:** rig status transitions to `completed` or `failed`
+
+```typescript
+stacks.watch('rigs', async (event) => {
+  if (event.type !== 'update') return
+  const rig = event.doc
+  const prev = event.prev
+
+  // Only fire on terminal transitions
+  if (prev.status === rig.status) return
+  if (rig.status !== 'completed' && rig.status !== 'failed') return
+
+  if (rig.status === 'completed') {
+    const sealYields = rig.engines.find(e => e.id === 'seal')?.yields as SealYields
+    await clerk.transition(rig.writId, 'completed', {
+      resolution: `Sealed at ${sealYields.sealedCommit} (${sealYields.strategy}, ${sealYields.inscriptionsSealed} inscriptions).`,
+    })
+  } else {
+    const failedEngine = rig.engines.find(e => e.status === 'failed')
+    await clerk.transition(rig.writId, 'failed', {
+      resolution: `Engine '${failedEngine?.id}' failed: ${failedEngine?.error ?? 'unknown error'}`,
+    })
+  }
+})
+```
+
+Because this is Phase 1 (cascade), the writ transition joins the same transaction as the rig status update. If the Clerk call throws, the rig update rolls back too.
+
+---
+
+## Engine Failure
+
+When any engine fails (throws, or a quick engine's session has `status: 'failed'`):
+
+1. The engine is marked `status: 'failed'` with the error (detected during "collect completed engines" for quick engines, or directly during execution for clockwork engines)
+2. All engines in the rig with `status === 'pending'` are set to `status: 'cancelled'` — they will never run. Engines already in `'running'`, `'completed'`, or `'failed'` are left untouched. Cancelled engines do **not** receive `completedAt` or `error` — cancellation is a consequence, not a failure.
+3. The rig is marked `status: 'failed'` (same transaction as steps 1 and 2)
+4. CDC fires on the rig status change → handler calls Clerk API to transition the writ to `failed`
+5. The draft is **not** abandoned — preserved for patron inspection
+
+No retry. No recovery. The patron inspects and decides what to do. This is appropriate for the static rig — see [Future Evolution](#future-evolution) for the retry/recovery direction.
+
+Quick engine "failure" definition: if the Animator session completes with `status: 'failed'`, the engine fails. If the session completes with `status: 'completed'`, the engine succeeds — even if the anima's work is incomplete (that's the review engine's job to catch, not the Spider's).
+
+---
+
+## Dependency Map
+
+```
+Spider
+  ├── Fabricator  (resolve engine designs by designId)
+  ├── Clerk       (query ready writs, transition writ state via CDC)
+  ├── Stacks      (persist rigs book, read sessions book, CDC handler on rigs book)
+  │
+  Engines (via guild() singleton, not Spider dependencies)
+  ├── Scriptorium (draft, seal engines — open drafts, seal)
+  ├── Animator    (implement, review, revise engines — summon animas)
+  └── Loom        (via Animator's summon — context composition)
+```
+
+---
+
+## Future Evolution
+
+These are known directions the Spider and its data model will grow. None are in scope for the static rig MVP.
+
+- **givensSpec templates.** The givensSpec currently holds literal values set at rig spawn time. It will grow to support template expressions (e.g. `${draft.worktreePath}`) that resolve specific values from upstream yields into typed givens, replacing the current reliance on the `context.upstream` escape hatch.
+- **Engine needs declarations.** Engine designs will declare a `needs` specification that controls which upstream yields are included and how they're mapped — making the data flow between engines explicit and type-safe.
+- **Typed engine contracts.** The `Record<string, unknown>` givens map with type assertions is scaffolding. The needs/planning system will introduce typed contracts between engines — defining what each engine requires and provides. This scaffolding gets replaced, not extended.
+- **Dynamic rig extension.** Capability resolution (via the Fabricator) and rig growth at runtime. Engines can declare needs that the Fabricator resolves to additional engine chains, grafted onto the rig mid-execution.
+- **Retry and recovery.** The static rig has no retry. Recovery logic arrives with dynamic extension — a failed engine can trigger a recovery chain rather than failing the whole rig.
+- **Engine timeouts.** The `startedAt` field on engine instances is included in the data model for future use. During the collect step, the Spider checks `startedAt` against a configurable timeout. If an engine has been running longer than the threshold, the Spider marks it failed (and optionally terminates the session).
+- **Unified capability catalog.** The Fabricator may absorb tool designs from the Instrumentarium, becoming the single answer to "what can this guild do?" regardless of whether the answer is an engine or a tool.
+
+---
+
+## What This Spec Does NOT Cover
+
+- **Origination.** Commission → rig mapping is hardcoded (static graph).
+- **The Executor as a separate apparatus.** The Spider runs engines directly — clockwork engines inline, quick engines via the Animator. The Executor earns its independence when substrate switching (Docker, remote VM) is needed. Key design constraint: the Spider currently `await`s `design.run()`, meaning a slow or misbehaving engine blocks the entire crawl loop. The Executor must not have this property — engine execution should be fully non-blocking, with yields persisted to a book so the orchestrator can poll for completion. This is essential for remote and Docker runners where the process that ran the engine is not the process polling for results.
+- **Concurrent rigs.** The priority system supports multiple rigs in principle, but the polling loop + single-guild model means we process one commission at a time in practice. Concurrency comes naturally when the Spider processes multiple ready engines across rigs.
+- **Reviewer role curriculum/temperament.** The `reviewer` role exists with a blank identity. The review engine assembles the prompt. Loom content for the reviewer is a separate concern.
+
+---
+
+## Configuration
+
+```json
+{
+  "spider": {
+    "role": "artificer",
+    "pollIntervalMs": 5000,
+    "buildCommand": "pnpm build",
+    "testCommand": "pnpm test"
+  }
+}
+```
+
+All fields optional. `role` defaults to `"artificer"`. `pollIntervalMs` defaults to `5000`. `buildCommand` and `testCommand` are run by the review engine before launching the reviewer; omitted means those mechanical checks are skipped (reviewer anima still does spec-vs-diff assessment).
+
+=== REFERENCED FILE: docs/architecture/index.md (pre-commission state) ===
+# Nexus Architecture
+
+**Nexus** is a framework for running an autonomous workforce of *animas* — AI agents who produce work in service of a guild, which ultimately delivers those works to a human patron. This is a technical document which describes the system itself — the structures, concepts, and machinery that any guild requires. It is meant to assist Nexus developers in their work, or provide users deeper insight into the workings of their guild. It is not intended as a general user guide for people who just want to run a guild.
+
+For the conceptual vocabulary — what guilds, animas, commissions, writs, and apparatus *are* in the abstract — read [The Guild Metaphor](../guild-metaphor.md) first. This document describes how those concepts are implemented.
+
+---
+
+## System at a Glance
+
+> This section describes the **standard guild** — the configuration `nsg init` produces. The framework itself is a plugin loader; every apparatus named below is part of the default plugin set, not a hard requirement. §4 ([Plugin Architecture](#plugin-architecture)) explains the underlying model; the [Standard Guild](#the-standard-guild) section catalogues what the default set includes.
+
+A Nexus guild is a git repository with a `guild.json` at its root and a `.nexus/` directory holding runtime state. When the system starts, **Arbor** — the guild runtime — reads `guild.json`, loads the declared plugins, validates their dependencies, and starts each apparatus in order. From that point, the guild operates: the patron commissions work; **The Clerk** receives it and issues writs; **The Spider** assembles rigs and drives their engines to completion; **The Clockworks** turns events into action, activating relays in response to standing orders; and **anima sessions** — AI processes launched by **The Animator** — do the work that requires judgment. Results land in codexes and documents; the patron consumes what the guild delivers.
+
+```
+  PATRON
+    │  commission                                        ▲  works
+    ▼                                                    │
+  ┌──────────────────────────────────────────────────────┴──────┐
+  │  Guild  (guild.json + .nexus/)                               │
+  │                                                              │
+  │  ┌───────────────────────────────────────────────────────┐  │
+  │  │  Arbor  —  runtime · plugin loader · lifecycle        │  │
+  │  ├───────────────────────────────────────────────────────┤  │
+  │  │  Stacks (persistence)                                 │  │
+  │  ├───────────────────────────────────────────────────────┤  │
+  │  │  Clockworks · Surveyor · Clerk                        │  │
+  │  ├───────────────────────────────────────────────────────┤  │
+  │  │  Spider · Fabricator · Executor                        │  │
+  │  │  Loom · Animator                                      │  │
+  │  └─────────────────────────┬─────────────────────────────┘  │
+  │                            │                                 │
+  │  Anima Sessions  ◄─────────┘                                │
+  │  AI process · MCP server · permission-gated tools                 │
+  │                   │                                          │
+  │  Works  ◄─────────┘                                         │
+  │  codexes · documents · yields                               │
+  └──────────────────────────────────────────────────────────────┘
+```
+
+### Patron
+
+The patron is the human outside the system. They commission work and consume what the guild delivers — and that is the full extent of their participation. The patron does not assign animas, orchestrate apparatus, or direct how labor is organized. The interface is intentionally narrow: commission in, works out. What happens in the guild to convert one to the other is the guild's concern.
+
+### The Guild
+
+Physically, a guild is a directory. Its configuration root is `guild.json` — a single file that declares the guild's name, the plugins it has installed, its anima roles, and the standing orders that govern its reactive behavior. Everything the guild *is* lives in that file and the versioned content alongside it. Runtime activity — the persistence database, daemon state, active worktrees — accumulates in `.nexus/`, which is gitignored. The guild's identity is versioned; its running state is not.
+
+### Arbor
+
+Arbor is the guild runtime. Its single entry point, `createGuild()`, reads `guild.json`, imports every declared plugin, validates the dependency graph, starts each apparatus in dependency order, and wires the `guild()` singleton. It is not a persistent server or a central process — it is a library that each entry point (the CLI, the MCP server, the Clockworks daemon) calls once at startup. There is no Arbor "service" to connect to; the `Guild` object it returns is alive for as long as the process that created it is running.
+
+Arbor's scope is deliberately narrow: plugin loading, dependency validation, and apparatus lifecycle. It does not own tool discovery (that belongs to The Instrumentarium), persistence (that belongs to The Stacks), or any CLI commands.
+
+### The CLI
+
+The `nsg` command is the patron's and operator's entry point into the guild. It has two layers of commands:
+
+**Framework commands** are defined in the CLI package itself — guild lifecycle (`init`, `status`, `version`, `upgrade`) and plugin management (`plugin list/install/remove`). These are always available, even without a guild.
+
+**Plugin tools** are discovered dynamically from **The Instrumentarium** (the `tools` apparatus). At startup, the CLI calls `createGuild()` to boot the runtime, then queries the Instrumentarium for all installed tools that are CLI-callable. Each tool's Zod param schema is auto-converted to Commander flags. This means the plugin tool surface grows automatically as plugins are installed — `nsg --help` always reflects exactly what's available.
+
+Tool names are auto-grouped by hyphen prefix — `session-list` and `session-show` become `nsg session list` and `nsg session show`.
+
+Two additional commands bypass the tool registry: `nsg consult` and `nsg convene` (interactive sessions with streaming output — not simple tool invocations). These are built into the v1 CLI and will migrate when the Animator and Parlour expose the necessary APIs.
+
+### The Apparatus
+
+The guild's operational fabric is provided by apparatus — plugins with a start/stop lifecycle that Arbor starts in dependency order. **The Stacks** is the persistence substrate everything else reads from and writes to. **The Scriptorium** manages codexes — bare clones, draft bindings (worktrees), and the seal-and-push lifecycle. **The Clockworks** is the event-driven nervous system: standing orders bind events to relays, and the summon relay dispatches anima sessions in response. **The Surveyor** tracks what work applies to each registered codex. **The Clerk** handles commission intake, converting patron requests into writs and signaling when work is ready to execute. The Fabricator, Spider, Executor, Loom, and Animator then take it from there — covered in the next section.
+
+Each of these is a plugin from the default set, not a built-in. The [Standard Guild](#the-standard-guild) section lists them; the sections that follow document each in detail.
+
+### Execution, Sessions, and Works
+
+When The Clerk signals a writ is ready, **The Spider** spawns a rig and begins driving it: traversing active engines, dispatching those whose upstream work is complete, and extending the rig by querying **The Fabricator** for engine chains that satisfy declared needs. **The Executor** runs each engine — clockwork engines run their code directly; quick engines launch an anima session.
+
+An anima session is an AI process running against an MCP server loaded with the role's tools. Before launch, **The Loom** weaves the session context: system prompt, tool instructions, writ context. **The Animator** then starts the process, monitors it, and records the result. The session exits; the output persists. The Clockworks can also trigger sessions directly via the summon relay, bypassing the rig machinery entirely — The Animator handles both paths the same way.
+
+Session output is concrete: modified files committed to a git branch, new documents written to disk, structured data passed as engine yields to downstream steps. When a rig completes, any pending git work is merged, and the result is whatever the patron commissioned — a working feature, a fixed bug, a written report. The patron's codexes are updated; the patron can pull, deploy, and use them.
+
+---
+
+## The Guild Root
+
+A guild is a directory — a regular git repository with a `guild.json` at its root. The framework discovers the guild root the same way git discovers `.git/`: by walking up from the current working directory until it finds `guild.json`. The `--guild-root` flag overrides this for explicit invocation.
+
+### Directory Structure
+
+```
+GUILD_ROOT/
+  guild.json                    ← central configuration (versioned)
+  package.json                  ← npm package; plugins are npm dependencies
+  package-lock.json
+  node_modules/                 ← gitignored; plugin code lives here
+  <guild content>/              ← versioned guild files (roles/, training/,
+                                   tools/, engines/, etc.) — structure is
+                                   guild-specific, not framework-prescribed
+  .nexus/                       ← runtime state, gitignored
+    nexus.db                    ← persistence database (SQLite)
+    clock.pid                   ← Clockworks daemon PID
+    clock.log                   ← Clockworks daemon log
+    sessions/                   ← per-session working files
+    codexes/                    ← bare git clones of registered codexes
+    worktrees/                  ← git worktrees for active draft bindings
+```
+
+The versioned files — `guild.json`, `package.json`, and the guild's own content — are the guild's identity. `.nexus/` is operational territory: it can be deleted and rebuilt without losing configuration. Nothing in `.nexus/` is committed; everything that matters is in the versioned files.
+
+### `guild.json`
+
+`guild.json` is the guild's central configuration file. Arbor reads it at startup; nothing in the guild system runs without it. It has a small number of framework-level keys that Arbor reads directly, plus any number of **plugin configuration sections** — top-level keys owned by individual plugins, keyed by their derived plugin id.
+
+```json
+{
+  "name": "my-guild",
+  "nexus": "0.1.x",
+  "plugins": ["books", "clockworks", "sessions", "..."],
+  "settings": {
+    "model": "claude-opus-4-5"
+  },
+
+  "clockworks": {
+    "events": {
+      "craft.question": { "description": "An artificer hit a decision outside commission scope." }
+    },
+    "standingOrders": [
+      { "on": "writ.ready",            "run": "draft-prepare" },
+      { "on": "writ.workspace-ready",  "summon": "artificer", "prompt": "..." },
+      { "on": "writ.completed",        "run": "draft-seal" }
+    ]
+  }
+}
+```
+
+#### Framework keys
+
+**`name`** — the guild's identifier, used as the npm package name for the guild's own content package.
+
+**`nexus`** — the installed framework version. Written by `nsg init` and `nsg upgrade`; not edited by hand.
+
+**`plugins`** — ordered list of installed plugin ids. Arbor loads them in this order, respecting the dependency graph. `nsg install` and `nsg remove` manage this list. Starts empty on `nsg init`; the standard guild adds the default set.
+
+**`settings`** — operational configuration. Currently holds `model` (the default LLM model for anima sessions) and `autoMigrate` (whether to apply database migrations automatically on startup).
+
+#### Plugin configuration
+
+All remaining top-level keys are plugin configuration sections, keyed by derived plugin id (see [Plugin IDs](#plugin-ids)). Each plugin reads its own section via `guild().config(pluginId)` at startup or handler invocation time.
+
+In the standard guild, `clockworks` contains events and standing orders; `codexes` tracks registered repositories and draft settings; `loom` holds role definitions and permission grants. These are all plugin config — not framework-owned fields — they get natural short keys because of the `@shardworks/` naming convention and `-(plugin|apparatus|kit)` suffix stripping (e.g. `@shardworks/tools-apparatus` → `tools`). See [Configuration](plugins.md#configuration) for the full model.
+
+### Runtime State (`.nexus/`)
+
+`.nexus/` is entirely gitignored. It is created on first run and can be deleted safely — the guild will rebuild it from `guild.json` and the versioned content files.
+
+**`nexus.db`** — the SQLite database owned by The Stacks. All guild state that needs to survive process restarts lives here: anima records, writ history, session records, event and dispatch logs.
+
+**`clock.pid` / `clock.log`** — daemon bookkeeping for The Clockworks. `clock.pid` holds the PID of the running daemon process; `clock.log` is its output. Both are absent when the daemon is not running.
+
+**`sessions/`** — working files for active and recently-completed sessions. Each session gets a JSON record here at launch; The Animator writes the result back when the session exits.
+
+**`codexes/`** — bare git clones of every registered codex, named `<codex-name>.git`. Managed by The Scriptorium. Draft worktrees are checked out from these clones rather than from the remotes directly, keeping network operations to `fetch` calls rather than repeated clones.
+
+**`worktrees/`** — git worktrees for active draft bindings. Each draft gets a dedicated worktree here, isolated from other concurrent work. Drafts are opened when work begins and sealed or abandoned when the work completes. See [The Scriptorium](apparatus/scriptorium.md).
+
+---
+
+## Plugin Architecture
+
+The apparatus described in §2 — The Stacks, The Clockworks, The Clerk, The Spider, and the rest — are all plugins. There is no privileged built-in layer. Arbor, the guild runtime, is only a plugin loader, a dependency graph, and the startup/shutdown lifecycle for what gets loaded. Every piece of operational infrastructure is contributed by a plugin package; the standard guild is simply a particular set of those packages.
+
+Plugins come in two kinds: **kits** and **apparatus**. This section introduces them; [Plugin Architecture](plugins.md) is the full specification.
+
+### Kit
+
+A **kit** is a passive package contributing capabilities to the guild. Kits have no lifecycle — they are read at load time and their contributions are forwarded to consuming apparatus. Nothing about a kit participates in `start`/`stop` or requires a running system.
+
+```typescript
+// @shardworks/nexus-git — a kit contributing git-related tools, engines, and relays
+export default {
+  kit: {
+    requires:   ["books"],
+    recommends: ["clockworks", "spider"],
+    engines: [createBranchEngine, mergeBranchEngine],
+    relays:  [onMergeRelay],
+    tools:   [statusTool, diffTool],
+  },
+} satisfies Plugin
+```
+
+A kit is an **open record**: the contribution fields (`engines`, `relays`, `tools`, etc.) are defined by the apparatus packages that consume them, not by the framework. The framework only reads `requires` (hard dependency on an apparatus — validated at startup) and `recommends` (advisory — generates a startup warning if absent). Everything else is forwarded opaquely to consuming apparatus via the `plugin:initialized` lifecycle event.
+
+Type safety for contribution fields is opt-in — each apparatus publishes a kit interface (`ClockworksKit`, `SpiderKit`, etc.) that kit authors can import and `satisfies` against.
+
+### Apparatus
+
+An **apparatus** is a package contributing persistent running infrastructure. It has a `start`/`stop` lifecycle, may declare dependencies on other apparatus, and may expose a runtime API.
+
+```typescript
+// @shardworks/clockworks — the guild's event-driven nervous system
+const clockworksApi: ClockworksApi = { ... }
+
+export default {
+  apparatus: {
+    requires: ["books"],
+    provides: clockworksApi,
+
+    start: (ctx) => {
+      const books = guild().apparatus<BooksApi>("books")
+      clockworksApi.init(books)
+    },
+    stop: () => clockworksApi.shutdown(),
+
+    supportKit: {
+      relays: [signalRelay, drainRelay],
+      tools:  [signalTool, clockStatusTool],
+    },
+
+    consumes: ["relays"],
+  },
+} satisfies Plugin
+```
+
+**`requires`** declares apparatus that must be started first — validated at startup, determines start ordering. **`provides`** is the runtime API other plugins retrieve via `guild().apparatus<T>(name)`. **`supportKit`** is the apparatus's own kit contributions (tools, relays, etc.) — treated identically to standalone kit contributions by consumers. **`consumes`** declares which kit contribution types this apparatus scans for, enabling startup warnings when kits contribute types no apparatus consumes.
+
+### Plugin IDs
+
+Plugin names are never declared in the manifest — they are derived from the npm package name at load time:
+
+1. Strip the `@shardworks/` scope (the official Nexus namespace)
+2. Retain other scopes as a prefix without `@` (`@acme/foo` → `acme/foo`)
+3. Strip a trailing `-(plugin|apparatus|kit)` suffix
+
+So `@shardworks/clockworks` → `clockworks`, `@shardworks/books-apparatus` → `books`, `@acme/cache-kit` → `acme/cache`. Plugin ids are used in `requires` arrays, `guild().apparatus()` calls, and as the key for plugin-specific configuration in `guild.json`. See [Plugin IDs](plugins.md#plugin-ids) for the full derivation table.
+
+### Arbor and Contexts
+
+**Arbor** is the runtime object. It reads `guild.json`, imports all declared plugins, validates the dependency graph, and starts each apparatus in dependency-resolved order. The CLI, MCP server, and Clockworks daemon each create one Arbor instance at startup; it lives for the process's lifetime.
+
+All plugin code — apparatus `start()`, tool handlers, CDC handlers — accesses guild infrastructure through the **`guild()` singleton** from `@shardworks/nexus-core`. It provides access to apparatus APIs, plugin config, the guild root path, and the loaded plugin graph. Apparatus `start(ctx)` additionally receives a **`StartupContext`** for subscribing to lifecycle events via `ctx.on()`.
+
+Startup validation is strict: missing dependencies and circular dependency graphs fail loudly before any apparatus starts. Kit contributions are forwarded to consuming apparatus reactively via the `plugin:initialized` lifecycle event. See [Plugin Architecture](plugins.md) for the full specification, including the [guild() singleton](plugins.md#the-guild-accessor), [StartupContext](plugins.md#startupcontext), and [Configuration](plugins.md#configuration).
+
+### Installation
+
+Plugins are listed in `guild.json` by their plugin id. The framework determines whether each is a kit or apparatus at load time from the package manifest — no user-side declaration needed.
+
+```json
+{
+  "plugins": ["books", "clockworks", "spider", "sessions", "nexus-git"]
+}
+```
+
+```sh
+nsg install nexus-git     # add a plugin
+nsg remove  nexus-git     # remove a plugin
+nsg status                # show apparatus health + kit inventory
+```
+
+`nsg init` populates the default plugin set for a new guild.
+
+---
+
+## The Standard Guild
+
+The plugin architecture described above is general-purpose: any guild can install any combination of kits and apparatus. In practice, nearly every guild uses the same foundational set — the apparatus and kits that `nsg init` installs by default. The sections that follow document this standard configuration.
+
+Each section introduces one or more apparatus or kits from the default set. Understanding that they are plugins — replaceable, independently testable, authored against the same contracts as any community extension — is the main thing §4 provides. The remaining sections don't repeat it.
+
+### Default Apparatus
+
+| Apparatus | Plugin id | Function |
+|-----------|-----------|----------|
+| **The Stacks** | `books` | Persistence substrate — SQLite-backed document store and change-data-capture events |
+| **The Scriptorium** | `codexes` | Codex management — repository registry, bare clones, draft binding lifecycle, sealing and push |
+| **The Clockworks** | `clockworks` | Event-driven nervous system — standing orders, event queue, the summon relay |
+| **The Surveyor** | `surveyor` | Codex knowledge — surveys registered codexes so the guild knows what work applies to each |
+| **The Clerk** | `clerk` | Commission intake and writ lifecycle — receives commissions, creates writs, signals when work is ready |
+| **The Loom** | `loom` | Session context composition — weaves role instructions, tool instructions, curricula, and temperaments into a session context |
+| **The Instrumentarium** | `tools` | Tool registry — resolves installed tools, permission-gated tool sets |
+| **The Animator** | `animator` | Session lifecycle — launches, monitors, and records anima sessions |
+| **The Fabricator** | `fabricator` | Engine design registry — answers "what engine chain satisfies this need?" from installed kits |
+| **The Spider** | `spider` | Rig lifecycle — spawns, traverses, extends, and strikes rigs as work progresses |
+| **The Executor** | `executor` | Engine runner — executes clockwork and quick engines against a configured substrate |
+
+### Default Kits
+
+| Kit | Contributes |
+|-----|-------------|
+| **nexus-stdlib** | Base tools (commission-create, tool-install, anima-create, signal, writ/session CRUD, etc.) and the summon relay |
+| **clockworks** (supportKit) | Clockworks tools (clock-start, clock-stop, clock-status, event-list, signal) |
+| **sessions** (supportKit) | Session tools (session-list, session-show, conversation-list) |
+
+> **Note:** The list above is provisional. The standard guild configuration is still being finalized as individual apparatus are built out. Some entries listed as apparatus are not yet implemented as separate packages — see [What's Implemented vs. Aspirational](_agent-context.md#whats-implemented-vs-aspirational) for the current state. Treat this as a working inventory, not a commitment.
+
+---
+
+## The Books
+
+**The Stacks** (plugin id: `books`) is the guild's persistence layer — a document store backed by SQLite at `.nexus/nexus.db`, with change data capture (CDC) as its primary integration mechanism.
+
+### Document Model
+
+The Stacks stores JSON documents in named collections called **books**. Every document must include an `id: string` field; the framework adds nothing else — no envelopes, timestamps, or revision tracking. Domain types own their own fields.
+
+Plugins declare the books they need via a `books` contribution field in their kit export:
+
+```typescript
+export default {
+  kit: {
+    requires: ['stacks'],
+    books: {
+      writs:    { indexes: ['status', 'createdAt', 'parent.id'] },
+      sessions: { indexes: ['writId', 'startedAt', 'animaId'] },
+    },
+  },
+} satisfies Plugin
+```
+
+The Stacks reads these declarations at startup and creates or reconciles the backing tables. Schema changes are additive only — new books and indexes are safe; nothing is dropped automatically.
+
+### API Surface
+
+Plugins access persistence through `guild().apparatus<StacksApi>('stacks')`, which exposes four methods:
+
+- **`book<T>(ownerId, name)`** — returns a writable handle for the named book. Supports `put()` (upsert), `patch()` (top-level field merge), `delete()`, and the full read API (`get`, `find`, `list`, `count`). Queries support equality, range, pattern matching (`LIKE`), set membership (`IN`), null checks, multi-field sorting, and offset/limit pagination.
+
+- **`readBook<T>(ownerId, name)`** — returns a read-only handle for another plugin's book. Cross-plugin writes are not supported; they go through the owning plugin's tools.
+
+- **`watch(ownerId, bookName, handler, options?)`** — registers a CDC handler that fires on every write to the named book. CDC events carry the document's previous state (`prev`) for updates and deletes, enabling diff-based logic.
+
+- **`transaction(fn)`** — executes a function within an atomic transaction. All writes inside `fn` commit or roll back together. Reads inside the transaction see uncommitted writes (read-your-writes).
+
+### Change Data Capture
+
+All writes go through The Stacks API — there is no raw SQL escape hatch. This is what makes CDC reliable: if the API is the only write path, the event stream is complete.
+
+CDC handlers execute in two phases:
+
+**Phase 1 (cascade)** — runs inside the transaction, before commit. The handler's writes join the same atomic unit. If the handler throws, everything rolls back — the triggering write, the handler's writes, and all nested cascades. This is the correct phase for maintaining referential integrity (e.g. cancelling child writs when a parent is cancelled).
+
+**Phase 2 (notification)** — runs after the transaction commits. Data is already persisted. Handler failures are logged as warnings but cannot affect committed data. This is the correct phase for external notifications like Clockworks event emission.
+
+Within a transaction, multiple writes to the same document are coalesced into a single CDC event reflecting the net change. External observers never see intermediate states.
+
+### Backend
+
+The Stacks depends on a `StacksBackend` interface, not SQLite directly. The default implementation uses SQLite via `better-sqlite3`; alternative backends (in-memory for tests, libSQL for edge) implement the same interface. No SQLite types leak into the public API.
+
+See [The Stacks — API Contract](apparatus/stacks.md) for the full specification: complete type signatures, query language, transaction semantics, coalescing rules, use case coverage matrix, and backend interface.
+
+---
+
+## Animas
+
+<!-- TODO: Identity and composition. An anima = name + curriculum + temperament + role assignments. Composition model: curriculum (what you know), temperament (who you are) — both versioned, immutable per version. The Loom weaves them at session time. Anima states: active / retired. MVP: no identity layer; The Loom returns a fixed composition per role. Link to forthcoming anima-composition.md. -->
+
+---
+
+## Work Model
+
+<!-- TODO: The obligation pipeline. Commission (patron's request) → Mandate writ (guild's formal record, created by Clerk) → child writs as the guild decomposes the work → Rigs as the execution scaffolding for a writ. Writ lifecycle (ready → active → pending → completed/failed/cancelled). Writ hierarchy and completion rollup. Brief intro to rigs (assembled by Spider from engine designs contributed by kits via Fabricator). Link to rigging.md for rig execution detail. -->
+
+---
+
+## Kit Components: Tools, Engines & Relays
+
+Kits contribute three kinds of installable artifacts. All three follow the same packaging pattern — a descriptor file, an entry point, and a registration entry — but they serve different roles in the guild.
+
+### Tools
+
+**Tools** are instruments animas wield during work. A tool is a handler with a defined contract (inputs in, structured result out), accessible through three paths:
+
+- **MCP** — animas invoke tools as typed MCP calls during sessions. The framework launches a single MCP engine per session loaded with the anima's permitted tools.
+- **CLI** — humans invoke tools via `nsg` subcommands.
+- **Import** — engines, relays, and other tools can import handlers programmatically.
+
+All three paths execute the same logic. Tool authors write the handler once using the `tool()` SDK factory from `@shardworks/tools-apparatus`, which wraps a Zod schema and handler function into a `ToolDefinition`:
+
+```typescript
+export default tool({
+  description: "Look up an anima by name",
+  params: { name: z.string() },
+  handler: async ({ name }, ctx) => { ... },
+})
+```
+
+Tools can be TypeScript modules or plain scripts (bash, Python, any executable). Script tools need no SDK — a one-line descriptor and an executable is enough. The framework infers the kind from the file extension.
+
+**Permission gating:** Tools may declare a `permission` level (e.g. `'read'`, `'write'`, `'admin'`). Roles grant permission strings in `plugin:level` format (with wildcard support). The Loom resolves an anima's roles into a flat permissions array; the Instrumentarium matches those grants against each tool's declared permission to resolve the available set. Tools without a `permission` field are permissionless — included by default, or gated in strict mode.
+
+**Instructions:** A tool can optionally ship with an `instructions.md` — a teaching document delivered to the anima as part of its system prompt. Instructions provide craft guidance (when to use the tool, when not to, workflow context) that MCP's schema metadata cannot convey.
+
+### Engines
+
+**Engines** are the workhorse components of rigs — bounded units of work the Spider mounts and sets in motion. An engine runs when its upstream dependencies (givens) are satisfied and produces yields when done. Two kinds:
+
+- **Clockwork** — deterministic, no AI. Runs its code directly against the configured substrate.
+- **Quick** — inhabited by an anima for work requiring judgment. The engine defines the work context; the anima brings the skill.
+
+Kits contribute engine designs; the Spider draws on them (via The Fabricator) to extend rigs as work progresses. Engines are not role-gated — they are not wielded by animas directly; they are the work context an anima staffs.
+
+### Relays
+
+**Relays** are Clockworks handlers — purpose-built to respond to events via standing orders. A relay exports a standard `relay()` contract that the Clockworks runner calls when a matching event fires. All relays are clockwork (no anima involvement). The built-in **summon relay** is the mechanism that dispatches anima sessions in response to standing orders.
+
+### Comparison
+
+| | Tools | Engines | Relays |
+|---|---|---|---|
+| **Purpose** | Instruments animas wield | Rig workhorses | Clockworks event handlers |
+| **Invoked by** | Animas (MCP), humans (CLI), code | Spider (within a rig) | Clockworks runner (standing order) |
+| **Role gating?** | Yes | No | No |
+| **Instructions?** | Optional | No | No |
+| **Clockwork or quick?** | Neither (runs on demand) | Either | Always clockwork |
+
+See [Kit Components](kit-components.md) for the full specification: descriptor schemas, on-disk layout, installation mechanics, the MCP engine, and local development workflow.
+
+---
+
+## Sessions
+
+A **session** is a single AI process doing work. It is the fundamental unit of labor in the guild — every anima interaction, whether launched by a standing order or started interactively from the CLI, is a session. Three apparatus collaborate to make a session happen: **The Loom** composes the context, **The Animator** launches the process and records the result, and (when available) **The Instrumentarium** resolves the tools the anima can wield.
+
+### The Session Funnel
+
+Every session passes through the same funnel regardless of how it was triggered:
+
+```
+  Trigger (summon relay / nsg consult / nsg convene)
+    │
+    ├─ 1. Weave context  (The Loom)
+    │     system prompt: charter + tool instructions + role instructions
+    │     future: + curriculum + temperament
+    │
+    ├─ 2. Launch process  (The Animator → Session Provider)
+    │     AI process starts in a working directory
+    │     MCP tool server attached (future: when Instrumentarium ships)
+    │
+    ├─ 3. Session runs
+    │     anima reads context, uses tools, produces output
+    │
+    └─ 4. Record result  (The Animator → The Stacks)
+          status, duration, token usage, cost, exit code
+          ALWAYS recorded — even on crash (try/finally guarantee)
+```
+
+The trigger determines *what* work is done (the prompt, the workspace, the metadata), but the funnel is identical. The Animator doesn't know or care whether it was called from a standing order or an interactive session.
+
+### Context Composition (The Loom)
+
+The Loom weaves anima identity into session contexts. Given a role name, it produces an `AnimaWeave` — the composed identity context that The Animator uses to launch a session. The work prompt (what the anima should do) bypasses The Loom and goes directly from the caller to the session provider. The Loom currently handles two concerns: **tool resolution** (role → permissions → Instrumentarium → permission-gated tool set, returned on the `AnimaWeave`) and **git identity** (deriving `GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL` from the role name). System prompt composition is not yet implemented — the `systemPrompt` field on `AnimaWeave` remains undefined until the Loom gains composition logic. The Animator never assembles prompts, so when real composition arrives, nothing downstream changes.
+
+The target design composes the system prompt from layers, in order: **guild charter** (institutional policy) → **curriculum** (what the anima knows) → **temperament** (who the anima is) → **role instructions** → **tool instructions** → **writ context**. Each layer is versioned and immutable per version, making sessions reproducible — given the same inputs, The Loom produces the same context.
+
+The distinction between **system prompt** and **work prompt** matters: the system prompt is the anima's identity and operating instructions (persistent across turns in a conversation, composed by The Loom); the work prompt is the specific work request for this session (changes each turn, bypasses The Loom). The Animator sends both to the provider.
+
+### Session Launch (The Animator)
+
+The Animator brings animas to life. It takes an `AnimaWeave`, a working directory, and optional metadata, then delegates to a **session provider** — a pluggable backend that knows how to launch and communicate with a specific AI system. Both `summon()` and `animate()` return an `AnimateHandle` synchronously — a `{ chunks, result }` pair where `result` is a promise for the final `SessionResult` and `chunks` is an async iterable of output (empty unless `streaming: true` is set on the request). The MVP provider is `claude-code-apparatus`, which launches a `claude` CLI process in **bare mode** (no CLAUDE.md, no persistent project context — the session context is entirely what The Loom wove).
+
+The Animator's error handling contract is strict: session results are **always** recorded to The Stacks, even when the provider crashes or times out. The launch is wrapped in try/finally — if the provider throws, the session record still gets written with `status: 'failed'` and whatever telemetry was available. If the Stacks write itself fails, that error is logged but doesn't mask the provider error. Session data loss is preferable to swallowing the original failure.
+
+Every session record captures structured telemetry: wall-clock duration, exit code, token usage (input, output, cache read, cache write), and cost in USD. Callers attach opaque **metadata** — the Animator stores it without interpreting it. The summon relay attaches dispatch context (writ id, anima name, codex); `nsg consult` attaches interactive session context. Downstream queries against metadata use The Stacks' JSON path queries.
+
+### Session Providers
+
+Session providers are the pluggable backend behind The Animator. A provider implements a single `launch()` method that returns `{ chunks, result }` synchronously — the same shape as `AnimateHandle`. When `config.streaming` is true, the provider yields output chunks through the `chunks` async iterable as the session runs; when false (or when the provider doesn't support streaming), the chunks iterable completes immediately with no items. The Animator does not branch on streaming capability — it passes the flag through and trusts the provider.
+
+Providers handle the mechanics of a specific AI system — process spawning, stdio communication, result parsing — but not session lifecycle. The Animator owns lifecycle (id generation, timing, recording); the provider owns the process. This split means adding a new AI backend (GPT, Gemini, local models) requires only a new provider package, not changes to The Animator.
+
+MVP: one hardcoded provider (`claude-code`). Future: provider discovery via kit contributions or guild config.
+
+### Tool-Equipped Sessions
+
+Sessions can be equipped with guild tools via the MCP integration pipeline. The Loom resolves the anima's role into permission grants, then calls The Instrumentarium to resolve the permission-gated tool set. The resolved tools are returned on the `AnimaWeave` and passed through The Animator to the session provider. The claude-code provider starts an in-process MCP HTTP server (one per session, SSE transport on an ephemeral localhost port), writes a `--mcp-config` file pointing at it, and tears it down when the session exits.
+
+Tools are the mechanism through which animas act on the guild — creating writs, reading documents, signaling events, modifying files. Without tools, a session is advisory; with tools, it is operational.
+
+### Conversations (The Parlour)
+
+A **conversation** groups multiple sessions into a coherent multi-turn interaction. Two kinds exist: **consult** (a human talks to an anima — the `nsg consult` command) and **convene** (multiple animas hold a structured dialogue — `nsg convene`). The Parlour manages both.
+
+The Parlour orchestrates, it doesn't execute. For each turn, it determines whose turn it is, assembles the inter-turn context (what happened since this participant last spoke), and delegates the actual session to The Animator. Each anima participant maintains **provider session continuity** via the `--resume` mechanism — the provider's conversation id is stored on the participant record and passed back on the next turn, allowing the AI process to maintain its full context window across turns.
+
+For convene conversations, The Parlour assembles inter-turn messages: when it's Participant A's turn, it collects the responses from all participants who spoke since A's last turn and formats them as the input message. Each participant sees a coherent dialogue without The Parlour re-sending the full history (the provider's `--resume` handles that).
+
+Conversations have an optional **turn limit** — when reached, the conversation auto-concludes. The Parlour tracks all state in The Stacks (no in-memory state between turns), making it safe for concurrent callers and process restarts.
+
+**Workspace constraint:** Provider session continuity depends on local filesystem state (e.g. Claude Code's `.claude/` directory). All turns in a conversation must run in the same working directory, or the session data needed for `--resume` won't be present. The Parlour enforces this by passing a consistent `cwd` to The Animator for every turn.
+
+### Invocation Paths
+
+Sessions enter the system through three paths:
+
+1. **Clockworks summon relay** — a standing order fires, the summon relay calls The Loom and The Animator. This is the autonomous path — no human involved.
+2. **`nsg consult`** — the patron starts an interactive session. The CLI calls The Loom and The Animator directly, with streaming output to the terminal. For multi-turn conversations, The Parlour manages the session sequence.
+3. **`nsg convene`** — the patron convenes a multi-anima dialogue. The CLI creates a Parlour conversation and drives the turn loop, with each turn delegating to The Animator.
+
+All three paths converge on the same `AnimatorApi.animate()` call. The Animator is the single chokepoint for session telemetry — every session, regardless of trigger, gets the same structured recording.
+
+See [The Animator — API Contract](apparatus/animator.md), [The Loom — API Contract](apparatus/loom.md), and [The Parlour — API Contract](apparatus/parlour.md) for the full specifications.
+
+---
+
+## The Clockworks
+
+<!-- TODO: Event-driven nervous system. Events as immutable persisted facts (not intents). Standing orders as guild policy in guild.json — bind event patterns to relays. The summon verb as sugar for the summon relay. Framework events (automatic, from nexus-core operations) vs. custom guild events (declared in guild.json, signaled by animas via signal tool). The runner: manual (nsg clock tick/run) vs. daemon (nsg clock start). Error handling: standing-order.failed, loop guard. Link to clockworks.md. -->
+
+---
+
+## Core Apparatus Reference
+
+<!-- TODO: Quick-reference table of all standard apparatus — name, package, layer, what it provides, links to detailed docs where they exist. Covers the same set as the table in "The Standard Guild" section but with package names, API surface hints, and links. -->
+
+---
+
+## Future State
+
+Known gaps in the framework infrastructure that will be addressed as apparatus are built out.
+
+### Config write path on `Guild` interface
+
+The `Guild` interface (`guild()` singleton) exposes `config<T>(pluginId)` for reading plugin configuration from `guild.json`, but has no corresponding write method. Currently, plugins that need to modify their config section must use the standalone `writeGuildConfig()` function from `@shardworks/nexus-core`, which reads the full file, modifies it, and writes it back. This works but has no atomicity guarantees and no event emission.
+
+A `guild().writeConfig(pluginId, config)` method (or equivalent) would provide:
+- Scoped writes (a plugin modifies only its own section)
+- Atomic file updates (read-modify-write under a lock)
+- Config change events (for downstream reactivity)
+
+**First consumer:** [The Scriptorium](apparatus/scriptorium.md) — `codex-add` and `codex-remove` need to modify the `codexes` config section programmatically. Update the Scriptorium's implementation when this API ships.
+
+### `workshops` → `codexes` migration in nexus-core
+
+The `GuildConfig` interface in `@shardworks/nexus-core` (`guild-config.ts`) still carries a framework-level `workshops` field with an associated `WorkshopEntry` type. This is legacy — codex registration is plugin config owned by The Scriptorium (read via `guild().config<CodexesConfig>('codexes')`), not a framework-level concern.
+
+Cleanup required:
+- Remove `workshops` from `GuildConfig` and `WorkshopEntry` from `guild-config.ts`
+- Remove `workshopsPath()` and `workshopBarePath()` from `nexus-home.ts`
+- Remove corresponding exports from `index.ts`
+- Update `createInitialGuildConfig()` to drop the empty `workshops: {}` default
+- Update test helpers in arbor and CLI that set `workshops: {}`
+- Update `README.md` in core and CLI packages
+
+The Scriptorium defines its own config types and path helpers internally. Nothing in the framework needs workshop/codex awareness.
+
+=== REFERENCED FILE: packages/plugins/codexes/src/scriptorium-core.ts (pre-commission state) ===
+/**
+ * The Scriptorium — core logic.
+ *
+ * Manages the codex registry (bare clones), draft binding lifecycle
+ * (worktrees), and sealing (ff-only merge or rebase+ff). All git
+ * operations go through the git helper for safety.
+ *
+ * Draft tracking is in-memory — drafts are reconstructed from
+ * filesystem state at startup and maintained in memory during the
+ * process lifetime.
+ *
+ * See: docs/architecture/apparatus/scriptorium.md
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { guild, generateId } from '@shardworks/nexus-core';
+
+import { git, resolveDefaultBranch, resolveRef, commitsAhead, GitError } from './git.ts';
+
+import type {
+  CodexRecord,
+  CodexDetail,
+  DraftRecord,
+  OpenDraftRequest,
+  AbandonDraftRequest,
+  SealRequest,
+  SealResult,
+  PushRequest,
+  CodexesConfig,
+  CodexConfigEntry,
+  ScriptoriumApi,
+} from './types.ts';
+
+// ── Internal state ──────────────────────────────────────────────────
+
+interface CodexState {
+  name: string
+  remoteUrl: string
+  cloneStatus: 'ready' | 'cloning' | 'error'
+  lastFetched: string | null
+  /** Promise that resolves when the bare clone is ready (for background clones). */
+  clonePromise?: Promise<void>
+}
+
+// ── Core class ──────────────────────────────────────────────────────
+
+export class ScriptoriumCore {
+  private codexes = new Map<string, CodexState>();
+  private drafts = new Map<string, DraftRecord>(); // keyed by `${codexName}/${branch}`
+
+  private maxMergeRetries: number = 3;
+  private draftRoot: string = '.nexus/worktrees';
+
+  // ── Paths ───────────────────────────────────────────────────────
+
+  private get home(): string {
+    return guild().home;
+  }
+
+  private codexesDir(): string {
+    return path.join(this.home, '.nexus', 'codexes');
+  }
+
+  private bareClonePath(name: string): string {
+    return path.join(this.codexesDir(), `${name}.git`);
+  }
+
+  private draftWorktreePath(codexName: string, branch: string): string {
+    return path.join(this.home, this.draftRoot, codexName, branch);
+  }
+
+  // ── Startup ─────────────────────────────────────────────────────
+
+  start(): void {
+    const config = guild().config<CodexesConfig>('codexes');
+
+    // Apply settings
+    this.maxMergeRetries = config.settings?.maxMergeRetries ?? 3;
+    this.draftRoot = config.settings?.draftRoot ?? '.nexus/worktrees';
+
+    // Ensure infrastructure directories exist
+    fs.mkdirSync(this.codexesDir(), { recursive: true });
+
+    // Load registered codexes from config
+    const registered = config.registered ?? {};
+    for (const [name, entry] of Object.entries(registered)) {
+      this.loadCodex(name, entry);
+    }
+
+    // Reconcile drafts from filesystem
+    this.reconcileDrafts();
+  }
+
+  /**
+   * Load a codex from config. Checks for existing bare clone;
+   * initiates background clone if missing.
+   */
+  private loadCodex(name: string, entry: CodexConfigEntry): void {
+    const clonePath = this.bareClonePath(name);
+    const exists = fs.existsSync(clonePath);
+
+    const state: CodexState = {
+      name,
+      remoteUrl: entry.remoteUrl,
+      cloneStatus: exists ? 'ready' : 'cloning',
+      lastFetched: null,
+    };
+
+    if (!exists) {
+      // Background clone — doesn't block startup
+      state.clonePromise = this.performClone(name, entry.remoteUrl)
+        .then(() => { state.cloneStatus = 'ready'; })
+        .catch((err) => {
+          state.cloneStatus = 'error';
+          console.warn(`[scriptorium] Background clone of "${name}" failed: ${err instanceof Error ? err.message : err}`);
+        });
+    }
+
+    this.codexes.set(name, state);
+  }
+
+  /**
+   * Reconcile in-memory draft tracking with filesystem state.
+   * Scans the worktree directories and rebuilds the draft map.
+   */
+  private reconcileDrafts(): void {
+    const worktreeRoot = path.join(this.home, this.draftRoot);
+    if (!fs.existsSync(worktreeRoot)) return;
+
+    for (const codexDir of fs.readdirSync(worktreeRoot, { withFileTypes: true })) {
+      if (!codexDir.isDirectory()) continue;
+      const codexName = codexDir.name;
+
+      // Only reconcile drafts for known codexes
+      if (!this.codexes.has(codexName)) continue;
+
+      const codexWorktreeDir = path.join(worktreeRoot, codexName);
+      for (const draftDir of fs.readdirSync(codexWorktreeDir, { withFileTypes: true })) {
+        if (!draftDir.isDirectory()) continue;
+        const branch = draftDir.name;
+        const draftPath = path.join(codexWorktreeDir, branch);
+
+        // Verify it's actually a git worktree (has .git file)
+        if (!fs.existsSync(path.join(draftPath, '.git'))) continue;
+
+        const key = `${codexName}/${branch}`;
+        if (!this.drafts.has(key)) {
+          this.drafts.set(key, {
+            id: generateId('draft', 4),
+            codexName,
+            branch,
+            path: draftPath,
+            createdAt: new Date().toISOString(), // approximate — we don't know the real time
+          });
+        }
+      }
+    }
+  }
+
+  // ── Clone readiness ─────────────────────────────────────────────
+
+  /**
+   * Ensure a codex's bare clone is ready. Blocks if a background
+   * clone is in progress. Throws if the codex is unknown or clone failed.
+   */
+  private async ensureReady(name: string): Promise<CodexState> {
+    const state = this.codexes.get(name);
+    if (!state) {
+      throw new Error(`Codex "${name}" is not registered. Use codex-add to register it.`);
+    }
+
+    if (state.clonePromise) {
+      await state.clonePromise;
+      state.clonePromise = undefined;
+    }
+
+    if (state.cloneStatus === 'error') {
+      throw new Error(
+        `Codex "${name}" bare clone failed. Remove and re-add the codex, or check the remote URL.`,
+      );
+    }
+
+    return state;
+  }
+
+  // ── Git operations ──────────────────────────────────────────────
+
+  private async performClone(name: string, remoteUrl: string): Promise<void> {
+    const clonePath = this.bareClonePath(name);
+    fs.mkdirSync(path.dirname(clonePath), { recursive: true });
+    await git(['clone', '--bare', remoteUrl, clonePath]);
+  }
+
+  /**
+   * Advance refs/heads/<branch> to the remote's position if the remote is
+   * strictly ahead of the local sealed binding.
+   *
+   * This handles commits pushed to the remote outside the Scriptorium:
+   * if the remote has advanced past the local sealed binding, sealing must
+   * rebase the draft onto the remote position — not the stale local one.
+   *
+   * If the local sealed binding is already ahead of (or equal to) the remote
+   * (e.g. contains unpushed seals from contention scenarios), it is kept.
+   */
+  private async advanceToRemote(codexName: string, branch: string): Promise<void> {
+    const clonePath = this.bareClonePath(codexName);
+    let remoteRef: string;
+    try {
+      remoteRef = await resolveRef(clonePath, `refs/remotes/origin/${branch}`);
+    } catch {
+      return; // No remote tracking ref (branch may not exist on remote yet)
+    }
+    const localRef = await resolveRef(clonePath, branch);
+    if (remoteRef === localRef) return;
+
+    const { stdout: mergeBase } = await git(
+      ['merge-base', localRef, remoteRef],
+      clonePath,
+    );
+    if (mergeBase === localRef) {
+      // Local is an ancestor of remote → remote is ahead → advance local
+      await git(['update-ref', `refs/heads/${branch}`, remoteRef], clonePath);
+    }
+    // If local is ahead of or diverged from remote: keep the local sealed binding
+  }
+
+  private async performFetch(name: string): Promise<void> {
+    const clonePath = this.bareClonePath(name);
+    // Explicit refspec is required: git clone --bare does not configure a
+    // fetch refspec, so plain `git fetch origin` only updates FETCH_HEAD and
+    // leaves refs/heads/* stale.
+    //
+    // We fetch into refs/remotes/origin/* rather than refs/heads/* for two
+    // reasons:
+    //   1. It avoids force-overwriting local draft branches (which live in
+    //      refs/heads/* but do not exist on the remote).
+    //   2. It separates the "remote position" (refs/remotes/origin/*) from
+    //      the "local sealed binding" (refs/heads/*), letting seal() advance
+    //      refs/heads/* only when the remote is strictly ahead.
+    await git(['fetch', '--prune', 'origin', '+refs/heads/*:refs/remotes/origin/*'], clonePath);
+
+    const state = this.codexes.get(name);
+    if (state) {
+      state.lastFetched = new Date().toISOString();
+    }
+  }
+
+  // ── API Implementation ────────────────────────────────────────
+
+  createApi(): ScriptoriumApi {
+    return {
+      add: (name, remoteUrl) => this.add(name, remoteUrl),
+      list: () => this.list(),
+      show: (name) => this.show(name),
+      remove: (name) => this.remove(name),
+      fetch: (name) => this.fetchCodex(name),
+      push: (request) => this.push(request),
+      openDraft: (request) => this.openDraft(request),
+      listDrafts: (codexName?) => this.listDrafts(codexName),
+      abandonDraft: (request) => this.abandonDraft(request),
+      seal: (request) => this.seal(request),
+    };
+  }
+
+  // ── Codex Registry ──────────────────────────────────────────────
+
+  async add(name: string, remoteUrl: string): Promise<CodexRecord> {
+    if (this.codexes.has(name)) {
+      throw new Error(`Codex "${name}" is already registered.`);
+    }
+
+    // Clone bare repo (blocking)
+    const state: CodexState = {
+      name,
+      remoteUrl,
+      cloneStatus: 'cloning',
+      lastFetched: null,
+    };
+    this.codexes.set(name, state);
+
+    try {
+      await this.performClone(name, remoteUrl);
+      state.cloneStatus = 'ready';
+    } catch (err) {
+      state.cloneStatus = 'error';
+      this.codexes.delete(name);
+      throw new Error(
+        `Failed to clone "${remoteUrl}" for codex "${name}": ${err instanceof Error ? err.message : err}`,
+      );
+    }
+
+    // Persist to guild.json
+    const config = guild().config<CodexesConfig>('codexes');
+    const registered = config.registered ?? {};
+    registered[name] = { remoteUrl };
+    guild().writeConfig('codexes', { ...config, registered });
+
+    return this.toCodexRecord(state);
+  }
+
+  async list(): Promise<CodexRecord[]> {
+    const records: CodexRecord[] = [];
+    for (const state of this.codexes.values()) {
+      records.push(this.toCodexRecord(state));
+    }
+    return records;
+  }
+
+  async show(name: string): Promise<CodexDetail> {
+    const state = await this.ensureReady(name);
+    const clonePath = this.bareClonePath(name);
+    const defaultBranch = await resolveDefaultBranch(clonePath);
+    const drafts = this.draftsForCodex(name);
+
+    return {
+      name: state.name,
+      remoteUrl: state.remoteUrl,
+      cloneStatus: state.cloneStatus,
+      activeDrafts: drafts.length,
+      defaultBranch,
+      lastFetched: state.lastFetched,
+      drafts,
+    };
+  }
+
+  async remove(name: string): Promise<void> {
+    const state = this.codexes.get(name);
+    if (!state) {
+      throw new Error(`Codex "${name}" is not registered.`);
+    }
+
+    // Abandon all drafts for this codex
+    const drafts = this.draftsForCodex(name);
+    for (const draft of drafts) {
+      await this.abandonDraft({ codexName: name, branch: draft.branch, force: true });
+    }
+
+    // Remove bare clone
+    const clonePath = this.bareClonePath(name);
+    if (fs.existsSync(clonePath)) {
+      fs.rmSync(clonePath, { recursive: true, force: true });
+    }
+
+    // Remove from in-memory state
+    this.codexes.delete(name);
+
+    // Remove from guild.json
+    const config = guild().config<CodexesConfig>('codexes');
+    const registered = { ...(config.registered ?? {}) };
+    delete registered[name];
+    guild().writeConfig('codexes', { ...config, registered });
+  }
+
+  async fetchCodex(name: string): Promise<void> {
+    await this.ensureReady(name);
+    await this.performFetch(name);
+  }
+
+  async push(request: PushRequest): Promise<void> {
+    const state = await this.ensureReady(request.codexName);
+    const clonePath = this.bareClonePath(state.name);
+    const branch = request.branch ?? await resolveDefaultBranch(clonePath);
+
+    await git(['push', 'origin', branch], clonePath);
+  }
+
+  // ── Draft Binding Lifecycle ─────────────────────────────────────
+
+  async openDraft(request: OpenDraftRequest): Promise<DraftRecord> {
+    const state = await this.ensureReady(request.codexName);
+    const clonePath = this.bareClonePath(state.name);
+
+    // Fetch before branching for freshness
+    await this.performFetch(state.name);
+
+    const branch = request.branch ?? generateId('draft', 4);
+    const key = `${request.codexName}/${branch}`;
+
+    // Reject if draft already exists
+    if (this.drafts.has(key)) {
+      throw new Error(
+        `Draft with branch "${branch}" already exists for codex "${request.codexName}". ` +
+        `Choose a different branch name or abandon the existing draft.`,
+      );
+    }
+
+    const defaultBranch = await resolveDefaultBranch(clonePath);
+    const startPoint = request.startPoint ?? defaultBranch;
+
+    // Advance the start-point branch to the remote position if the remote
+    // has moved ahead. Ensures the draft branches from the latest state.
+    await this.advanceToRemote(state.name, startPoint);
+
+    const worktreePath = this.draftWorktreePath(request.codexName, branch);
+    fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+
+    // Create worktree with new branch from start point
+    await git(
+      ['worktree', 'add', worktreePath, '-b', branch, startPoint],
+      clonePath,
+    );
+
+    const draft: DraftRecord = {
+      id: generateId('draft', 4),
+      codexName: request.codexName,
+      branch,
+      path: worktreePath,
+      createdAt: new Date().toISOString(),
+      associatedWith: request.associatedWith,
+    };
+
+    this.drafts.set(key, draft);
+    return draft;
+  }
+
+  async listDrafts(codexName?: string): Promise<DraftRecord[]> {
+    if (codexName) {
+      return this.draftsForCodex(codexName);
+    }
+    return [...this.drafts.values()];
+  }
+
+  async abandonDraft(request: AbandonDraftRequest): Promise<void> {
+    const key = `${request.codexName}/${request.branch}`;
+    const draft = this.drafts.get(key);
+
+    if (!draft) {
+      throw new Error(
+        `No active draft with branch "${request.branch}" for codex "${request.codexName}".`,
+      );
+    }
+
+    // Check for unsealed inscriptions (commits ahead of the sealed binding)
+    if (!request.force) {
+      const state = await this.ensureReady(request.codexName);
+      const clonePath = this.bareClonePath(state.name);
+
+      try {
+        const defaultBranch = await resolveDefaultBranch(clonePath);
+        const ahead = await commitsAhead(clonePath, request.branch, defaultBranch);
+
+        if (ahead > 0) {
+          throw new Error(
+            `Draft "${request.branch}" has ${ahead} unsealed inscription(s). ` +
+            `Use force: true to abandon anyway, or seal the draft first.`,
+          );
+        }
+      } catch (err) {
+        // If the branch doesn't exist in the bare clone (already cleaned up),
+        // that's fine — proceed with cleanup
+        if (err instanceof GitError && err.stderr.includes('unknown revision')) {
+          // Branch already gone — proceed with cleanup
+        } else if (err instanceof Error && err.message.includes('unsealed inscription')) {
+          throw err;
+        }
+        // Other git errors during the check are non-fatal — proceed with cleanup
+      }
+    }
+
+    // Remove worktree
+    const clonePath = this.bareClonePath(request.codexName);
+    try {
+      await git(['worktree', 'remove', '--force', draft.path], clonePath);
+    } catch {
+      // If worktree removal fails (e.g. already gone), try manual cleanup
+      if (fs.existsSync(draft.path)) {
+        fs.rmSync(draft.path, { recursive: true, force: true });
+      }
+      // Prune stale worktree references
+      try {
+        await git(['worktree', 'prune'], clonePath);
+      } catch { /* best effort */ }
+    }
+
+    // Delete the branch from the bare clone
+    try {
+      await git(['branch', '-D', request.branch], clonePath);
+    } catch {
+      // Branch may already be gone — that's fine
+    }
+
+    // Remove from in-memory tracking
+    this.drafts.delete(key);
+  }
+
+  async seal(request: SealRequest): Promise<SealResult> {
+    const state = await this.ensureReady(request.codexName);
+    const clonePath = this.bareClonePath(state.name);
+    const maxRetries = request.maxRetries ?? this.maxMergeRetries;
+
+    const defaultBranch = await resolveDefaultBranch(clonePath);
+    const targetBranch = request.targetBranch ?? defaultBranch;
+
+    let strategy: 'fast-forward' | 'rebase' = 'fast-forward';
+    let retries = 0;
+
+    // Fetch before sealing for freshness
+    await this.performFetch(state.name);
+
+    // Advance the local sealed binding to the remote position if the remote
+    // has moved ahead (e.g. commits pushed outside the Scriptorium).
+    // This ensures seal compares against the latest remote ref, not a
+    // potentially stale local one — preventing push failures.
+    await this.advanceToRemote(state.name, targetBranch);
+
+    // Attempt ff-only merge, with rebase retry loop
+    while (retries <= maxRetries) {
+      try {
+        // Try fast-forward merge: update the target branch ref to point at the source
+        // In a bare repo, we use `git merge --ff-only` with the branch checked out,
+        // but bare repos don't have a checkout. Instead, we verify ancestry and
+        // update the ref directly.
+        const targetRef = await resolveRef(clonePath, targetBranch);
+        const sourceRef = await resolveRef(clonePath, request.sourceBranch);
+
+        // Check if source is already at target (nothing to seal)
+        if (targetRef === sourceRef) {
+          // Push before abandoning draft — if push fails the draft survives for inspection
+          try {
+            await git(['push', 'origin', targetBranch], clonePath);
+          } catch (pushErr) {
+            throw new Error(
+              `Push failed after successful seal: ${pushErr instanceof Error ? pushErr.message : pushErr}`,
+            );
+          }
+
+          // Clean up draft unless keepDraft
+          if (!request.keepDraft) {
+            await this.abandonDraft({
+              codexName: request.codexName,
+              branch: request.sourceBranch,
+              force: true,
+            });
+          }
+          return { success: true, strategy, retries, sealedCommit: targetRef, inscriptionsSealed: 0 };
+        }
+
+        // Check if target is an ancestor of source (ff is possible)
+        const { stdout: mergeBase } = await git(
+          ['merge-base', targetBranch, request.sourceBranch],
+          clonePath,
+        );
+
+        if (mergeBase === targetRef) {
+          // Fast-forward is possible — count and incorporate inscriptions
+          const inscriptionsSealed = await commitsAhead(
+            clonePath,
+            request.sourceBranch,
+            targetBranch,
+          );
+
+          await git(
+            ['update-ref', `refs/heads/${targetBranch}`, sourceRef],
+            clonePath,
+          );
+
+          // Push before abandoning draft — if push fails the draft survives for inspection
+          try {
+            await git(['push', 'origin', targetBranch], clonePath);
+          } catch (pushErr) {
+            throw new Error(
+              `Push failed after successful seal: ${pushErr instanceof Error ? pushErr.message : pushErr}`,
+            );
+          }
+
+          // Clean up draft unless keepDraft
+          if (!request.keepDraft) {
+            await this.abandonDraft({
+              codexName: request.codexName,
+              branch: request.sourceBranch,
+              force: true,
+            });
+          }
+
+          return { success: true, strategy, retries, sealedCommit: sourceRef, inscriptionsSealed };
+        }
+
+        // FF not possible — rebase the source branch onto the target
+        strategy = 'rebase';
+
+        // Rebase needs a worktree (can't rebase in a bare repo).
+        // Use the draft's existing worktree.
+        const key = `${request.codexName}/${request.sourceBranch}`;
+        const draft = this.drafts.get(key);
+        if (!draft) {
+          throw new Error(
+            `Cannot rebase: no active draft for branch "${request.sourceBranch}". ` +
+            `The draft worktree is needed for rebase operations.`,
+          );
+        }
+
+        try {
+          await git(['rebase', targetBranch], draft.path);
+        } catch (err) {
+          // Rebase conflict — abort and fail
+          try {
+            await git(['rebase', '--abort'], draft.path);
+          } catch { /* best effort */ }
+
+          throw new Error(
+            `Sealing seized: rebase of "${request.sourceBranch}" onto "${targetBranch}" ` +
+            `produced conflicts. Manual reconciliation is needed.`,
+          );
+        }
+
+        // Rebase succeeded — re-fetch and retry the ff merge
+        retries++;
+        await this.performFetch(state.name);
+        continue;
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('Sealing seized')) {
+          throw err;
+        }
+        if (err instanceof Error && err.message.includes('Cannot rebase')) {
+          throw err;
+        }
+        // Unexpected error — don't retry
+        throw err;
+      }
+    }
+
+    throw new Error(
+      `Sealing failed after ${maxRetries} retries. Codex "${request.codexName}", ` +
+      `branch "${request.sourceBranch}" → "${targetBranch}".`,
+    );
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────
+
+  private draftsForCodex(codexName: string): DraftRecord[] {
+    return [...this.drafts.values()].filter((d) => d.codexName === codexName);
+  }
+
+  private toCodexRecord(state: CodexState): CodexRecord {
+    return {
+      name: state.name,
+      remoteUrl: state.remoteUrl,
+      cloneStatus: state.cloneStatus,
+      activeDrafts: this.draftsForCodex(state.name).length,
+    };
+  }
+}
+
+=== REFERENCED FILE: packages/plugins/codexes/src/scriptorium.ts (pre-commission state) ===
+/**
+ * The Scriptorium — apparatus implementation.
+ *
+ * Wires together the ScriptoriumCore (git operations, draft lifecycle)
+ * and exposes the ScriptoriumApi as the `provides` object. Tools are
+ * contributed via supportKit.
+ *
+ * See: docs/architecture/apparatus/scriptorium.md
+ */
+
+import type {
+  Plugin,
+  StartupContext,
+} from '@shardworks/nexus-core';
+
+import type { ScriptoriumApi } from './types.ts';
+import { ScriptoriumCore } from './scriptorium-core.ts';
+
+import {
+  codexAdd,
+  codexList,
+  codexShow,
+  codexRemove,
+  codexPush,
+  draftOpen,
+  draftList,
+  draftAbandon,
+  draftSeal,
+} from './tools/index.ts';
+
+// ── Apparatus export ──────────────────────────────────────────────────
+
+export function createScriptorium(): Plugin {
+  const core = new ScriptoriumCore();
+  let api: ScriptoriumApi;
+
+  return {
+    apparatus: {
+      requires: [],
+      consumes: [],
+
+      get provides() { return api; },
+
+      supportKit: {
+        tools: [
+          codexAdd,
+          codexList,
+          codexShow,
+          codexRemove,
+          codexPush,
+          draftOpen,
+          draftList,
+          draftAbandon,
+          draftSeal,
+        ],
+      },
+
+      start(_ctx: StartupContext): void {
+        core.start();
+        api = core.createApi();
+      },
+    },
+  };
+}
+
+=== REFERENCED FILE: packages/plugins/spider/src/engines/seal.ts (pre-commission state) ===
+/**
+ * Seal engine — clockwork.
+ *
+ * Seals the draft binding via the Scriptorium. Reads the draft branch
+ * from context.upstream['draft'] (the DraftYields from the draft engine).
+ * Returns SealYields with the sealed commit info.
+ */
+
+import { guild } from '@shardworks/nexus-core';
+import type { EngineDesign } from '@shardworks/fabricator-apparatus';
+import type { ScriptoriumApi } from '@shardworks/codexes-apparatus';
+import type { DraftYields, SealYields } from '../types.ts';
+
+const sealEngine: EngineDesign = {
+  id: 'seal',
+
+  async run(_givens, context) {
+    const scriptorium = guild().apparatus<ScriptoriumApi>('codexes');
+    const draftYields = context.upstream['draft'] as DraftYields | undefined;
+
+    if (!draftYields) {
+      throw new Error('Seal engine requires draft yields in context.upstream but none found.');
+    }
+
+    const result = await scriptorium.seal({
+      codexName: draftYields.codexName,
+      sourceBranch: draftYields.branch,
+    });
+
+    const yields: SealYields = {
+      sealedCommit: result.sealedCommit,
+      strategy: result.strategy,
+      retries: result.retries,
+      inscriptionsSealed: result.inscriptionsSealed,
+    };
+
+    return { status: 'completed', yields };
+  },
+};
+
+export default sealEngine;
+
