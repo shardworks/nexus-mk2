@@ -15,6 +15,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn, type ChildProcess, execSync } from 'node:child_process';
@@ -50,6 +51,22 @@ function getCodexNames(): string[] {
   return Object.keys(cfg.codexes?.registered ?? {});
 }
 
+function getCodexRemoteUrl(codexName: string): string {
+  const cfg = guildRef.guildConfig();
+  const entry = cfg.codexes?.registered?.[codexName];
+  if (!entry?.remoteUrl) throw new Error(`Codex "${codexName}" not found or missing remoteUrl`);
+  return entry.remoteUrl;
+}
+
+/** Shallow-clone a codex to a temp directory. Returns the clone path. */
+function cloneCodex(codexName: string): string {
+  const remoteUrl = getCodexRemoteUrl(codexName);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `plan-${codexName}-`));
+  console.log(`[workshop] Cloning ${codexName} (${remoteUrl}) → ${tmpDir}`);
+  execSync(`git clone --depth 1 ${remoteUrl} ${tmpDir}`, { stdio: 'pipe' });
+  return tmpDir;
+}
+
 // Ensure specs dir exists
 if (!fs.existsSync(SPECS_DIR)) fs.mkdirSync(SPECS_DIR, { recursive: true });
 
@@ -79,6 +96,7 @@ interface SpecMeta {
   createdAt?: string;
   sessionId?: string;
   writId?: string;
+  codex?: string;
 }
 
 function readMeta(slug: string): SpecMeta {
@@ -277,6 +295,7 @@ function getSpecData(slug: string): Record<string, any> {
 
   // Read meta
   const meta = readMeta(slug);
+  if (meta.codex) data.codex = meta.codex;
   if (meta.sessionId) data.readerSessionId = meta.sessionId;
   if (meta.writId) {
     data.writId = meta.writId;
@@ -330,19 +349,42 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     return;
   }
 
+  // Clone the target codex to a temp directory so the agent runs from within it.
+  // This ensures all paths the agent discovers are relative to the codex root,
+  // which matches the worktree structure the implementing anima will work in.
+  const meta = readMeta(slug);
+  const codexName = meta.codex;
+  if (!codexName) {
+    console.error('[workshop] No codex set for ' + slug + ' — cannot run pipeline');
+    sendSSE(slug, 'status', { step, state: 'failed', error: 'no codex set' });
+    return;
+  }
+
+  let cloneDir: string;
+  try {
+    cloneDir = cloneCodex(codexName);
+  } catch (err: any) {
+    console.error('[workshop] Clone failed for ' + codexName + ': ' + err.message);
+    sendSSE(slug, 'status', { step, state: 'failed', error: 'clone failed: ' + err.message });
+    return;
+  }
+
+  const agentPath = path.join(PROJECT_ROOT, '.claude', 'agents', 'plan-' + step + '.md');
+
   const cliArgs = [
-    '--agent', 'plan-' + step,
+    '--agent', agentPath,
     '--print',
     '--dangerously-skip-permissions',
+    '--add-dir', SPECS_DIR,
     '--max-budget-usd', step === 'writer' ? '5' : '3',
     ...args,
     prompt,
   ];
 
-  console.log('[workshop] Starting ' + step + ' for ' + slug);
+  console.log('[workshop] Starting ' + step + ' for ' + slug + ' (cwd=' + cloneDir + ')');
 
   const proc = spawn('claude', cliArgs, {
-    cwd: PROJECT_ROOT,
+    cwd: cloneDir,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -392,6 +434,14 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     console.log('[workshop] ' + step + ' for ' + slug + ' finished (code=' + code + ', ' + elapsed + 's)');
     sendSSE(slug, 'status', { step, state: code === 0 ? 'complete' : 'failed', elapsed, code });
 
+    // Clean up the temp clone
+    try {
+      fs.rmSync(cloneDir, { recursive: true, force: true });
+      console.log('[workshop] Cleaned up temp clone: ' + cloneDir);
+    } catch (err: any) {
+      console.warn('[workshop] Failed to clean up temp clone: ' + err.message);
+    }
+
     // Auto-chain: reader → analyst
     if (code === 0 && step === 'reader') {
       const brief = readSpecFile(slug, 'brief.md') ?? '';
@@ -409,7 +459,7 @@ function startReader(slug: string, brief: string): void {
   writeMeta(slug, meta);
 
   runPipelineStep(slug, 'reader', ['--session-id', sessionId],
-    'Brief: ' + brief + '\n\nSlug: ' + slug);
+    'Brief: ' + brief + '\n\nSlug: ' + slug + '\n\nSpecs directory: ' + SPECS_DIR);
 }
 
 function startAnalyst(slug: string, brief: string): void {
@@ -419,7 +469,7 @@ function startAnalyst(slug: string, brief: string): void {
   const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
 
   runPipelineStep(slug, 'analyst', args,
-    'Brief: ' + brief + '\n\nSlug: ' + slug + '\n\nThe inventory has been written to specs/' + slug + '/inventory.md. Produce scope and decisions.');
+    'Brief: ' + brief + '\n\nSlug: ' + slug + '\n\nSpecs directory: ' + SPECS_DIR + '\n\nThe inventory has been written. Produce scope and decisions.');
 }
 
 function startWriter(slug: string, brief: string): void {
@@ -429,7 +479,7 @@ function startWriter(slug: string, brief: string): void {
   const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
 
   runPipelineStep(slug, 'writer', args,
-    'Brief: ' + brief + '\n\nSlug: ' + slug + '\n\nThe analyst has written scope.yaml and decisions.yaml in specs/' + slug + '/, and the patron has reviewed and locked them. Read those files plus inventory.md, then produce the spec.');
+    'Brief: ' + brief + '\n\nSlug: ' + slug + '\n\nSpecs directory: ' + SPECS_DIR + '\n\nThe analyst has written scope.yaml and decisions.yaml, and the patron has reviewed and locked them. Read those files plus inventory.md, then produce the spec.');
 }
 
 // ── HTTP Server ───────────────────────────────────────────────────────
@@ -465,15 +515,17 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse(await readBody(req));
       const brief: string = body.brief || '';
       const slug: string = body.slug || slugify(brief);
+      const codex: string = body.codex || '';
 
       if (!slug || !brief) return jsonResponse(res, { error: 'brief and slug required' }, 400);
+      if (!codex) return jsonResponse(res, { error: 'codex is required' }, 400);
 
       const dir = path.join(SPECS_DIR, slug);
       if (fs.existsSync(dir)) return jsonResponse(res, { error: 'spec already exists' }, 409);
 
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, 'brief.md'), brief + '\n');
-      writeMeta(slug, { createdAt: new Date().toISOString() });
+      writeMeta(slug, { createdAt: new Date().toISOString(), codex });
 
       // Auto-start the reader
       startReader(slug, brief);
@@ -589,10 +641,11 @@ const server = http.createServer(async (req, res) => {
       if (running.has(slug + ':dispatch')) return jsonResponse(res, { error: 'dispatch already in progress' }, 409);
 
       // Capture previous writ ID for retry linking
-      const prevWritId = readMeta(slug).writId ?? null;
+      const dispatchMeta = readMeta(slug);
+      const prevWritId = dispatchMeta.writId ?? null;
 
       const commissionScript = path.join(PROJECT_ROOT, 'bin', 'commission.sh');
-      const codex = body.codex || '';
+      const codex = dispatchMeta.codex || '';
       const complexity = body.complexity || '';
 
       if (!codex) return jsonResponse(res, { error: 'codex is required' }, 400);
@@ -740,9 +793,11 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '  resize: vertical; outline: none; }\n' +
 '.new-spec textarea:focus { border-color: var(--cyan); }\n' +
 '.new-spec .row { display: flex; gap: 10px; margin-top: 10px; align-items: center; }\n' +
-'.new-spec input { flex: 1; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border);\n' +
+'.new-spec input, .new-spec select { padding: 8px 12px; background: var(--bg); border: 1px solid var(--border);\n' +
 '  border-radius: 6px; color: var(--text); font-family: inherit; font-size: 13px; outline: none; }\n' +
-'.new-spec input:focus { border-color: var(--cyan); }\n' +
+'.new-spec input { flex: 1; }\n' +
+'.new-spec select { min-width: 120px; }\n' +
+'.new-spec input:focus, .new-spec select:focus { border-color: var(--cyan); }\n' +
 '.btn { padding: 8px 20px; border: none; border-radius: 6px; font-family: inherit; font-size: 13px;\n' +
 '  font-weight: 600; cursor: pointer; transition: opacity 0.15s; }\n' +
 '.btn:hover { opacity: 0.85; }\n' +
@@ -932,6 +987,7 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    html += \'<textarea id="new-brief" placeholder="Describe the feature..."></textarea>\';\n' +
 '    html += \'<div class="row">\';\n' +
 '    html += \'<input id="new-slug" placeholder="slug (auto-generated from brief)">\';\n' +
+'    html += \'<select id="new-codex"><option value="">codex...</option></select>\';\n' +
 '    html += \'<button class="btn btn-primary" data-action="create-spec">Start Pipeline &#8594;</button>\';\n' +
 '    html += \'</div></div>\';\n' +
 '\n' +
@@ -962,6 +1018,17 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '        var words = firstLine.toLowerCase().replace(/[^a-z0-9\\s-]/g, "").split(/\\s+/).slice(0, 6);\n' +
 '        slugEl.value = words.join("-").replace(/-+/g, "-").replace(/^-|-$/g, "");\n' +
 '      });\n' +
+'    }\n' +
+'\n' +
+'    // Populate codex dropdown\n' +
+'    var newCodexEl = document.getElementById("new-codex");\n' +
+'    if (newCodexEl && codexList.length > 0) {\n' +
+'      var defaultVal = codexList.length === 1 ? codexList[0] : "";\n' +
+'      newCodexEl.innerHTML = codexList.length === 1 ? "" : \'<option value="">codex...</option>\';\n' +
+'      for (var ci = 0; ci < codexList.length; ci++) {\n' +
+'        var sel = codexList[ci] === defaultVal ? " selected" : "";\n' +
+'        newCodexEl.innerHTML += \'<option value="\' + codexList[ci] + \'"\' + sel + \'>\' + codexList[ci] + \'</option>\';\n' +
+'      }\n' +
 '    }\n' +
 '  });\n' +
 '}\n' +
@@ -1014,16 +1081,6 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '  var logEl = document.getElementById("log-area");\n' +
 '  if (logEl) logEl.scrollTop = logEl.scrollHeight;\n' +
 '\n' +
-'  // Populate codex dropdown\n' +
-'  var codexEl = document.getElementById("dispatch-codex");\n' +
-'  if (codexEl && codexList.length > 0) {\n' +
-'    var defaultVal = codexList.length === 1 ? codexList[0] : "";\n' +
-'    codexEl.innerHTML = codexList.length === 1 ? "" : \'<option value="">-- select --</option>\';\n' +
-'    for (var ci = 0; ci < codexList.length; ci++) {\n' +
-'      var sel = codexList[ci] === defaultVal ? " selected" : "";\n' +
-'      codexEl.innerHTML += \'<option value="\' + codexList[ci] + \'"\' + sel + \'>\' + codexList[ci] + \'</option>\';\n' +
-'    }\n' +
-'  }\n' +
 '\n' +
 '  startElapsedTimer();\n' +
 '}\n' +
@@ -1230,7 +1287,6 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '  }\n' +
 '\n' +
 '  html += \'<div class="dispatch-form">\';\n' +
-'  html += \'<label>Codex:</label> <select id="dispatch-codex"><option value="">-- select --</option></select>\';\n' +
 '  html += \'<label>Role:</label> <input id="dispatch-role" value="artificer">\';\n' +
 '  html += \'<label>Complexity:</label> <input id="dispatch-complexity" placeholder="1 2 3 5 8 13 21" style="width:80px">\';\n' +
 '  if (specData.writId) {\n' +
@@ -1314,8 +1370,10 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '  if (action === "create-spec") {\n' +
 '    var brief = document.getElementById("new-brief").value.trim();\n' +
 '    var slug = document.getElementById("new-slug").value.trim();\n' +
+'    var codex = document.getElementById("new-codex").value.trim();\n' +
 '    if (!brief) return;\n' +
-'    api("POST", "/specs", { brief: brief, slug: slug }).then(function(result) {\n' +
+'    if (!codex) { alert("Codex is required"); return; }\n' +
+'    api("POST", "/specs", { brief: brief, slug: slug, codex: codex }).then(function(result) {\n' +
 '      if (result.slug) { location.hash = "#/" + result.slug; }\n' +
 '    });\n' +
 '  }\n' +
@@ -1376,15 +1434,13 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '  }\n' +
 '\n' +
 '  else if (action === "dispatch") {\n' +
-'    var codex = document.getElementById("dispatch-codex").value.trim();\n' +
 '    var role = document.getElementById("dispatch-role").value.trim();\n' +
 '    var complexity = document.getElementById("dispatch-complexity").value.trim();\n' +
-'    if (!codex) { alert("Codex is required"); return; }\n' +
 '    target.disabled = true;\n' +
 '    target.textContent = "Dispatching...";\n' +
 '    target.classList.remove("btn-green");\n' +
 '    target.classList.add("btn-dim");\n' +
-'    api("POST", "/specs/" + currentSlug + "/dispatch", { codex: codex, role: role, complexity: complexity }).then(function(r) {\n' +
+'    api("POST", "/specs/" + currentSlug + "/dispatch", { role: role, complexity: complexity }).then(function(r) {\n' +
 '      if (r.error) {\n' +
 '        alert("Dispatch failed: " + r.error);\n' +
 '        target.disabled = false;\n' +
