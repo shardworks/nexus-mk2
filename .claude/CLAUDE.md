@@ -23,8 +23,7 @@ nexus-mk2/  (the sanctum)
 │   └── archive/                 #   Completed commissions, deprecated docs
 ├── bin/                         # Shell scripts for operations
 │   ├── coco.sh                  #   Launch Coco session
-│   ├── inscribe.sh              #   Full inscription cycle: draft → summon → seal → push
-│   ├── commission.sh            #   Post a commission to the live guild
+│   ├── commission.sh            #   Post a commission to the Clerk (Spider dispatches)
 │   └── ...                      #   Other operational scripts (some legacy Mk 2.0)
 ├── .claude/                     # Claude Code agent configuration
 │   ├── CLAUDE.md                #   THIS FILE — shared instructions for all agents
