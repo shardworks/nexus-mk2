@@ -134,8 +134,12 @@ function onWritStatusChanged(
   switch (writ.status) {
     case 'completed':
     case 'failed':
-      // Trigger quality assessment on terminal states
-      triggerQualityReview(config, guildHome, writ);
+      // DISABLED: instrument runs paused pending cache-prefix unification
+      // (cost fix). All instrument inputs are back-fillable from git history
+      // + commission.md — no data loss from skipping.
+      // See: .scratch/todo/URGENT-unified-instrument-context.md
+      //
+      // triggerQualityReview(config, guildHome, writ);
       break;
 
     case 'active':
