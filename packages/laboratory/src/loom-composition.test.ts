@@ -197,10 +197,10 @@ describe('R6 — RoleDefinition type is unchanged', () => {
       roleDefBlock.includes('permissions'),
       'RoleDefinition must have a permissions field',
     );
-    // The strict field is optional but may be present
-    assert.ok(
-      !roleDefBlock.includes('instructions') || roleDefBlock.includes('strict'),
-      'RoleDefinition must not have an instructions or instructionsFile field (convention-based, not config)',
+    assert.equal(
+      roleDefBlock.includes('instructions'),
+      false,
+      'RoleDefinition must not have an instructions field (convention-based, not config)',
     );
   });
 
