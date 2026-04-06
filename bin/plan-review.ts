@@ -330,12 +330,12 @@ function computePipelineCosts(slug: string): PipelineCosts | null {
   const files = fs.readdirSync(transcriptDir).filter(f => f.endsWith('.jsonl')).sort();
   if (files.length === 0) return null;
 
-  const stepOrder = ['reader', 'analyst', 'analyst-cold', 'writer'];
+  const stepOrder = ['reader', 'reader-sonnet', 'analyst', 'analyst-cold', 'writer'];
 
   // Collect all transcript files grouped by step
   const stepFiles = new Map<string, string[]>();
   for (const f of files) {
-    const match = f.match(/^(reader|analyst-cold|analyst|writer)-(.+)\.jsonl$/);
+    const match = f.match(/^(reader-sonnet|reader|analyst-cold|analyst|writer)-(.+)\.jsonl$/);
     if (!match) continue;
     const step = match[1];
     if (!stepFiles.has(step)) stepFiles.set(step, []);
@@ -534,7 +534,7 @@ function sendSSE(slug: string, event: string, data: any): void {
 
 // ── Pipeline ──────────────────────────────────────────────────────────
 
-function runPipelineStep(slug: string, step: string, args: string[], prompt: string): void {
+function runPipelineStep(slug: string, step: string, args: string[], prompt: string, model: string = 'opus'): void {
   if (running.has(slug)) {
     console.log('[workshop] Already running a step for ' + slug);
     return;
@@ -565,7 +565,7 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
   const cliArgs = [
     '--print', '-',
     '--system-prompt-file', promptPath,
-    '--model', 'opus',
+    '--model', model,
     '--tools', 'Read,Glob,Grep,Write',
     '--setting-sources', 'user',
     '--permission-mode', 'acceptEdits',
@@ -636,29 +636,37 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     // so the same JSONL file grows across steps. We save a snapshot after each
     // step with a step prefix (e.g., reader-X.jsonl, analyst-X.jsonl).
     // Cost computation uses UUID-based dedup to attribute incremental costs.
+    //
+    // Only copy the transcript for the session ID this step actually used —
+    // the Claude projects dir may contain stale JSONL files from prior runs.
     try {
       const projectKey = cloneDir.replace(/\//g, '-');
       const claudeProjectDir = path.join(os.homedir(), '.claude', 'projects', projectKey);
       if (fs.existsSync(claudeProjectDir)) {
-        const transcriptDir = path.join(SPECS_DIR, slug, 'planner-transcripts');
-        fs.mkdirSync(transcriptDir, { recursive: true });
-        const jsonlFiles = fs.readdirSync(claudeProjectDir).filter(f => f.endsWith('.jsonl'));
-        let copied = 0;
-        for (const f of jsonlFiles) {
-          const sessionId = f.replace('.jsonl', '');
-          const dest = path.join(transcriptDir, step + '-' + sessionId + '.jsonl');
-          fs.copyFileSync(path.join(claudeProjectDir, f), dest);
-          copied++;
+        // Extract the session ID this step used from the CLI args
+        const sidIdx = cliArgs.indexOf('--session-id');
+        const resumeIdx = cliArgs.indexOf('--resume');
+        const activeSessionId = sidIdx !== -1 ? cliArgs[sidIdx + 1]
+          : resumeIdx !== -1 ? cliArgs[resumeIdx + 1]
+          : null;
 
-          // Record this step's session ID in meta
-          const updatedMeta = readMeta(slug);
-          if (!updatedMeta.sessions) updatedMeta.sessions = {};
-          updatedMeta.sessions[step] = sessionId;
-          writeMeta(slug, updatedMeta);
-          console.log('[workshop] Recorded session for ' + step + ': ' + sessionId);
-        }
-        if (copied > 0) {
-          console.log('[workshop] Saved ' + copied + ' transcript(s) for ' + step + '/' + slug);
+        if (activeSessionId) {
+          const transcriptDir = path.join(SPECS_DIR, slug, 'planner-transcripts');
+          fs.mkdirSync(transcriptDir, { recursive: true });
+          const src = path.join(claudeProjectDir, activeSessionId + '.jsonl');
+          if (fs.existsSync(src)) {
+            const dest = path.join(transcriptDir, step + '-' + activeSessionId + '.jsonl');
+            fs.copyFileSync(src, dest);
+
+            // Record this step's session ID in meta
+            const updatedMeta = readMeta(slug);
+            if (!updatedMeta.sessions) updatedMeta.sessions = {};
+            updatedMeta.sessions[step] = activeSessionId;
+            writeMeta(slug, updatedMeta);
+            console.log('[workshop] Saved transcript for ' + step + '/' + slug + ' (session ' + activeSessionId + ')');
+          } else {
+            console.warn('[workshop] No transcript found for session ' + activeSessionId);
+          }
         }
       }
     } catch (err: any) {
@@ -693,8 +701,7 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
   });
 }
 
-function startReader(slug: string, brief: string): void {
-  // Pre-create session ID for forking
+function startReader(slug: string, brief: string, model: string = 'opus'): void {
   const sessionId = crypto.randomUUID();
   const meta = readMeta(slug);
   meta.sessionId = sessionId;
@@ -702,9 +709,11 @@ function startReader(slug: string, brief: string): void {
   meta.sessions.reader = sessionId;
   writeMeta(slug, meta);
 
+  const step = model === 'opus' ? 'reader' : 'reader-' + model;
   const outputPath = path.join(SPECS_DIR, slug, 'inventory.md');
-  runPipelineStep(slug, 'reader', ['--session-id', sessionId],
-    'MODE: READER\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug + '\n\nFollowing your instructions, read the codebase and create an inventory at: ' + outputPath);
+  runPipelineStep(slug, step, ['--session-id', sessionId],
+    'MODE: READER\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug + '\n\nFollowing your instructions, read the codebase and create an inventory at: ' + outputPath,
+    model);
 }
 
 function startAnalyst(slug: string, brief: string): void {
@@ -899,6 +908,7 @@ const server = http.createServer(async (req, res) => {
       const brief = readSpecFile(slug, 'brief.md') ?? '';
 
       if (step === 'reader') startReader(slug, brief.trim());
+      else if (step === 'reader-sonnet') startReader(slug, brief.trim(), 'sonnet');
       else if (step === 'analyst') startAnalyst(slug, brief.trim());
       else if (step === 'analyst-cold') startAnalystCold(slug, brief.trim());
       else if (step === 'analyst-revise') {
@@ -1545,8 +1555,8 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '        else if (ws === "cancelled") { state = "failed"; statusText = "cancelled"; icon = "&#10007;"; }\n' +
 '        else { state = "done"; statusText = ws; icon = "&#10003;"; }\n' +
 '      }\n' +
-'    } else if (d.runningStep === s.key || (s.key === "analyst" && d.runningStep === "analyst-cold")) {\n' +
-'      state = "active"; statusText = d.runningStep === "analyst-cold" ? "running (cold)..." : "running..."; icon = "&#9672;";\n' +
+'    } else if (d.runningStep === s.key || (s.key === "analyst" && d.runningStep === "analyst-cold") || (s.key === "reader" && d.runningStep === "reader-sonnet")) {\n' +
+'      state = "active"; statusText = d.runningStep === "analyst-cold" ? "running (cold)..." : d.runningStep === "reader-sonnet" ? "running (sonnet)..." : "running..."; icon = "&#9672;";\n' +
 '    } else if (s.key === "review") {\n' +
 '      if (d.scope && d.decisions) { state = "done"; statusText = "ready"; icon = "&#10003;"; }\n' +
 '    } else if (s.file && d[s.key === "reader" ? "inventory" : s.key === "analyst" ? "scope" : "spec"]) {\n' +
@@ -1567,17 +1577,20 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '      }\n' +
 '    }\n' +
 '\n' +
-'    // Add "cold" button for analyst when inventory exists (run without reader context)\n' +
-'    var coldBtn = "";\n' +
+'    // Add variant buttons for testing\n' +
+'    var extraBtns = "";\n' +
+'    if (s.key === "reader" && d.brief && !d.runningStep) {\n' +
+'      extraBtns += \' <button class="btn btn-dim" data-action="run-step" data-step="reader-sonnet" title="Run reader with Sonnet model">sonnet</button>\';\n' +
+'    }\n' +
 '    if (s.key === "analyst" && d.inventory && !d.runningStep) {\n' +
-'      coldBtn = \' <button class="btn btn-dim" data-action="run-step" data-step="analyst-cold" title="Run analyst without reader context (fresh session)">cold</button>\';\n' +
+'      extraBtns += \' <button class="btn btn-dim" data-action="run-step" data-step="analyst-cold" title="Run analyst without reader context (fresh session)">cold</button>\';\n' +
 '    }\n' +
 '\n' +
 '    html += \'<div class="pipeline-step">\';\n' +
 '    html += \'<div class="step-indicator \' + state + \'">\' + icon + \'</div>\';\n' +
 '    html += \'<div class="step-name">\' + s.label + \'</div>\';\n' +
 '    html += \'<div class="step-status">\' + statusText + \'</div>\';\n' +
-'    html += \'<div class="step-actions">\' + actionBtn + coldBtn + \'</div>\';\n' +
+'    html += \'<div class="step-actions">\' + actionBtn + extraBtns + \'</div>\';\n' +
 '    html += \'</div>\';\n' +
 '  }\n' +
 '  html += \'</div>\';\n' +
