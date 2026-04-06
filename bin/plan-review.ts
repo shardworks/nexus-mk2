@@ -330,20 +330,20 @@ function computePipelineCosts(slug: string): PipelineCosts | null {
   const files = fs.readdirSync(transcriptDir).filter(f => f.endsWith('.jsonl')).sort();
   if (files.length === 0) return null;
 
-  const stepOrder = ['reader', 'analyst', 'writer'];
+  const stepOrder = ['reader', 'analyst', 'analyst-cold', 'writer'];
 
   // Collect all transcript files grouped by step
   const stepFiles = new Map<string, string[]>();
   for (const f of files) {
-    const match = f.match(/^(reader|analyst|writer)-(.+)\.jsonl$/);
+    const match = f.match(/^(reader|analyst-cold|analyst|writer)-(.+)\.jsonl$/);
     if (!match) continue;
     const step = match[1];
     if (!stepFiles.has(step)) stepFiles.set(step, []);
     stepFiles.get(step)!.push(f);
   }
 
-  // Process steps in order. Track seen message UUIDs to deduplicate forked sessions —
-  // a forked session's transcript contains the parent's messages with their usage blocks.
+  // Process steps in order. Track seen message UUIDs to deduplicate — all steps share
+  // one session, so each step's transcript snapshot is a superset of the previous.
   // We only count each message's tokens once, attributed to the step that first ran it.
   const seenUuids = new Set<string>();
   const stepTotals = new Map<string, StepCost>();
@@ -631,29 +631,21 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     console.log('[workshop] ' + step + ' for ' + slug + ' finished (code=' + code + ', ' + elapsed + 's)');
     sendSSE(slug, 'status', { step, state: code === 0 ? 'complete' : 'failed', elapsed, code });
 
-    // Copy session transcripts before cleaning up.
-    // Only copy files that are NEW to this step — skip transcripts already captured
-    // by previous steps (e.g., the reader's session file that's still in the project
-    // dir when the analyst runs via --fork-session).
+    // Copy session transcript snapshot for this step.
+    // All pipeline steps share a single session (--resume, no --fork-session),
+    // so the same JSONL file grows across steps. We save a snapshot after each
+    // step with a step prefix (e.g., reader-X.jsonl, analyst-X.jsonl).
+    // Cost computation uses UUID-based dedup to attribute incremental costs.
     try {
       const projectKey = cloneDir.replace(/\//g, '-');
       const claudeProjectDir = path.join(os.homedir(), '.claude', 'projects', projectKey);
       if (fs.existsSync(claudeProjectDir)) {
         const transcriptDir = path.join(SPECS_DIR, slug, 'planner-transcripts');
         fs.mkdirSync(transcriptDir, { recursive: true });
-        const existingSessionIds = new Set(
-          fs.readdirSync(transcriptDir)
-            .filter(f => f.endsWith('.jsonl'))
-            .map(f => f.replace(/^[a-z]+-/, '').replace('.jsonl', ''))
-        );
         const jsonlFiles = fs.readdirSync(claudeProjectDir).filter(f => f.endsWith('.jsonl'));
         let copied = 0;
         for (const f of jsonlFiles) {
           const sessionId = f.replace('.jsonl', '');
-          if (existingSessionIds.has(sessionId)) {
-            console.log('[workshop] Skipping already-captured transcript: ' + sessionId);
-            continue;
-          }
           const dest = path.join(transcriptDir, step + '-' + sessionId + '.jsonl');
           fs.copyFileSync(path.join(claudeProjectDir, f), dest);
           copied++;
@@ -720,7 +712,7 @@ function startAnalyst(slug: string, brief: string): void {
   const sessionId = meta.sessions?.reader ?? meta.sessionId ?? '';
   const specDir = path.join(SPECS_DIR, slug);
 
-  const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
+  const args = sessionId ? ['--resume', sessionId] : [];
 
   runPipelineStep(slug, 'analyst', args,
     'MODE: ANALYST\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
@@ -746,11 +738,11 @@ function startAnalystCold(slug: string, brief: string): void {
 
 function startAnalystRevise(slug: string, amendment: string): void {
   const meta = readMeta(slug);
-  const sessionId = meta.sessions?.analyst ?? meta.sessions?.reader ?? meta.sessionId ?? '';
+  const sessionId = meta.sessions?.reader ?? meta.sessionId ?? '';
   const specDir = path.join(SPECS_DIR, slug);
   const brief = readSpecFile(slug, 'brief.md') ?? '';
 
-  const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
+  const args = sessionId ? ['--resume', sessionId] : [];
 
   runPipelineStep(slug, 'analyst', args,
     'MODE: ANALYST-REVISE\n\nThe patron has reviewed your previous scope and decisions and has corrections.\n\n' +
@@ -764,10 +756,10 @@ function startAnalystRevise(slug: string, amendment: string): void {
 
 function startWriter(slug: string, brief: string): void {
   const meta = readMeta(slug);
-  const sessionId = meta.sessions?.analyst ?? meta.sessions?.reader ?? meta.sessionId ?? '';
+  const sessionId = meta.sessions?.reader ?? meta.sessionId ?? '';
   const specDir = path.join(SPECS_DIR, slug);
 
-  const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
+  const args = sessionId ? ['--resume', sessionId] : [];
 
   runPipelineStep(slug, 'writer', args,
     'MODE: WRITER\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
