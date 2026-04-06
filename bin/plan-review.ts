@@ -515,7 +515,7 @@ function sendSSE(slug: string, event: string, data: any): void {
 
 // ── Pipeline ──────────────────────────────────────────────────────────
 
-function runPipelineStep(slug: string, step: string, args: string[], prompt: string): void {
+function runPipelineStep(slug: string, step: string, args: string[], prompt: string, promptFile?: string): void {
   if (running.has(slug)) {
     console.log('[workshop] Already running a step for ' + slug);
     return;
@@ -541,7 +541,7 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     return;
   }
 
-  const promptPath = path.join(PROJECT_ROOT, 'bin', 'plan-prompts', step + '.md');
+  const promptPath = path.join(PROJECT_ROOT, 'bin', 'plan-prompts', (promptFile ?? step) + '.md');
 
   const cliArgs = [
     '--print', '-',
@@ -687,6 +687,25 @@ function startAnalyst(slug: string, brief: string): void {
     '\n- ' + path.join(specDir, 'scope.yaml') +
     '\n- ' + path.join(specDir, 'decisions.yaml') +
     '\n- ' + path.join(specDir, 'observations.md'));
+}
+
+function startAnalystRevise(slug: string, amendment: string): void {
+  const meta = readMeta(slug);
+  const sessionId = meta.sessionId ?? '';
+  const specDir = path.join(SPECS_DIR, slug);
+  const brief = readSpecFile(slug, 'brief.md') ?? '';
+
+  const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
+
+  runPipelineStep(slug, 'analyst', args,
+    'You are in REVISION MODE. The patron has reviewed your previous scope and decisions and has corrections.\n\n' +
+    '## Original Brief\n\n' + brief.trim() + '\n\n' +
+    '## Patron\'s Amendment\n\n' + amendment + '\n\n---\n\n' +
+    'Read your previous output files, apply the patron\'s feedback, and rewrite them:' +
+    '\n- ' + path.join(specDir, 'scope.yaml') +
+    '\n- ' + path.join(specDir, 'decisions.yaml') +
+    '\n- ' + path.join(specDir, 'observations.md'),
+    'analyst-revise');
 }
 
 function startWriter(slug: string, brief: string): void {
@@ -835,6 +854,12 @@ const server = http.createServer(async (req, res) => {
 
       if (step === 'reader') startReader(slug, brief.trim());
       else if (step === 'analyst') startAnalyst(slug, brief.trim());
+      else if (step === 'analyst-revise') {
+        const body = JSON.parse(await readBody(req));
+        const amendment = body.amendment;
+        if (!amendment) return jsonResponse(res, { error: 'amendment text required' }, 400);
+        startAnalystRevise(slug, amendment);
+      }
       else if (step === 'writer') startWriter(slug, brief.trim());
       else return jsonResponse(res, { error: 'unknown step' }, 400);
 
@@ -1141,6 +1166,19 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '.elapsed { color: var(--text-dim); font-size: 12px; margin-top: 8px; }\n' +
 '\n' +
 '/* ── Cost card ── */\n' +
+'/* ── Amendment section ── */\n' +
+'.amendment-section { margin-bottom: 16px; }\n' +
+'.amendment-toggle { font-size: 12px; color: var(--text-dim); cursor: pointer;\n' +
+'  user-select: none; padding: 6px 0; }\n' +
+'.amendment-toggle:hover { color: var(--cyan); }\n' +
+'.amendment-toggle.open { color: var(--cyan); }\n' +
+'.amendment-body { margin-top: 8px; }\n' +
+'.amendment-hint { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; line-height: 1.5; }\n' +
+'.amendment-textarea { width: 100%; min-height: 80px; padding: 10px 12px; background: var(--bg);\n' +
+'  border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: inherit;\n' +
+'  font-size: 13px; resize: vertical; outline: none; margin-bottom: 8px; box-sizing: border-box; }\n' +
+'.amendment-textarea:focus { border-color: var(--cyan); }\n' +
+'\n' +
 '.cost-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;\n' +
 '  padding: 16px; margin-top: 16px; }\n' +
 '.cost-card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;\n' +
@@ -1587,6 +1625,15 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    return hasScope;\n' +
 '  });\n' +
 '\n' +
+'  // Amendment section\n' +
+'  html += \'<div class="amendment-section">\';\n' +
+'  html += \'<div class="amendment-toggle" data-action="toggle-amendment">&#9656; Amend analysis</div>\';\n' +
+'  html += \'<div class="amendment-body" id="amendment-body" style="display:none;">\';\n' +
+'  html += \'<div class="amendment-hint">Describe what the analyst got wrong — wrong assumptions, missing context, or misdirected framing. The analyst will revise scope and decisions in light of your feedback.</div>\';\n' +
+'  html += \'<textarea id="amendment-text" class="amendment-textarea" placeholder="The analyst assumed X, but actually Y. This means..."></textarea>\';\n' +
+'  html += \'<button class="btn btn-primary" data-action="submit-amendment">Revise &#8594;</button>\';\n' +
+'  html += \'</div></div>\';\n' +
+'\n' +
 '  if (decisions.length === 0) {\n' +
 '    html += \'<div class="empty">No decisions match filters.</div>\';\n' +
 '    return html;\n' +
@@ -1807,6 +1854,27 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '        renderDetail();\n' +
 '      });\n' +
 '    }\n' +
+'  }\n' +
+'\n' +
+'  else if (action === "toggle-amendment") {\n' +
+'    var body = document.getElementById("amendment-body");\n' +
+'    var isOpen = body.style.display !== "none";\n' +
+'    body.style.display = isOpen ? "none" : "block";\n' +
+'    target.innerHTML = isOpen ? "&#9656; Amend analysis" : "&#9662; Amend analysis";\n' +
+'    target.classList.toggle("open", !isOpen);\n' +
+'  }\n' +
+'\n' +
+'  else if (action === "submit-amendment") {\n' +
+'    var text = document.getElementById("amendment-text").value.trim();\n' +
+'    if (!text) { alert("Write your amendment first"); return; }\n' +
+'    logLines = [];\n' +
+'    api("POST", "/specs/" + currentSlug + "/pipeline/analyst-revise", { amendment: text }).then(function() {\n' +
+'      api("GET", "/specs/" + currentSlug).then(function(d) {\n' +
+'        specData = d;\n' +
+'        currentTab = "pipeline";\n' +
+'        renderDetail();\n' +
+'      });\n' +
+'    });\n' +
 '  }\n' +
 '\n' +
 '  else if (action === "toggle-explain") {\n' +
