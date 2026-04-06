@@ -133,6 +133,10 @@ The goal is a complete register where the downstream spec writer makes **zero** 
 - `medium` — there's precedent but it's not perfectly analogous, or the brief is ambiguous. The recommendation is defensible but debatable.
 - `low` — genuine ambiguity. Multiple options are equally valid. The patron should weigh in.
 
+**`stakes`** (high / low) — How much would a consumer of this feature/API notice or care if a different option were picked?
+- `high` — the choice materially affects the consumer experience: API ergonomics, runtime behavior, error handling semantics, performance characteristics, or operator workflow. Picking wrong here creates real friction.
+- `low` — either option works. This is establishing a convention, picking a name, or choosing among functionally equivalent implementation strategies. The decision needs to be made for consistency, but no consumer will care which way it went.
+
 **`audience`** — Who is affected by this decision? One or more of:
 - `patron` — affects product behavior, feature semantics, or what the patron would recognize as "how the feature works"
 - `author` — affects the API surface for plugin authors writing against the framework, or framework developers working on packages other than where the decision was surfaced
@@ -158,6 +162,7 @@ decisions:
       observable: true
       recommendation: a
       rationale: "{why this option — one line}"
+      stakes: high
 
   - id: D2
     scope: [S1, S3]
@@ -173,6 +178,7 @@ decisions:
       observable: false
       recommendation: b
       rationale: "{...}"
+      stakes: low
 ```
 
 Rules:

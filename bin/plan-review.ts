@@ -1286,6 +1286,9 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '.conf-badge.high { background: rgba(158,206,106,0.15); color: var(--green); }\n' +
 '.conf-badge.medium { background: rgba(224,175,104,0.15); color: var(--yellow); }\n' +
 '.conf-badge.low { background: rgba(247,118,142,0.15); color: var(--red); }\n' +
+'.stakes-badge { font-size: 10px; padding: 2px 6px; border-radius: 8px; font-weight: 500; flex-shrink: 0; margin-left: 4px; }\n' +
+'.stakes-badge.high { background: rgba(247,118,142,0.12); color: var(--red); }\n' +
+'.stakes-badge.low { background: rgba(169,177,214,0.12); color: var(--text-dim); }\n' +
 '.decision-options { padding: 0 16px 12px; }\n' +
 '.option { display: flex; align-items: flex-start; gap: 10px; padding: 8px 12px;\n' +
 '  border-radius: 6px; cursor: pointer; transition: background 0.1s; margin-bottom: 2px; }\n' +
@@ -1343,7 +1346,7 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 'var evtSource = null;\n' +
 'var logLines = [];\n' +
 'var elapsedTimer = null;\n' +
-'var filters = { patron: true, author: true, operator: true, implementer: false, showAll: false };\n' +
+'var filters = { patron: true, author: true, operator: true, implementer: false, showAll: false, hideBikesheds: false };\n' +
 'var codexList = [];\n' +
 'var writList = [];\n' +
 'api("GET", "/codexes").then(function(c) { codexList = c || []; });\n' +
@@ -1677,8 +1680,10 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    var on = filters[aud] ? " on" : "";\n' +
 '    html += \'<div class="filter-chip\' + on + \'" data-action="toggle-filter" data-cat="\' + aud + \'">\' + aud + \'</div>\';\n' +
 '  }\n' +
+'  var bikeOn = filters.hideBikesheds ? " on" : "";\n' +
+'  html += \'<div class="filter-chip\' + bikeOn + \'" data-action="toggle-filter" data-cat="hideBikesheds" style="margin-left:8px;">hide bikesheds</div>\';\n' +
 '  var allOn = filters.showAll ? " on" : "";\n' +
-'  html += \'<div class="filter-chip\' + allOn + \'" data-action="toggle-filter" data-cat="showAll" style="margin-left:8px;">show all</div>\';\n' +
+'  html += \'<div class="filter-chip\' + allOn + \'" data-action="toggle-filter" data-cat="showAll">show all</div>\';\n' +
 '  html += \'</div>\';\n' +
 '\n' +
 '  var excluded = {};\n' +
@@ -1690,8 +1695,9 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '  var decisions = allDecisions.filter(function(d) {\n' +
 '    var hasScope = d.scope.some(function(s) { return !excluded[s]; });\n' +
 '    if (!hasScope) return false;\n' +
-'    if (filters.showAll) return true;\n' +
 '    var a = d.analysis || {};\n' +
+'    if (filters.hideBikesheds && (a.stakes === "low")) return false;\n' +
+'    if (filters.showAll) return true;\n' +
 '    var audience = a.audience || [];\n' +
 '    var matchesAudience = audience.some(function(aud) { return filters[aud]; });\n' +
 '    if (matchesAudience) return true;\n' +
@@ -1724,7 +1730,9 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '      html += \'<span class="aud-badge \' + audience[ai] + \'">\' + esc(audience[ai]) + \'</span>\';\n' +
 '    }\n' +
 '    html += \'<div class="decision-question">\' + esc(d.question) + \'</div>\';\n' +
+'    var stk = a.stakes || "high";\n' +
 '    html += \'<span class="conf-badge \' + (a.confidence || "medium") + \'">\' + esc(a.confidence || "medium") + \'</span>\';\n' +
+'    html += \'<span class="stakes-badge \' + stk + \'">\' + (stk === "low" ? "bikeshed" : "stakes: high") + \'</span>\';\n' +
 '    html += \'</div><div class="decision-options">\';\n' +
 '\n' +
 '    for (var oi = 0; oi < optionKeys.length; oi++) {\n' +
@@ -1751,7 +1759,7 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    html += \'<div class="explain-toggle" data-action="toggle-explain">&#9656; explain</div>\';\n' +
 '    html += \'<div class="explain-content">\';\n' +
 '    if (a.context) { html += \'<div class="explain-label">Context</div>\'; html += \'<div class="explain-text">\' + esc(a.context) + \'</div>\'; }\n' +
-'    html += \'<div class="explain-label">Analyst recommendation: \' + esc(a.recommendation || d.selected) + \' (confidence: \' + esc(a.confidence || "medium") + \')</div>\';\n' +
+'    html += \'<div class="explain-label">Analyst recommendation: \' + esc(a.recommendation || d.selected) + \' (confidence: \' + esc(a.confidence || "medium") + \', stakes: \' + esc(a.stakes || "high") + \')</div>\';\n' +
 '    if (a.rationale) { html += \'<div class="explain-text rationale">\' + esc(a.rationale) + \'</div>\'; }\n' +
 '    html += \'</div></div>\';\n' +
 '  }\n' +
