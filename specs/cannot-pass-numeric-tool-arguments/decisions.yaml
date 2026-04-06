@@ -1,0 +1,162 @@
+decisions:
+  - id: D1
+    scope: [S1]
+    question: "What API shape should the coercion take — a single coerceParams(shape, opts) function, or a per-field isNumberSchema() detector paired with inline coercion in program.ts?"
+    options:
+      a: "A single coerceCliOpts(shape, opts) function in helpers.ts that walks the shape, detects number schemas, and returns a new opts object with strings coerced to numbers"
+      b: "An isNumberSchema(schema) detector in helpers.ts (parallel to isBooleanSchema), with coercion logic inline in buildToolCommand's action handler"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The coercion is a self-contained transform: take the Zod shape + raw Commander opts, return typed opts. A single function keeps the logic in one place and is easier to test than spreading detection and conversion across two files."
+      observable: false
+      recommendation: a
+      rationale: "Single function is simpler to test and keeps all coercion logic co-located in helpers.ts."
+      stakes: low
+
+  - id: D2
+    scope: [S1]
+    question: "How should number schemas be detected — behavioral probing (safeParse) like isBooleanSchema, or instanceof checks like tools-show.ts?"
+    options:
+      a: "Behavioral probing: schema.safeParse(42).success && !schema.safeParse('hello').success && !schema.safeParse(true).success"
+      b: "instanceof unwrapping: peel ZodOptional/ZodDefault wrappers, then check instanceof z.ZodNumber"
+    selected: b
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The codebase uses both approaches. Behavioral probing (isBooleanSchema) is resilient to Zod version changes but is imprecise — a union type accepting numbers could match. instanceof unwrapping (tools-show.ts extractSingleParam/zodTypeToJsonType) is precise and already proven in the codebase. For coercion, precision matters — we only want to convert strings when the inner type is definitely ZodNumber."
+      observable: false
+      recommendation: b
+      rationale: "instanceof is precise and already proven in the codebase (tools-show.ts). Coercion must not accidentally convert strings intended for other schema types."
+      stakes: low
+
+  - id: D3
+    scope: [S1]
+    question: "What conversion function should be used — Number(value), parseFloat(value), or parseInt(value, 10)?"
+    options:
+      a: "Number(value) — handles integers, floats, Infinity, and produces NaN for non-numeric strings"
+      b: "parseFloat(value) — handles integers and floats but parses partial strings ('123abc' → 123)"
+      c: "parseInt(value, 10) — integers only, ignores decimals"
+    selected: a
+    analysis:
+      audience: [patron, operator]
+      confidence: high
+      context: "Tool schemas use z.number() which accepts any finite number (int or float). Number() is the most faithful conversion — it rejects partial strings ('123abc' → NaN) which Zod will then report as an invalid number. parseFloat would silently accept '123abc' as 123, hiding user typos."
+      observable: true
+      recommendation: a
+      rationale: "Number() is strict (rejects partial numeric strings) and handles both int and float, matching z.number() semantics."
+      stakes: low
+
+  - id: D4
+    scope: [S1]
+    question: "Should the coercion function handle only numbers, or also future-proof for other types (arrays, objects, etc.)?"
+    options:
+      a: "Handle only numbers — booleans are already handled at registration time, strings pass through naturally, other types can be added later"
+      b: "Build a general-purpose type coercion framework that handles numbers now and is structured for future type additions"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The only broken type today is z.number(). Booleans already work via Commander flag registration. Strings and enums work naturally. No tool currently uses z.array() or z.object() params. YAGNI applies — building generalized infrastructure for hypothetical future types adds complexity with no current payoff."
+      observable: false
+      recommendation: a
+      rationale: "Only numbers are broken. Solve the actual bug; don't build speculative infrastructure."
+      stakes: low
+
+  - id: D5
+    scope: [S1]
+    question: "Should the coercion function also handle undefined values, or pass them through?"
+    options:
+      a: "Pass undefined through unchanged — Zod's parse handles optional/default semantics"
+      b: "Strip undefined keys from the opts object before passing to Zod"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "Zod's .optional() and .default() already handle undefined correctly. Commander produces undefined for omitted optional flags. The current code passes undefined through successfully for string/boolean params. No reason to change this for numbers."
+      observable: false
+      recommendation: a
+      rationale: "Existing behavior for undefined is correct. Don't change what works."
+      stakes: low
+
+  - id: D6
+    scope: [S1]
+    question: "Where in buildToolCommand should coercion be applied — before toolDef.params.parse(opts), or should Commander's argParser option be used per-flag?"
+    options:
+      a: "Coerce the full opts object before toolDef.params.parse(opts) — a single coercion pass over all keys"
+      b: "Use Commander's option() argParser callback to convert numeric flags at parse time: cmd.option('--limit <value>', desc, Number)"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: medium
+      context: "Commander supports per-option argParser callbacks, which would convert at the source. However, this requires detecting number schemas during the option registration loop (lines 47-58 in program.ts) and passing a converter. A post-parse coercion pass is simpler — it touches one insertion point rather than weaving into the option registration conditionals. Both work correctly."
+      observable: false
+      recommendation: a
+      rationale: "Single coercion pass before parse() is simpler and keeps all type conversion logic in one place rather than mixing it with Commander registration."
+      stakes: low
+
+  - id: D7
+    scope: [S1]
+    question: "Should the opts type annotation on the action handler change?"
+    options:
+      a: "Change from Record<string, string | undefined> to Record<string, unknown> since the coerced object contains mixed types"
+      b: "Keep Record<string, string | undefined> on the Commander callback, type the coerced result separately"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "After coercion, the object contains strings, numbers, booleans, and undefined. Record<string, unknown> accurately reflects this. Zod's parse() accepts unknown input anyway. The type annotation on Commander's action is advisory — Commander doesn't enforce it."
+      observable: false
+      recommendation: a
+      rationale: "Record<string, unknown> is accurate post-coercion and matches what Zod's parse() accepts."
+      stakes: low
+
+  - id: D8
+    scope: [S1]
+    question: "Should the coercion function live in helpers.ts or in a new file?"
+    options:
+      a: "Add to helpers.ts alongside isBooleanSchema, toFlag, findGroupPrefixes"
+      b: "Create a new file like coerce.ts"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "helpers.ts is 55 lines and described as 'Pure helper functions for CLI command generation.' A coercion function fits this description exactly. The file is small enough that adding one function doesn't warrant a new module."
+      observable: false
+      recommendation: a
+      rationale: "helpers.ts exists for exactly this purpose and is small. No need for a new file."
+      stakes: low
+
+  - id: D9
+    scope: [S2]
+    question: "What test cases should cover the coercion helper?"
+    options:
+      a: "Test the coercion function in isolation with synthetic Zod shapes — numeric string coercion, non-numeric string rejection (NaN), undefined pass-through, string params left alone, boolean params left alone, mixed shapes"
+      b: "Test end-to-end through buildToolCommand with Commander parsing"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The existing test file tests helpers in isolation — toFlag, isBooleanSchema, findGroupPrefixes are all tested with direct calls, no Commander involved. buildToolCommand is not tested end-to-end (would require heavy mocking). Following the established pattern, test the coercion function directly."
+      observable: false
+      recommendation: a
+      rationale: "Follow the established pattern — test pure helper functions in isolation. buildToolCommand integration testing is out of scope."
+      stakes: low
+
+  - id: D10
+    scope: [S1]
+    question: "What should the coercion function's name be?"
+    options:
+      a: "coerceCliOpts"
+      b: "coerceParams"
+      c: "coerceOptsForSchema"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: medium
+      context: "The function is CLI-specific — it converts Commander string opts to match a Zod shape. 'coerceCliOpts' makes the CLI context explicit. 'coerceParams' is shorter but could be confused with Zod's own coerce mechanism. 'coerceOptsForSchema' is descriptive but verbose."
+      observable: false
+      recommendation: a
+      rationale: "'coerceCliOpts' is clear about what it does and where it's used. Distinguishes from Zod's own coerce."
+      stakes: low
