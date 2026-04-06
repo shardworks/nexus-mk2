@@ -300,9 +300,11 @@ function readSpecFile(slug: string, filename: string): string | null {
 // ── Pipeline Cost Tracking ───────────────────────────────────────────
 
 // Anthropic pricing per million tokens
+const SONNET_PRICING = { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30 };
 const MODEL_PRICING: Record<string, { input: number; output: number; cacheWrite: number; cacheRead: number }> = {
-  'claude-opus-4-6':         { input: 15,  output: 75,  cacheWrite: 18.75, cacheRead: 1.875 },
-  'claude-sonnet-4-20250514': { input: 3,   output: 15,  cacheWrite: 3.75,  cacheRead: 0.30 },
+  'claude-opus-4-6':          { input: 15,  output: 75,  cacheWrite: 18.75, cacheRead: 1.875 },
+  'claude-sonnet-4-20250514': SONNET_PRICING,
+  'claude-sonnet-4-6':        SONNET_PRICING,
 };
 const DEFAULT_PRICING = MODEL_PRICING['claude-opus-4-6'];
 
@@ -1275,10 +1277,11 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '  margin-bottom: 12px; overflow: hidden; }\n' +
 '.decision-header { padding: 12px 16px; display: flex; align-items: flex-start; gap: 10px; }\n' +
 '.decision-question { flex: 1; font-weight: 500; color: var(--text-bright); }\n' +
-'.cat-badge { font-size: 11px; padding: 2px 8px; border-radius: 8px; font-weight: 500; flex-shrink: 0; }\n' +
-'.cat-badge.product { background: rgba(158,206,106,0.15); color: var(--green); }\n' +
-'.cat-badge.api { background: rgba(125,207,255,0.15); color: var(--cyan); }\n' +
-'.cat-badge.implementation { background: rgba(224,175,104,0.15); color: var(--yellow); }\n' +
+'.aud-badge { font-size: 11px; padding: 2px 6px; border-radius: 8px; font-weight: 500; flex-shrink: 0; margin-right: 3px; }\n' +
+'.aud-badge.patron { background: rgba(158,206,106,0.15); color: var(--green); }\n' +
+'.aud-badge.author { background: rgba(125,207,255,0.15); color: var(--cyan); }\n' +
+'.aud-badge.operator { background: rgba(187,154,247,0.15); color: var(--purple); }\n' +
+'.aud-badge.implementer { background: rgba(224,175,104,0.15); color: var(--yellow); }\n' +
 '.conf-badge { font-size: 11px; padding: 2px 8px; border-radius: 8px; font-weight: 500; flex-shrink: 0; }\n' +
 '.conf-badge.high { background: rgba(158,206,106,0.15); color: var(--green); }\n' +
 '.conf-badge.medium { background: rgba(224,175,104,0.15); color: var(--yellow); }\n' +
@@ -1340,7 +1343,7 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 'var evtSource = null;\n' +
 'var logLines = [];\n' +
 'var elapsedTimer = null;\n' +
-'var filters = { product: true, api: true, implementation: true };\n' +
+'var filters = { patron: true, author: true, operator: true, implementer: false, showAll: false };\n' +
 'var codexList = [];\n' +
 'var writList = [];\n' +
 'api("GET", "/codexes").then(function(c) { codexList = c || []; });\n' +
@@ -1667,13 +1670,15 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '  if (!specData.decisions) return \'<div class="empty">No decisions.yaml yet. Run the analyst first.</div>\';\n' +
 '\n' +
 '  var html = \'<div class="filters">\';\n' +
-'  html += \'<span>Show:</span>\';\n' +
-'  var cats = ["product", "api", "implementation"];\n' +
-'  for (var ci = 0; ci < cats.length; ci++) {\n' +
-'    var cat = cats[ci];\n' +
-'    var on = filters[cat] ? " on" : "";\n' +
-'    html += \'<div class="filter-chip\' + on + \'" data-action="toggle-filter" data-cat="\' + cat + \'">\' + cat + \'</div>\';\n' +
+'  html += \'<span>Audience:</span>\';\n' +
+'  var auds = ["patron", "author", "operator", "implementer"];\n' +
+'  for (var ci = 0; ci < auds.length; ci++) {\n' +
+'    var aud = auds[ci];\n' +
+'    var on = filters[aud] ? " on" : "";\n' +
+'    html += \'<div class="filter-chip\' + on + \'" data-action="toggle-filter" data-cat="\' + aud + \'">\' + aud + \'</div>\';\n' +
 '  }\n' +
+'  var allOn = filters.showAll ? " on" : "";\n' +
+'  html += \'<div class="filter-chip\' + allOn + \'" data-action="toggle-filter" data-cat="showAll" style="margin-left:8px;">show all</div>\';\n' +
 '  html += \'</div>\';\n' +
 '\n' +
 '  var excluded = {};\n' +
@@ -1681,11 +1686,17 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    specData.scope.scope.forEach(function(s) { if (!s.included) excluded[s.id] = true; });\n' +
 '  }\n' +
 '\n' +
-'  var decisions = specData.decisions.decisions.filter(function(d) {\n' +
-'    if (!d.observable) return false;\n' +
-'    if (!filters[d.category]) return false;\n' +
+'  var allDecisions = specData.decisions.decisions;\n' +
+'  var decisions = allDecisions.filter(function(d) {\n' +
 '    var hasScope = d.scope.some(function(s) { return !excluded[s]; });\n' +
-'    return hasScope;\n' +
+'    if (!hasScope) return false;\n' +
+'    if (filters.showAll) return true;\n' +
+'    var a = d.analysis || {};\n' +
+'    var audience = a.audience || [];\n' +
+'    var matchesAudience = audience.some(function(aud) { return filters[aud]; });\n' +
+'    if (matchesAudience) return true;\n' +
+'    if (a.confidence === "low") return true;\n' +
+'    return false;\n' +
 '  });\n' +
 '\n' +
 '  // Amendment section\n' +
@@ -1706,10 +1717,14 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    var d = decisions[di];\n' +
 '    var optionKeys = Object.keys(d.options);\n' +
 '    html += \'<div class="decision" data-id="\' + escAttr(d.id) + \'">\';\n' +
+'    var a = d.analysis || {};\n' +
 '    html += \'<div class="decision-header">\';\n' +
-'    html += \'<span class="cat-badge \' + d.category + \'">\' + esc(d.category) + \'</span>\';\n' +
+'    var audience = a.audience || [];\n' +
+'    for (var ai = 0; ai < audience.length; ai++) {\n' +
+'      html += \'<span class="aud-badge \' + audience[ai] + \'">\' + esc(audience[ai]) + \'</span>\';\n' +
+'    }\n' +
 '    html += \'<div class="decision-question">\' + esc(d.question) + \'</div>\';\n' +
-'    html += \'<span class="conf-badge \' + d.analysis.confidence + \'">\' + esc(d.analysis.confidence) + \'</span>\';\n' +
+'    html += \'<span class="conf-badge \' + (a.confidence || "medium") + \'">\' + esc(a.confidence || "medium") + \'</span>\';\n' +
 '    html += \'</div><div class="decision-options">\';\n' +
 '\n' +
 '    for (var oi = 0; oi < optionKeys.length; oi++) {\n' +
@@ -1735,10 +1750,9 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '\n' +
 '    html += \'<div class="explain-toggle" data-action="toggle-explain">&#9656; explain</div>\';\n' +
 '    html += \'<div class="explain-content">\';\n' +
-'    html += \'<div class="explain-label">Context</div>\';\n' +
-'    html += \'<div class="explain-text">\' + esc(d.context) + \'</div>\';\n' +
-'    html += \'<div class="explain-label">Analyst recommendation: \' + esc(d.analysis.recommendation) + \' (confidence: \' + esc(d.analysis.confidence) + \')</div>\';\n' +
-'    html += \'<div class="explain-text rationale">\' + esc(d.analysis.rationale) + \'</div>\';\n' +
+'    if (a.context) { html += \'<div class="explain-label">Context</div>\'; html += \'<div class="explain-text">\' + esc(a.context) + \'</div>\'; }\n' +
+'    html += \'<div class="explain-label">Analyst recommendation: \' + esc(a.recommendation || d.selected) + \' (confidence: \' + esc(a.confidence || "medium") + \')</div>\';\n' +
+'    if (a.rationale) { html += \'<div class="explain-text rationale">\' + esc(a.rationale) + \'</div>\'; }\n' +
 '    html += \'</div></div>\';\n' +
 '  }\n' +
 '  return html;\n' +
