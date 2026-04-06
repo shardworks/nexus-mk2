@@ -573,7 +573,7 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     '--setting-sources', 'user',
     '--permission-mode', 'acceptEdits',
     '--add-dir', SPECS_DIR,
-    '--max-budget-usd', step === 'writer' ? '5' : '3',
+    '--max-budget-usd', step === 'analyst' ? '15' : step === 'writer' ? '5' : '3',
     ...args,
   ];
 
