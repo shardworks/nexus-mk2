@@ -73,6 +73,10 @@ Update the index in the same commit as the experiment change. Don't let it drift
 
 When collaborating on content (documents, philosophy, specs, plans), draft it in `.scratch/` first. This gives Sean a navigable file he can annotate and review in his editor, rather than trying to collaborate inline in chat. Once the content is finalized, move it to its permanent location. **When publishing a draft to its permanent location, delete the scratch file.** Don't let `.scratch/` accumulate stale drafts.
 
+### Capturing Todos
+
+When we table an item for later but want to preserve the spec, analysis, or thinking done so far, store it in `.scratch/todo/`. Use a descriptive slug filename (e.g., `qs2-structured-concern-list.md`). These are not drafts heading toward a permanent location — they're parking spots for work-in-progress that we want to pick back up later.
+
 ### Transcript Capture
 
 When Sean provides feedback on draft documents (via file edits, annotations, or out-of-band comments), restate a summary of that feedback in your chat response. Use Sean's direct words as much as possible. This "states it for the record" — ensuring the substance of the feedback appears in the transcript where Scribe can capture it, even when the collaboration itself happened in external files.

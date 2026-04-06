@@ -32,7 +32,8 @@ nexus-mk2/  (the sanctum)
 │   └── worktrees/               #   Snapshot of old worktree state (historical)
 ├── .artifacts/                  # Build & assessment artifacts (JSON, timestamped)
 ├── .scratch/                    # Ephemeral working space
-│   └── recent-sessions/         #   Coco session summaries (read at startup for continuity)
+│   ├── recent-sessions/         #   Coco session summaries (read at startup for continuity)
+│   └── todo/                    #   Tabled items: parked specs/analysis to pick up later
 └── .locks/                      # Feature locks for concurrent agent coordination
 ```
 
