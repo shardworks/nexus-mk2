@@ -483,7 +483,8 @@ function getSpecData(slug: string): Record<string, any> {
   // Read meta
   const meta = readMeta(slug);
   if (meta.codex) data.codex = meta.codex;
-  if (meta.sessionId) data.readerSessionId = meta.sessionId;
+  const sid = meta.sessions?.reader ?? meta.sessionId;
+  if (sid) data.readerSessionId = sid;
   if (meta.writId) {
     data.writId = meta.writId;
     const writ = getWritSync(meta.writId);
@@ -553,7 +554,7 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
 
   let cloneDir: string;
   try {
-    cloneDir = cloneCodex(codexName, meta.sessionId);
+    cloneDir = cloneCodex(codexName, meta.sessions?.reader ?? meta.sessionId);
   } catch (err: any) {
     console.error('[workshop] Clone failed for ' + codexName + ': ' + err.message);
     sendSSE(slug, 'status', { step, state: 'failed', error: 'clone failed: ' + err.message });
@@ -704,14 +705,15 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
 function startReader(slug: string, brief: string): void {
   const sessionId = crypto.randomUUID();
   const meta = readMeta(slug);
-  meta.sessionId = sessionId;
   if (!meta.sessions) meta.sessions = {};
   meta.sessions.reader = sessionId;
   writeMeta(slug, meta);
 
   const outputPath = path.join(SPECS_DIR, slug, 'inventory.md');
   runPipelineStep(slug, 'reader', ['--session-id', sessionId],
-    'MODE: READER\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug + '\n\nFollowing your instructions, read the codebase and create an inventory at: ' + outputPath,
+    'MODE: READER\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
+    '\n\nThe codebase is in your current working directory. Start by exploring it with Glob and Read.' +
+    '\n\nFollowing your instructions, create an inventory at: ' + outputPath,
     'sonnet');
 }
 
