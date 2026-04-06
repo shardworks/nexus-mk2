@@ -66,5 +66,5 @@ Check for things Sean should be nudged about:
 - Write the summary to `.scratch/recent-sessions/<timestamp>.md`, where `<timestamp>` is the current date and time formatted as `YYYY-MM-DDTHHMMSS.md` (use the actual current time — don't round to the nearest hour). Each session gets its own file — never overwrite a previous one.
 - **Also write a copy** to `experiments/ethnography/session-notes/new/<timestamp>.md`. This copy is for the ethnographer and must NOT be auto-deleted — it accumulates until the ethnographer reviews it.
 - After writing, check `.scratch/recent-sessions/`: if there are more than 4 files, delete the oldest ones to keep only the 4 most recent. Do NOT trim the `session-notes/new/` copy.
-- Commit all `recent-sessions` and `session-notes` changes to git and push those changes.
+- Commit all `recent-sessions`, `session-notes`, and `experiments/data/transcripts/` changes to git and push those changes. The transcripts directory may contain files from concurrent sessions — commit whatever is there.
 - In addition to writing the summary, share it in the chat for review and inclusion in session transcripts
