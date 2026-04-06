@@ -332,12 +332,12 @@ function computePipelineCosts(slug: string): PipelineCosts | null {
   const files = fs.readdirSync(transcriptDir).filter(f => f.endsWith('.jsonl')).sort();
   if (files.length === 0) return null;
 
-  const stepOrder = ['reader', 'analyst', 'analyst-cold', 'writer'];
+  const stepOrder = ['reader', 'analyst', 'writer'];
 
   // Collect all transcript files grouped by step
   const stepFiles = new Map<string, string[]>();
   for (const f of files) {
-    const match = f.match(/^(reader|analyst-cold|analyst|writer)-(.+)\.jsonl$/);
+    const match = f.match(/^(reader|analyst|writer)-(.+)\.jsonl$/);
     if (!match) continue;
     const step = match[1];
     if (!stepFiles.has(step)) stepFiles.set(step, []);
@@ -735,19 +735,6 @@ function startAnalyst(slug: string, brief: string): void {
     '\n- ' + path.join(specDir, 'observations.md'));
 }
 
-function startAnalystCold(slug: string, brief: string): void {
-  const specDir = path.join(SPECS_DIR, slug);
-  const sessionId = crypto.randomUUID();
-
-  runPipelineStep(slug, 'analyst-cold', ['--session-id', sessionId],
-    'MODE: ANALYST\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
-    '\n\nThe inventory has been written. Read it at: ' + path.join(specDir, 'inventory.md') +
-    '\n\nFollowing your instructions, produce scope and decisions. Write output files to:' +
-    '\n- ' + path.join(specDir, 'scope.yaml') +
-    '\n- ' + path.join(specDir, 'decisions.yaml') +
-    '\n- ' + path.join(specDir, 'observations.md'));
-}
-
 function startAnalystRevise(slug: string, amendment: string): void {
   const meta = readMeta(slug);
   const sessionId = meta.sessions?.reader ?? meta.sessionId ?? '';
@@ -912,7 +899,6 @@ const server = http.createServer(async (req, res) => {
 
       if (step === 'reader') startReader(slug, brief.trim());
       else if (step === 'analyst') startAnalyst(slug, brief.trim());
-      else if (step === 'analyst-cold') startAnalystCold(slug, brief.trim());
       else if (step === 'analyst-revise') {
         const body = JSON.parse(await readBody(req));
         const amendment = body.amendment;
@@ -1561,8 +1547,8 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '        else if (ws === "cancelled") { state = "failed"; statusText = "cancelled"; icon = "&#10007;"; }\n' +
 '        else { state = "done"; statusText = ws; icon = "&#10003;"; }\n' +
 '      }\n' +
-'    } else if (d.runningStep === s.key || (s.key === "analyst" && d.runningStep === "analyst-cold")) {\n' +
-'      state = "active"; statusText = d.runningStep === "analyst-cold" ? "running (cold)..." : "running..."; icon = "&#9672;";\n' +
+'    } else if (d.runningStep === s.key) {\n' +
+'      state = "active"; statusText = "running..."; icon = "&#9672;";\n' +
 '    } else if (s.key === "review") {\n' +
 '      if (d.scope && d.decisions) { state = "done"; statusText = "ready"; icon = "&#10003;"; }\n' +
 '    } else if (s.file && d[s.key === "reader" ? "inventory" : s.key === "analyst" ? "scope" : "spec"]) {\n' +
@@ -1586,7 +1572,6 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    // Add variant buttons for testing\n' +
 '    var extraBtns = "";\n' +
 '    if (s.key === "analyst" && d.inventory && !d.runningStep) {\n' +
-'      extraBtns += \' <button class="btn btn-dim" data-action="run-step" data-step="analyst-cold" title="Run analyst without reader context (fresh session)">cold</button>\';\n' +
 '    }\n' +
 '\n' +
 '    html += \'<div class="pipeline-step">\';\n' +
