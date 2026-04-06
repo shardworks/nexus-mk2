@@ -296,6 +296,146 @@ function readSpecFile(slug: string, filename: string): string | null {
   return fs.readFileSync(fp, 'utf-8');
 }
 
+// ── Pipeline Cost Tracking ───────────────────────────────────────────
+
+// Anthropic pricing per million tokens
+const MODEL_PRICING: Record<string, { input: number; output: number; cacheWrite: number; cacheRead: number }> = {
+  'claude-opus-4-6':         { input: 15,  output: 75,  cacheWrite: 18.75, cacheRead: 1.875 },
+  'claude-sonnet-4-20250514': { input: 3,   output: 15,  cacheWrite: 3.75,  cacheRead: 0.30 },
+};
+const DEFAULT_PRICING = MODEL_PRICING['claude-opus-4-6'];
+
+interface StepCost {
+  step: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+  model: string | null;
+}
+
+interface PipelineCosts {
+  steps: StepCost[];
+  totalCostUsd: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+}
+
+function computePipelineCosts(slug: string): PipelineCosts | null {
+  const transcriptDir = path.join(SPECS_DIR, slug, 'planner-transcripts');
+  if (!fs.existsSync(transcriptDir)) return null;
+
+  const files = fs.readdirSync(transcriptDir).filter(f => f.endsWith('.jsonl')).sort();
+  if (files.length === 0) return null;
+
+  const stepOrder = ['reader', 'analyst', 'writer'];
+
+  // Resumed sessions share JSONL — the same file is copied for each step in the chain.
+  // To avoid double-counting, group by session ID and attribute the full cost to the
+  // latest step that used it.
+  const sessionLatestStep = new Map<string, string>();  // sessionId → latest step
+  const sessionFile = new Map<string, string>();         // sessionId → any filename (all identical)
+
+  for (const f of files) {
+    const match = f.match(/^(reader|analyst|writer)-(.+)\.jsonl$/);
+    if (!match) continue;
+    const [, step, sessionId] = match;
+    const existing = sessionLatestStep.get(sessionId);
+    if (!existing || stepOrder.indexOf(step) > stepOrder.indexOf(existing)) {
+      sessionLatestStep.set(sessionId, step);
+      sessionFile.set(sessionId, f);
+    }
+  }
+
+  // Parse each unique session once and attribute to its latest step
+  const stepTotals = new Map<string, StepCost>();
+
+  for (const [sessionId, step] of sessionLatestStep) {
+    const filePath = path.join(transcriptDir, sessionFile.get(sessionId)!);
+    const messages = parseTranscriptUsage(filePath);
+    const usage = sumUsage(messages);
+
+    const existing = stepTotals.get(step);
+    if (existing) {
+      mergeStepCost(existing, usage);
+    } else {
+      stepTotals.set(step, { step, ...usage });
+    }
+  }
+
+  const stepsResult: StepCost[] = [];
+  for (const step of stepOrder) {
+    const s = stepTotals.get(step);
+    if (s) stepsResult.push(s);
+  }
+
+  if (stepsResult.length === 0) return null;
+
+  return {
+    steps: stepsResult,
+    totalCostUsd: stepsResult.reduce((sum, s) => sum + s.costUsd, 0),
+    totalInputTokens: stepsResult.reduce((sum, s) => sum + s.inputTokens, 0),
+    totalOutputTokens: stepsResult.reduce((sum, s) => sum + s.outputTokens, 0),
+  };
+}
+
+interface UsageSummary {
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+  model: string | null;
+}
+
+function parseTranscriptUsage(filePath: string): Array<{ model: string; input: number; output: number; cacheWrite: number; cacheRead: number }> {
+  const messages: Array<{ model: string; input: number; output: number; cacheWrite: number; cacheRead: number }> = [];
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      const obj = JSON.parse(line);
+      if (obj.type === 'assistant' && obj.message?.usage) {
+        const usage = obj.message.usage;
+        messages.push({
+          model: obj.message.model || 'unknown',
+          input: usage.input_tokens || 0,
+          output: usage.output_tokens || 0,
+          cacheWrite: usage.cache_creation_input_tokens || 0,
+          cacheRead: usage.cache_read_input_tokens || 0,
+        });
+      }
+    }
+  } catch { /* ignore parse errors */ }
+  return messages;
+}
+
+function sumUsage(messages: Array<{ model: string; input: number; output: number; cacheWrite: number; cacheRead: number }>): UsageSummary {
+  let inputTokens = 0, outputTokens = 0, cacheWriteTokens = 0, cacheReadTokens = 0;
+  let model: string | null = null;
+  for (const m of messages) {
+    inputTokens += m.input;
+    outputTokens += m.output;
+    cacheWriteTokens += m.cacheWrite;
+    cacheReadTokens += m.cacheRead;
+    if (m.model !== 'unknown') model = m.model;
+  }
+  const pricing = (model && MODEL_PRICING[model]) || DEFAULT_PRICING;
+  const costUsd = (inputTokens * pricing.input + outputTokens * pricing.output +
+    cacheWriteTokens * pricing.cacheWrite + cacheReadTokens * pricing.cacheRead) / 1_000_000;
+  return { inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, costUsd, model };
+}
+
+function mergeStepCost(target: StepCost, source: UsageSummary): void {
+  target.inputTokens += source.inputTokens;
+  target.outputTokens += source.outputTokens;
+  target.cacheWriteTokens += source.cacheWriteTokens;
+  target.cacheReadTokens += source.cacheReadTokens;
+  target.costUsd += source.costUsd;
+  if (source.model) target.model = source.model;
+}
+
 function getSpecData(slug: string): Record<string, any> {
   const dir = path.join(SPECS_DIR, slug);
   const data: Record<string, any> = { slug, status: deriveStatus(slug) };
@@ -339,6 +479,10 @@ function getSpecData(slug: string): Record<string, any> {
     data.runningElapsed = Math.floor((Date.now() - r.startTime) / 1000);
     data.runningTokens = r.tokenCount;
   }
+
+  // Pipeline costs from planner transcripts
+  const costs = computePipelineCosts(slug);
+  if (costs) data.pipelineCosts = costs;
 
   return data;
 }
@@ -996,6 +1140,21 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '.log-area .stderr { color: var(--yellow); }\n' +
 '.elapsed { color: var(--text-dim); font-size: 12px; margin-top: 8px; }\n' +
 '\n' +
+'/* ── Cost card ── */\n' +
+'.cost-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;\n' +
+'  padding: 16px; margin-top: 16px; }\n' +
+'.cost-card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;\n' +
+'  color: var(--text-dim); margin-bottom: 10px; }\n' +
+'.cost-steps { display: flex; gap: 16px; margin-bottom: 12px; }\n' +
+'.cost-step { flex: 1; }\n' +
+'.cost-step-label { font-size: 11px; color: var(--text-dim); margin-bottom: 2px; }\n' +
+'.cost-step-value { font-size: 16px; font-weight: 600; color: var(--text); }\n' +
+'.cost-total { border-top: 1px solid var(--border); padding-top: 10px;\n' +
+'  display: flex; justify-content: space-between; align-items: baseline; }\n' +
+'.cost-total-label { font-size: 12px; color: var(--text-dim); }\n' +
+'.cost-total-value { font-size: 20px; font-weight: 700; color: var(--green); }\n' +
+'.cost-total-tokens { font-size: 11px; color: var(--text-dim); margin-left: 8px; font-weight: 400; }\n' +
+'\n' +
 '/* ── Scope tab ── */\n' +
 '.scope-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px;\n' +
 '  border-radius: 8px; margin-bottom: 4px; cursor: pointer; transition: background 0.1s; }\n' +
@@ -1348,7 +1507,41 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '    html += \'<div class="elapsed" id="elapsed">Elapsed: <span id="elapsed-val">0</span>s</div>\';\n' +
 '  }\n' +
 '\n' +
+'  html += renderCostCard();\n' +
+'\n' +
 '  return html;\n' +
+'}\n' +
+'\n' +
+'function renderCostCard() {\n' +
+'  var costs = specData.pipelineCosts;\n' +
+'  if (!costs || costs.steps.length === 0) return "";\n' +
+'\n' +
+'  var html = \'<div class="cost-card">\';\n' +
+'  html += \'<div class="cost-card-title">Pipeline Cost</div>\';\n' +
+'  html += \'<div class="cost-steps">\';\n' +
+'  for (var i = 0; i < costs.steps.length; i++) {\n' +
+'    var s = costs.steps[i];\n' +
+'    html += \'<div class="cost-step">\';\n' +
+'    html += \'<div class="cost-step-label">\' + esc(s.step) + \'</div>\';\n' +
+'    html += \'<div class="cost-step-value">$\' + s.costUsd.toFixed(2) + \'</div>\';\n' +
+'    html += \'</div>\';\n' +
+'  }\n' +
+'  html += \'</div>\';\n' +
+'  html += \'<div class="cost-total">\';\n' +
+'  html += \'<div class="cost-total-label">Total</div>\';\n' +
+'  var totalTokens = costs.totalInputTokens + costs.totalOutputTokens;\n' +
+'  html += \'<div><span class="cost-total-value">$\' + costs.totalCostUsd.toFixed(2) + \'</span>\';\n' +
+'  html += \'<span class="cost-total-tokens">\' + fmtTokens(totalTokens) + \' tokens</span>\';\n' +
+'  html += \'</div>\';\n' +
+'  html += \'</div>\';\n' +
+'  html += \'</div>\';\n' +
+'  return html;\n' +
+'}\n' +
+'\n' +
+'function fmtTokens(n) {\n' +
+'  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";\n' +
+'  if (n >= 1000) return (n / 1000).toFixed(1) + "k";\n' +
+'  return "" + n;\n' +
 '}\n' +
 '\n' +
 'function renderScope() {\n' +
