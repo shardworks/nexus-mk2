@@ -332,36 +332,44 @@ function computePipelineCosts(slug: string): PipelineCosts | null {
 
   const stepOrder = ['reader', 'analyst', 'writer'];
 
-  // Resumed sessions share JSONL — the same file is copied for each step in the chain.
-  // To avoid double-counting, group by session ID and attribute the full cost to the
-  // latest step that used it.
-  const sessionLatestStep = new Map<string, string>();  // sessionId → latest step
-  const sessionFile = new Map<string, string>();         // sessionId → any filename (all identical)
-
+  // Collect all transcript files grouped by step
+  const stepFiles = new Map<string, string[]>();
   for (const f of files) {
     const match = f.match(/^(reader|analyst|writer)-(.+)\.jsonl$/);
     if (!match) continue;
-    const [, step, sessionId] = match;
-    const existing = sessionLatestStep.get(sessionId);
-    if (!existing || stepOrder.indexOf(step) > stepOrder.indexOf(existing)) {
-      sessionLatestStep.set(sessionId, step);
-      sessionFile.set(sessionId, f);
-    }
+    const step = match[1];
+    if (!stepFiles.has(step)) stepFiles.set(step, []);
+    stepFiles.get(step)!.push(f);
   }
 
-  // Parse each unique session once and attribute to its latest step
+  // Process steps in order. Track seen message UUIDs to deduplicate forked sessions —
+  // a forked session's transcript contains the parent's messages with their usage blocks.
+  // We only count each message's tokens once, attributed to the step that first ran it.
+  const seenUuids = new Set<string>();
   const stepTotals = new Map<string, StepCost>();
 
-  for (const [sessionId, step] of sessionLatestStep) {
-    const filePath = path.join(transcriptDir, sessionFile.get(sessionId)!);
-    const messages = parseTranscriptUsage(filePath);
-    const usage = sumUsage(messages);
+  for (const step of stepOrder) {
+    const transcripts = stepFiles.get(step);
+    if (!transcripts) continue;
 
-    const existing = stepTotals.get(step);
-    if (existing) {
-      mergeStepCost(existing, usage);
-    } else {
-      stepTotals.set(step, { step, ...usage });
+    for (const f of transcripts) {
+      const filePath = path.join(transcriptDir, f);
+      const messages = parseTranscriptUsage(filePath);
+
+      // Filter to only messages not already counted by an earlier step
+      const newMessages = messages.filter(m => {
+        if (m.uuid && seenUuids.has(m.uuid)) return false;
+        if (m.uuid) seenUuids.add(m.uuid);
+        return true;
+      });
+
+      const usage = sumUsage(newMessages);
+      const existing = stepTotals.get(step);
+      if (existing) {
+        mergeStepCost(existing, usage);
+      } else {
+        stepTotals.set(step, { step, ...usage });
+      }
     }
   }
 
@@ -390,8 +398,17 @@ interface UsageSummary {
   model: string | null;
 }
 
-function parseTranscriptUsage(filePath: string): Array<{ model: string; input: number; output: number; cacheWrite: number; cacheRead: number }> {
-  const messages: Array<{ model: string; input: number; output: number; cacheWrite: number; cacheRead: number }> = [];
+interface TranscriptMessage {
+  uuid: string | null;
+  model: string;
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
+}
+
+function parseTranscriptUsage(filePath: string): TranscriptMessage[] {
+  const messages: TranscriptMessage[] = [];
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     for (const line of content.split('\n')) {
@@ -400,6 +417,7 @@ function parseTranscriptUsage(filePath: string): Array<{ model: string; input: n
       if (obj.type === 'assistant' && obj.message?.usage) {
         const usage = obj.message.usage;
         messages.push({
+          uuid: obj.uuid || null,
           model: obj.message.model || 'unknown',
           input: usage.input_tokens || 0,
           output: usage.output_tokens || 0,
