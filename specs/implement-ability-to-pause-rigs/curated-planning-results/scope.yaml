@@ -1,0 +1,49 @@
+brief: |
+  Engines should be able to enter a **blocked** state — signaling to the Spider that the engine cannot proceed, but has not failed. The engine terminates cleanly and declares *what* it is waiting for using a structured block record. When the blocking condition clears, the Spider detects the change and restarts the engine, which may then run to completion, fail, or block again. Block types are registered components with lightweight checkers. The Spider owns the block-checking loop. Rigs themselves transition to blocked when all forward progress is blocked. Operator surface includes rig-list filtering, rig-show metadata, and a rig-resume manual override tool. CrawlResult should emit block/unblock variants.
+slug: implement-ability-to-pause-rigs
+
+scope:
+  - id: S1
+    description: "Engine blocked status — engines can return a 'blocked' result from run(), the Spider validates and persists the block record, and the engine enters a blocked status"
+    rationale: "Core primitive. Everything else depends on engines being able to signal a blocked state."
+    included: true
+
+  - id: S2
+    description: "Block type registry — BlockTypeDesign interface in the Fabricator, kit contribution scanning for blockTypes field, FabricatorApi.getBlockTypeDesign() lookup method"
+    rationale: "Brief explicitly says block types are registered components with checkers, condition schemas, and poll intervals, analogous to engine designs."
+    included: true
+
+  - id: S3
+    description: "Spider block-checking loop — new tryCheckBlocked() crawl phase that iterates blocked engines, runs registered checkers, and transitions cleared engines back to pending"
+    rationale: "Brief says the Spider owns the block-checking loop and checks on each crawl cycle."
+    included: true
+
+  - id: S4
+    description: "Rig-level blocked status — rig transitions to blocked when all forward progress is blocked, back to running when any engine is unblocked"
+    rationale: "Brief explicitly calls for rig-level blocked status for operator queryability and to avoid wasting crawl cycles."
+    included: true
+
+  - id: S5
+    description: "CrawlResult observability — new engine-blocked, engine-unblocked, rig-blocked variants emitted by crawl()"
+    rationale: "Brief explicitly says crawl loop should emit result variants for block and unblock events."
+    included: true
+
+  - id: S6
+    description: "Operator surface — rig-list supports blocked filter, rig-show surfaces block metadata, new rig-resume tool for manual block clearing"
+    rationale: "Brief explicitly lists these three operator surface requirements."
+    included: true
+
+  - id: S7
+    description: "Prior block context — restarted engines receive context about their prior block via EngineRunContext.priorBlock"
+    rationale: "Brief says 'when the engine is restarted after unblocking, it receives context about the prior block.'"
+    included: true
+
+  - id: S8
+    description: "Built-in block types — framework ships common block types (book-updated, writ-status, scheduled-time, and at least one external example)"
+    rationale: "Brief says 'built-in block types should ship with the framework for common cases.' This is separable — the mechanism works without built-ins."
+    included: true
+
+  - id: S9
+    description: "Block condition schema validation — the Spider validates the engine's condition payload against the block type's declared condition schema at block time"
+    rationale: "Brief says condition schema enables validation at block time and validation failure causes immediate engine failure (fail-fast)."
+    included: true

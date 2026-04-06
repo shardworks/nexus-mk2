@@ -1,0 +1,712 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What shape does the new 'blocked' EngineRunResult variant take?
+    options:
+      a: "{ status: 'blocked'; blockType: string; condition: unknown } — flat, parallel to 'completed' and 'launched'"
+      b: "{ status: 'blocked'; block: { type: string; condition: unknown } } — nested block object"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "Existing variants are flat: { status: 'completed'; yields } and { status: 'launched'; sessionId }. Engine authors return this from run()."
+      observable: true
+      recommendation: a
+      rationale: Flat structure matches the established EngineRunResult variant style. The Spider constructs the full persisted BlockRecord by adding timestamps.
+  - id: D2
+    scope:
+      - S1
+    question: What fields does the BlockRecord stored on EngineInstance contain?
+    options:
+      a: "{ type: string; condition: unknown; blockedAt: string } — type, payload, timestamp"
+      b: "{ type: string; condition: unknown; blockedAt: string; message?: string } — adds optional human-readable explanation from the engine"
+      c: "{ type: string; condition: unknown; blockedAt: string; message?: string; lastCheckedAt?: string } — includes poll tracking"
+    selected: c
+    analysis:
+      audience:
+        - operator
+        - author
+      confidence: high
+      context: "The block record serves two audiences: the checker (needs type + condition) and the operator (needs timestamps + human context). lastCheckedAt is needed for per-block-type poll interval enforcement."
+      observable: true
+      recommendation: c
+      rationale: lastCheckedAt is operationally necessary for poll throttling (D13). message improves operator experience at zero cost. Consolidating all block state on one record avoids scattered fields.
+  - id: D3
+    scope:
+      - S1
+    question: What field name on EngineInstance holds the block record?
+    options:
+      a: "block?: BlockRecord"
+      b: "blockRecord?: BlockRecord"
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: "EngineInstance already has terse field names: yields, error, sessionId. The block record is the analogous status-specific payload for the 'blocked' state."
+      observable: true
+      recommendation: a
+      rationale: Consistent with existing terse naming. 'block' is unambiguous in context.
+  - id: D4
+    scope:
+      - S1
+    question: When an engine returns 'blocked', how does the engine status transition work?
+    options:
+      a: pending → running (before run()) → blocked (after run() returns). Two Stacks writes.
+      b: pending → running (before run()) → blocked (after run() returns). The second write replaces the running status.
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: tryRun() already marks the engine 'running' before calling design.run(), then patches again for 'launched' or 'completed'. The blocked branch follows the same pattern — no structural change to the two-write flow.
+      observable: false
+      recommendation: b
+      rationale: Identical pattern to the existing 'launched' and 'completed' branches. The engine IS running while run() executes; it transitions to blocked when run() returns.
+  - id: D5
+    scope:
+      - S1
+    question: Should failEngine() cancel 'blocked' engines in addition to 'pending' ones?
+    options:
+      a: Yes — cancel both pending and blocked engines when a rig fails
+      b: No — only cancel pending engines
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "failEngine() currently does: if (e.status === 'pending') → cancelled. Blocked engines are non-terminal and can never complete if the rig fails."
+      observable: false
+      recommendation: a
+      rationale: A blocked engine in a failed rig would be an unreachable zombie. The predicate becomes e.status === 'pending' || e.status === 'blocked'.
+  - id: D6
+    scope:
+      - S1
+    question: Where does the BlockRecord type live — Spider types or Fabricator types?
+    options:
+      a: Spider's types.ts — it's a persistence/data-model concern specific to how the Spider stores block state
+      b: Fabricator's fabricator.ts — it's part of the engine protocol
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: EngineRunResult carries { blockType, condition } — that's the Fabricator's concern. BlockRecord adds { blockedAt, lastCheckedAt, message } — that's Spider-specific persistence. The type boundary aligns with the package boundary.
+      observable: true
+      recommendation: a
+      rationale: BlockRecord is the Spider's persisted enrichment of what the engine declared. The engine protocol (EngineRunResult) stays in the Fabricator; the storage shape (BlockRecord) stays in the Spider.
+  - id: D7
+    scope:
+      - S2
+    question: What is the BlockTypeDesign interface shape?
+    options:
+      a: "{ id: string; check: (condition: unknown) => Promise<boolean>; conditionSchema: ZodSchema; pollIntervalMs?: number }"
+      b: "{ id: string; check: (condition: unknown) => Promise<boolean>; validate?: (condition: unknown) => boolean; pollIntervalMs?: number }"
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The Fabricator has no Zod dependency today. Its only dependency is @shardworks/nexus-core. Adding a Zod dependency would break the clean boundary. The brief says 'condition schema' but doesn't mandate Zod.
+      observable: true
+      recommendation: b
+      rationale: A plain validate function preserves the Fabricator's zero-dependency stance. Block type authors can use Zod internally and expose it as validate(). The Spider calls validate(condition) at block time; if absent, any condition is accepted.
+  - id: D8
+    scope:
+      - S2
+    question: What kit contribution field name for block type registrations?
+    options:
+      a: blockTypes
+      b: checkers
+      c: blocks
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "Kit contributions use descriptive plural nouns: engines, tools, books. The Fabricator's consumes array will grow from ['engines'] to ['engines', 'blockTypes']."
+      observable: true
+      recommendation: a
+      rationale: Unambiguous and parallel to 'engines'. 'blocks' could be confused with block records; 'checkers' names the function not the concept.
+  - id: D9
+    scope:
+      - S2
+    question: What method does FabricatorApi expose for block type lookup?
+    options:
+      a: "getBlockType(id): BlockTypeDesign | undefined"
+      b: "getBlockTypeDesign(id): BlockTypeDesign | undefined"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: Existing method is getEngineDesign(). Consistent naming convention.
+      observable: true
+      recommendation: b
+      rationale: Parallel naming with getEngineDesign(). Both return Design objects from the capability catalog.
+  - id: D10
+    scope:
+      - S2
+    question: How does the Fabricator scan blockTypes contributions?
+    options:
+      a: Add a separate BlockTypeRegistry class parallel to EngineRegistry, with its own registerFromKit() scanning kit.blockTypes
+      b: Extend EngineRegistry to handle both engines and blockTypes in one class
+      c: Add a generic ContributionRegistry<T> that both engines and blockTypes use
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "EngineRegistry is 30 lines. The scanning pattern is: get kit field, iterate values, type-guard check, store in Map. Duplicating this for a second small class is clearer than premature generalization."
+      observable: false
+      recommendation: a
+      rationale: Separate small classes for separate concepts. The EngineRegistry and BlockTypeRegistry are structurally identical but semantically distinct. The Fabricator's register() method on plugin:initialized calls both.
+  - id: D11
+    scope:
+      - S2
+    question: What type guard identifies a BlockTypeDesign?
+    options:
+      a: isBlockTypeDesign() — checks for id (string) and check (function)
+      b: isBlockTypeDesign() — checks for id (string), check (function), and pollIntervalMs (number, optional)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: isEngineDesign() checks only for id (string) and run (function). pollIntervalMs is optional, so it can't be part of the guard.
+      observable: false
+      recommendation: a
+      rationale: Mirrors isEngineDesign() — checks the two required fields. Optional fields are optional.
+  - id: D12
+    scope:
+      - S3
+    question: Where in crawl() priority order does tryCheckBlocked() run?
+    options:
+      a: collect > checkBlocked > run > spawn
+      b: collect > run > checkBlocked > spawn
+      c: checkBlocked > collect > run > spawn
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Each crawl() does exactly one action. Collecting completed sessions (unblocking downstream) should remain highest priority. Block checking also unblocks engines, making them runnable for the next crawl. Running and spawning are lower priority.
+      observable: true
+      recommendation: a
+      rationale: Collect stays first (it unblocks downstream engines). Block checking is second (it also unblocks engines). Run is third (it executes newly-runnable engines). Spawn is last. An unblocked engine becomes runnable on the next crawl — consistent with the one-action-per-crawl model.
+  - id: D13
+    scope:
+      - S3
+    question: Does tryCheckBlocked() respect the block type's suggested pollIntervalMs?
+    options:
+      a: No — check every crawl cycle. The crawl loop's own interval is the throttle.
+      b: Yes — compare Date.now() against block.lastCheckedAt + blockType.pollIntervalMs. Skip if too soon.
+    selected: b
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: "The brief explicitly mentions per-type poll intervals: 'don't hammer GitHub every 2 seconds; check timestamps every 30 seconds.' The crawl loop runs every ~5s. Without per-type throttling, a GitHub checker runs every 5s."
+      observable: true
+      recommendation: b
+      rationale: The brief explicitly calls for this. lastCheckedAt is stored on the block record (persisted in Stacks). On each cycle, Spider compares now - lastCheckedAt >= pollIntervalMs. If the block type has no pollIntervalMs, check every cycle.
+  - id: D14
+    scope:
+      - S3
+    question: Does tryCheckBlocked() query only 'blocked' rigs or also 'running' rigs?
+    options:
+      a: Query rigs with status IN ('running', 'blocked'), scan engines for status === 'blocked'
+      b: Query only 'blocked' rigs
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: A running rig can have one blocked engine and one running engine simultaneously. If only blocked rigs are queried, the blocked engine in a running rig is never checked until the running engine completes and the rig transitions to blocked.
+      observable: false
+      recommendation: a
+      rationale: Blocked engines in running rigs must be checked promptly. The IN query hits the existing status index.
+  - id: D15
+    scope:
+      - S3
+    question: When a checker throws an error, what happens to the blocked engine?
+    options:
+      a: Log warning, skip — engine stays blocked. Retry next cycle.
+      b: Fail the engine — checker error is unrecoverable
+      c: Log warning, skip, track consecutive failures — fail after N errors
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: Checkers make external calls (HTTP, filesystem). Transient failures are expected. The brief says checkers are lightweight functions; it doesn't specify error handling.
+      observable: true
+      recommendation: a
+      rationale: Failing the engine on a transient network blip is too aggressive. Log-and-retry is resilient. The operator can use rig-resume if the checker is permanently broken.
+  - id: D16
+    scope:
+      - S3
+    question: What status does an unblocked engine transition to?
+    options:
+      a: Back to 'pending' — the standard runnable status. tryRun() picks it up.
+      b: New 'unblocked' status — explicitly different from never-blocked pending engines
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: "'pending' means 'ready to be evaluated for running.' The engine re-enters the same queue. Adding a new status would require changes to findRunnableEngine() for no functional benefit."
+      observable: true
+      recommendation: a
+      rationale: Re-using 'pending' avoids adding yet another status to the union. The engine re-enters the run queue naturally.
+  - id: D17
+    scope:
+      - S3
+    question: When tryCheckBlocked() updates lastCheckedAt but the checker returned false, does it write to Stacks?
+    options:
+      a: Yes — patch the rig to update block.lastCheckedAt on every check
+      b: No — track lastCheckedAt in-memory only, don't write unless the block clears
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: In-memory tracking is cheaper but doesn't survive process restarts. If the Spider restarts, it would immediately re-check all blocked engines without respecting poll intervals.
+      observable: false
+      recommendation: a
+      rationale: Persisting lastCheckedAt ensures poll intervals are respected across process restarts. The write is a patch on an existing engines array — same I/O pattern as other engine updates.
+  - id: D18
+    scope:
+      - S4
+    question: What is the exact condition for a rig to enter 'blocked' status?
+    options:
+      a: No engine has status 'running', findRunnableEngine() returns null, and at least one engine has status 'blocked'
+      b: Every non-completed engine is either 'blocked' or 'pending' with at least one blocked ancestor in its upstream chain
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: "The brief says 'all forward progress is blocked.' Option (a) is the operational formulation: nothing is running, nothing can run, but blocks exist. Option (b) is stricter and harder to compute."
+      observable: true
+      recommendation: a
+      rationale: "Option (a) is the natural check: can anything make progress? If not, and blocks exist, the rig is blocked. This reuses findRunnableEngine() which already handles upstream-completion checks."
+  - id: D19
+    scope:
+      - S4
+    question: Where is the rig-blocked check performed in the Spider code?
+    options:
+      a: "Extract a helper function isRigBlocked(engines): boolean, called from tryRun() and tryCollect() alongside the existing allCompleted check"
+      b: Inline the check in each code path
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The check is needed in multiple places: after an engine returns blocked (tryRun), after a running engine completes leaving only blocked engines (tryCollect), and potentially in tryCheckBlocked when an engine unblocks."
+      observable: false
+      recommendation: a
+      rationale: "Avoids duplication. The helper is: no running engines, findRunnableEngine returns null, some engine is blocked."
+  - id: D20
+    scope:
+      - S4
+    question: When tryCheckBlocked() unblocks an engine, does it also transition the rig status?
+    options:
+      a: Yes — patch both engine (blocked→pending) and rig (blocked→running) in the same Stacks write
+      b: No — leave the rig as blocked until tryRun() picks it up
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: tryRun() queries rigs with status === 'running'. If the rig stays 'blocked', tryRun() won't find it. The rig must be restored to 'running' for the unblocked engine to be runnable.
+      observable: false
+      recommendation: a
+      rationale: Functional necessity. tryRun() only queries running rigs. The atomic patch of engine + rig status ensures the unblocked engine is runnable on the next crawl.
+  - id: D21
+    scope:
+      - S4
+    question: Does the CDC handler on the rigs book need changes for the 'blocked' status?
+    options:
+      a: No change needed — the existing if/else-if for 'completed'/'failed' naturally ignores 'blocked'
+      b: Add an explicit guard to skip 'blocked' transitions
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The CDC handler code is: if (rig.status === 'completed') { ... } else if (rig.status === 'failed') { ... }. The 'blocked' status falls through to neither branch."
+      observable: false
+      recommendation: a
+      rationale: The existing code structure already handles this correctly. Adding an explicit guard would be defensive but unnecessary.
+  - id: D22
+    scope:
+      - S5
+    question: What new CrawlResult variants are added?
+    options:
+      a: engine-blocked, engine-unblocked, rig-blocked — three new variants
+      b: engine-blocked, engine-unblocked, rig-blocked, rig-unblocked — four variants
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief says 'block and unblock events at both engine and rig level.' However, engine-unblocked implies the rig is also unblocked (rig returns to running). A separate rig-unblocked would be redundant.
+      observable: true
+      recommendation: a
+      rationale: engine-unblocked already signals that the rig can make progress again. rig-blocked signals full stall. There's no distinct 'rig-unblocked' event — it's implicit in engine-unblocked.
+  - id: D23
+    scope:
+      - S5
+    question: What payload do the new CrawlResult variants carry?
+    options:
+      a: "engine-blocked: { rigId, engineId, blockType }; engine-unblocked: { rigId, engineId }; rig-blocked: { rigId, writId }"
+      b: "engine-blocked: { rigId, engineId, blockType, condition }; engine-unblocked: { rigId, engineId }; rig-blocked: { rigId, writId }"
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: Existing variants carry minimal identifying fields. The condition payload can be large and is always available via rig-show.
+      observable: true
+      recommendation: a
+      rationale: blockType is sufficient for logging. The full block record is accessible via show() if needed. Keeps CrawlResult lightweight.
+  - id: D24
+    scope:
+      - S5
+    question: Can a single crawl() call return both engine-blocked and rig-blocked?
+    options:
+      a: No — return engine-blocked. The rig-blocked transition happens in the same Stacks write but is not a separate CrawlResult.
+      b: No — if the engine block also causes the rig to become blocked, return rig-blocked instead (higher-level event wins)
+      c: Yes — return an array of results
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: crawl() returns a single CrawlResult. When an engine blocks and the rig has no other progress possible, the most important signal is that the rig is stalled — not just that one engine blocked.
+      observable: true
+      recommendation: b
+      rationale: The rig-blocked signal is more actionable for operators. engine-blocked is implied (the rig wouldn't be blocked without it). Mirrors how engine failure returns rig-completed/failed rather than engine-failed.
+  - id: D25
+    scope:
+      - S6
+    question: What is the SpiderApi.resume() method signature?
+    options:
+      a: "resume(rigId: string, engineId: string): Promise<void>"
+      b: "resume(rigId: string, engineId?: string): Promise<void> — optional engineId resumes all blocked engines"
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The brief says 'an operator can clear a block regardless of the checker, for any block type.' Multiple blocked engines in one rig may have different conditions.
+      observable: true
+      recommendation: a
+      rationale: Explicit targeting is safer. Resuming all blocked engines at once could have unintended consequences if they block on different conditions. The operator calls resume() per engine.
+  - id: D26
+    scope:
+      - S6
+    question: What does resume() do when the engine is not blocked?
+    options:
+      a: "Throw an error: 'Engine \"X\" in rig \"Y\" is not blocked (status: Z)'"
+      b: Silent no-op
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: show() throws if rig not found. Codebase convention is fail-fast for invalid operations.
+      observable: true
+      recommendation: a
+      rationale: Fail-fast matches codebase convention. Silent success hides mistakes.
+  - id: D27
+    scope:
+      - S6
+    question: What does resume() do when the rig is not found or engine id is invalid?
+    options:
+      a: "Throw errors: 'Rig not found' / 'Engine not found in rig'"
+      b: Return null for not-found cases
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: SpiderApi.show() already throws for missing rigs. Same convention.
+      observable: true
+      recommendation: a
+      rationale: Consistent with show() error behavior.
+  - id: D28
+    scope:
+      - S6
+    question: What is the rig-resume tool's permission level?
+    options:
+      a: "'spider:write' — same as crawl-one and crawl-continual"
+      b: "'write' — generic write permission"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: crawl-one and crawl-continual use 'spider:write'. resume() mutates rig state.
+      observable: false
+      recommendation: a
+      rationale: Same mutation scope as crawl tools.
+  - id: D29
+    scope:
+      - S6
+    question: Does rig-show need code changes for block metadata?
+    options:
+      a: No — it returns the full RigDoc which will include block fields on EngineInstance naturally
+      b: Yes — update instructions text to mention block metadata
+    selected: b
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: rig-show returns the raw RigDoc. The block field on EngineInstance will appear automatically. But the instructions text could mention blocked engines for operator awareness.
+      observable: true
+      recommendation: b
+      rationale: The tool's instructions text is its documentation for operators. Mentioning that blocked engines include block records (type, condition, timestamps) aids discoverability.
+  - id: D30
+    scope:
+      - S7
+    question: How is prior block context passed to the restarted engine?
+    options:
+      a: "Add priorBlock?: BlockRecord to EngineRunContext"
+      b: "Add priorBlocks?: BlockRecord[] to EngineRunContext for multi-block history"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: EngineRunContext has { engineId, upstream }. The engine needs its most recent block info to understand what just cleared.
+      observable: true
+      recommendation: a
+      rationale: The engine only needs its most recent block. If it blocks again and gets restarted again, it gets the newer block. History is in the Stacks.
+  - id: D31
+    scope:
+      - S7
+    question: When is the block field cleared from the EngineInstance?
+    options:
+      a: Cleared when the engine transitions from blocked→pending. Spider reads block into memory first, passes as priorBlock on next run().
+      b: Kept on the EngineInstance through the pending→running→completed lifecycle. Cleared only when the engine completes.
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: A pending engine with a non-null block field would be semantically confusing — it's not blocked anymore. The Spider needs the block info transiently to build the run context.
+      observable: false
+      recommendation: a
+      rationale: A pending engine should have no block field. The Spider stores the block in a local variable (or in-memory map keyed by rig+engine) between unblock and re-run. If the process restarts between unblock and re-run, priorBlock is lost — acceptable since it's advisory context.
+  - id: D32
+    scope:
+      - S8
+    question: Where do built-in block types live in the codebase?
+    options:
+      a: In the Spider's supportKit.blockTypes — parallel to how Spider contributes its engines
+      b: In a separate standalone kit package
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The Spider already contributes five engine designs via supportKit.engines. Built-in block types are part of the same ecosystem.
+      observable: false
+      recommendation: a
+      rationale: No separate package needed at this scale. Block type source files live alongside engines in the Spider's src/.
+  - id: D33
+    scope:
+      - S8
+    question: Which specific built-in block types to implement?
+    options:
+      a: writ-status, scheduled-time, book-updated — three internal types
+      b: writ-status, scheduled-time, book-updated, http-poll — three internal plus one generic external
+      c: writ-status, scheduled-time, book-updated, github-workflow — three internal plus one concrete external
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: Brief says 'at least one external-system example.' The three internal types are self-contained. An external example (github-workflow or http-poll) requires auth config that varies per guild.
+      observable: true
+      recommendation: a
+      rationale: The three internal types cover the common cases the brief lists and are fully self-contained. Any kit can register external block types — the mechanism is proven by the internal ones. Deferring the external example avoids guild-specific auth configuration in the framework. If the patron requires an external example, http-poll (b) is the most reusable.
+  - id: D34
+    scope:
+      - S8
+    question: What is the writ-status block type's condition shape?
+    options:
+      a: "{ writId: string; targetStatus: WritStatus } — wait for a specific writ to reach a specific status"
+      b: "{ writId: string; targetStatuses: WritStatus[] } — wait for a writ to reach any of several statuses"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Most use cases are 'wait for writ X to be completed.' Multiple target statuses add complexity for a rare case.
+      observable: true
+      recommendation: a
+      rationale: Simple and covers the common case. If needed, 'wait for completed or failed' can be modeled as two separate blocks or a future enhancement.
+  - id: D35
+    scope:
+      - S8
+    question: What is the scheduled-time block type's condition shape?
+    options:
+      a: "{ resumeAt: string } — ISO 8601 timestamp; checker returns Date.now() >= Date.parse(resumeAt)"
+      b: "{ resumeAfterMs: number } — milliseconds from block time; checker computes blockedAt + resumeAfterMs"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Absolute timestamps are more useful for deployment windows ('deploy after 2am') than relative delays.
+      observable: true
+      recommendation: a
+      rationale: Absolute time is more natural for the use cases in the brief (deployment windows). Relative delays can be computed by the engine at block time.
+  - id: D36
+    scope:
+      - S8
+    question: What is the book-updated block type's condition shape?
+    options:
+      a: "{ ownerId: string; book: string; documentId: string } — wait for a specific document to be updated"
+      b: "{ ownerId: string; book: string; documentId?: string } — wait for any write to the book, or a specific document"
+      c: "{ ownerId: string; book: string; documentId: string; field?: string; value?: unknown } — wait for a specific field to reach a specific value"
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: The brief's example is 'a Stacks Book is written to.' Both per-book and per-document granularity are useful. The checker needs to detect 'has a write occurred since blockedAt.'
+      observable: true
+      recommendation: b
+      rationale: "Both granularities are useful: 'any update to this book' (general) or 'this specific document changed' (targeted). The checker compares against a stored snapshot or timestamp."
+  - id: D37
+    scope:
+      - S8
+    question: How does the book-updated checker detect changes — snapshot comparison or timestamp?
+    options:
+      a: Store a snapshot hash of the document at block time in the condition; checker re-reads and compares
+      b: The checker reads the document and checks if its updatedAt (or any field) has changed since block.blockedAt
+      c: The condition includes a snapshotValue for a specific field; checker reads current value and compares
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: BookEntry has no built-in updatedAt field. But Stacks documents are free-form JSON with an id. The checker needs a reliable way to detect 'changed since blocked.'
+      observable: false
+      recommendation: b
+      rationale: "Simple: read the document, compare any distinguishing field against blockedAt. For per-book checks (no documentId), use count() or read the book's latest entry. Documents without timestamps are an edge case — authors can include a sentinel field in the condition for comparison."
+  - id: D38
+    scope:
+      - S8
+    question: What are the default pollIntervalMs values for the built-in block types?
+    options:
+      a: "writ-status: 5000, scheduled-time: 10000, book-updated: 5000"
+      b: "writ-status: 10000, scheduled-time: 30000, book-updated: 10000"
+    selected: b
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: These are all internal checks (Stacks reads). They're cheap but still shouldn't run on every 5s crawl cycle. The brief says 'check timestamps every 30 seconds' as an example for time-based.
+      observable: true
+      recommendation: b
+      rationale: The brief's example of 30s for time checks maps to scheduled-time. Writ status and book updates are cheap Stacks reads but don't need sub-10s latency. These are defaults — operators can override via block type configuration in the future.
+  - id: D39
+    scope:
+      - S9
+      - S1
+    question: What happens when an engine returns a blockType that isn't registered in the Fabricator?
+    options:
+      a: "Fail the engine immediately — 'Unknown block type: X. Registered types: [...]'"
+      b: Log a warning, leave the engine blocked permanently until manual resume
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: Brief explicitly says 'fail-fast — catches typos, missing registrations, engines assuming apparatus that isn't installed.'
+      observable: true
+      recommendation: a
+      rationale: The brief mandates fail-fast. An unregistered block type means the checker can never run, so the engine would be permanently stuck.
+  - id: D40
+    scope:
+      - S9
+      - S2
+    question: What happens when the block type's validate() returns false?
+    options:
+      a: "Fail the engine immediately — 'Block type \"X\" rejected condition: validation failed'"
+      b: Fail the engine with the validate function's return value if it returns a string
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: validate() returns boolean (per D7). The Spider provides the error context.
+      observable: true
+      recommendation: a
+      rationale: Consistent with the fail-fast principle. The Spider wraps the failure in a descriptive error message including the block type and engine id.
+  - id: D41
+    scope:
+      - S9
+    question: When does validation run in the tryRun() code path?
+    options:
+      a: "After run() returns { status: 'blocked' }, before writing the block record to Stacks"
+      b: Before calling run() — pre-validate all possible block types
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The engine hasn't declared a block type yet before run() executes. Validation can only happen after run() returns the blockType and condition.
+      observable: false
+      recommendation: a
+      rationale: Validation is a gate between the engine's declaration and persistence. If validation fails, failEngine() is called instead of persisting the block.
+  - id: D42
+    scope:
+      - S1
+      - S5
+    question: Does the EngineRunResult 'blocked' variant support an optional message for human-readable context?
+    options:
+      a: "Yes — { status: 'blocked'; blockType: string; condition: unknown; message?: string }"
+      b: No — message is only in BlockRecord, set by Spider
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: "The engine knows best what it's waiting for in human terms ('Waiting for operator review of draft PR #42'). The Spider can propagate this to the BlockRecord."
+      observable: true
+      recommendation: a
+      rationale: Letting the engine provide a message at block time is cheap and dramatically improves operator experience in rig-show. The Spider passes it through to BlockRecord.message.
+  - id: D43
+    scope:
+      - S1
+      - S6
+    question: Should the Spider's index.ts re-export the new BlockRecord type?
+    options:
+      a: Yes — add BlockRecord to the public type exports alongside EngineInstance, RigDoc, etc.
+      b: No — consumers access it through EngineInstance.block
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: spider/src/index.ts re-exports all public types. BlockRecord is a first-class data model type that consumers may want to import directly for type annotations.
+      observable: true
+      recommendation: a
+      rationale: Consistent with how all Spider data model types are re-exported.
