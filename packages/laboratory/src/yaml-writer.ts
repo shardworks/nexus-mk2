@@ -10,33 +10,114 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+// ── Frontmatter parsing ─────────────────────────────────────────────
+
+/**
+ * Extract the `author` field from YAML frontmatter in a writ body.
+ * Returns undefined if no frontmatter or no author field.
+ */
+function extractFrontmatterAuthor(body: string): string | undefined {
+  const match = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return undefined;
+  const authorMatch = match[1].match(/^author:\s*(.+)$/m);
+  return authorMatch?.[1].trim();
+}
+
 // ── Commission log ───────────────────────────────────────────────────
 
 /**
  * Append a skeleton commission log entry for a newly created writ.
- * Human-judgment fields are written as null for the patron to fill in.
+ *
+ * Omits revision_required and failure_mode (added later if needed).
+ * If the writ body has frontmatter with author: plan-writer, sets
+ * spec_quality_pre and spec_quality_post to 'strong'.
  */
 export function appendCommissionLogEntry(
   logPath: string,
-  writ: { id: string; title: string; codex?: string },
+  writ: { id: string; title: string; codex?: string; body?: string },
 ): void {
   // Escape the title for YAML (wrap in double quotes, escape internal quotes)
   const safeTitle = writ.title.replace(/"/g, '\\"');
   const codexLine = writ.codex ? `    codex: ${writ.codex}` : '    codex: null';
+
+  const author = writ.body ? extractFrontmatterAuthor(writ.body) : undefined;
+  const specQuality = author === 'plan-writer' ? 'strong' : 'null';
 
   const entry = `
   - id: ${writ.id}
     title: "${safeTitle}"
 ${codexLine}
     complexity: null
-    spec_quality_pre: null
+    spec_quality_pre: ${specQuality}
     outcome: null
-    revision_required: null
-    spec_quality_post: null
-    failure_mode: null
+    spec_quality_post: ${specQuality}
 `;
 
   fs.appendFileSync(logPath, entry, 'utf-8');
+}
+
+/**
+ * Set the outcome field on an existing commission log entry.
+ * Optionally sets failure_mode as well (appends a new line after outcome).
+ * No-op if the entry is not found.
+ */
+export function setCommissionOutcome(
+  logPath: string,
+  writId: string,
+  outcome: string,
+  failureMode?: string,
+): boolean {
+  if (!fs.existsSync(logPath)) return false;
+
+  let content = fs.readFileSync(logPath, 'utf-8');
+
+  // Replace outcome field
+  const outcomePattern = new RegExp(
+    `(- id: ${writId}\\n(?:    .*\\n)*?    outcome: )(null|\\w+)`,
+  );
+
+  const match = content.match(outcomePattern);
+  if (!match) return false;
+
+  content = content.replace(outcomePattern, `$1${outcome}`);
+
+  // If failureMode provided, append failure_mode line after spec_quality_post
+  // (or after outcome if spec_quality_post isn't present)
+  if (failureMode) {
+    const fmInsertPattern = new RegExp(
+      `(- id: ${writId}\\n(?:    .*\\n)*?    spec_quality_post: (?:null|\\w+)\\n)`,
+    );
+    const fmInsertMatch = content.match(fmInsertPattern);
+    if (fmInsertMatch) {
+      content = content.replace(fmInsertPattern, `$1    failure_mode: ${failureMode}\n`);
+    }
+  }
+
+  fs.writeFileSync(logPath, content, 'utf-8');
+  return true;
+}
+
+/**
+ * If a commission's outcome is 'success', clear it to null.
+ * Used when a fixes link indicates the commission needs revision —
+ * the presumption of success is withdrawn.
+ * No-op if the entry is not found or outcome is not 'success'.
+ */
+export function clearSuccessOutcome(logPath: string, writId: string): boolean {
+  if (!fs.existsSync(logPath)) return false;
+
+  const content = fs.readFileSync(logPath, 'utf-8');
+
+  const pattern = new RegExp(
+    `(- id: ${writId}\\n(?:    .*\\n)*?    outcome: )(success)`,
+  );
+
+  const match = content.match(pattern);
+  if (!match) return false;
+
+  const updated = content.replace(pattern, '$1null');
+  fs.writeFileSync(logPath, updated, 'utf-8');
+  return true;
 }
 
 /**

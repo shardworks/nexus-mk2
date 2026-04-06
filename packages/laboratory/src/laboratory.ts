@@ -22,6 +22,8 @@ import type {
 } from './types.ts';
 import {
   appendCommissionLogEntry,
+  setCommissionOutcome,
+  clearSuccessOutcome,
   markRevisionRequired,
   writeCommissionMd,
   writeReviewTemplate,
@@ -114,6 +116,7 @@ function onWritCreated(config: ResolvedConfig, writ: WritLike): void {
     id: writ.id,
     title: writ.title,
     codex: writ.codex,
+    body: writ.body,
   });
 
   // 5. Auto-commit
@@ -131,9 +134,20 @@ function onWritStatusChanged(
   guildHome: string,
   writ: WritLike,
 ): void {
+  const relLogPath = path.relative(config.sanctumHome, config.commissionLogPath);
+
   switch (writ.status) {
-    case 'completed':
-    case 'failed':
+    case 'completed': {
+      // Presume success — patron reviews and corrects if needed
+      const updated = setCommissionOutcome(config.commissionLogPath, writ.id, 'success');
+      if (updated) {
+        autoCommit(
+          config.sanctumHome,
+          `laboratory: set outcome success for ${writ.id}`,
+          [relLogPath],
+        );
+      }
+
       // DISABLED: instrument runs paused pending cache-prefix unification
       // (cost fix). All instrument inputs are back-fillable from git history
       // + commission.md — no data loss from skipping.
@@ -141,6 +155,21 @@ function onWritStatusChanged(
       //
       // triggerQualityReview(config, guildHome, writ);
       break;
+    }
+
+    case 'failed': {
+      const updated = setCommissionOutcome(
+        config.commissionLogPath, writ.id, 'abandoned', 'execution_error',
+      );
+      if (updated) {
+        autoCommit(
+          config.sanctumHome,
+          `laboratory: set outcome abandoned for ${writ.id}`,
+          [relLogPath],
+        );
+      }
+      break;
+    }
 
     case 'active':
     case 'cancelled':
@@ -163,16 +192,23 @@ function handleLinkEvent(config: ResolvedConfig, event: ChangeEvent<BookEntry>):
 }
 
 function onFixesLinkCreated(config: ResolvedConfig, link: WritLinkLike): void {
-  // Mark the original (target) writ as requiring revision
-  const updated = markRevisionRequired(config.commissionLogPath, link.targetId);
-  if (!updated) return;
-
   const relLogPath = path.relative(config.sanctumHome, config.commissionLogPath);
-  autoCommit(
-    config.sanctumHome,
-    `laboratory: mark ${link.targetId} revision_required (fixed by ${link.sourceId})`,
-    [relLogPath],
-  );
+
+  // Mark the original (target) writ as requiring revision
+  const revisionUpdated = markRevisionRequired(config.commissionLogPath, link.targetId);
+
+  // Withdraw presumption of success — a fixes link means the outcome
+  // wasn't actually clean. Other outcomes (partial, wrong, etc.) are
+  // left as-is since those were already patron-set.
+  const outcomeCleared = clearSuccessOutcome(config.commissionLogPath, link.targetId);
+
+  if (revisionUpdated || outcomeCleared) {
+    autoCommit(
+      config.sanctumHome,
+      `laboratory: mark ${link.targetId} revision_required (fixed by ${link.sourceId})`,
+      [relLogPath],
+    );
+  }
 }
 
 // ── Session CDC handler ──────────────────────────────────────────────

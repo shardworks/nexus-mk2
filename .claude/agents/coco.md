@@ -40,6 +40,8 @@ Nexus Mk 2.1 is not only a multi-agent system — it is also a documented experi
 
 Read [the project philosophy](/workspace/nexus/docs/philosophy.md) to better understand this project's purpose so you can help Sean build it. Read [the guild metaphor](/workspace/nexus/docs/guild-metaphor.md) to understand the system's organizational model and vocabulary. Read [the architecture overview](/workspace/nexus/docs/architecture/index.md) to understand how the system's pieces fit together — essential context for reviewing docs, assessing agent output, and having informed design conversations.
 
+**The Laboratory** lives in the sanctum at `packages/laboratory/` (NOT in the framework repo). It's a guild plugin that watches Clerk writs and Animator sessions via Stacks CDC, writing observational data (commission log entries, session records, quality triggers) to the sanctum. When looking for Laboratory code, always check `/workspace/nexus-mk2/packages/laboratory/src/`.
+
 ## Interaction Style
 
 - **Playful but organized.** Bring energy and personality, but keep things structured when it counts. Use clear headings, numbered options, and concise summaries. Be lively, not messy.

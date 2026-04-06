@@ -5,6 +5,8 @@ import path from 'node:path';
 import os from 'node:os';
 import {
   appendCommissionLogEntry,
+  setCommissionOutcome,
+  clearSuccessOutcome,
   markRevisionRequired,
   writeCommissionMd,
   writeReviewTemplate,
@@ -38,6 +40,66 @@ describe('appendCommissionLogEntry', () => {
     assert.ok(content.includes('codex: nexus'));
     assert.ok(content.includes('complexity: null'));
     assert.ok(content.includes('outcome: null'));
+  });
+
+  it('omits revision_required and failure_mode from skeleton', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, 'commissions:\n');
+
+    appendCommissionLogEntry(logPath, {
+      id: 'w-abc123',
+      title: 'Test',
+    });
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    assert.ok(!content.includes('revision_required'));
+    assert.ok(!content.includes('failure_mode'));
+  });
+
+  it('sets spec quality to strong when author is plan-writer', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, 'commissions:\n');
+
+    appendCommissionLogEntry(logPath, {
+      id: 'w-abc123',
+      title: 'Plan Writer Commission',
+      codex: 'nexus',
+      body: '---\nauthor: plan-writer\nestimated_complexity: 5\n---\n\n# The spec',
+    });
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    assert.ok(content.includes('spec_quality_pre: strong'));
+    assert.ok(content.includes('spec_quality_post: strong'));
+  });
+
+  it('sets spec quality to null when author is not plan-writer', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, 'commissions:\n');
+
+    appendCommissionLogEntry(logPath, {
+      id: 'w-abc123',
+      title: 'Manual Commission',
+      body: '---\nauthor: patron\n---\n\n# The spec',
+    });
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    assert.ok(content.includes('spec_quality_pre: null'));
+    assert.ok(content.includes('spec_quality_post: null'));
+  });
+
+  it('sets spec quality to null when no frontmatter', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, 'commissions:\n');
+
+    appendCommissionLogEntry(logPath, {
+      id: 'w-abc123',
+      title: 'No Frontmatter',
+      body: '# Just a heading\n\nNo frontmatter here.',
+    });
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    assert.ok(content.includes('spec_quality_pre: null'));
+    assert.ok(content.includes('spec_quality_post: null'));
   });
 
   it('escapes double quotes in titles', () => {
@@ -81,6 +143,149 @@ describe('appendCommissionLogEntry', () => {
     assert.ok(content.startsWith('# This is a comment'));
     assert.ok(content.includes('id: w-existing'));
     assert.ok(content.includes('id: w-new'));
+  });
+});
+
+describe('setCommissionOutcome', () => {
+  it('sets outcome on an existing entry', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-abc123',
+      '    title: "Test"',
+      '    codex: nexus',
+      '    complexity: 3',
+      '    spec_quality_pre: strong',
+      '    outcome: null',
+      '    spec_quality_post: strong',
+      '',
+    ].join('\n'));
+
+    const result = setCommissionOutcome(logPath, 'w-abc123', 'success');
+    assert.equal(result, true);
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    assert.ok(content.includes('outcome: success'));
+    assert.ok(!content.includes('outcome: null'));
+  });
+
+  it('sets outcome and failure_mode together', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-abc123',
+      '    title: "Test"',
+      '    complexity: 3',
+      '    spec_quality_pre: strong',
+      '    outcome: null',
+      '    spec_quality_post: strong',
+      '',
+    ].join('\n'));
+
+    const result = setCommissionOutcome(logPath, 'w-abc123', 'abandoned', 'execution_error');
+    assert.equal(result, true);
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    assert.ok(content.includes('outcome: abandoned'));
+    assert.ok(content.includes('failure_mode: execution_error'));
+  });
+
+  it('returns false when entry not found', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-other',
+      '    outcome: null',
+      '',
+    ].join('\n'));
+
+    const result = setCommissionOutcome(logPath, 'w-nonexistent', 'success');
+    assert.equal(result, false);
+  });
+
+  it('returns false when log file does not exist', () => {
+    const result = setCommissionOutcome(path.join(tmpDir, 'nonexistent.yaml'), 'w-abc123', 'success');
+    assert.equal(result, false);
+  });
+
+  it('only modifies the targeted entry', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-first',
+      '    title: "First"',
+      '    outcome: null',
+      '    spec_quality_post: null',
+      '',
+      '  - id: w-second',
+      '    title: "Second"',
+      '    outcome: null',
+      '    spec_quality_post: null',
+      '',
+    ].join('\n'));
+
+    setCommissionOutcome(logPath, 'w-second', 'success');
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    const firstEntry = content.substring(0, content.indexOf('w-second'));
+    assert.ok(firstEntry.includes('outcome: null'));
+    const secondEntry = content.substring(content.indexOf('w-second'));
+    assert.ok(secondEntry.includes('outcome: success'));
+  });
+});
+
+describe('clearSuccessOutcome', () => {
+  it('clears outcome from success to null', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-abc123',
+      '    title: "Test"',
+      '    outcome: success',
+      '',
+    ].join('\n'));
+
+    const result = clearSuccessOutcome(logPath, 'w-abc123');
+    assert.equal(result, true);
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    assert.ok(content.includes('outcome: null'));
+    assert.ok(!content.includes('outcome: success'));
+  });
+
+  it('does not modify non-success outcomes', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-abc123',
+      '    title: "Test"',
+      '    outcome: partial',
+      '',
+    ].join('\n'));
+
+    const result = clearSuccessOutcome(logPath, 'w-abc123');
+    assert.equal(result, false);
+
+    const content = fs.readFileSync(logPath, 'utf-8');
+    assert.ok(content.includes('outcome: partial'));
+  });
+
+  it('returns false when entry not found', () => {
+    const logPath = path.join(tmpDir, 'commission-log.yaml');
+    fs.writeFileSync(logPath, [
+      'commissions:',
+      '  - id: w-other',
+      '    outcome: success',
+      '',
+    ].join('\n'));
+
+    const result = clearSuccessOutcome(logPath, 'w-nonexistent');
+    assert.equal(result, false);
+  });
+
+  it('returns false when log file does not exist', () => {
+    const result = clearSuccessOutcome(path.join(tmpDir, 'nonexistent.yaml'), 'w-abc123');
+    assert.equal(result, false);
   });
 });
 
