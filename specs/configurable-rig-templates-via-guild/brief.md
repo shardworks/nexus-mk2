@@ -6,7 +6,7 @@ Every writ gets the same hardcoded 5-engine rig (draft → implement → review 
 
 ## Desired behavior
 
-The Spider's `spider` config section gains a `rigTemplates` map: keyed by writ type, each entry defines an ordered list of engine instances with their designIds, upstream dependencies, and givens. When spawning a rig, the Spider looks up the template matching the writ's type, falling back to a default template. Givens support a small set of named variable references (`$writ`, `$role`, `$buildCommand`, `$testCommand`) that the Spider resolves from the writ and SpiderConfig at spawn time — undefined variables are omitted from givens. If no templates are configured, the current hardcoded 5-engine pipeline is used unchanged (full backwards compatibility).
+The Spider's `spider` config section gains a `rigTemplates` map: keyed by writ type, each entry defines an ordered list of engine instances with their designIds, upstream dependencies, and givens. When spawning a rig, the Spider looks up the template matching the writ's type, falling back to a default template. Givens support variable references that the Spider resolves at spawn time. At minimum, `$writ` (the writ document) and `$role` (the configured role) are well-known references. Beyond those, the template needs a general mechanism for passing through arbitrary Spider/guild config values to engine givens — rather than enumerating specific keys like `buildCommand` or `testCommand` in the variable vocabulary. Undefined variables are omitted from givens. If no templates are configured, the current hardcoded 5-engine pipeline is used unchanged (full backwards compatibility).
 
 ## Validation
 

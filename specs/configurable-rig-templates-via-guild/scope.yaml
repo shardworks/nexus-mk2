@@ -1,0 +1,33 @@
+brief: |
+  Every writ gets the same hardcoded 5-engine rig (draft → implement → review → revise → seal), regardless of writ type. Different kinds of work need different pipelines — a spec-writing commission doesn't need review/revise, a hotfix might skip drafting, a doc update might use a different role. Today the only way to change the pipeline is to modify Spider source code. This is a stop-gap before the full needs-discovery system: let guilds pre-compose writ-type-to-rig-structure mappings in guild config.
+
+  The Spider's `spider` config section gains a `rigTemplates` map: keyed by writ type, each entry defines an ordered list of engine instances with their designIds, upstream dependencies, and givens. When spawning a rig, the Spider looks up the template matching the writ's type, falling back to a default template. Givens support variable references that the Spider resolves at spawn time. At minimum, `$writ` (the writ document) and `$role` (the configured role) are well-known references. Beyond those, the template needs a general mechanism for passing through arbitrary Spider/guild config values to engine givens — rather than enumerating specific keys like `buildCommand` or `testCommand` in the variable vocabulary. Undefined variables are omitted from givens. If no templates are configured, the current hardcoded 5-engine pipeline is used unchanged (full backwards compatibility).
+
+  At startup, the Spider validates all configured templates: every `designId` must exist in the Fabricator's engine registry, upstream references must point to engine ids within the same template, and the dependency graph must be acyclic. Invalid templates fail guild startup with a clear error message. The rig-completion CDC currently hardcodes a lookup for an engine with `id: 'seal'` to extract the resolution summary — this needs a fallback for templates that don't include a seal engine (use the last completed engine's yields, or allow the template to declare which engine provides the resolution).
+slug: configurable-rig-templates-via-guild
+
+scope:
+  - id: S1
+    description: "Template config shape and writ-type dispatch: SpiderConfig gains a rigTemplates map keyed by writ type; trySpawn looks up the matching template, falls back to a default template, then falls back to the hardcoded pipeline."
+    rationale: "Core capability described in the brief — the template map and the lookup/fallback chain."
+    included: true
+
+  - id: S2
+    description: "Variable resolution in template givens: $writ and $role as well-known references, plus a general $spider.<key> mechanism for arbitrary spider config values. Undefined variables omitted from givens."
+    rationale: "Brief explicitly requires a general mechanism, not an enumerated vocabulary of specific keys like buildCommand or testCommand."
+    included: true
+
+  - id: S3
+    description: "Startup validation of configured templates: designId existence check against Fabricator registry, upstream reference integrity, acyclicity check. Invalid templates fail guild startup with a clear error."
+    rationale: "Brief's Validation section explicitly requires this as a startup-time check."
+    included: true
+
+  - id: S4
+    description: "CDC resolution fallback: when a completed rig has no seal engine, use an alternative strategy to extract the resolution summary for the writ transition."
+    rationale: "Brief explicitly calls out the hardcoded seal lookup as needing a fallback for templates without seal."
+    included: true
+
+  - id: S5
+    description: "Backwards compatibility: when no rigTemplates are configured, the current hardcoded 5-engine pipeline is used unchanged. New rigs from either path work with the updated CDC handler."
+    rationale: "Brief: 'if no templates are configured, the current hardcoded 5-engine pipeline is used unchanged (full backwards compatibility)'."
+    included: true
