@@ -534,7 +534,7 @@ function sendSSE(slug: string, event: string, data: any): void {
 
 // ── Pipeline ──────────────────────────────────────────────────────────
 
-function runPipelineStep(slug: string, step: string, args: string[], prompt: string, promptFile?: string): void {
+function runPipelineStep(slug: string, step: string, args: string[], prompt: string): void {
   if (running.has(slug)) {
     console.log('[workshop] Already running a step for ' + slug);
     return;
@@ -560,7 +560,7 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     return;
   }
 
-  const promptPath = path.join(PROJECT_ROOT, 'bin', 'plan-prompts', (promptFile ?? step) + '.md');
+  const promptPath = path.join(PROJECT_ROOT, 'bin', 'plan-prompts', 'planner.md');
 
   const cliArgs = [
     '--print', '-',
@@ -712,7 +712,7 @@ function startReader(slug: string, brief: string): void {
 
   const outputPath = path.join(SPECS_DIR, slug, 'inventory.md');
   runPipelineStep(slug, 'reader', ['--session-id', sessionId],
-    'Here is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug + '\n\nFollowing your instructions, read the codebase and create an inventory at: ' + outputPath);
+    'MODE: READER\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug + '\n\nFollowing your instructions, read the codebase and create an inventory at: ' + outputPath);
 }
 
 function startAnalyst(slug: string, brief: string): void {
@@ -723,7 +723,7 @@ function startAnalyst(slug: string, brief: string): void {
   const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
 
   runPipelineStep(slug, 'analyst', args,
-    'Here is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
+    'MODE: ANALYST\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
     '\n\nThe inventory has been written. Read it at: ' + path.join(specDir, 'inventory.md') +
     '\n\nFollowing your instructions, produce scope and decisions. Write output files to:' +
     '\n- ' + path.join(specDir, 'scope.yaml') +
@@ -740,14 +740,13 @@ function startAnalystRevise(slug: string, amendment: string): void {
   const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
 
   runPipelineStep(slug, 'analyst', args,
-    'You are in REVISION MODE. The patron has reviewed your previous scope and decisions and has corrections.\n\n' +
+    'MODE: ANALYST-REVISE\n\nThe patron has reviewed your previous scope and decisions and has corrections.\n\n' +
     '## Original Brief\n\n' + brief.trim() + '\n\n' +
     '## Patron\'s Amendment\n\n' + amendment + '\n\n---\n\n' +
     'Read your previous output files, apply the patron\'s feedback, and rewrite them:' +
     '\n- ' + path.join(specDir, 'scope.yaml') +
     '\n- ' + path.join(specDir, 'decisions.yaml') +
-    '\n- ' + path.join(specDir, 'observations.md'),
-    'analyst-revise');
+    '\n- ' + path.join(specDir, 'observations.md'));
 }
 
 function startWriter(slug: string, brief: string): void {
@@ -758,7 +757,7 @@ function startWriter(slug: string, brief: string): void {
   const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
 
   runPipelineStep(slug, 'writer', args,
-    'Here is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
+    'MODE: WRITER\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
     '\n\nThe analyst has written scope and decisions, and the patron has reviewed and locked them. Read these input files:' +
     '\n- ' + path.join(specDir, 'scope.yaml') +
     '\n- ' + path.join(specDir, 'decisions.yaml') +
