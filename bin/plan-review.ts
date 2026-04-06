@@ -122,6 +122,7 @@ const sseClients: SSEClient[] = [];
 interface SpecMeta {
   createdAt?: string;
   sessionId?: string;
+  sessions?: Record<string, string>;  // step → session ID (reader, analyst, writer)
   writId?: string;
   codex?: string;
   link?: { type: string; targetId: string };
@@ -612,21 +613,42 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     console.log('[workshop] ' + step + ' for ' + slug + ' finished (code=' + code + ', ' + elapsed + 's)');
     sendSSE(slug, 'status', { step, state: code === 0 ? 'complete' : 'failed', elapsed, code });
 
-    // Copy session transcripts before cleaning up
+    // Copy session transcripts before cleaning up.
+    // Only copy files that are NEW to this step — skip transcripts already captured
+    // by previous steps (e.g., the reader's session file that's still in the project
+    // dir when the analyst runs via --fork-session).
     try {
       const projectKey = cloneDir.replace(/\//g, '-');
       const claudeProjectDir = path.join(os.homedir(), '.claude', 'projects', projectKey);
       if (fs.existsSync(claudeProjectDir)) {
         const transcriptDir = path.join(SPECS_DIR, slug, 'planner-transcripts');
         fs.mkdirSync(transcriptDir, { recursive: true });
+        const existingSessionIds = new Set(
+          fs.readdirSync(transcriptDir)
+            .filter(f => f.endsWith('.jsonl'))
+            .map(f => f.replace(/^[a-z]+-/, '').replace('.jsonl', ''))
+        );
         const jsonlFiles = fs.readdirSync(claudeProjectDir).filter(f => f.endsWith('.jsonl'));
+        let copied = 0;
         for (const f of jsonlFiles) {
           const sessionId = f.replace('.jsonl', '');
+          if (existingSessionIds.has(sessionId)) {
+            console.log('[workshop] Skipping already-captured transcript: ' + sessionId);
+            continue;
+          }
           const dest = path.join(transcriptDir, step + '-' + sessionId + '.jsonl');
           fs.copyFileSync(path.join(claudeProjectDir, f), dest);
+          copied++;
+
+          // Record this step's session ID in meta
+          const updatedMeta = readMeta(slug);
+          if (!updatedMeta.sessions) updatedMeta.sessions = {};
+          updatedMeta.sessions[step] = sessionId;
+          writeMeta(slug, updatedMeta);
+          console.log('[workshop] Recorded session for ' + step + ': ' + sessionId);
         }
-        if (jsonlFiles.length > 0) {
-          console.log('[workshop] Saved ' + jsonlFiles.length + ' transcript(s) for ' + step + '/' + slug);
+        if (copied > 0) {
+          console.log('[workshop] Saved ' + copied + ' transcript(s) for ' + step + '/' + slug);
         }
       }
     } catch (err: any) {
@@ -666,6 +688,8 @@ function startReader(slug: string, brief: string): void {
   const sessionId = crypto.randomUUID();
   const meta = readMeta(slug);
   meta.sessionId = sessionId;
+  if (!meta.sessions) meta.sessions = {};
+  meta.sessions.reader = sessionId;
   writeMeta(slug, meta);
 
   const outputPath = path.join(SPECS_DIR, slug, 'inventory.md');
@@ -675,7 +699,7 @@ function startReader(slug: string, brief: string): void {
 
 function startAnalyst(slug: string, brief: string): void {
   const meta = readMeta(slug);
-  const sessionId = meta.sessionId ?? '';
+  const sessionId = meta.sessions?.reader ?? meta.sessionId ?? '';
   const specDir = path.join(SPECS_DIR, slug);
 
   const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
@@ -691,7 +715,7 @@ function startAnalyst(slug: string, brief: string): void {
 
 function startAnalystRevise(slug: string, amendment: string): void {
   const meta = readMeta(slug);
-  const sessionId = meta.sessionId ?? '';
+  const sessionId = meta.sessions?.analyst ?? meta.sessions?.reader ?? meta.sessionId ?? '';
   const specDir = path.join(SPECS_DIR, slug);
   const brief = readSpecFile(slug, 'brief.md') ?? '';
 
@@ -710,7 +734,7 @@ function startAnalystRevise(slug: string, amendment: string): void {
 
 function startWriter(slug: string, brief: string): void {
   const meta = readMeta(slug);
-  const sessionId = meta.sessionId ?? '';
+  const sessionId = meta.sessions?.analyst ?? meta.sessions?.reader ?? meta.sessionId ?? '';
   const specDir = path.join(SPECS_DIR, slug);
 
   const args = sessionId ? ['--resume', sessionId, '--fork-session'] : [];
