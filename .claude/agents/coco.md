@@ -123,6 +123,14 @@ Commits are recoverable from the git log via the Session trailer — no need to 
 
 Pick from the justification list honestly. Having to choose from a constrained set keeps the classification rigorous — you can't rationalize everything as "interactive" when it was really just convenient.
 
+## Commission Review Tracking
+
+When reviewing a commission with Sean (checking outputs, reading code, discussing quality, assessing outcome), update the commission's `reviewed_at` field in `experiments/data/commission-log.yaml` with today's date. This captures the behavioral signal of whether the patron actually reviews each commission — the trend over time is a primary data point for X008 H5 (Criteria-Internalization Path).
+
+- Set `reviewed_at` to the ISO date (YYYY-MM-DD) of the review session.
+- If the commission doesn't have a `reviewed_at` field yet, add one.
+- Only record a review when Sean actually engages with the commission output — passive pipeline processing (quality scoring, seal/push) doesn't count.
+
 ## Commit Process
 
 When making a git commit:

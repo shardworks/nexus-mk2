@@ -180,6 +180,16 @@ X008 reaches its natural end when the transition has stabilized — specifically
 
 **H2 signal — granularity split is self-organizing.** No deliberation occurred about which mode to use for which task. Small surgical changes (role terminology, config edits) flowed naturally to Coco. Larger features with spec-level complexity (workshop-prepare idempotency, update-writ actions, sortable table) flowed to commissions. This is consistent with H2: work shape is structurally different, not just faster or slower.
 
+### Infrastructure Milestones (H4/H5 context)
+
+Two infrastructure changes are noted as having a significant impact on the patron's dispatch confidence and review behavior. These serve as natural experiment markers for H4 (calibration) and H5 (criteria internalization) analysis:
+
+1. **Static implement→review→revise rig structure** (operational ~2026-04-02). Commissions began running through a structured three-engine pipeline: implement, then autonomous code review, then revise based on findings. This replaced ad hoc dispatch-and-hope with a predictable quality pass before the patron ever sees the output. The patron cited this as reducing anxiety about dispatching to autonomous agents.
+
+2. **Planning workshop** (operational ~2026-04-04). A web-based pipeline orchestrator with a 3-agent planning pipeline (analyst, writer, reviewer) that generates commission specs from patron direction. This is the first concrete step toward the H6 (Mountain-to-Spec) target state — the patron provides direction, the system generates the spec.
+
+Both milestones coincide with a visible drop in per-commission patron review. Prior to w-mnjp1ph3 (dispatched 2026-04-04), every commission was reviewed by the patron with Coco. After that point, review became ad hoc — "I've not really reviewed anything except by trying to use it." The `reviewed_at` field in the commission log captures this transition.
+
 ### Sessions 2026-04-02 – 2026-04-03
 
 **H3 / H5 — the review layer and its limits.** The scorer + Coco review pattern has proven its value: architectural debt in Walker Increment 3 (hardcoded `engine.id === 'review'` branch) was surfaced by the scorer and Coco that Sean says he probably wouldn't have caught manually. However, Sean has clarified the target state: not structured per-commission review as the endpoint, but criteria baked into agent curricula and pipelines, with self-auditing surfacing only the critical minority. Per-commission review is overhead on the path to that target.

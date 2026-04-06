@@ -222,6 +222,7 @@ All fields are filled in by Sean at review time.
 | `outcome` | patron | success / partial / wrong / abandoned | patron assessment of the commission result |
 | `revision_required` | patron | boolean | whether follow-up work was needed |
 | `spec_quality_post` | patron | strong / adequate / weak | retrospective — record separately from `spec_quality_pre`; divergence is data |
+| `reviewed_at` | coco | ISO date / null | date patron reviewed this commission with Coco; null = not reviewed |
 | `failure_mode` | patron | spec_ambiguous / requirement_wrong / execution_error / complexity_overrun / broken / incomplete | optional; best guess at root cause |
 | `reviewed_by_ethnographer` | ethnographer | boolean | mark after ethnographer has probed this case |
 | `note` | patron | string | optional; meta info about the record itself |
