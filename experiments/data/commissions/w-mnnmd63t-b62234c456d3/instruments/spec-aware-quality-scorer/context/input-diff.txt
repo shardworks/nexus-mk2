@@ -1,0 +1,883 @@
+ packages/plugins/fabricator/src/fabricator.ts      |  19 +-
+ .../plugins/spider/src/block-types/book-updated.ts |  41 +++
+ packages/plugins/spider/src/block-types/index.ts   |   3 +
+ .../spider/src/block-types/scheduled-time.ts       |  25 ++
+ .../plugins/spider/src/block-types/writ-status.ts  |  33 +++
+ packages/plugins/spider/src/index.ts               |   2 +
+ packages/plugins/spider/src/spider.ts              | 327 +++++++++++++++++++--
+ packages/plugins/spider/src/tools/index.ts         |   1 +
+ packages/plugins/spider/src/tools/rig-list.ts      |   2 +-
+ packages/plugins/spider/src/tools/rig-resume.ts    |  27 ++
+ packages/plugins/spider/src/tools/rig-show.ts      |   4 +-
+ packages/plugins/spider/src/types.ts               |  76 ++++-
+ 12 files changed, 530 insertions(+), 30 deletions(-)
+
+diff --git a/packages/plugins/fabricator/src/fabricator.ts b/packages/plugins/fabricator/src/fabricator.ts
+index 90f6e2b..29af3bf 100644
+--- a/packages/plugins/fabricator/src/fabricator.ts
++++ b/packages/plugins/fabricator/src/fabricator.ts
+@@ -28,6 +28,20 @@ export interface EngineRunContext {
+   engineId: string;
+   /** All upstream yields, keyed by engine id. Escape hatch for engines that need to inspect the full upstream chain. */
+   upstream: Record<string, unknown>;
++  /**
++   * Present when this engine was previously blocked and has been restarted.
++   * Advisory — do not depend on for correctness.
++   *
++   * Note: Defined inline to avoid a circular package dependency with spider-apparatus.
++   * Shape matches spider-apparatus BlockRecord exactly.
++   */
++  priorBlock?: {
++    type: string;
++    condition: unknown;
++    blockedAt: string;
++    message?: string;
++    lastCheckedAt?: string;
++  };
+ }
+ 
+ /**
+@@ -35,10 +49,13 @@ export interface EngineRunContext {
+  *
+  * 'completed' — synchronous work done inline, yields are available immediately.
+  * 'launched'  — async work launched in a session; the Spider polls for completion.
++ * 'blocked'   — engine is waiting for an external condition; Spider will poll
++ *               the registered block type's checker and restart when cleared.
+  */
+ export type EngineRunResult =
+   | { status: 'completed'; yields: unknown }
+-  | { status: 'launched'; sessionId: string };
++  | { status: 'launched'; sessionId: string }
++  | { status: 'blocked'; blockType: string; condition: unknown; message?: string };
+ 
+ /**
+  * An engine design — the unit of work the Fabricator catalogues and the
+diff --git a/packages/plugins/spider/src/block-types/book-updated.ts b/packages/plugins/spider/src/block-types/book-updated.ts
+new file mode 100644
+index 0000000..2087f09
+--- /dev/null
++++ b/packages/plugins/spider/src/block-types/book-updated.ts
+@@ -0,0 +1,41 @@
++/**
++ * Built-in block type: book-updated.
++ *
++ * Blocks until a specific book (or document within it) has content.
++ * Condition: { ownerId: string; book: string; documentId?: string }
++ *
++ * When documentId is provided: checks if that specific document exists.
++ * When documentId is absent: checks if any document exists in the book.
++ */
++
++import { z } from 'zod';
++import { guild } from '@shardworks/nexus-core';
++import type { StacksApi } from '@shardworks/stacks-apparatus';
++import type { BlockType } from '../types.ts';
++
++const conditionSchema = z.object({
++  ownerId: z.string(),
++  book: z.string(),
++  documentId: z.string().optional(),
++});
++
++const bookUpdatedBlockType: BlockType = {
++  id: 'book-updated',
++  conditionSchema,
++  pollIntervalMs: 10_000,
++  async check(condition: unknown): Promise<boolean> {
++    const { ownerId, book, documentId } = conditionSchema.parse(condition);
++    const stacks = guild().apparatus<StacksApi>('stacks');
++    const targetBook = stacks.readBook<Record<string, unknown>>(ownerId, book);
++    if (documentId) {
++      // Per-document: check if the document exists
++      const doc = await targetBook.get(documentId);
++      return doc !== null && doc !== undefined;
++    }
++    // Per-book: check if any documents exist
++    const docs = await targetBook.find({ limit: 1 });
++    return docs.length > 0;
++  },
++};
++
++export default bookUpdatedBlockType;
+diff --git a/packages/plugins/spider/src/block-types/index.ts b/packages/plugins/spider/src/block-types/index.ts
+new file mode 100644
+index 0000000..b9a401e
+--- /dev/null
++++ b/packages/plugins/spider/src/block-types/index.ts
+@@ -0,0 +1,3 @@
++export { default as writStatusBlockType } from './writ-status.ts';
++export { default as scheduledTimeBlockType } from './scheduled-time.ts';
++export { default as bookUpdatedBlockType } from './book-updated.ts';
+diff --git a/packages/plugins/spider/src/block-types/scheduled-time.ts b/packages/plugins/spider/src/block-types/scheduled-time.ts
+new file mode 100644
+index 0000000..d7700b7
+--- /dev/null
++++ b/packages/plugins/spider/src/block-types/scheduled-time.ts
+@@ -0,0 +1,25 @@
++/**
++ * Built-in block type: scheduled-time.
++ *
++ * Blocks until a specified ISO 8601 timestamp is reached.
++ * Condition: { resumeAt: string }
++ */
++
++import { z } from 'zod';
++import type { BlockType } from '../types.ts';
++
++const conditionSchema = z.object({
++  resumeAt: z.string(),
++});
++
++const scheduledTimeBlockType: BlockType = {
++  id: 'scheduled-time',
++  conditionSchema,
++  pollIntervalMs: 30_000,
++  async check(condition: unknown): Promise<boolean> {
++    const { resumeAt } = conditionSchema.parse(condition);
++    return Date.now() >= Date.parse(resumeAt);
++  },
++};
++
++export default scheduledTimeBlockType;
+diff --git a/packages/plugins/spider/src/block-types/writ-status.ts b/packages/plugins/spider/src/block-types/writ-status.ts
+new file mode 100644
+index 0000000..73f270c
+--- /dev/null
++++ b/packages/plugins/spider/src/block-types/writ-status.ts
+@@ -0,0 +1,33 @@
++/**
++ * Built-in block type: writ-status.
++ *
++ * Blocks until a specific writ reaches a target status.
++ * Condition: { writId: string; targetStatus: string }
++ */
++
++import { z } from 'zod';
++import { guild } from '@shardworks/nexus-core';
++import type { StacksApi } from '@shardworks/stacks-apparatus';
++import type { WritDoc } from '@shardworks/clerk-apparatus';
++import type { BlockType } from '../types.ts';
++
++const conditionSchema = z.object({
++  writId: z.string(),
++  targetStatus: z.string(),
++});
++
++const writStatusBlockType: BlockType = {
++  id: 'writ-status',
++  conditionSchema,
++  pollIntervalMs: 10_000,
++  async check(condition: unknown): Promise<boolean> {
++    const { writId, targetStatus } = conditionSchema.parse(condition);
++    const stacks = guild().apparatus<StacksApi>('stacks');
++    const writsBook = stacks.readBook<WritDoc>('clerk', 'writs');
++    const results = await writsBook.find({ where: [['id', '=', writId]], limit: 1 });
++    if (results.length === 0) return false;
++    return results[0].status === targetStatus;
++  },
++};
++
++export default writStatusBlockType;
+diff --git a/packages/plugins/spider/src/index.ts b/packages/plugins/spider/src/index.ts
+index 2585c8f..b85a0a0 100644
+--- a/packages/plugins/spider/src/index.ts
++++ b/packages/plugins/spider/src/index.ts
+@@ -21,6 +21,8 @@ export type {
+   CrawlResult,
+   SpiderApi,
+   SpiderConfig,
++  BlockRecord,
++  BlockType,
+   DraftYields,
+   SealYields,
+ } from './types.ts';
+diff --git a/packages/plugins/spider/src/spider.ts b/packages/plugins/spider/src/spider.ts
+index 19e866c..c93d701 100644
+--- a/packages/plugins/spider/src/spider.ts
++++ b/packages/plugins/spider/src/spider.ts
+@@ -4,20 +4,22 @@
+  * The Spider drives writ-to-completion by managing rigs: ordered pipelines
+  * of engine instances. Each crawl() call performs one unit of work:
+  *
+- *   collect > run > spawn   (priority order)
++ *   collect > checkBlocked > run > spawn   (priority order)
+  *
+- * collect — check running engines for terminal session results
+- * run     — execute the next pending engine (clockwork inline, quick → launch)
+- * spawn   — create a new rig for a ready writ with no existing rig
++ * collect      — check running engines for terminal session results
++ * checkBlocked — poll registered block type checkers; unblock engines when cleared
++ * run          — execute the next pending engine (clockwork inline, quick → launch)
++ * spawn        — create a new rig for a ready writ with no existing rig
+  *
+  * CDC on the rigs book (Phase 1 cascade) transitions the associated writ
+  * when a rig reaches a terminal state (completed or failed).
++ * The blocked status does NOT trigger the CDC handler.
+  *
+  * See: docs/architecture/apparatus/spider.md
+  */
+ 
+-import type { Plugin, StartupContext } from '@shardworks/nexus-core';
+-import { guild, generateId } from '@shardworks/nexus-core';
++import type { Plugin, StartupContext, LoadedPlugin } from '@shardworks/nexus-core';
++import { guild, generateId, isLoadedKit, isLoadedApparatus } from '@shardworks/nexus-core';
+ import type { StacksApi, Book, ReadOnlyBook, WhereClause } from '@shardworks/stacks-apparatus';
+ import type { ClerkApi, WritDoc } from '@shardworks/clerk-apparatus';
+ import type { FabricatorApi } from '@shardworks/fabricator-apparatus';
+@@ -30,6 +32,8 @@ import type {
+   SpiderApi,
+   CrawlResult,
+   SpiderConfig,
++  BlockRecord,
++  BlockType,
+ } from './types.ts';
+ 
+ import {
+@@ -40,7 +44,20 @@ import {
+   sealEngine,
+ } from './engines/index.ts';
+ 
+-import { crawlOneTool, crawlContinualTool, rigShowTool, rigListTool, rigForWritTool } from './tools/index.ts';
++import {
++  writStatusBlockType,
++  scheduledTimeBlockType,
++  bookUpdatedBlockType,
++} from './block-types/index.ts';
++
++import {
++  crawlOneTool,
++  crawlContinualTool,
++  rigShowTool,
++  rigListTool,
++  rigForWritTool,
++  rigResumeTool,
++} from './tools/index.ts';
+ 
+ // ── Helpers ────────────────────────────────────────────────────────────
+ 
+@@ -87,6 +104,24 @@ function findRunnableEngine(rig: RigDoc): EngineInstance | null {
+   return null;
+ }
+ 
++/**
++ * Determine whether a rig should enter the blocked state.
++ *
++ * A rig is blocked when:
++ * - No engine is currently running
++ * - No engine is runnable (pending with all upstream completed)
++ * - At least one engine is blocked
++ */
++function isRigBlocked(engines: EngineInstance[]): boolean {
++  const hasRunning = engines.some((e) => e.status === 'running');
++  if (hasRunning) return false;
++  const hasBlocked = engines.some((e) => e.status === 'blocked');
++  if (!hasBlocked) return false;
++  // Check runnability by constructing a minimal RigDoc-like object
++  const syntheticRig = { engines } as RigDoc;
++  return findRunnableEngine(syntheticRig) === null;
++}
++
+ /**
+  * Produce the five-engine static pipeline for a writ.
+  * Each engine receives only the givens it needs.
+@@ -110,6 +145,47 @@ function buildStaticEngines(writ: WritDoc, config: SpiderConfig): EngineInstance
+   ];
+ }
+ 
++// ── Block type type guard ──────────────────────────────────────────────
++
++function isBlockType(value: unknown): value is BlockType {
++  return (
++    typeof value === 'object' &&
++    value !== null &&
++    typeof (value as Record<string, unknown>).id === 'string' &&
++    typeof (value as Record<string, unknown>).check === 'function'
++  );
++}
++
++// ── Block type registry ────────────────────────────────────────────────
++
++class BlockTypeRegistry {
++  private readonly types = new Map<string, BlockType>();
++
++  register(plugin: LoadedPlugin): void {
++    if (isLoadedKit(plugin)) {
++      this.registerFromKit(plugin.kit);
++    } else if (isLoadedApparatus(plugin)) {
++      if (plugin.apparatus.supportKit) {
++        this.registerFromKit(plugin.apparatus.supportKit);
++      }
++    }
++  }
++
++  private registerFromKit(kit: Record<string, unknown>): void {
++    const raw = kit.blockTypes;
++    if (typeof raw !== 'object' || raw === null) return;
++    for (const value of Object.values(raw as Record<string, unknown>)) {
++      if (isBlockType(value)) {
++        this.types.set(value.id, value);
++      }
++    }
++  }
++
++  get(id: string): BlockType | undefined {
++    return this.types.get(id);
++  }
++}
++
+ // ── Apparatus factory ──────────────────────────────────────────────────
+ 
+ export function createSpider(): Plugin {
+@@ -120,10 +196,20 @@ export function createSpider(): Plugin {
+   let fabricator: FabricatorApi;
+   let spiderConfig: SpiderConfig = {};
+ 
++  const blockTypeRegistry = new BlockTypeRegistry();
++
++  /**
++   * In-memory store for block records that have been cleared.
++   * Key: "rigId:engineId". Written when an engine is unblocked (via checker or resume()).
++   * Read and deleted in tryRun() when building EngineRunContext.
++   */
++  const pendingPriorBlocks = new Map<string, BlockRecord>();
++
+   // ── Internal crawl operations ─────────────────────────────────────
+ 
+   /**
+    * Mark an engine failed and propagate failure to the rig (same update).
++   * Cancels all pending and blocked engines.
+    */
+   async function failEngine(
+     rig: RigDoc,
+@@ -135,8 +221,8 @@ export function createSpider(): Plugin {
+       if (e.id === engineId) {
+         return { ...e, status: 'failed' as const, error: errorMessage, completedAt: now };
+       }
+-      if (e.status === 'pending') {
+-        return { ...e, status: 'cancelled' as const };
++      if (e.status === 'pending' || e.status === 'blocked') {
++        return { ...e, status: 'cancelled' as const, block: undefined };
+       }
+       return e;
+     });
+@@ -152,6 +238,9 @@ export function createSpider(): Plugin {
+    * Find the first running engine with a sessionId whose session has
+    * reached a terminal state. Populate yields and advance the engine
+    * (and possibly the rig) to completed or failed.
++   *
++   * After collecting a completed engine, check whether the rig has
++   * become blocked (no running engines, no runnable engines, some blocked).
+    */
+   async function tryCollect(): Promise<CrawlResult | null> {
+     const runningRigs = await rigsBook.find({ where: [['status', '=', 'running']] });
+@@ -198,14 +287,19 @@ export function createSpider(): Plugin {
+         );
+ 
+         const allCompleted = updatedEngines.every((e) => e.status === 'completed');
+-        await rigsBook.patch(rig.id, {
+-          engines: updatedEngines,
+-          status: allCompleted ? 'completed' : 'running',
+-        });
+ 
+         if (allCompleted) {
++          await rigsBook.patch(rig.id, { engines: updatedEngines, status: 'completed' });
+           return { action: 'rig-completed', rigId: rig.id, writId: rig.writId, outcome: 'completed' };
+         }
++
++        // Check whether completing this engine has caused the rig to become blocked
++        if (isRigBlocked(updatedEngines)) {
++          await rigsBook.patch(rig.id, { engines: updatedEngines, status: 'blocked' });
++          return { action: 'rig-blocked', rigId: rig.id, writId: rig.writId };
++        }
++
++        await rigsBook.patch(rig.id, { engines: updatedEngines, status: 'running' });
+         return { action: 'engine-completed', rigId: rig.id, engineId: engine.id };
+       }
+     }
+@@ -213,13 +307,92 @@ export function createSpider(): Plugin {
+   }
+ 
+   /**
+-   * Phase 2 — run.
++   * Phase 2 — checkBlocked.
++   *
++   * Query rigs with status 'running' or 'blocked'. For each blocked engine,
++   * run the registered checker (respecting pollIntervalMs). If cleared,
++   * transition the engine back to pending and restore the rig to running.
++   * If not cleared, update lastCheckedAt and continue to the next engine.
++   */
++  async function tryCheckBlocked(): Promise<CrawlResult | null> {
++    // Fetch both running rigs (may have blocked engines) and blocked rigs
++    const runningRigs = await rigsBook.find({ where: [['status', '=', 'running']] });
++    const blockedRigs = await rigsBook.find({ where: [['status', '=', 'blocked']] });
++    const rigs = [...runningRigs, ...blockedRigs];
++
++    for (const rig of rigs) {
++      for (const engine of rig.engines) {
++        if (engine.status !== 'blocked' || !engine.block) continue;
++
++        const blockType = blockTypeRegistry.get(engine.block.type);
++        if (!blockType) continue; // Type was unregistered after block was created; skip
++
++        // Poll interval throttle
++        if (blockType.pollIntervalMs !== undefined && engine.block.lastCheckedAt) {
++          const elapsed = Date.now() - new Date(engine.block.lastCheckedAt).getTime();
++          if (elapsed < blockType.pollIntervalMs) continue;
++        }
++
++        let cleared: boolean;
++        try {
++          cleared = await blockType.check(engine.block.condition);
++        } catch (err) {
++          // Log warning, skip — engine stays blocked, retry next cycle
++          console.warn(
++            `Block checker "${engine.block.type}" threw for engine "${engine.id}" in rig "${rig.id}":`,
++            err,
++          );
++          continue;
++        }
++
++        if (!cleared) {
++          // Update lastCheckedAt and continue checking other engines
++          const now = new Date().toISOString();
++          const updatedEngines = rig.engines.map((e) =>
++            e.id === engine.id
++              ? { ...e, block: { ...e.block!, lastCheckedAt: now } }
++              : e,
++          );
++          await rigsBook.patch(rig.id, { engines: updatedEngines });
++          continue; // Check next engine
++        }
++
++        // Cleared — store block record in memory for priorBlock, then transition engine to pending
++        const priorBlockRecord = engine.block;
++        pendingPriorBlocks.set(`${rig.id}:${engine.id}`, priorBlockRecord);
++
++        const updatedEngines = rig.engines.map((e) =>
++          e.id === engine.id
++            ? { ...e, status: 'pending' as const, block: undefined }
++            : e,
++        );
++
++        // Restore rig to running if it was blocked; use isRigBlocked on updatedEngines
++        // (always false after unblocking, but keeps call sites consistent per R13)
++        const stillBlocked = isRigBlocked(updatedEngines);
++        const rigStatus = stillBlocked ? 'blocked' : 'running';
++
++        await rigsBook.patch(rig.id, {
++          engines: updatedEngines,
++          status: rigStatus,
++        });
++
++        return { action: 'engine-unblocked', rigId: rig.id, engineId: engine.id };
++      }
++    }
++    return null;
++  }
++
++  /**
++   * Phase 3 — run.
+    *
+    * Find the first pending engine in any running rig whose upstream is
+    * all completed. Execute it:
+    * - Clockwork ('completed') → store yields, mark engine completed,
+    *   check for rig completion.
+    * - Quick ('launched') → store sessionId, mark engine running.
++   * - Blocked ('blocked') → validate block type and condition, persist
++   *   block record, check whether rig should enter blocked state.
+    */
+   async function tryRun(): Promise<CrawlResult | null> {
+     const runningRigs = await rigsBook.find({ where: [['status', '=', 'running']] });
+@@ -236,7 +409,17 @@ export function createSpider(): Plugin {
+       const now = new Date().toISOString();
+       const upstream = buildUpstreamMap(rig);
+       const givens = { ...pending.givensSpec };
+-      const context = { engineId: pending.id, upstream };
++
++      // Check for a prior block record (engine was previously blocked and unblocked)
++      const priorBlockKey = `${rig.id}:${pending.id}`;
++      const priorBlock = pendingPriorBlocks.get(priorBlockKey);
++      if (priorBlock) pendingPriorBlocks.delete(priorBlockKey);
++
++      const context = {
++        engineId: pending.id,
++        upstream,
++        ...(priorBlock ? { priorBlock } : {}),
++      };
+ 
+       let engineResult: Awaited<ReturnType<typeof design.run>>;
+       try {
+@@ -263,6 +446,53 @@ export function createSpider(): Plugin {
+           return { action: 'engine-started', rigId: rig.id, engineId: pending.id };
+         }
+ 
++        if (engineResult.status === 'blocked') {
++          const { blockType: blockTypeId, condition, message } = engineResult;
++
++          // Look up the block type
++          const blockType = blockTypeRegistry.get(blockTypeId);
++          if (!blockType) {
++            await failEngine(updatedRig, pending.id, `Unknown block type: "${blockTypeId}"`);
++            return { action: 'rig-completed', rigId: rig.id, writId: rig.writId, outcome: 'failed' };
++          }
++
++          // Validate the condition against the block type's schema
++          try {
++            blockType.conditionSchema.parse(condition);
++          } catch (zodErr) {
++            const zodMessage = zodErr instanceof Error ? zodErr.message : String(zodErr);
++            await failEngine(
++              updatedRig,
++              pending.id,
++              `Block type "${blockTypeId}" rejected condition: ${zodMessage}`,
++            );
++            return { action: 'rig-completed', rigId: rig.id, writId: rig.writId, outcome: 'failed' };
++          }
++
++          // Build the block record and persist the blocked engine
++          const blockRecord: BlockRecord = {
++            type: blockTypeId,
++            condition,
++            blockedAt: new Date().toISOString(),
++            ...(message !== undefined ? { message } : {}),
++          };
++
++          const blockedEngines = updatedRig.engines.map((e) =>
++            e.id === pending.id
++              ? { ...e, status: 'blocked' as const, block: blockRecord }
++              : e,
++          );
++
++          // Determine whether the rig should also enter blocked state
++          if (isRigBlocked(blockedEngines)) {
++            await rigsBook.patch(rig.id, { engines: blockedEngines, status: 'blocked' });
++            return { action: 'rig-blocked', rigId: rig.id, writId: rig.writId };
++          }
++
++          await rigsBook.patch(rig.id, { engines: blockedEngines });
++          return { action: 'engine-blocked', rigId: rig.id, engineId: pending.id, blockType: blockTypeId };
++        }
++
+         // Clockwork engine — validate and store yields
+         const { yields } = engineResult;
+         if (!isJsonSerializable(yields)) {
+@@ -296,7 +526,7 @@ export function createSpider(): Plugin {
+   }
+ 
+   /**
+-   * Phase 3 — spawn.
++   * Phase 4 — spawn.
+    *
+    * Find the oldest ready writ with no existing rig. Create a rig and
+    * transition the writ to active so the Clerk tracks it as in-progress.
+@@ -356,6 +586,9 @@ export function createSpider(): Plugin {
+       const collected = await tryCollect();
+       if (collected) return collected;
+ 
++      const checked = await tryCheckBlocked();
++      if (checked) return checked;
++
+       const ran = await tryRun();
+       if (ran) return ran;
+ 
+@@ -391,6 +624,41 @@ export function createSpider(): Plugin {
+       const results = await rigsBook.find({ where: [['writId', '=', writId]], limit: 1 });
+       return results[0] ?? null;
+     },
++
++    async resume(rigId: string, engineId: string): Promise<void> {
++      const rig = await api.show(rigId); // Throws if not found
++      const engine = rig.engines.find((e) => e.id === engineId);
++      if (!engine) {
++        throw new Error(`Engine "${engineId}" not found in rig "${rigId}".`);
++      }
++      if (engine.status !== 'blocked') {
++        throw new Error(
++          `Engine "${engineId}" in rig "${rigId}" is not blocked (status: ${engine.status}).`,
++        );
++      }
++
++      // Store prior block for priorBlock context on next run
++      if (engine.block) {
++        pendingPriorBlocks.set(`${rigId}:${engineId}`, engine.block);
++      }
++
++      const updatedEngines = rig.engines.map((e) =>
++        e.id === engineId
++          ? { ...e, status: 'pending' as const, block: undefined }
++          : e,
++      );
++
++      const rigStatus = rig.status === 'blocked' ? 'running' : rig.status;
++
++      await rigsBook.patch(rigId, {
++        engines: updatedEngines,
++        status: rigStatus,
++      });
++    },
++
++    getBlockType(id: string): BlockType | undefined {
++      return blockTypeRegistry.get(id);
++    },
+   };
+ 
+   // ── Apparatus ─────────────────────────────────────────────────────
+@@ -398,6 +666,7 @@ export function createSpider(): Plugin {
+   return {
+     apparatus: {
+       requires: ['stacks', 'clerk', 'fabricator'],
++      consumes: ['blockTypes'],
+ 
+       supportKit: {
+         books: {
+@@ -412,12 +681,17 @@ export function createSpider(): Plugin {
+           revise:    reviseEngine,
+           seal:      sealEngine,
+         },
+-        tools: [crawlOneTool, crawlContinualTool, rigShowTool, rigListTool, rigForWritTool],
++        blockTypes: {
++          'writ-status':    writStatusBlockType,
++          'scheduled-time': scheduledTimeBlockType,
++          'book-updated':   bookUpdatedBlockType,
++        },
++        tools: [crawlOneTool, crawlContinualTool, rigShowTool, rigListTool, rigForWritTool, rigResumeTool],
+       },
+ 
+       provides: api,
+ 
+-      start(_ctx: StartupContext): void {
++      start(ctx: StartupContext): void {
+         const g = guild();
+         spiderConfig = g.guildConfig().spider ?? {};
+ 
+@@ -429,8 +703,24 @@ export function createSpider(): Plugin {
+         sessionsBook = stacks.readBook<SessionDoc>('animator', 'sessions');
+         writsBook = stacks.readBook<WritDoc>('clerk', 'writs');
+ 
++        // Scan all already-loaded kits for block types.
++        // These fired plugin:initialized before any apparatus started.
++        for (const kit of g.kits()) {
++          blockTypeRegistry.register(kit);
++        }
++
++        // Subscribe to plugin:initialized for apparatus supportKits that
++        // fire after us in the startup sequence.
++        ctx.on('plugin:initialized', (plugin: unknown) => {
++          const loaded = plugin as LoadedPlugin;
++          if (isLoadedApparatus(loaded)) {
++            blockTypeRegistry.register(loaded);
++          }
++        });
++
+         // CDC — Phase 1 cascade on rigs book.
+         // When a rig reaches a terminal state, transition the associated writ.
++        // The 'blocked' status intentionally falls through — no CDC action.
+         stacks.watch<RigDoc>(
+           'spider',
+           'rigs',
+@@ -455,6 +745,7 @@ export function createSpider(): Plugin {
+               const resolution = failedEngine?.error ?? 'Engine failure';
+               await clerk.transition(rig.writId, 'failed', { resolution });
+             }
++            // 'blocked' status — no CDC action, writ stays in current state
+           },
+           { failOnError: true },
+         );
+diff --git a/packages/plugins/spider/src/tools/index.ts b/packages/plugins/spider/src/tools/index.ts
+index 66a27bb..6cda7a1 100644
+--- a/packages/plugins/spider/src/tools/index.ts
++++ b/packages/plugins/spider/src/tools/index.ts
+@@ -3,3 +3,4 @@ export { default as crawlContinualTool } from './crawl-continual.ts';
+ export { default as rigShowTool } from './rig-show.ts';
+ export { default as rigListTool } from './rig-list.ts';
+ export { default as rigForWritTool } from './rig-for-writ.ts';
++export { default as rigResumeTool } from './rig-resume.ts';
+diff --git a/packages/plugins/spider/src/tools/rig-list.ts b/packages/plugins/spider/src/tools/rig-list.ts
+index abcd58c..7efa42d 100644
+--- a/packages/plugins/spider/src/tools/rig-list.ts
++++ b/packages/plugins/spider/src/tools/rig-list.ts
+@@ -15,7 +15,7 @@ export default tool({
+     'Optionally filter by status and control pagination with limit and offset.',
+   params: {
+     status: z
+-      .enum(['running', 'completed', 'failed'])
++      .enum(['running', 'completed', 'failed', 'blocked'])
+       .optional()
+       .describe('Filter by rig status.'),
+     limit: z
+diff --git a/packages/plugins/spider/src/tools/rig-resume.ts b/packages/plugins/spider/src/tools/rig-resume.ts
+new file mode 100644
+index 0000000..7f4f41f
+--- /dev/null
++++ b/packages/plugins/spider/src/tools/rig-resume.ts
+@@ -0,0 +1,27 @@
++/**
++ * rig-resume tool — manually clear a block on a specific engine.
++ */
++
++import { z } from 'zod';
++import { guild } from '@shardworks/nexus-core';
++import { tool } from '@shardworks/tools-apparatus';
++import type { SpiderApi } from '../types.ts';
++
++export default tool({
++  name: 'rig-resume',
++  description: 'Manually clear a block on a specific engine, regardless of checker result',
++  instructions:
++    'Clears the block on the specified engine and transitions it back to pending. ' +
++    'The engine will be picked up on the next crawl cycle. ' +
++    'Throws if the engine is not in blocked status.',
++  params: {
++    rigId: z.string().describe('The rig id.'),
++    engineId: z.string().describe('The engine id within the rig.'),
++  },
++  permission: 'spider:write',
++  handler: async (params) => {
++    const spider = guild().apparatus<SpiderApi>('spider');
++    await spider.resume(params.rigId, params.engineId);
++    return { ok: true };
++  },
++});
+diff --git a/packages/plugins/spider/src/tools/rig-show.ts b/packages/plugins/spider/src/tools/rig-show.ts
+index 7533211..5f535de 100644
+--- a/packages/plugins/spider/src/tools/rig-show.ts
++++ b/packages/plugins/spider/src/tools/rig-show.ts
+@@ -10,7 +10,9 @@ import type { SpiderApi } from '../types.ts';
+ export default tool({
+   name: 'rig-show',
+   description: 'Retrieve a rig by id',
+-  instructions: 'Returns the full RigDoc for the given rig id. Throws if the rig does not exist.',
++  instructions:
++    'Returns the full RigDoc for the given rig id. Throws if the rig does not exist. ' +
++    'Blocked engines include a block record with type, condition, blockedAt, and lastCheckedAt timestamps.',
+   params: {
+     id: z.string().describe('The rig id to look up.'),
+   },
+diff --git a/packages/plugins/spider/src/types.ts b/packages/plugins/spider/src/types.ts
+index 8bf47b0..65971f8 100644
+--- a/packages/plugins/spider/src/types.ts
++++ b/packages/plugins/spider/src/types.ts
+@@ -6,9 +6,31 @@
+  * packages can import them without depending on the engine implementation files.
+  */
+ 
++import type { ZodSchema } from 'zod';
++
+ // ── Engine instance status ────────────────────────────────────────────
+ 
+-export type EngineStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
++export type EngineStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked';
++
++// ── Block record ──────────────────────────────────────────────────────
++
++/**
++ * Persisted record of an active engine block.
++ * Present on an EngineInstance when status === 'blocked'.
++ * Cleared when the block is resolved.
++ */
++export interface BlockRecord {
++  /** Block type identifier (matches a registered BlockType.id). */
++  type: string;
++  /** Structured condition payload — shape validated by the block type's conditionSchema. */
++  condition: unknown;
++  /** ISO timestamp when the engine was blocked. */
++  blockedAt: string;
++  /** Optional human-readable message from the engine. */
++  message?: string;
++  /** ISO timestamp of the last checker evaluation. Updated on every check cycle. */
++  lastCheckedAt?: string;
++}
+ 
+ // ── Engine instance ───────────────────────────────────────────────────
+ 
+@@ -43,11 +65,13 @@ export interface EngineInstance {
+   startedAt?: string;
+   /** ISO timestamp when execution completed (or failed). */
+   completedAt?: string;
++  /** Present when status === 'blocked'. Cleared when the block is resolved. */
++  block?: BlockRecord;
+ }
+ 
+ // ── Rig ──────────────────────────────────────────────────────────────
+ 
+-export type RigStatus = 'running' | 'completed' | 'failed';
++export type RigStatus = 'running' | 'completed' | 'failed' | 'blocked';
+ 
+ /**
+  * A rig — the execution context for a single writ.
+@@ -90,19 +114,42 @@ export interface RigFilters {
+ /**
+  * The result of a single crawl() call.
+  *
+- * Four variants, ordered by priority:
+- * - 'engine-completed' — an engine finished (collected or ran inline); rig still running
+- * - 'engine-started'   — launched a quick engine's session
+- * - 'rig-spawned'      — created a new rig for a ready writ
+- * - 'rig-completed'    — the crawl step caused a rig to reach a terminal state
++ * Variants, ordered by priority:
++ * - 'engine-completed'  — an engine finished (collected or ran inline); rig still running
++ * - 'engine-started'    — launched a quick engine's session
++ * - 'engine-blocked'    — engine entered blocked status; rig is still running (other engines active)
++ * - 'engine-unblocked'  — a blocked engine's condition cleared; engine returned to pending
++ * - 'rig-spawned'       — created a new rig for a ready writ
++ * - 'rig-completed'     — the crawl step caused a rig to reach a terminal state
++ * - 'rig-blocked'       — all forward progress stalled; rig entered blocked status
+  *
+  * null means no work was available.
+  */
+ export type CrawlResult =
+   | { action: 'engine-completed'; rigId: string; engineId: string }
+   | { action: 'engine-started'; rigId: string; engineId: string }
++  | { action: 'engine-blocked'; rigId: string; engineId: string; blockType: string }
++  | { action: 'engine-unblocked'; rigId: string; engineId: string }
+   | { action: 'rig-spawned'; rigId: string; writId: string }
+-  | { action: 'rig-completed'; rigId: string; writId: string; outcome: 'completed' | 'failed' };
++  | { action: 'rig-completed'; rigId: string; writId: string; outcome: 'completed' | 'failed' }
++  | { action: 'rig-blocked'; rigId: string; writId: string };
++
++// ── Block type ────────────────────────────────────────────────────────
++
++/**
++ * A registered block type — defines how to check whether a blocking
++ * condition has cleared. Contributed via kit/supportKit `blockTypes`.
++ */
++export interface BlockType {
++  /** Unique identifier (e.g. 'writ-status', 'scheduled-time'). */
++  id: string;
++  /** Lightweight checker — returns true if the blocking condition has cleared. */
++  check: (condition: unknown) => Promise<boolean>;
++  /** Zod schema for validating the condition payload at block time. */
++  conditionSchema: ZodSchema;
++  /** Suggested poll interval in milliseconds. If absent, check every crawl cycle. */
++  pollIntervalMs?: number;
++}
+ 
+ // ── SpiderApi ─────────────────────────────────────────────────────────
+ 
+@@ -113,7 +160,7 @@ export interface SpiderApi {
+   /**
+    * Execute one step of the crawl loop.
+    *
+-   * Priority ordering: collect > run > spawn.
++   * Priority ordering: collect > checkBlocked > run > spawn.
+    * Returns null when no work is available.
+    */
+   crawl(): Promise<CrawlResult | null>;
+@@ -132,6 +179,17 @@ export interface SpiderApi {
+    * Find the rig for a given writ. Returns null if no rig exists.
+    */
+   forWrit(writId: string): Promise<RigDoc | null>;
++
++  /**
++   * Manually clear a block on a specific engine, regardless of checker result.
++   * Throws if the engine is not blocked.
++   */
++  resume(rigId: string, engineId: string): Promise<void>;
++
++  /**
++   * Look up a registered block type by ID.
++   */
++  getBlockType(id: string): BlockType | undefined;
+ }
+ 
+ // ── Configuration ─────────────────────────────────────────────────────
