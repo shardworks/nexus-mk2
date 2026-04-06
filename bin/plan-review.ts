@@ -330,12 +330,12 @@ function computePipelineCosts(slug: string): PipelineCosts | null {
   const files = fs.readdirSync(transcriptDir).filter(f => f.endsWith('.jsonl')).sort();
   if (files.length === 0) return null;
 
-  const stepOrder = ['reader', 'reader-sonnet', 'analyst', 'analyst-cold', 'writer'];
+  const stepOrder = ['reader', 'analyst', 'analyst-cold', 'writer'];
 
   // Collect all transcript files grouped by step
   const stepFiles = new Map<string, string[]>();
   for (const f of files) {
-    const match = f.match(/^(reader-sonnet|reader|analyst-cold|analyst|writer)-(.+)\.jsonl$/);
+    const match = f.match(/^(reader|analyst-cold|analyst|writer)-(.+)\.jsonl$/);
     if (!match) continue;
     const step = match[1];
     if (!stepFiles.has(step)) stepFiles.set(step, []);
@@ -701,7 +701,7 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
   });
 }
 
-function startReader(slug: string, brief: string, model: string = 'opus'): void {
+function startReader(slug: string, brief: string): void {
   const sessionId = crypto.randomUUID();
   const meta = readMeta(slug);
   meta.sessionId = sessionId;
@@ -709,11 +709,10 @@ function startReader(slug: string, brief: string, model: string = 'opus'): void 
   meta.sessions.reader = sessionId;
   writeMeta(slug, meta);
 
-  const step = model === 'opus' ? 'reader' : 'reader-' + model;
   const outputPath = path.join(SPECS_DIR, slug, 'inventory.md');
-  runPipelineStep(slug, step, ['--session-id', sessionId],
+  runPipelineStep(slug, 'reader', ['--session-id', sessionId],
     'MODE: READER\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug + '\n\nFollowing your instructions, read the codebase and create an inventory at: ' + outputPath,
-    model);
+    'sonnet');
 }
 
 function startAnalyst(slug: string, brief: string): void {
@@ -908,7 +907,6 @@ const server = http.createServer(async (req, res) => {
       const brief = readSpecFile(slug, 'brief.md') ?? '';
 
       if (step === 'reader') startReader(slug, brief.trim());
-      else if (step === 'reader-sonnet') startReader(slug, brief.trim(), 'sonnet');
       else if (step === 'analyst') startAnalyst(slug, brief.trim());
       else if (step === 'analyst-cold') startAnalystCold(slug, brief.trim());
       else if (step === 'analyst-revise') {
@@ -1555,8 +1553,8 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '        else if (ws === "cancelled") { state = "failed"; statusText = "cancelled"; icon = "&#10007;"; }\n' +
 '        else { state = "done"; statusText = ws; icon = "&#10003;"; }\n' +
 '      }\n' +
-'    } else if (d.runningStep === s.key || (s.key === "analyst" && d.runningStep === "analyst-cold") || (s.key === "reader" && d.runningStep === "reader-sonnet")) {\n' +
-'      state = "active"; statusText = d.runningStep === "analyst-cold" ? "running (cold)..." : d.runningStep === "reader-sonnet" ? "running (sonnet)..." : "running..."; icon = "&#9672;";\n' +
+'    } else if (d.runningStep === s.key || (s.key === "analyst" && d.runningStep === "analyst-cold")) {\n' +
+'      state = "active"; statusText = d.runningStep === "analyst-cold" ? "running (cold)..." : "running..."; icon = "&#9672;";\n' +
 '    } else if (s.key === "review") {\n' +
 '      if (d.scope && d.decisions) { state = "done"; statusText = "ready"; icon = "&#10003;"; }\n' +
 '    } else if (s.file && d[s.key === "reader" ? "inventory" : s.key === "analyst" ? "scope" : "spec"]) {\n' +
@@ -1579,9 +1577,6 @@ const HTML = /* html */ '<!DOCTYPE html>\n' +
 '\n' +
 '    // Add variant buttons for testing\n' +
 '    var extraBtns = "";\n' +
-'    if (s.key === "reader" && d.brief && !d.runningStep) {\n' +
-'      extraBtns += \' <button class="btn btn-dim" data-action="run-step" data-step="reader-sonnet" title="Run reader with Sonnet model">sonnet</button>\';\n' +
-'    }\n' +
 '    if (s.key === "analyst" && d.inventory && !d.runningStep) {\n' +
 '      extraBtns += \' <button class="btn btn-dim" data-action="run-step" data-step="analyst-cold" title="Run analyst without reader context (fresh session)">cold</button>\';\n' +
 '    }\n' +
