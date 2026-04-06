@@ -27,6 +27,7 @@ Maintained by Coco. Update when experiments are created, activated, or closed.
 | [X011](X011-context-debt/spec.md) | Context Debt | How much context is consumed by tool output never referenced again, and can we reduce it? |
 | [X012](X012-agent-oriented-code/spec.md) | Agent-Oriented Code | Do conventional clean code principles still apply when agents are the primary authors? |
 | [X014](X014-technical-spec-quality/spec.md) | Technical Spec Quality | Do technically detailed specs outperform mountain-quality specs — and does it depend on complexity? |
+| [X015](X015-spec-detail-model-substitute/spec.md) | Spec Detail as Model Substitute | Can planning-pipeline specs reduce the model capability threshold, enabling Sonnet-class models to match Opus outcomes? |
 
 ## Complete
 
