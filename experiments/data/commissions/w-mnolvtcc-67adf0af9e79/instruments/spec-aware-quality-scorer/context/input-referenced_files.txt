@@ -1,0 +1,751 @@
+=== REFERENCED FILE: packages/plugins/animator/src/animator.ts (pre-commission state) ===
+/**
+ * The Animator — session launch and telemetry recording apparatus.
+ *
+ * Two API levels:
+ * - summon() — high-level: composes context via The Loom, then launches.
+ * - animate() — low-level: takes a pre-composed AnimaWeave + prompt.
+ *
+ * See: docs/specification.md (animator)
+ */
+
+import type { Plugin, StartupContext } from '@shardworks/nexus-core';
+import { guild, generateId } from '@shardworks/nexus-core';
+import type { StacksApi, Book } from '@shardworks/stacks-apparatus';
+
+import type { LoomApi } from '@shardworks/loom-apparatus';
+
+import type {
+  AnimatorApi,
+  AnimateHandle,
+  AnimatorConfig,
+  AnimateRequest,
+  SummonRequest,
+  SessionResult,
+  SessionChunk,
+  SessionDoc,
+  TranscriptDoc,
+  TranscriptMessage,
+  AnimatorSessionProvider,
+  SessionProviderConfig,
+  SessionProviderResult,
+} from './types.ts';
+
+import { sessionList, sessionShow, summon as summonTool } from './tools/index.ts';
+
+// ── Core logic ───────────────────────────────────────────────────────
+
+/**
+ * Resolve the session provider apparatus.
+ *
+ * Looks up the provider by plugin id from guild config. The provider is
+ * an apparatus whose `provides` implements AnimatorSessionProvider.
+ * Arbor throws immediately if the plugin isn't loaded or has no provides.
+ */
+function resolveProvider(config: AnimatorConfig): AnimatorSessionProvider {
+  const pluginId = config.sessionProvider ?? 'claude-code';
+  return guild().apparatus<AnimatorSessionProvider>(pluginId);
+}
+
+/**
+ * Resolve the model from guild settings.
+ */
+function resolveModel(): string {
+  const g = guild();
+  const guildConfig = g.guildConfig();
+  return guildConfig.settings?.model ?? 'sonnet';
+}
+
+/**
+ * Build the provider config from an AnimateRequest.
+ *
+ * The system prompt comes from the AnimaWeave (composed by The Loom).
+ * The work prompt comes from the request directly (bypasses The Loom).
+ * The streaming flag is passed through for the provider to honor (or ignore).
+ */
+function buildProviderConfig(
+  request: AnimateRequest,
+  model: string,
+): SessionProviderConfig {
+  return {
+    systemPrompt: request.context.systemPrompt,
+    initialPrompt: request.prompt,
+    model,
+    conversationId: request.conversationId,
+    cwd: request.cwd,
+    streaming: request.streaming,
+    tools: request.context.tools,
+    environment: { ...request.context.environment, ...request.environment },
+  };
+}
+
+/**
+ * Build a SessionResult from provider output and session metadata.
+ */
+function buildSessionResult(
+  id: string,
+  startedAt: string,
+  providerName: string,
+  providerResult: SessionProviderResult,
+  request: AnimateRequest,
+): SessionResult {
+  const endedAt = new Date().toISOString();
+  const durationMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+
+  return {
+    id,
+    status: providerResult.status,
+    startedAt,
+    endedAt,
+    durationMs,
+    provider: providerName,
+    exitCode: providerResult.exitCode,
+    error: providerResult.error,
+    conversationId: request.conversationId,
+    providerSessionId: providerResult.providerSessionId,
+    tokenUsage: providerResult.tokenUsage,
+    costUsd: providerResult.costUsd,
+    metadata: request.metadata,
+    output: providerResult.output,
+  };
+}
+
+/**
+ * Build a failed SessionResult when the provider throws.
+ */
+function buildFailedResult(
+  id: string,
+  startedAt: string,
+  providerName: string,
+  error: unknown,
+  request: AnimateRequest,
+): SessionResult {
+  const endedAt = new Date().toISOString();
+  const durationMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+  const errorMessage = error instanceof Error ? error.message : String(error);
+
+  return {
+    id,
+    status: 'failed',
+    startedAt,
+    endedAt,
+    durationMs,
+    provider: providerName,
+    exitCode: 1,
+    error: errorMessage,
+    conversationId: request.conversationId,
+    metadata: request.metadata,
+  };
+}
+
+/**
+ * Convert a SessionResult to a SessionDoc for Stacks storage.
+ */
+function toSessionDoc(result: SessionResult): SessionDoc {
+  return {
+    id: result.id,
+    status: result.status,
+    startedAt: result.startedAt,
+    endedAt: result.endedAt,
+    durationMs: result.durationMs,
+    provider: result.provider,
+    exitCode: result.exitCode,
+    error: result.error,
+    conversationId: result.conversationId,
+    providerSessionId: result.providerSessionId,
+    tokenUsage: result.tokenUsage,
+    costUsd: result.costUsd,
+    metadata: result.metadata,
+    output: result.output,
+  };
+}
+
+/**
+ * Record a session result to The Stacks (sessions + transcripts books).
+ *
+ * Errors are logged but never propagated — session data loss is
+ * preferable to masking the original failure. See § Error Handling Contract.
+ */
+async function recordSession(
+  sessions: Book<SessionDoc>,
+  transcripts: Book<TranscriptDoc>,
+  result: SessionResult,
+  transcript: TranscriptMessage[] | undefined,
+): Promise<void> {
+  try {
+    await sessions.put(toSessionDoc(result));
+  } catch (err) {
+    console.warn(
+      `[animator] Failed to record session ${result.id}: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+
+  if (transcript && transcript.length > 0) {
+    try {
+      await transcripts.put({ id: result.id, messages: transcript });
+    } catch (err) {
+      console.warn(
+        `[animator] Failed to record transcript for ${result.id}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+}
+
+/**
+ * Write the initial 'running' session record to The Stacks.
+ */
+async function recordRunning(
+  sessions: Book<SessionDoc>,
+  id: string,
+  startedAt: string,
+  providerName: string,
+  request: AnimateRequest,
+): Promise<void> {
+  try {
+    await sessions.put({
+      id,
+      status: 'running',
+      startedAt,
+      provider: providerName,
+      conversationId: request.conversationId,
+      metadata: request.metadata,
+    });
+  } catch (err) {
+    console.warn(
+      `[animator] Failed to write initial session record ${id}: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
+// ── Apparatus factory ────────────────────────────────────────────────
+
+/**
+ * Create the Animator apparatus plugin.
+ *
+ * Returns a Plugin with:
+ * - `requires: ['stacks']` — records session results
+ * - `provides: AnimatorApi` — the session launch API
+ * - `supportKit` — contributes `sessions` book + inspection tools
+ */
+export function createAnimator(): Plugin {
+  let config: AnimatorConfig = {};
+  let sessions: Book<SessionDoc>;
+  let transcripts: Book<TranscriptDoc>;
+
+  const api: AnimatorApi = {
+    summon(request: SummonRequest): AnimateHandle {
+      // Resolve The Loom at call time — not a startup dependency.
+      // This allows the Animator to start without the Loom installed;
+      // only summon() requires it.
+      let loom: LoomApi;
+      try {
+        loom = guild().apparatus<LoomApi>('loom');
+      } catch {
+        throw new Error(
+          'summon() requires The Loom apparatus to be installed. ' +
+          'Use animate() directly if you want to provide a pre-composed AnimaWeave.',
+        );
+      }
+
+      // Generate session id up front so it's available on the handle
+      // immediately — before the Loom weave or session launch resolves.
+      const sessionId = generateId('ses', 4);
+
+      // We need to weave context before we can animate, but summon()
+      // must return synchronously. Wrap the async Loom call and the
+      // animate delegation into a single deferred flow.
+      const deferred = (async () => {
+        // Compose identity context via The Loom.
+        // The Loom owns system prompt composition — it produces the system
+        // prompt from the anima's identity layers (role instructions,
+        // curriculum, temperament, charter). MVP: returns empty (no
+        // systemPrompt); the session runs without one until the Loom
+        // gains composition logic. The work prompt bypasses the Loom.
+        const context = await loom.weave({
+          role: request.role,
+        });
+
+        // Merge caller metadata with auto-generated summon metadata
+        const metadata: Record<string, unknown> = {
+          trigger: 'summon',
+          ...(request.role ? { role: request.role } : {}),
+          ...request.metadata,
+        };
+
+        // Delegate to the standard animate path, threading through the
+        // pre-generated session id so animate() uses it instead of
+        // generating a new one.
+        return this.animate({
+          sessionId,
+          context,
+          prompt: request.prompt,
+          cwd: request.cwd,
+          conversationId: request.conversationId,
+          metadata,
+          streaming: request.streaming,
+          environment: request.environment,
+        });
+      })();
+
+      // Pipe chunks through — can't get them until the Loom weave resolves.
+      // Works for both streaming and non-streaming: non-streaming providers
+      // return empty chunks, so the generator yields nothing and completes.
+      async function* pipeChunks(): AsyncIterable<SessionChunk> {
+        const handle = await deferred;
+        yield* handle.chunks;
+      }
+
+      return {
+        sessionId,
+        chunks: pipeChunks(),
+        result: deferred.then((handle) => handle.result),
+      };
+    },
+
+    animate(request: AnimateRequest): AnimateHandle {
+      const provider = resolveProvider(config);
+      const model = resolveModel();
+      const providerConfig = buildProviderConfig(request, model);
+
+      // Step 1: use pre-generated session id if provided (from summon()),
+      // otherwise generate one. Capture startedAt.
+      const id = request.sessionId ?? generateId('ses', 4);
+      const startedAt = new Date().toISOString();
+
+      // Single path — the provider returns { chunks, result } regardless
+      // of whether streaming is enabled. Providers that don't support
+      // streaming return empty chunks; the Animator doesn't branch.
+      const { chunks, result: providerResultPromise } = provider.launch(providerConfig);
+
+      // Write initial record (fire and forget — don't block streaming)
+      const initPromise = recordRunning(sessions, id, startedAt, provider.name, request);
+
+      const result = (async () => {
+        await initPromise;
+
+        let sessionResult: SessionResult;
+        try {
+          const providerResult = await providerResultPromise;
+          sessionResult = buildSessionResult(id, startedAt, provider.name, providerResult, request);
+          await recordSession(sessions, transcripts, sessionResult, providerResult.transcript);
+        } catch (err) {
+          sessionResult = buildFailedResult(id, startedAt, provider.name, err, request);
+          await recordSession(sessions, transcripts, sessionResult, undefined);
+          throw err;
+        }
+        return sessionResult;
+      })();
+
+      return { sessionId: id, chunks, result };
+    },
+  };
+
+  return {
+    apparatus: {
+      requires: ['stacks'],
+      recommends: ['loom'],
+
+      supportKit: {
+        books: {
+          sessions: {
+            indexes: ['startedAt', 'status', 'conversationId', 'provider'],
+          },
+          transcripts: {
+            indexes: ['sessionId'],
+          },
+        },
+        tools: [sessionList, sessionShow, summonTool],
+      },
+
+      provides: api,
+
+      start(_ctx: StartupContext): void {
+        const g = guild();
+        config = g.guildConfig().animator ?? {};
+
+        const stacks = g.apparatus<StacksApi>('stacks');
+        sessions = stacks.book<SessionDoc>('animator', 'sessions');
+        transcripts = stacks.book<TranscriptDoc>('animator', 'transcripts');
+      },
+    },
+  };
+}
+
+=== REFERENCED FILE: packages/plugins/animator/src/types.ts (pre-commission state) ===
+/**
+ * The Animator — public types.
+ *
+ * These types form the contract between The Animator apparatus and all
+ * callers (summon relay, nsg consult, etc.). No implementation details.
+ *
+ * See: docs/specification.md (animator)
+ */
+
+import type { AnimaWeave } from '@shardworks/loom-apparatus';
+import type { ResolvedTool } from '@shardworks/tools-apparatus';
+
+// ── Session chunks (streaming output) ────────────────────────────────
+
+/** A chunk of output from a running session. */
+export type SessionChunk =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; tool: string }
+  | { type: 'tool_result'; tool: string };
+
+// ── Request / Result ─────────────────────────────────────────────────
+
+export interface AnimateRequest {
+  /**
+   * Optional pre-generated session id. When provided, the Animator uses
+   * this id instead of generating a new one. Used by summon() to make the
+   * session id available on the handle before the Loom weave resolves.
+   */
+  sessionId?: string;
+  /** The anima weave from The Loom (composed identity context). */
+  context: AnimaWeave;
+  /**
+   * The work prompt — what the anima should do.
+   * Passed directly to the session provider as the initial prompt.
+   * This bypasses The Loom — it is not a composition concern.
+   */
+  prompt?: string;
+  /**
+   * Working directory for the session.
+   * The session provider launches the AI process here.
+   */
+  cwd: string;
+  /**
+   * Optional conversation id to resume a multi-turn conversation.
+   * If provided, the session provider resumes the existing conversation
+   * rather than starting a new one.
+   */
+  conversationId?: string;
+  /**
+   * Caller-supplied metadata recorded alongside the session.
+   * The Animator stores this as-is — it does not interpret the contents.
+   */
+  metadata?: Record<string, unknown>;
+  /**
+   * Enable streaming output. When true, the returned `chunks` iterable
+   * yields output as the session produces it. When false (default), the
+   * `chunks` iterable completes immediately with no items.
+   *
+   * Either way, the return shape is the same: `{ chunks, result }`.
+   */
+  streaming?: boolean;
+  /**
+   * Task-layer environment variables. Overrides the identity-layer
+   * environment from the AnimaWeave when keys collide. Spread into the
+   * spawned process environment.
+   */
+  environment?: Record<string, string>;
+}
+
+export interface SessionResult {
+  /** Unique session id (generated by The Animator). */
+  id: string;
+  /** Terminal status. */
+  status: 'completed' | 'failed' | 'timeout';
+  /** When the session started (ISO-8601). */
+  startedAt: string;
+  /** When the session ended (ISO-8601). */
+  endedAt: string;
+  /** Wall-clock duration in milliseconds. */
+  durationMs: number;
+  /** Provider name (e.g. 'claude-code'). */
+  provider: string;
+  /** Numeric exit code from the provider process. */
+  exitCode: number;
+  /** Error message if failed. */
+  error?: string;
+  /** Conversation id (for multi-turn resume). */
+  conversationId?: string;
+  /** Session id from the provider (e.g. for --resume). */
+  providerSessionId?: string;
+  /** Token usage from the provider, if available. */
+  tokenUsage?: TokenUsage;
+  /** Cost in USD from the provider, if available. */
+  costUsd?: number;
+  /** Caller-supplied metadata, recorded as-is. */
+  metadata?: Record<string, unknown>;
+  /**
+   * The final assistant text from the session.
+   * Extracted by the Animator from the provider's transcript.
+   * Useful for programmatic consumers that need the session's conclusion
+   * without parsing the full transcript (e.g. the Spider's review collect step).
+   */
+  output?: string;
+}
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+}
+
+// ── Summon request ──────────────────────────────────────────────────
+
+export interface SummonRequest {
+  /**
+   * The work prompt — what the anima should do.
+   * Passed directly to the session provider as the initial prompt.
+   */
+  prompt: string;
+  /**
+   * The role to summon (e.g. 'artificer', 'scribe').
+   * Passed to The Loom for context composition and recorded in session metadata.
+   */
+  role?: string;
+  /**
+   * Working directory for the session.
+   * The session provider launches the AI process here.
+   */
+  cwd: string;
+  /**
+   * Optional conversation id to resume a multi-turn conversation.
+   */
+  conversationId?: string;
+  /**
+   * Additional metadata to record alongside the session.
+   * Merged with auto-generated metadata (trigger: 'summon', role).
+   */
+  metadata?: Record<string, unknown>;
+  /**
+   * Enable streaming output. When true, the returned `chunks` iterable
+   * yields output as the session produces it. When false (default), the
+   * `chunks` iterable completes immediately with no items.
+   */
+  streaming?: boolean;
+  /**
+   * Task-layer environment variables. Overrides the identity-layer
+   * environment from the AnimaWeave when keys collide. Spread into the
+   * spawned process environment.
+   */
+  environment?: Record<string, string>;
+}
+
+// ── Animator API (the `provides` interface) ──────────────────────────
+
+/** The return value from animate() and summon(). */
+export interface AnimateHandle {
+  /**
+   * Session ID, available immediately after launch — before the session
+   * completes. Callers that only need to know the session was launched
+   * (e.g. quick engines returning `{ status: 'launched', sessionId }`)
+   * can return without awaiting `result`.
+   */
+  sessionId: string;
+  /**
+   * Async iterable of output chunks from the session. When streaming is
+   * disabled (the default), this iterable completes immediately with no
+   * items. When streaming is enabled, it yields chunks as the session
+   * produces output.
+   */
+  chunks: AsyncIterable<SessionChunk>;
+  /**
+   * Promise that resolves to the final SessionResult after the session
+   * completes (or fails/times out) and the result is recorded to The Stacks.
+   */
+  result: Promise<SessionResult>;
+}
+
+export interface AnimatorApi {
+  /**
+   * Summon an anima — compose context via The Loom and launch a session.
+   *
+   * This is the high-level "make an anima do a thing" entry point.
+   * Internally calls The Loom for context composition (passing the role),
+   * then animate() for session launch and recording. The work prompt
+   * bypasses the Loom and goes directly to the provider.
+   *
+   * Requires The Loom apparatus to be installed. Throws if not available.
+   *
+   * Auto-populates session metadata with `trigger: 'summon'` and `role`.
+   *
+   * Returns synchronously — the async work lives inside `result` and `chunks`.
+   */
+  summon(request: SummonRequest): AnimateHandle;
+
+  /**
+   * Animate a session — launch an AI process with the given context.
+   *
+   * This is the low-level entry point for callers that compose their own
+   * AnimaWeave (e.g. The Parlour for multi-turn conversations).
+   *
+   * Records the session result to The Stacks before `result` resolves.
+   *
+   * Set `streaming: true` on the request to receive output chunks as the
+   * session runs. When streaming is disabled (default), the `chunks`
+   * iterable completes immediately with no items.
+   *
+   * Returns synchronously — the async work lives inside `result` and `chunks`.
+   */
+  animate(request: AnimateRequest): AnimateHandle;
+}
+
+// ── Session provider interface ───────────────────────────────────────
+
+/**
+ * A session provider — pluggable backend that knows how to launch and
+ * communicate with a specific AI system.
+ *
+ * Implemented as an apparatus plugin whose `provides` object satisfies
+ * this interface. The Animator discovers the provider via guild config:
+ * `guild.json["animator"]["sessionProvider"]` names the plugin id.
+ *
+ * The provider always returns `{ chunks, result }` — the same shape as
+ * AnimateHandle. When `config.streaming` is true, the provider MAY yield
+ * output chunks as the session runs. When false (or when the provider
+ * does not support streaming), the chunks iterable completes immediately
+ * with no items. The Animator does not branch on streaming capability —
+ * it passes the flag through and trusts the provider to do the right thing.
+ */
+export interface AnimatorSessionProvider {
+  /** Human-readable name (e.g. 'claude-code'). */
+  name: string;
+
+  /**
+   * Launch a session. Returns `{ chunks, result }` synchronously.
+   *
+   * The `result` promise resolves when the AI process exits.
+   * The `chunks` async iterable yields output when `config.streaming`
+   * is true and the provider supports streaming; otherwise it completes
+   * immediately with no items.
+   *
+   * Providers that don't support streaming simply ignore the flag and
+   * return empty chunks — no separate method needed.
+   */
+  launch(config: SessionProviderConfig): {
+    chunks: AsyncIterable<SessionChunk>;
+    result: Promise<SessionProviderResult>;
+  };
+}
+
+export interface SessionProviderConfig {
+  /** System prompt for the AI process. May be undefined if composition is not yet implemented. */
+  systemPrompt?: string;
+  /** Initial user message (e.g. writ description). */
+  initialPrompt?: string;
+  /** Model to use (from guild settings). */
+  model: string;
+  /** Optional conversation id for resume. */
+  conversationId?: string;
+  /** Working directory for the session. */
+  cwd: string;
+  /**
+   * Enable streaming output. When true, the provider should yield output
+   * chunks as the session produces them. When false (default), the chunks
+   * iterable should complete immediately with no items.
+   *
+   * Providers that don't support streaming may ignore this flag.
+   */
+  streaming?: boolean;
+  /**
+   * Resolved tools for this session. When present, the provider should
+   * configure an MCP server with these tool definitions.
+   *
+   * The Loom resolves role → permissions → tools via the Instrumentarium.
+   * The Animator passes them through from the AnimaWeave.
+   */
+  tools?: ResolvedTool[];
+  /**
+   * Merged environment variables to spread into the spawned process.
+   * The Animator merges identity-layer (weave) and task-layer (request)
+   * variables before passing them here — task layer wins on collision.
+   */
+  environment?: Record<string, string>;
+}
+
+/** A single message from the NDJSON stream. Untyped — shape varies by provider. */
+export type TranscriptMessage = Record<string, unknown>;
+
+export interface SessionProviderResult {
+  /** Exit status. */
+  status: 'completed' | 'failed' | 'timeout';
+  /** Numeric exit code from the process. */
+  exitCode: number;
+  /** Error message if failed. */
+  error?: string;
+  /** Provider's session id (e.g. for --resume). */
+  providerSessionId?: string;
+  /** Token usage, if the provider can report it. */
+  tokenUsage?: TokenUsage;
+  /** Cost in USD, if the provider can report it. */
+  costUsd?: number;
+  /** The session's full transcript — array of NDJSON message objects. */
+  transcript?: TranscriptMessage[];
+  /**
+   * The final assistant text from the session.
+   * Extracted from the last assistant message's text content blocks.
+   * Undefined if the session produced no assistant output.
+   */
+  output?: string;
+}
+
+// ── Stacks document type ─────────────────────────────────────────────
+
+/**
+ * The session document stored in The Stacks' `sessions` book.
+ * Includes all SessionResult fields plus the `id` required by BookEntry.
+ */
+export interface SessionDoc {
+  id: string;
+  /**
+   * Session status. Initially written as `'running'` when the session is
+   * launched (Step 2), then updated to a terminal status (`'completed'`,
+   * `'failed'`, or `'timeout'`) after the provider exits (Step 5).
+   * The `'running'` state is transient — it only exists between Steps 2 and 5.
+   * `SessionResult.status` only includes terminal states.
+   */
+  status: 'running' | 'completed' | 'failed' | 'timeout';
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  provider: string;
+  exitCode?: number;
+  error?: string;
+  conversationId?: string;
+  providerSessionId?: string;
+  tokenUsage?: TokenUsage;
+  costUsd?: number;
+  metadata?: Record<string, unknown>;
+  /** The final assistant text from the session. */
+  output?: string;
+  /** Index signature required by BookEntry. */
+  [key: string]: unknown;
+}
+
+/**
+ * The transcript document stored in The Stacks' `transcripts` book.
+ * One record per session — 1:1 relationship with SessionDoc.
+ */
+export interface TranscriptDoc {
+  /** Same as the session id. */
+  id: string;
+  /** Full NDJSON transcript from the session. */
+  messages: TranscriptMessage[];
+  /** Index signature required by BookEntry. */
+  [key: string]: unknown;
+}
+
+// ── Animator config ──────────────────────────────────────────────────
+
+/** Plugin configuration stored at guild.json["animator"]. */
+export interface AnimatorConfig {
+  /**
+   * Plugin id of the apparatus that implements AnimatorSessionProvider.
+   * The Animator looks this up via guild().apparatus() at animate-time.
+   * Defaults to 'claude-code' if not specified.
+   */
+  sessionProvider?: string;
+}
+
+// Augment GuildConfig so `guild().guildConfig().animator` is typed without
+// requiring a manual type parameter at the call site.
+declare module '@shardworks/nexus-core' {
+  interface GuildConfig {
+    animator?: AnimatorConfig;
+  }
+}
+
