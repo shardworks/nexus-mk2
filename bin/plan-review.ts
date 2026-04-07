@@ -537,6 +537,65 @@ function sendSSE(slug: string, event: string, data: any): void {
 
 // ── Pipeline ──────────────────────────────────────────────────────────
 
+// ── Planning file shuttle ────────────────────────────────────────────
+// Each pipeline step runs inside a temp codex clone. To avoid leaking sanctum
+// paths (which causes permission-denial cascades and misplaced output files),
+// we shuttle planning artifacts in/out of a `_planning/` dir inside the clone.
+// The agent sees only `_planning/` — no absolute sanctum paths at all.
+
+const PLANNING_DIR = '_planning';
+
+const STEP_FILES: Record<string, { inputs: string[]; outputs: string[] }> = {
+  reader:  {
+    inputs:  ['brief.md'],
+    outputs: ['inventory.md'],
+  },
+  analyst: {
+    inputs:  ['brief.md', 'inventory.md', 'scope.yaml', 'decisions.yaml', 'observations.md'],
+    outputs: ['scope.yaml', 'decisions.yaml', 'observations.md'],
+  },
+  writer:  {
+    inputs:  ['inventory.md', 'scope.yaml', 'decisions.yaml', 'decisions-digest.yaml'],
+    outputs: ['spec.md', 'gaps.yaml'],
+  },
+};
+
+/** Copy planning inputs from the specs dir into the clone's _planning/ dir. */
+function copyPlanningInputs(slug: string, cloneDir: string, step: string): void {
+  const planDir = path.join(cloneDir, PLANNING_DIR);
+  fs.mkdirSync(planDir, { recursive: true });
+  const files = STEP_FILES[step]?.inputs ?? [];
+  for (const f of files) {
+    const src = path.join(SPECS_DIR, slug, f);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, path.join(planDir, f));
+      console.log('[workshop] Copied in: ' + f);
+    }
+  }
+}
+
+/** Copy planning outputs from the clone's _planning/ dir back to the specs dir. */
+function copyPlanningOutputs(slug: string, cloneDir: string, step: string): void {
+  const planDir = path.join(cloneDir, PLANNING_DIR);
+  const files = STEP_FILES[step]?.outputs ?? [];
+  let copied = 0;
+  for (const f of files) {
+    const src = path.join(planDir, f);
+    if (fs.existsSync(src)) {
+      const dest = path.join(SPECS_DIR, slug, f);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(src, dest);
+      copied++;
+      console.log('[workshop] Copied out: ' + f);
+    }
+  }
+  if (copied === 0) {
+    console.warn('[workshop] No planning outputs found for ' + step + '/' + slug);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+
 function runPipelineStep(slug: string, step: string, args: string[], prompt: string, model: string = 'opus'): void {
   if (running.has(slug)) {
     console.log('[workshop] Already running a step for ' + slug);
@@ -563,6 +622,9 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     return;
   }
 
+  // Shuttle planning inputs into the clone before launching the agent
+  copyPlanningInputs(slug, cloneDir, step);
+
   const promptPath = path.join(PROJECT_ROOT, 'bin', 'plan-prompts', 'planner.md');
 
   const cliArgs = [
@@ -572,7 +634,6 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     '--tools', 'Read,Glob,Grep,Write',
     '--setting-sources', 'user',
     '--permission-mode', 'acceptEdits',
-    '--add-dir', SPECS_DIR,
     '--max-budget-usd', step === 'analyst' ? '15' : step === 'writer' ? '5' : '3',
     ...args,
   ];
@@ -676,6 +737,13 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
       console.warn('[workshop] Failed to copy transcripts: ' + err.message);
     }
 
+    // Shuttle planning outputs back to the specs dir before cleanup
+    try {
+      copyPlanningOutputs(slug, cloneDir, step);
+    } catch (err: any) {
+      console.warn('[workshop] Failed to copy planning outputs: ' + err.message);
+    }
+
     // Clean up the temp clone
     try {
       fs.rmSync(cloneDir, { recursive: true, force: true });
@@ -711,34 +779,31 @@ function startReader(slug: string, brief: string): void {
   meta.sessions.reader = sessionId;
   writeMeta(slug, meta);
 
-  const outputPath = path.join(SPECS_DIR, slug, 'inventory.md');
   runPipelineStep(slug, 'reader', ['--session-id', sessionId],
     'MODE: READER\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
     '\n\nThe codebase is in your current working directory. Start by exploring it with Glob and Read.' +
-    '\n\nFollowing your instructions, create an inventory at: ' + outputPath,
+    '\n\nFollowing your instructions, create an inventory at: ' + PLANNING_DIR + '/inventory.md',
     'sonnet');
 }
 
 function startAnalyst(slug: string, brief: string): void {
   const meta = readMeta(slug);
   const sessionId = meta.sessions?.reader ?? meta.sessionId ?? '';
-  const specDir = path.join(SPECS_DIR, slug);
 
   const args = sessionId ? ['--resume', sessionId] : [];
 
   runPipelineStep(slug, 'analyst', args,
     'MODE: ANALYST\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
-    '\n\nThe inventory has been written. Read it at: ' + path.join(specDir, 'inventory.md') +
+    '\n\nThe inventory has been written. Read it at: ' + PLANNING_DIR + '/inventory.md' +
     '\n\nFollowing your instructions, produce scope and decisions. Write output files to:' +
-    '\n- ' + path.join(specDir, 'scope.yaml') +
-    '\n- ' + path.join(specDir, 'decisions.yaml') +
-    '\n- ' + path.join(specDir, 'observations.md'));
+    '\n- ' + PLANNING_DIR + '/scope.yaml' +
+    '\n- ' + PLANNING_DIR + '/decisions.yaml' +
+    '\n- ' + PLANNING_DIR + '/observations.md');
 }
 
 function startAnalystRevise(slug: string, amendment: string): void {
   const meta = readMeta(slug);
   const sessionId = meta.sessions?.reader ?? meta.sessionId ?? '';
-  const specDir = path.join(SPECS_DIR, slug);
   const brief = readSpecFile(slug, 'brief.md') ?? '';
 
   const args = sessionId ? ['--resume', sessionId] : [];
@@ -748,9 +813,9 @@ function startAnalystRevise(slug: string, amendment: string): void {
     '## Original Brief\n\n' + brief.trim() + '\n\n' +
     '## Patron\'s Amendment\n\n' + amendment + '\n\n---\n\n' +
     'Read your previous output files, apply the patron\'s feedback, and rewrite them:' +
-    '\n- ' + path.join(specDir, 'scope.yaml') +
-    '\n- ' + path.join(specDir, 'decisions.yaml') +
-    '\n- ' + path.join(specDir, 'observations.md'));
+    '\n- ' + PLANNING_DIR + '/scope.yaml' +
+    '\n- ' + PLANNING_DIR + '/decisions.yaml' +
+    '\n- ' + PLANNING_DIR + '/observations.md');
 }
 
 /**
@@ -815,7 +880,6 @@ function generateDecisionsDigest(slug: string): void {
 function startWriter(slug: string, brief: string): void {
   const meta = readMeta(slug);
   const sessionId = meta.sessions?.reader ?? meta.sessionId ?? '';
-  const specDir = path.join(SPECS_DIR, slug);
 
   // Generate the decisions digest before launching the writer
   try {
@@ -831,12 +895,12 @@ function startWriter(slug: string, brief: string): void {
   runPipelineStep(slug, 'writer', args,
     'MODE: WRITER\n\nSlug: ' + slug +
     '\n\nThe analyst has written scope and decisions, and the patron has reviewed and locked them. Read these input files:' +
-    '\n- ' + path.join(specDir, 'decisions-digest.yaml') + ' (PRIMARY — the authoritative decisions input)' +
-    '\n- ' + path.join(specDir, 'scope.yaml') +
-    '\n- ' + path.join(specDir, 'inventory.md') +
-    '\n- ' + path.join(specDir, 'decisions.yaml') + ' (REFERENCE ONLY — full analyst reasoning, for context if needed)' +
-    '\n\nFollowing your instructions, produce the spec. Write output to: ' + path.join(specDir, 'spec.md') +
-    '\nIf gaps are found, write: ' + path.join(specDir, 'gaps.yaml'));
+    '\n- ' + PLANNING_DIR + '/decisions-digest.yaml (PRIMARY — the authoritative decisions input)' +
+    '\n- ' + PLANNING_DIR + '/scope.yaml' +
+    '\n- ' + PLANNING_DIR + '/inventory.md' +
+    '\n- ' + PLANNING_DIR + '/decisions.yaml (REFERENCE ONLY — full analyst reasoning, for context if needed)' +
+    '\n\nFollowing your instructions, produce the spec. Write output to: ' + PLANNING_DIR + '/spec.md' +
+    '\nIf gaps are found, write: ' + PLANNING_DIR + '/gaps.yaml');
 }
 
 // ── HTTP Server ───────────────────────────────────────────────────────
