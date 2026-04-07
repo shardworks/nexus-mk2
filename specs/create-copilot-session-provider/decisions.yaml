@@ -1,0 +1,612 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: Which GitHub API surface should the copilot provider target?
+    options:
+      a: GitHub Models REST API — OpenAI-compatible chat completions endpoint at https://models.inference.ai.azure.com
+      b: gh copilot CLI — spawn the GitHub CLI extension
+      c: GitHub Copilot Chat API — internal API used by VS Code extensions
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: The gh copilot CLI only supports explain/suggest (not autonomous sessions). The Copilot Chat API is internal and undocumented. The GitHub Models API is the only public, documented, programmatic API for autonomous AI interactions under the Copilot umbrella.
+      observable: true
+      recommendation: a
+      rationale: Only viable public API for autonomous agent sessions
+      stakes: high
+  - id: D2
+    scope:
+      - S1
+    question: What HTTP client should the provider use to call the API?
+    options:
+      a: Native Node.js fetch() — no additional dependency
+      b: OpenAI SDK npm package — type-safe client for OpenAI-compatible APIs
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: The codebase has zero external HTTP client dependencies. The claude-code apparatus uses child_process.spawn. Node 24 (per .nvmrc and tsconfig) has built-in fetch. The OpenAI SDK would add a dependency but provide typed request/response objects. However, the provider only uses chat completions — one endpoint — making an SDK overkill.
+      observable: false
+      recommendation: a
+      rationale: Minimizes dependencies; the API surface is small enough to call directly; consistent with the codebase's preference for minimal third-party deps
+      stakes: low
+  - id: D3
+    scope:
+      - S1
+    question: What should the package name be?
+    options:
+      a: "@shardworks/copilot-apparatus"
+      b: "@shardworks/github-copilot-apparatus"
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: derivePluginId('@shardworks/copilot-apparatus') = 'copilot'. The slug in the brief is 'copilot'. The claude-code sibling uses '@shardworks/claude-code-apparatus' → 'claude-code'. Brevity is the convention.
+      observable: true
+      recommendation: a
+      rationale: Follows existing naming convention; derives to the expected plugin id 'copilot'
+      stakes: low
+  - id: D4
+    scope:
+      - S1
+    question: What directory path should the package use?
+    options:
+      a: packages/plugins/copilot/
+      b: packages/plugins/github-copilot/
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "Existing packages use the short plugin id as directory name: claude-code, animator, loom, stacks, etc."
+      observable: false
+      recommendation: a
+      rationale: Matches the directory naming convention used by all sibling packages
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: What value should provider.name return?
+    options:
+      a: "'copilot'"
+      b: "'github-copilot'"
+      c: "'github-models'"
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: "The provider.name appears in SessionResult.provider, SessionDoc.provider, and the session-list tool's provider filter. It should match the plugin id for consistency. The claude-code provider uses name: 'claude-code' which matches its plugin id."
+      observable: true
+      recommendation: a
+      rationale: Matches plugin id; consistent with claude-code's name = plugin id convention
+      stakes: low
+  - id: D6
+    scope:
+      - S1
+    question: How should the apparatus structure its dependencies (requires/recommends)?
+    options:
+      a: "requires: [] — no apparatus dependencies, same as claude-code"
+      b: "requires: ['tools'] — declare dependency on Instrumentarium for tool definition access"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The claude-code apparatus has requires: []. The provider receives tools via SessionProviderConfig.tools (already resolved by the Loom/Animator pipeline). It does not query the Instrumentarium directly."
+      observable: false
+      recommendation: a
+      rationale: Tools arrive via SessionProviderConfig; no direct Instrumentarium access needed
+      stakes: low
+  - id: D7
+    scope:
+      - S1
+    question: How should the provider derive exitCode for SessionProviderResult?
+    options:
+      a: 0 for any successful API completion, 1 for any API error or network failure
+      b: 0 for successful completion, non-zero mapped from HTTP status codes (e.g. 429→2, 500→3)
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: exitCode is a number field on SessionProviderResult used by the Animator to set SessionResult.exitCode. The claude-code provider passes through the process exit code. For an HTTP-based provider, there is no process — the exit code is synthetic. The Animator checks exitCode === 0 to determine 'completed' vs 'failed' status. Downstream consumers (Spider, Clerk) check result.status, not exitCode directly.
+      observable: true
+      recommendation: a
+      rationale: Simple binary mapping; status field carries the semantic meaning, exitCode is just a convention
+      stakes: low
+  - id: D8
+    scope:
+      - S1
+    question: How should providerSessionId be generated?
+    options:
+      a: Generate a UUID/random id at session start — no API equivalent exists
+      b: Use the API's response id field (e.g. chatcmpl-xxx from OpenAI format)
+      c: Leave undefined — no native session concept in the API
+    selected: b
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: providerSessionId is stored in SessionDoc and returned in SessionResult. For claude-code, it comes from the result NDJSON's session_id field. The OpenAI-compatible API returns an 'id' field on each chat completion response (e.g. 'chatcmpl-abc123'). Using the last response's id gives a traceable link back to the API.
+      observable: true
+      recommendation: b
+      rationale: Provides API-traceable provenance; the response id is always present in OpenAI-format responses
+      stakes: low
+  - id: D9
+    scope:
+      - S1
+    question: How should the transcript be structured?
+    options:
+      a: Store raw API request/response message arrays as TranscriptMessage[] — each message object becomes one entry
+      b: Store the raw HTTP response bodies as TranscriptMessage[] — each API call becomes one entry
+    selected: a
+    analysis:
+      audience:
+        - operator
+        - implementer
+      confidence: medium
+      context: TranscriptMessage is Record<string, unknown> — fully opaque. The claude-code provider stores the stream-json NDJSON messages (which are Anthropic message objects with type/content). For the copilot provider, the natural analog is the OpenAI-format message array built up during the agentic loop — each has role, content, and optionally tool_calls/tool_call_id.
+      observable: true
+      recommendation: a
+      rationale: Message-level granularity matches the claude-code pattern (one transcript entry per message); enables session-show to display conversation flow
+      stakes: low
+  - id: D10
+    scope:
+      - S1
+    question: How should the provider extract the final output text?
+    options:
+      a: Return the content of the last assistant message that has no tool_calls — same logic as extractFinalAssistantText but for OpenAI format
+      b: Always return the last assistant message's content regardless of tool_calls
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The claude-code provider's extractFinalAssistantText walks backward to find the last assistant message with text content blocks. The output field is used by the Spider's review engine to collect review results. The last assistant message with text and no pending tool_calls is the session's conclusion.
+      observable: true
+      recommendation: a
+      rationale: Mirrors extractFinalAssistantText semantics; the final text-only assistant message is the session's deliverable
+      stakes: low
+  - id: D11
+    scope:
+      - S1
+    question: How should the provider handle config.cwd (working directory)?
+    options:
+      a: Ignore it — no subprocess to set cwd on; document that cwd has no effect for this provider
+      b: "Pass it as context in the system prompt (e.g. 'You are working in directory: /path/to/guild')"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: cwd is meaningful for the claude-code provider because the claude CLI is spawned with that working directory, letting it read/write files relative to it. The copilot provider makes HTTP API calls — there's no filesystem access. Adding cwd to the system prompt would be misleading since the API has no file access.
+      observable: false
+      recommendation: a
+      rationale: The API has no filesystem access; mentioning cwd in the prompt would be misleading
+      stakes: low
+  - id: D12
+    scope:
+      - S1
+    question: How should the provider handle config.environment?
+    options:
+      a: Ignore it — no subprocess to inject env vars into; the field is not applicable
+      b: Use it to override process.env for the API token lookup
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: config.environment carries identity-layer env vars (GIT_AUTHOR_NAME etc.) meant for the spawned subprocess. The copilot provider makes HTTP calls, not subprocess spawns. The API token should come from the provider's own config or a well-known env var, not from the Loom's identity environment.
+      observable: false
+      recommendation: a
+      rationale: Environment injection is a subprocess concern; the copilot provider has no subprocess
+      stakes: low
+  - id: D13
+    scope:
+      - S1
+    question: What should the provider's factory function be named?
+    options:
+      a: createCopilotProvider() — mirrors createClaudeCodeProvider()
+      b: createCopilot()
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: claude-code uses createClaudeCodeProvider(). The pattern is create + Name + Provider.
+      observable: false
+      recommendation: a
+      rationale: Follows the naming convention established by createClaudeCodeProvider()
+      stakes: low
+  - id: D14
+    scope:
+      - S1
+    question: Should the apparatus have a no-op start() or read config at start?
+    options:
+      a: Read copilot config from guild.json at start() — cache API endpoint, token env var name
+      b: No-op start(), read config lazily at launch() time
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: claude-code has a no-op start() because it shells out to a binary with no config. The copilot provider needs config (API endpoint, token env var). Reading at start() is the pattern used by the Loom (reads config and caches). Reading lazily would work but adds repeated guild() calls in the hot path.
+      observable: false
+      recommendation: a
+      rationale: Follows the Loom pattern — read config once at startup, cache for use in launch()
+      stakes: low
+  - id: D15
+    scope:
+      - S1
+    question: How should the provider handle config.conversationId when no agentic loop state is persisted?
+    options:
+      a: Ignore conversationId — conversation resume is not supported in the MVP copilot provider
+      b: Store message history in Stacks keyed by conversationId and replay it on resume
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: The claude-code provider resumes conversations via --resume <id> which is a Claude CLI feature. The GitHub Models API is stateless — resume requires replaying the full message history. Persisting message history requires the Stacks apparatus, adding a runtime dependency. The Parlour (multi-turn conversations) uses conversationId but currently only works with claude-code. This is a significant feature that could be added later.
+      observable: true
+      recommendation: a
+      rationale: Conversation resume requires state persistence infrastructure; MVP should establish the core single-turn flow first
+      stakes: high
+  - id: D16
+    scope:
+      - S2
+    question: How should ResolvedTool[] be converted to the API's function/tool format?
+    options:
+      a: "Convert each ResolvedTool.definition to an OpenAI function tool: extract JSON Schema from the Zod params schema using zod's .toJSONSchema(), set name and description"
+      b: Serialize Zod schemas manually to JSON Schema objects
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The MCP server in claude-code passes def.params.shape directly to the MCP SDK which handles JSON Schema conversion. The OpenAI API expects JSON Schema in the tools[].function.parameters field. Zod v4 (4.3.6 per package.json) has a built-in .toJSONSchema() method that produces JSON Schema from Zod schemas.
+      observable: false
+      recommendation: a
+      rationale: Zod v4 has built-in JSON Schema conversion; avoids manual schema translation
+      stakes: low
+  - id: D17
+    scope:
+      - S2
+    question: How should the agentic loop execute tool calls?
+    options:
+      a: Parse tool_calls from the API response, look up each tool by name in the ResolvedTool[] array, call definition.handler(params), collect results, send back as tool role messages, repeat until no more tool_calls
+      b: Start an MCP server like claude-code does, and somehow route API tool_calls through it
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The ResolvedTool.definition.handler is an in-process closure. The MCP server is an indirection layer for the claude CLI which communicates via SSE. Since the copilot provider runs in-process (HTTP fetch, not subprocess), it can call handlers directly — no MCP server needed. This is simpler and more efficient.
+      observable: false
+      recommendation: a
+      rationale: Direct handler invocation is simpler and more efficient than MCP indirection for an in-process provider
+      stakes: low
+  - id: D18
+    scope:
+      - S2
+    question: Should the agentic loop have a maximum iteration limit?
+    options:
+      a: Yes — hard limit of 50 iterations (tool-call rounds), then force-complete with a timeout/failed status
+      b: Yes — configurable limit via CopilotConfig with a sensible default (e.g. 25)
+      c: No limit — run until the model stops issuing tool_calls or the session times out
+    selected: custom
+    analysis:
+      audience:
+        - operator
+        - patron
+      confidence: medium
+      context: The claude-code provider has no explicit iteration limit because the claude CLI manages its own loop. A runaway agentic loop could burn tokens indefinitely. A configurable limit lets operators tune for their use case while having a safe default.
+      observable: true
+      recommendation: b
+      rationale: Configurable safety valve; sensible default prevents runaway loops
+      stakes: high
+    patron_override: Yes — configurable limit via CopilotConfig with a sensible default (50 to start)
+  - id: D19
+    scope:
+      - S2
+    question: How should tool call errors be handled within the agentic loop?
+    options:
+      a: Catch the error, return it as a tool result message with role 'tool' and content describing the error, let the model decide what to do
+      b: Abort the session on any tool error
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: "The MCP server in claude-code wraps handler errors with { isError: true, content: [{ text: 'Error: ...' }] }. The model sees the error and can retry or work around it. This is the standard pattern in OpenAI tool-calling — errors are reported back as tool messages, not session failures."
+      observable: true
+      recommendation: a
+      rationale: Matches MCP server error-handling pattern; lets the model self-correct
+      stakes: high
+  - id: D20
+    scope:
+      - S2
+    question: Should callableBy filtering be applied to tools before sending to the API?
+    options:
+      a: Yes — filter to tools where callableBy includes 'anima' or callableBy is undefined, same as the MCP server does
+      b: No — trust that the Loom/Instrumentarium already resolved the correct tool set
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The Instrumentarium's resolve() method already filters by caller ('anima') before tools reach the SessionProviderConfig. The MCP server in claude-code applies a redundant filter. Since tools arrive pre-filtered, the copilot provider does not need to re-filter.
+      observable: false
+      recommendation: b
+      rationale: Tools are pre-filtered by the Instrumentarium; redundant filtering adds complexity without value
+      stakes: low
+  - id: D21
+    scope:
+      - S2
+    question: How should the provider validate tool call arguments from the API before passing them to the handler?
+    options:
+      a: Parse the arguments JSON string, then validate via definition.params.parse() — same Zod validation the MCP server uses
+      b: Parse the arguments JSON string and pass directly to the handler without Zod validation
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The MCP server calls def.params.parse(params) which validates via Zod before invoking the handler. This prevents malformed model output from causing handler crashes. The OpenAI API returns tool_calls[].function.arguments as a JSON string that needs parsing.
+      observable: false
+      recommendation: a
+      rationale: Zod validation matches the MCP server pattern and protects handlers from malformed model output
+      stakes: low
+  - id: D22
+    scope:
+      - S3
+    question: How should streaming be implemented for the OpenAI-compatible SSE API?
+    options:
+      a: "Use fetch() with stream: true in the request body, read response.body as a ReadableStream, parse SSE data: lines into chunks"
+      b: Use a third-party SSE client library (e.g. eventsource-parser)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: "The codebase avoids unnecessary dependencies. The OpenAI SSE format is simple: 'data: {json}\\n\\n' lines with 'data: [DONE]' terminator. Node 24 ReadableStream is mature. A parser is ~30 lines of code. The eventsource-parser package would add a dependency for minimal value."
+      observable: false
+      recommendation: a
+      rationale: SSE parsing is trivial for this format; avoids an unnecessary dependency
+      stakes: low
+  - id: D23
+    scope:
+      - S3
+    question: In non-streaming mode, should the provider still use the streaming API internally, or use the non-streaming API?
+    options:
+      a: "Use the non-streaming API (stream: false) — simpler response parsing, one JSON body per call"
+      b: Always use the streaming API internally, only vary whether chunks are yielded to the caller
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The claude-code provider uses two separate spawn functions: spawnClaudeStreamJson (non-streaming) and spawnClaudeStreamingJson (streaming). Using the non-streaming API when streaming is off simplifies parsing — the response is a single JSON object with usage included."
+      observable: false
+      recommendation: a
+      rationale: Non-streaming API returns a complete JSON response; simpler parsing, matches the two-path pattern in claude-code
+      stakes: low
+  - id: D24
+    scope:
+      - S3
+    question: How should streaming interact with the agentic tool-call loop?
+    options:
+      a: Stream text chunks during each API call, then pause streaming while tool handlers execute, resume streaming on the next API call
+      b: Only stream the final API response (after all tool calls are done)
+    selected: a
+    analysis:
+      audience:
+        - operator
+        - patron
+      confidence: high
+      context: The claude-code provider streams all content as it arrives, including interleaved tool_use and tool_result chunks. Operators expect to see activity during long sessions. Streaming only the final response would show nothing during potentially long tool-call sequences.
+      observable: true
+      recommendation: a
+      rationale: Matches claude-code's behavior — real-time visibility of session progress including tool activity
+      stakes: high
+  - id: D25
+    scope:
+      - S4
+    question: What config shape should the copilot apparatus use in guild.json?
+    options:
+      a: "{ apiEndpoint?: string, tokenEnvVar?: string, maxToolRounds?: number } — minimal config with environment-based auth"
+      b: "{ apiEndpoint?: string, apiToken?: string, maxToolRounds?: number } — token stored directly in guild.json"
+    selected: a
+    analysis:
+      audience:
+        - operator
+        - patron
+      confidence: high
+      context: Storing API tokens directly in guild.json is a security anti-pattern — guild.json is committed to git. The convention for sensitive credentials is environment variables. The config stores the env var *name* (defaulting to GITHUB_TOKEN), not the value.
+      observable: true
+      recommendation: a
+      rationale: Environment variables for secrets is standard practice; guild.json is version-controlled
+      stakes: high
+  - id: D26
+    scope:
+      - S4
+    question: What should the default API endpoint be?
+    options:
+      a: https://models.inference.ai.azure.com — the GitHub Models endpoint
+      b: https://api.githubcopilot.com — the Copilot-specific endpoint
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The GitHub Models REST API is the documented public endpoint for chat completions with GitHub authentication. https://api.githubcopilot.com is an internal endpoint used by IDE extensions and requires Copilot-specific OAuth tokens, not standard GitHub tokens.
+      observable: true
+      recommendation: a
+      rationale: Public, documented endpoint compatible with standard GitHub tokens
+      stakes: high
+  - id: D27
+    scope:
+      - S4
+    question: What should the default token environment variable name be?
+    options:
+      a: GITHUB_TOKEN — standard GitHub authentication env var
+      b: COPILOT_TOKEN — copilot-specific env var
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: GITHUB_TOKEN is the standard env var used by GitHub CLI, GitHub Actions, and GitHub APIs. It's what operators are most likely to already have configured. Using a custom name adds friction.
+      observable: true
+      recommendation: a
+      rationale: Standard convention; most operators already have this set
+      stakes: low
+  - id: D28
+    scope:
+      - S4
+    question: How should config.model from SessionProviderConfig be mapped to the API model parameter?
+    options:
+      a: Pass config.model directly as the model field in the API request — operators set the actual model name in guild.json settings.model
+      b: Maintain a mapping table (e.g. 'sonnet' → 'gpt-4o') with a fallback to pass-through
+    selected: a
+    analysis:
+      audience:
+        - operator
+        - patron
+      confidence: high
+      context: The model comes from guild.json['settings']['model'], resolved by the Animator's resolveModel(). When using the copilot provider, operators would set this to a GitHub Models model name (e.g. 'gpt-4o', 'o1'). Adding a mapping table creates a maintenance burden and obscures which model is actually being used.
+      observable: true
+      recommendation: a
+      rationale: Direct pass-through; operators set the correct model name for their chosen provider in guild settings
+      stakes: low
+  - id: D29
+    scope:
+      - S4
+    question: Should the copilot config use GuildConfig module augmentation?
+    options:
+      a: "Yes — augment GuildConfig with copilot?: CopilotConfig, same pattern as AnimatorConfig"
+      b: No — read config via guild().config<CopilotConfig>('copilot') without augmentation
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The Animator augments GuildConfig with animator?: AnimatorConfig. The Loom augments with loom?: LoomConfig. This enables typed access via guild().guildConfig().copilot. Without augmentation, callers must use the generic guild().config<T>() path."
+      observable: false
+      recommendation: a
+      rationale: Follows the established pattern for apparatus with config sections
+      stakes: low
+  - id: D30
+    scope:
+      - S4
+    question: What should the default maxToolRounds be?
+    options:
+      a: 25 — conservative default that prevents runaway loops while allowing complex multi-step tasks
+      b: 50 — generous default for complex workflows
+      c: 10 — aggressive limit for cost control
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: No precedent in the codebase — claude-code has no iteration limit because the Claude CLI manages its own loop internally. 25 rounds is enough for most tool-equipped workflows while providing a safety net against infinite loops.
+      observable: true
+      recommendation: a
+      rationale: Balanced default — high enough for real work, low enough to catch runaways
+      stakes: low
+  - id: D31
+    scope:
+      - S1
+    question: How should the provider report costUsd?
+    options:
+      a: Leave costUsd undefined — the GitHub Models API does not report cost
+      b: Estimate cost based on token usage and known per-token pricing
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The GitHub Models API's usage response includes token counts but not cost. Cost estimation would require hardcoded pricing tables that go stale. The claude-code provider gets cost from the Claude CLI's result message (total_cost_usd). The field is optional on SessionProviderResult.
+      observable: true
+      recommendation: a
+      rationale: No reliable cost data from the API; undefined is honest and the field is optional
+      stakes: low
+  - id: D32
+    scope:
+      - S1
+    question: How should token usage be accumulated across multiple API calls in a tool-calling session?
+    options:
+      a: Sum inputTokens and outputTokens across all API calls in the session
+      b: Report only the last API call's token usage
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: A tool-calling session makes multiple API calls. Reporting only the last call's usage would drastically undercount. The TokenUsage fields (inputTokens, outputTokens) should reflect total session consumption, matching the claude-code provider's behavior where the result message reports cumulative usage.
+      observable: true
+      recommendation: a
+      rationale: Cumulative usage reflects actual resource consumption; matches claude-code's total-session reporting
+      stakes: low
+  - id: D33
+    scope:
+      - S1
+    question: How should API-level errors (HTTP 4xx/5xx, network failures) be mapped to SessionProviderResult?
+    options:
+      a: "Set status: 'failed', exitCode: 1, error: descriptive message with HTTP status and response body"
+      b: Retry transient errors (429, 5xx) with backoff before failing
+    selected: a
+    analysis:
+      audience:
+        - operator
+        - patron
+      confidence: medium
+      context: The claude-code provider does not retry — if the process exits non-zero, it's a failure. Retry logic adds complexity and implicit cost. The Animator's existing error handling records failures cleanly. Retries could be added in a future iteration if operators need them.
+      observable: true
+      recommendation: a
+      rationale: Fail-fast matches claude-code's behavior; retries can be layered on later
+      stakes: low
+  - id: D34
+    scope:
+      - S1
+    question: How should the provider handle a missing API token at launch time?
+    options:
+      a: Throw immediately with a clear error message naming the expected env var
+      b: Return a failed SessionProviderResult
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The claude-code provider throws if the claude binary can't be spawned. A missing token is a configuration error, not a session failure. Throwing gives the Animator a chance to catch and record it as a failed session via buildFailedResult(). The error message should tell the operator exactly what env var to set.
+      observable: true
+      recommendation: a
+      rationale: Configuration errors should be loud and immediate; matches spawn-failure pattern in claude-code
+      stakes: low
+  - id: D35
+    scope:
+      - S5
+    question: Should the doc follow the apparatus template exactly?
+    options:
+      a: Yes — follow docs/architecture/apparatus/_template.md structure, same as claude-code.md
+      b: Abbreviated doc — just a README in the package directory
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Every apparatus in docs/architecture/apparatus/ follows the template. The claude-code apparatus has a full doc at docs/architecture/apparatus/claude-code.md.
+      observable: false
+      recommendation: a
+      rationale: Follows the established documentation convention for apparatus packages
+      stakes: low
