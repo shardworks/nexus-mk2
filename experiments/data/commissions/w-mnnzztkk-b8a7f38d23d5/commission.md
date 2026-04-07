@@ -1,0 +1,1 @@
+The original implemntation of write "w-mnnmd63t-b62234c456d3" (Engine Blocking on External Conditions) did not include any unit test. Please implement them, using the test cases from the spec as a minimum required set
