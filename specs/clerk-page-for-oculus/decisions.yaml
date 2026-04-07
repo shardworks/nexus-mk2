@@ -1,0 +1,758 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What page id and nav title should the clerk page use?
+    options:
+      a: "id: 'writs', title: 'Writs' — names the page after the entity it manages"
+      b: "id: 'clerk', title: 'Clerk' — names the page after the apparatus"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: The page id becomes the URL segment (/pages/{id}/) and the nav title appears in the Oculus navigation bar. Other apparatus (Parlour, Animator) could eventually have their own pages. Naming after the entity avoids ambiguity if the clerk gains multiple pages later.
+      observable: true
+      recommendation: a
+      rationale: "'Writs' directly communicates what the page shows; the URL /pages/writs/ is self-documenting."
+      stakes: low
+  - id: D2
+    scope:
+      - S1
+    question: Where should the page directory live within the clerk package?
+    options:
+      a: "pages/writs/ at package root (alongside src/) — matches the oculus test fixture convention (dir: 'pages/my-page')"
+      b: src/pages/writs/ inside the source directory
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "Oculus test fixtures use dir: 'pages/my-page' resolved from package root. The page is static HTML/JS, not TypeScript — it doesn't belong in src/ alongside compiled code. pnpm workspace symlinks the package root, so pages/ is directly accessible in dev."
+      observable: false
+      recommendation: a
+      rationale: Matches the test fixture convention and avoids conflating static assets with TypeScript source.
+      stakes: low
+  - id: D3
+    scope:
+      - S1
+    question: Should the page be a single index.html with inline JS, or split into index.html + separate app.js?
+    options:
+      a: Single index.html with all JS inline — simpler, one file to maintain
+      b: index.html + app.js — separation of concerns, easier to navigate
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: There is no build toolchain for browser JS in this repo. The page uses vanilla JS and fetch() against the REST API. There are no existing pages to set a precedent. A single file keeps things simple for the first contributed page.
+      observable: false
+      recommendation: a
+      rationale: For the first contributed page, a self-contained index.html avoids file coordination overhead. The codebase has no bundler, and the JS is straightforward DOM manipulation + fetch.
+      stakes: low
+  - id: D4
+    scope:
+      - S1
+    question: Which writ fields should appear as columns in the list table?
+    options:
+      a: id, type, status, title, createdAt — core identification and lifecycle fields
+      b: id, type, status, title, createdAt, updatedAt — adds last-modified visibility
+      c: status, type, title, createdAt — omit id column (show on hover or detail expand)
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: "WritDoc has: id, type, status, title, body, codex?, createdAt, updatedAt, acceptedAt?, resolvedAt?, resolution?. The list view should be scannable. Body and resolution are too long for a table row. The id is essential for operations (transitions, linking). updatedAt is mostly redundant with status context."
+      observable: true
+      recommendation: a
+      rationale: id, type, status, title, createdAt are the fields needed to identify, categorize, and act on a writ. Detail view shows the rest.
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: Which CSS badge class should map to each writ status?
+    options:
+      a: ready→badge (default/dim), active→badge--active (cyan pulse), completed→badge--success, failed→badge--error, cancelled→badge--warning
+      b: ready→badge--info, active→badge--active, completed→badge--success, failed→badge--error, cancelled→badge--warning
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: "The Oculus stylesheet defines: .badge (dim default), .badge--success (green), .badge--error (red), .badge--warning (yellow), .badge--info (cyan), .badge--active (cyan + pulse animation). 'ready' is the initial/neutral state — default dim badge fits. 'active' naturally maps to the pulsing animation."
+      observable: true
+      recommendation: a
+      rationale: "Maps status semantics to visual weight: neutral for ready, attention-drawing pulse for active, green/red/yellow for terminal outcomes."
+      stakes: low
+  - id: D6
+    scope:
+      - S1
+    question: What should the default status filter be when the page loads?
+    options:
+      a: No filter (show all statuses)
+      b: Default to non-terminal statuses (ready + active)
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: The brief says 'sorting, filtering, and search (particularly by status)'. The writ-list tool defaults to no status filter. Showing all statuses gives a complete view; the filter controls are prominently available for narrowing.
+      observable: true
+      recommendation: a
+      rationale: No filter on first load gives a complete picture. Quick-filter buttons for status make narrowing immediate.
+      stakes: low
+  - id: D7
+    scope:
+      - S1
+    question: How should sorting be implemented — client-side or server-side?
+    options:
+      a: Client-side sorting on the fetched page of results — sort the loaded array in JS
+      b: Server-side sorting via new orderBy parameter on writ-list tool
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The writ-list tool returns a page of results (default 20, ordered by createdAt desc). The existing tool has no orderBy parameter. Adding server-side sorting requires modifying the tool schema and ClerkApi. For a page of 20-50 results, client-side sorting is instant and avoids API changes.
+      observable: false
+      recommendation: a
+      rationale: Client-side sort on a small result set avoids API changes and is instant. The page already has all the data it needs.
+      stakes: low
+  - id: D8
+    scope:
+      - S1
+    question: How should text search work?
+    options:
+      a: Client-side filter on title — JS filters the loaded results array by title substring match
+      b: Server-side search via new search parameter on writ-list tool
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The writ-list tool has no text search parameter. Adding server-side search would require modifications to the tool, ClerkApi, and Stacks query layer. For a page showing 20-50 results, client-side filtering is sufficient and immediate.
+      observable: false
+      recommendation: a
+      rationale: Client-side title filtering on the loaded page of results avoids API changes and provides instant feedback.
+      stakes: low
+  - id: D9
+    scope:
+      - S1
+    question: How should pagination work?
+    options:
+      a: "'Load more' button using offset/limit — appends results to the existing list"
+      b: Page-based navigation with prev/next buttons
+      c: No pagination — increase default limit to 100 and show all
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The writ-list tool already supports offset and limit parameters. 'Load more' is simple to implement, avoids page-state management, and works naturally with client-side filtering and sorting (all loaded results are filterable).
+      observable: true
+      recommendation: a
+      rationale: "'Load more' leverages existing offset/limit support, keeps the page simple, and accumulates results for client-side operations."
+      stakes: low
+  - id: D10
+    scope:
+      - S1
+    question: Should writ detail be shown via inline expansion or a separate panel/modal?
+    options:
+      a: Inline expansion — clicking a row expands it to show body, timestamps, resolution, links
+      b: Side panel — a fixed panel on the right shows detail for the selected writ
+      c: Modal dialog — clicking a row opens a modal with full detail
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: The page needs to show writ body, timestamps, resolution, and links for detailed inspection. The brief doesn't specify a detail view pattern. Inline expansion is the simplest to implement in vanilla JS, doesn't obscure the list context, and naturally accommodates action buttons within the expanded area.
+      observable: true
+      recommendation: a
+      rationale: Inline expansion is the simplest pattern in vanilla JS, keeps list context visible, and naturally hosts action buttons and link management for that writ.
+      stakes: low
+  - id: D11
+    scope:
+      - S1
+    question: How should status filtering be presented in the UI?
+    options:
+      a: Quick-filter buttons (toggle-style) for each status, plus an 'All' button
+      b: A dropdown/select element for status
+      c: Both — buttons for common statuses plus a dropdown for type
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief emphasizes filtering 'particularly by status'. There are exactly 5 statuses. Toggle buttons provide one-click access without a dropdown interaction. Type filtering can use a separate dropdown since the number of types is variable.
+      observable: true
+      recommendation: a
+      rationale: Five statuses fit comfortably as toggle buttons in a toolbar. One-click filtering is faster than a dropdown for the primary filter dimension.
+      stakes: low
+  - id: D12
+    scope:
+      - S1
+    question: What should the page.files entry in package.json look like?
+    options:
+      a: "files: ['dist', 'pages'] — add pages alongside dist"
+      b: "files: ['dist', 'src/pages'] — reference from src"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The pages directory is at the package root (per D2), not inside src/. The current files field is ['dist']. Adding 'pages' includes the static HTML directory in the published package.
+      observable: false
+      recommendation: a
+      rationale: "Directly mirrors the directory structure: pages/ is at package root, so 'pages' is the correct files entry."
+      stakes: low
+  - id: D13
+    scope:
+      - S2
+    question: Where should transition buttons appear — in the list row or in the expanded detail?
+    options:
+      a: In the expanded detail view only — keeps the list clean
+      b: Cancel button inline in the list row; other transitions in expanded detail
+      c: All transition buttons inline in every list row
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief emphasizes cancel but also wants all legal transitions. Putting buttons in the expanded detail keeps the table scannable. The expansion (D10) already houses body/links/timestamps — adding action buttons there is natural. The user clicks a row to expand, then acts.
+      observable: true
+      recommendation: a
+      rationale: Keeps the list table clean and scannable while providing all actions in the natural detail context.
+      stakes: low
+  - id: D14
+    scope:
+      - S2
+    question: Which transition buttons should be shown for each writ status?
+    options:
+      a: "Show only legal transitions: ready→(Accept, Cancel), active→(Complete, Fail, Cancel), terminal→none"
+      b: Show all buttons always but disable illegal ones
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: "The status machine has clear legal transitions. Showing only legal ones reduces cognitive load and prevents confusion. The ALLOWED_FROM map in clerk.ts is the source of truth: ready→active/cancelled, active→completed/failed/cancelled."
+      observable: true
+      recommendation: a
+      rationale: Only showing legal transitions is clearer and matches the status machine. No disabled buttons to confuse.
+      stakes: low
+  - id: D15
+    scope:
+      - S2
+    question: Should cancel and other terminal transitions require a confirmation step?
+    options:
+      a: Yes — inline confirmation prompt with optional resolution text input before executing
+      b: No confirmation — click and execute immediately
+      c: Confirmation only for cancel; complete and fail go directly to resolution input
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Terminal transitions (cancel, complete, fail) are irreversible. Cancel is explicitly called out in the brief. Complete and fail require a resolution string (required param in writ-complete and writ-fail tools). A confirmation step that also collects the resolution text serves double duty.
+      observable: true
+      recommendation: a
+      rationale: Terminal transitions are irreversible. A confirmation step with resolution text input prevents accidents and collects required data in one interaction.
+      stakes: high
+  - id: D16
+    scope:
+      - S2
+    question: Should the accept transition (ready→active) also require confirmation?
+    options:
+      a: No — accept is a non-destructive forward transition; one-click is appropriate
+      b: Yes — all transitions get confirmation for consistency
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Accept (ready→active) is non-terminal, takes no additional fields, and is readily reversible conceptually (the writ can still be cancelled from active). The writ-accept tool takes only an id parameter.
+      observable: true
+      recommendation: a
+      rationale: Accept is non-destructive and takes no additional input. One-click is appropriate.
+      stakes: low
+  - id: D17
+    scope:
+      - S2
+    question: What button styles should map to each transition action?
+    options:
+      a: Accept→btn--primary (blue), Complete→btn--success (green), Fail→btn--danger (red), Cancel→btn--danger (red)
+      b: Accept→btn--primary (blue), Complete→btn--success (green), Fail→btn--danger (red), Cancel→btn (default/dim)
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The Oculus stylesheet provides btn--primary (blue), btn--success (green), btn--danger (red). Cancel is destructive (terminal, irreversible). Fail is also destructive. Both should signal danger.
+      observable: true
+      recommendation: a
+      rationale: Danger-styled buttons for destructive actions (cancel, fail); positive style for complete; neutral-positive for accept.
+      stakes: low
+  - id: D18
+    scope:
+      - S3
+    question: Where should links be displayed?
+    options:
+      a: In the expanded writ detail view, below body and timestamps
+      b: In a separate 'Links' tab or section of the page
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: writ-show already returns links alongside the writ data. Links are per-writ metadata. The expanded detail view (D10) is the natural home. Separating links into a different section would decontextualize them.
+      observable: true
+      recommendation: a
+      rationale: Links are per-writ context; displaying them in the expanded detail keeps them associated with their writ.
+      stakes: low
+  - id: D19
+    scope:
+      - S3
+    question: How should the 'create link' UI work?
+    options:
+      a: "Inline form in the expanded detail: text input for target writ id + text input for link type + 'Link' button"
+      b: Modal dialog for creating links
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: "Creating a link requires three values: source writ id (implicit from expanded writ), target writ id, and link type. This is a simple two-field form. A modal adds unnecessary complexity for such a small form."
+      observable: true
+      recommendation: a
+      rationale: Two input fields + a button fits naturally in the expanded detail view. No modal needed for a simple form.
+      stakes: low
+  - id: D20
+    scope:
+      - S3
+    question: Should the link type field offer suggestions or be freeform?
+    options:
+      a: Text input with a datalist of common types (retries, supersedes, fixes, duplicates, blocks) — freeform but suggestive
+      b: Plain text input — fully freeform
+      c: Dropdown with fixed options only
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: "WritLinkDoc.type is an open string — the clerk does not restrict it. The writ-link tool description mentions common types: 'fixes', 'retries', 'supersedes', 'duplicates'. A datalist provides suggestions without restricting input."
+      observable: true
+      recommendation: a
+      rationale: HTML datalist gives autocomplete suggestions for common types while preserving freeform entry for novel relationship types.
+      stakes: low
+  - id: D21
+    scope:
+      - S3
+    question: Should link deletion require confirmation?
+    options:
+      a: Yes — a confirm prompt or click-twice pattern
+      b: No — immediate deletion (unlink is idempotent, the operation is low-stakes)
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: Unlink is idempotent and non-destructive to the writs themselves — it only removes the relationship. The link can be recreated. The operation is low-risk compared to status transitions.
+      observable: true
+      recommendation: b
+      rationale: Unlinking is non-destructive and easily reversible (re-link). No confirmation needed.
+      stakes: low
+  - id: D22
+    scope:
+      - S3
+    question: How should linked writs be displayed — as ids only or with title preview?
+    options:
+      a: Show linked writ id as a clickable link that scrolls to / expands that writ, plus the link type
+      b: Show linked writ id + title (fetched via writ-show) + link type
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: Fetching the title for each linked writ requires an additional API call per link. For a first implementation, showing the id (which is already in the link doc) with a clickable reference is simpler. The id format (w-{timestamp}{random}) is recognizable.
+      observable: true
+      recommendation: a
+      rationale: Avoids N+1 API calls for linked writs. The id is clickable and navigates to the writ in the list. Titles can be added as a future enhancement.
+      stakes: low
+  - id: D23
+    scope:
+      - S4
+    question: Should repost be implemented as page-level JS (two API calls) or a new server-side writ-repost tool?
+    options:
+      a: Page-level composition — JS calls commission-post then writ-link in sequence
+      b: New writ-repost tool — atomic server-side operation
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - implementer
+      confidence: medium
+      context: "Repost is a compound UI operation: create new writ + link to original. A server-side tool would be atomic (no partial state if the link call fails), but the failure mode is benign — a writ without a link is not harmful, and the user can see the error and retry the link. Adding a new tool increases API surface and requires tests."
+      observable: true
+      recommendation: a
+      rationale: Page-level composition using existing tools keeps the API surface minimal. Partial failure (writ created but link fails) is benign and recoverable from the UI.
+      stakes: low
+  - id: D24
+    scope:
+      - S4
+    question: What format should the reposted writ's title use?
+    options:
+      a: "'[Repost] {original title}' — bracket prefix annotation"
+      b: "'Repost: {original title}' — colon prefix"
+      c: Keep the original title unchanged — let the link convey the relationship
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: The brief says 'with possible annotation of it being a repost'. The title needs to be visually distinguishable in the writ list so the operator knows which writs are reposts vs originals. Bracket prefix is a common convention for annotations.
+      observable: true
+      recommendation: a
+      rationale: Bracket prefix is concise and visually scannable in a list. Matches common annotation conventions.
+      stakes: low
+  - id: D25
+    scope:
+      - S4
+    question: What link type should be used for the repost→original relationship?
+    options:
+      a: "'retries' — the repost retries the failed work"
+      b: "'repost' — a specific relationship type for this operation"
+      c: "'supersedes' — the new writ supersedes the old one"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: medium
+      context: The existing writ-link tool description lists 'retries' as a common link type. A repost of a failed writ is semantically 'retrying' that work. Using the existing vocabulary is better than introducing a new type.
+      observable: true
+      recommendation: a
+      rationale: "'retries' is already listed as a standard link type and semantically matches: the new writ retries the failed work."
+      stakes: low
+  - id: D26
+    scope:
+      - S4
+    question: From which writ statuses should the repost button be available?
+    options:
+      a: Failed only — repost is specifically for retrying failed work
+      b: Failed and cancelled — both represent work that didn't complete successfully
+      c: Any terminal status (failed, cancelled, completed) — maximum flexibility
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: The brief says 'repost failed writs', specifically calling out failed. However, cancelled writs are equally likely candidates for reposting — the patron cancelled but may want to retry. Completed writs shouldn't be reposted since the work succeeded.
+      observable: true
+      recommendation: b
+      rationale: Both failed and cancelled represent incomplete work that might need retrying. Completed writs don't need reposting.
+      stakes: low
+  - id: D27
+    scope:
+      - S4
+    question: Should the repost UI allow editing the title and body before submitting?
+    options:
+      a: Yes — pre-fill with the original values but allow editing before submit
+      b: No editing — auto-submit with the annotated title and original body
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief says 'with possible annotation of it being a repost'. 'Possible' implies the patron should have control. Pre-filling the post form with the repost data and letting the patron review/edit before submitting gives maximum flexibility.
+      observable: true
+      recommendation: a
+      rationale: Pre-filling the post form lets the patron adjust the title, body, or type before submitting. More flexible and less error-prone than auto-submit.
+      stakes: high
+  - id: D28
+    scope:
+      - S5
+    question: How should the writ type dropdown be populated — via a new tool or other mechanism?
+    options:
+      a: New writ-types tool that returns available types from guild config — becomes GET /api/writ/types
+      b: Custom Oculus route contributed by clerk via supportKit.routes
+      c: Hardcode 'mandate' as the only option and let the patron type a custom value
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: No existing tool exposes available writ types. The internal resolveWritTypes() function in clerk.ts reads from guild config. A tool is consistent with the existing pattern (all clerk operations are tools) and becomes available to CLI/MCP users as well as the page. A custom route would only be usable from the web UI.
+      observable: true
+      recommendation: a
+      rationale: A tool is consistent with the clerk's tool-first architecture and makes the types list available to all callers, not just the web UI.
+      stakes: low
+  - id: D29
+    scope:
+      - S5
+    question: What should the writ-types tool name be?
+    options:
+      a: "'writ-types' — becomes GET /api/writ/types"
+      b: "'clerk-types' — becomes GET /api/clerk/types"
+      c: "'clerk-config' — becomes GET /api/clerk/config, returns full config"
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: All existing clerk tools are named 'writ-*' or 'commission-*'. The tool returns writ types specifically, not general clerk config. 'writ-types' matches the naming convention.
+      observable: true
+      recommendation: a
+      rationale: Follows the 'writ-*' naming convention established by all other clerk tools.
+      stakes: low
+  - id: D30
+    scope:
+      - S5
+    question: What should the writ-types tool return?
+    options:
+      a: Array of {name, description?, default} objects — includes descriptions and marks the default type
+      b: Array of {name, description?} objects — matches WritTypeEntry shape
+      c: Array of strings — just the type names
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: The guild config has WritTypeEntry[] with name + optional description. The resolveDefaultType() function returns the configured default. The page needs to know the default type to pre-select it in the dropdown. Returning descriptions enables tooltips.
+      observable: true
+      recommendation: a
+      rationale: Including descriptions and the default flag gives the page all the information it needs without extra calls. The overhead is minimal.
+      stakes: low
+  - id: D31
+    scope:
+      - S5
+    question: What permission should the writ-types tool have?
+    options:
+      a: "'clerk:read' — consistent with writ-list and writ-show"
+      b: No permission (undefined) — types are non-sensitive config data
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: writ-list and writ-show both use 'clerk:read'. Types are read-only config data. Using 'clerk:read' maps to GET via permissionToMethod and is consistent. Undefined would also map to GET, but breaks the consistency of all clerk tools having explicit permissions.
+      observable: false
+      recommendation: a
+      rationale: Consistent with all other clerk read tools.
+      stakes: low
+  - id: D32
+    scope:
+      - S5
+    question: Should the writ-types tool be callableBy patron only or unrestricted?
+    options:
+      a: Unrestricted (no callableBy) — default; available to both patron and anima
+      b: "callableBy: ['patron'] — only the web UI / patron needs it"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Existing clerk tools do not set callableBy (they are unrestricted). Anima agents could reasonably want to know the available writ types when creating writs programmatically. There is no reason to restrict this.
+      observable: false
+      recommendation: a
+      rationale: Consistent with all other clerk tools — no callableBy restriction.
+      stakes: low
+  - id: D33
+    scope:
+      - S5
+    question: Where should the post-writ form appear on the page?
+    options:
+      a: Collapsible section at the top of the page — hidden by default, toggled with a 'New Writ' button
+      b: Always visible at the top of the page
+      c: Modal dialog triggered by a 'New Writ' button
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief describes a form with a 'large, possibly expandable text area'. Keeping it always visible would consume significant space. A collapsible section keeps the list as the primary view while making the form quickly accessible. A modal would work but is more complex in vanilla JS.
+      observable: true
+      recommendation: a
+      rationale: Collapsible section balances accessibility with screen real estate. One click to open, doesn't obscure the list context.
+      stakes: low
+  - id: D34
+    scope:
+      - S5
+    question: How should the body textarea behave?
+    options:
+      a: "Standard textarea with a generous default height (6-8 rows) — CSS resize: vertical to allow manual expansion"
+      b: Auto-expanding textarea that grows as the user types
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: "The brief says 'large, possibly expandable text area'. CSS resize: vertical is the simplest way to make a textarea expandable. Auto-expanding requires JS to measure content height. A generous default height (6-8 rows) accommodates most content without needing expansion."
+      observable: true
+      recommendation: a
+      rationale: "CSS resize: vertical provides the expansion the brief asks for with zero JS. A generous default height handles most cases."
+      stakes: low
+  - id: D35
+    scope:
+      - S5
+    question: Should the post form include a codex field?
+    options:
+      a: Yes — optional text input for codex name, matching commission-post's full parameter set
+      b: No — omit codex to keep the form focused; it can be added later
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: commission-post accepts an optional codex parameter. The codex field targets a specific codex for the writ. Omitting it would make the web form less capable than the CLI tool. Including it as an optional field costs one input row.
+      observable: true
+      recommendation: a
+      rationale: Feature parity with the commission-post tool. The field is optional — it doesn't complicate the form when unused.
+      stakes: low
+  - id: D36
+    scope:
+      - S5
+    question: What happens after a writ is successfully posted?
+    options:
+      a: Clear the form, collapse it, and refresh the writ list — the new writ appears at the top
+      b: Clear the form and show a success message, but don't collapse
+      c: Navigate to the new writ's detail view
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The primary view is the writ list. After posting, the patron wants to see the new writ in context. Collapsing the form and refreshing the list makes the new writ visible immediately at the top (list is sorted by createdAt desc).
+      observable: true
+      recommendation: a
+      rationale: Clear→collapse→refresh puts the new writ in view immediately. The patron sees confirmation by seeing their writ in the list.
+      stakes: low
+  - id: D37
+    scope:
+      - S1
+      - S2
+      - S3
+      - S4
+      - S5
+    question: How should API errors be displayed to the user?
+    options:
+      a: Inline error messages near the triggering element (form validation errors below the form, action errors below the action buttons)
+      b: Toast notifications that auto-dismiss
+      c: A fixed error banner at the top of the page
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: No toast system exists in the Oculus CSS. Inline errors are the simplest to implement in vanilla JS and contextually clear — the error appears where the user's attention already is.
+      observable: true
+      recommendation: a
+      rationale: Inline errors are contextual, require no toast infrastructure, and are simple to implement.
+      stakes: low
+  - id: D38
+    scope:
+      - S1
+      - S2
+      - S3
+      - S4
+      - S5
+    question: How should loading states be indicated?
+    options:
+      a: Simple text indicators ('Loading...', 'Posting...') in the relevant area
+      b: Disable buttons and show spinner icons
+      c: No loading indication
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: No spinner component exists in the Oculus stylesheet. Text indicators are trivial to implement and clearly communicate state. Button disabling during operations prevents double-submission.
+      observable: true
+      recommendation: a
+      rationale: Text loading indicators + button disabling during operations. Simplest approach with clear feedback.
+      stakes: low
+  - id: D39
+    scope:
+      - S1
+    question: Should the page auto-refresh the writ list periodically?
+    options:
+      a: No auto-refresh — manual refresh button only
+      b: Auto-refresh every 30 seconds
+      c: Auto-refresh every 10 seconds
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Auto-refresh could disrupt user interaction (expanded details, form in progress, scroll position). A manual refresh button gives the user control. The page refreshes after operations (post, transition, link) anyway.
+      observable: true
+      recommendation: a
+      rationale: Manual refresh prevents disruption during interaction. Operations trigger automatic refresh of relevant data.
+      stakes: low
+  - id: D40
+    scope:
+      - S5
+    question: Should the writ-types tool be added to the ClerkApi interface, or kept as a tool-only operation?
+    options:
+      a: Tool-only — the tool reads guild config directly, no new method on ClerkApi
+      b: Add a writTypes() method to ClerkApi that the tool delegates to
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: resolveWritTypes() is already a private helper in clerk.ts. The writ-types tool can read guild config directly via guild().guildConfig().clerk, just like the existing helper does. Adding to ClerkApi would expand the public API for a simple config read. No other tool adds a method to ClerkApi just for config reads.
+      observable: false
+      recommendation: a
+      rationale: The tool reads config directly — no need to expand ClerkApi for a simple config query. Consistent with how resolveWritTypes() already works internally.
+      stakes: low
+  - id: D41
+    scope:
+      - S4
+    question: How should the repost flow interact with the post form?
+    options:
+      a: Clicking 'Repost' pre-fills the post form (S5) with annotated title + original body + original type, then opens it — user reviews and submits normally. After submit, JS automatically calls writ-link.
+      b: Separate repost modal with its own form
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: D27 decided the patron should be able to edit before submitting. Reusing the post form avoids duplicating form logic. The repost button sets a 'reposting from' context that triggers the link creation after the post succeeds. This is simpler and more consistent than a separate form.
+      observable: true
+      recommendation: a
+      rationale: Reusing the post form avoids duplicate UI. The repost context is a data-flow concern (pre-fill + auto-link), not a separate form.
+      stakes: low
