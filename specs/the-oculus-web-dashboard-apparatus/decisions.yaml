@@ -1,0 +1,679 @@
+decisions:
+  # ════════════════════════════════════════════════════════════════════
+  # S1 — ToolCaller rename
+  # ════════════════════════════════════════════════════════════════════
+
+  - id: D1
+    scope: [S1]
+    question: "What is the full set of files that must change for the 'cli' → 'patron' rename?"
+    options:
+      a: "Only the files identified in the inventory (tool.ts, tools-list.ts, program.ts, and their tests)"
+      b: "All files that reference 'cli' as a ToolCaller value, including CLI framework commands (status, init, version, upgrade, plugin — 5 files), animator/summon.ts, claude-code/mcp-server.test.ts, and all CLI command test files"
+    selected: b
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "Grep for callableBy.*'cli' reveals ~19 files across packages/framework/cli/src/commands/, packages/plugins/animator/src/tools/summon.ts, packages/plugins/claude-code/src/mcp-server.test.ts, plus tests. Every literal 'cli' used as a ToolCaller value must become 'patron'."
+      observable: true
+      recommendation: b
+      rationale: "Any file left referencing 'cli' as a ToolCaller value will either fail type checks or silently misfilter tools."
+      stakes: high
+
+  - id: D2
+    scope: [S1]
+    question: "Should the cli.ts entry point comment ('Tools are filtered to those with cli in callableBy') be updated?"
+    options:
+      a: "Yes, update the comment to say 'patron'"
+      b: "No, leave the comment"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "packages/framework/cli/src/cli.ts line 9 has a JSDoc comment mentioning 'cli' in the callableBy context. It's just a comment but will be misleading."
+      observable: false
+      recommendation: a
+      rationale: "Stale comments are worse than no comments. One-line change."
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════
+  # S2 — Oculus apparatus core
+  # ════════════════════════════════════════════════════════════════════
+
+  - id: D3
+    scope: [S2]
+    question: "What is the npm package name for the Oculus?"
+    options:
+      a: "@shardworks/oculus-apparatus"
+      b: "@shardworks/nexus-oculus"
+    selected: a
+    analysis:
+      audience: [patron, author]
+      confidence: high
+      context: "All existing apparatus packages follow @shardworks/{name}-apparatus convention: tools-apparatus, stacks-apparatus, loom-apparatus, animator-apparatus, clerk-apparatus, etc."
+      observable: true
+      recommendation: a
+      rationale: "Follow the established naming convention. Plugin ID derives to 'oculus' via derivePluginId()."
+      stakes: low
+
+  - id: D4
+    scope: [S2]
+    question: "What does the apparatus declare for requires?"
+    options:
+      a: "requires: ['tools'] — hard dependency on the Instrumentarium"
+      b: "recommends: ['tools'] — soft dependency, Oculus serves pages even without tool auto-mapping"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: "The tool auto-mapping is central to the Oculus's value proposition. Without the Instrumentarium, the /api/ surface is empty. The brief lists the Instrumentarium as a dependency. Loom similarly requires: ['tools']."
+      observable: true
+      recommendation: a
+      rationale: "Tool auto-mapping is core, not optional. A hard dependency catches misconfiguration at startup."
+      stakes: high
+
+  - id: D5
+    scope: [S2]
+    question: "What npm packages does the Oculus depend on for the HTTP server?"
+    options:
+      a: "hono only — use Node's built-in http module via Hono's node adapter built into hono/node-server"
+      b: "hono + @hono/node-server as separate packages"
+    selected: b
+    analysis:
+      audience: [implementer]
+      confidence: medium
+      context: "Hono's core package provides the router and handler framework. For Node.js, @hono/node-server is the standard adapter that bridges Hono's Request/Response API to Node's http.createServer. Hono v4 does export a hono/node-server path but it's a re-export that requires @hono/node-server to be installed. Both packages have zero transitive deps."
+      observable: false
+      recommendation: b
+      rationale: "Two explicit deps is clearer than relying on re-export behavior. @hono/node-server is tiny and has zero transitive deps."
+      stakes: low
+
+  - id: D6
+    scope: [S2]
+    question: "What does OculusApi (the provides object) expose?"
+    options:
+      a: "Minimal: { port(): number } — just the port the server is listening on"
+      b: "Richer: { port(): number; url(): string; pages(): PageContribution[] }"
+      c: "Empty — no provides. Other apparatus don't need to interact with the Oculus programmatically"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: medium
+      context: "Other apparatus typically use provides for programmatic cross-apparatus interaction (e.g. Loom uses Instrumentarium to resolve tools). The Oculus is primarily a human-facing surface. The port is useful for tools or engines that want to print the dashboard URL."
+      observable: true
+      recommendation: a
+      rationale: "Port is the minimum useful information. Pages list can be added later if needed. Empty provides prevents any programmatic usage."
+      stakes: low
+
+  - id: D7
+    scope: [S2]
+    question: "Should start() be async (to await server.listen) or sync (fire-and-forget)?"
+    options:
+      a: "Async — await the server listen call to ensure the port is bound before start() returns"
+      b: "Sync — call server.listen() without awaiting; log when ready via callback"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: "The Apparatus.start signature is (ctx: StartupContext) => void | Promise<void> — async is supported. @hono/node-server's serve() returns a Server. The listen callback or the returned promise confirms binding. Awaiting ensures the port is confirmed bound before other apparatus start."
+      observable: true
+      recommendation: a
+      rationale: "If the port is taken, better to fail fast during startup than log an error after startup completes."
+      stakes: high
+
+  - id: D8
+    scope: [S2]
+    question: "Should the Oculus implement stop() to shut down the HTTP server?"
+    options:
+      a: "Yes — close the HTTP server in stop()"
+      b: "No — the process exits anyway"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "Apparatus stop() is called during guild shutdown. Node's http.Server has a close() method. Clean shutdown prevents port-in-use errors during tests or rapid restart cycles."
+      observable: false
+      recommendation: a
+      rationale: "Standard hygiene. Other apparatus (Stacks) implement stop() for cleanup. Prevents test pollution."
+      stakes: low
+
+  - id: D9
+    scope: [S2]
+    question: "How should the Oculus read its configuration?"
+    options:
+      a: "guild().config<OculusConfig>('oculus') — untyped fallback"
+      b: "Module augmentation on GuildConfig + guild().guildConfig().oculus — typed access"
+    selected: b
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "Loom and Copilot both use module augmentation. It's the established pattern for apparatus with config sections. Provides typed access at guild().guildConfig().oculus without a cast."
+      observable: false
+      recommendation: b
+      rationale: "Follow Loom/Copilot pattern. Module augmentation is the recommended approach per docs/architecture/plugins.md."
+      stakes: low
+
+  - id: D10
+    scope: [S2]
+    question: "What should the Oculus log at startup?"
+    options:
+      a: "Console log with URL: '[oculus] Dashboard listening on http://localhost:{port}'"
+      b: "Silent — no console output"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: "The CLI currently logs warnings via console.warn. The Instrumentarium logs via console.warn for issues. A startup URL is standard for web servers and helps operators find the dashboard."
+      observable: true
+      recommendation: a
+      rationale: "Operators need to know the dashboard is running and where to find it. Standard web server convention."
+      stakes: low
+
+  - id: D11
+    scope: [S2]
+    question: "How does the Oculus scan page and route contributions from kits?"
+    options:
+      a: "Instrumentarium pattern — scan g.kits() at start, subscribe to plugin:initialized for late apparatus supportKits only"
+      b: "Loom pattern — scan g.kits() + g.apparatuses() at start, subscribe to plugin:initialized for late apparatus supportKits"
+    selected: b
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The Oculus requires: ['tools'], so the Instrumentarium starts first. Any apparatus that started before the Oculus may have supportKit pages/routes. The Loom pattern (scan both kits and already-started apparatuses, plus subscribe) covers all cases. The Instrumentarium's simpler pattern works because it has no requires — no apparatus has started yet when it scans."
+      observable: false
+      recommendation: b
+      rationale: "The Oculus starts after tools, so apparatus like tools may already have supportKits. Loom's three-phase scan is the correct pattern for apparatus with requires."
+      stakes: high
+
+  - id: D12
+    scope: [S2]
+    question: "How should page asset directories be served — Hono's serveStatic middleware or manual fs.readFile per request?"
+    options:
+      a: "Manual fs.readFile — read file from disk, determine Content-Type, return Response"
+      b: "Hono's serveStatic middleware from hono/node-server or @hono/node-server"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: medium
+      context: "Hono's serveStatic has different implementations per runtime adapter. For Node, it needs the @hono/node-server adapter. Manual file serving is more explicit, avoids adapter coupling, and makes chrome injection straightforward (read file → inject → return). The brief says 'no caching' — serveStatic may add cache headers."
+      observable: false
+      recommendation: a
+      rationale: "Manual file serving gives full control for chrome injection, avoids cache headers, and is simple — fs.readFile + content-type lookup + Response constructor."
+      stakes: low
+
+  - id: D13
+    scope: [S2]
+    question: "How should the Oculus determine Content-Type for served static files?"
+    options:
+      a: "Extension-based lookup table built into the apparatus (html, css, js, json, png, svg, etc.)"
+      b: "Use a third-party mime type library"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "Page assets are web files — the set of relevant MIME types is small and stable (text/html, text/css, application/javascript, application/json, image/png, image/svg+xml, etc.). A lookup table of ~15 entries covers all practical cases. Adding a dep for this is overkill."
+      observable: false
+      recommendation: a
+      rationale: "Small fixed set of web MIME types. No third-party dep needed. Fall back to application/octet-stream for unknown extensions."
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════
+  # S3 — Chrome injection and stylesheet
+  # ════════════════════════════════════════════════════════════════════
+
+  - id: D14
+    scope: [S3]
+    question: "How should chrome be injected into page index.html — regex or string search?"
+    options:
+      a: "Case-insensitive string search for </head> and <body (with attribute tolerance) via indexOf/regex"
+      b: "Parse HTML with a DOM parser, manipulate, serialize"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "Chrome injection is simple text insertion at two known points. HTML parsing is heavyweight and unnecessary — we're not transforming the DOM, just inserting at marker positions. The brief says 'pages without <head> or <body> tags are served as-is' — which is a simple conditional."
+      observable: false
+      recommendation: a
+      rationale: "Case-insensitive regex for </head> and <body[^>]*> is sufficient. No parsing dep needed."
+      stakes: low
+
+  - id: D15
+    scope: [S3]
+    question: "Should chrome injection apply to all HTML files in a page directory, or only index.html?"
+    options:
+      a: "Only index.html — other HTML files are served as-is"
+      b: "All .html files in the page directory"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "The brief says 'The Oculus intercepts page index.html responses and injects'. Plural HTML files in a page directory may be partial templates, iframes, or sub-pages that shouldn't get double navigation."
+      observable: true
+      recommendation: a
+      rationale: "Brief is explicit: injection applies to index.html responses only."
+      stakes: high
+
+  - id: D16
+    scope: [S3]
+    question: "What HTML element wraps the injected navigation?"
+    options:
+      a: "<nav> element with an id (e.g. id='oculus-nav')"
+      b: "<header> element"
+      c: "<div> with a class"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "The brief says 'a navigation header after <body>'. Semantic HTML uses <nav> for navigation. An id avoids style collisions with page content. The stylesheet can target #oculus-nav for chrome-specific styles."
+      observable: true
+      recommendation: a
+      rationale: "Semantic HTML. The id makes it targetable by both the shared stylesheet and page authors who want to customize."
+      stakes: low
+
+  - id: D17
+    scope: [S3]
+    question: "Should the navigation include a link back to the Oculus home page?"
+    options:
+      a: "Yes — include a home/guild link as the first nav item"
+      b: "No — only list contributed pages"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: "Without a home link, navigating back to the page index requires manually editing the URL. Standard web navigation includes a home link."
+      observable: true
+      recommendation: a
+      rationale: "Basic navigation hygiene. The home page is where the page listing lives."
+      stakes: low
+
+  - id: D18
+    scope: [S3, S7]
+    question: "Should the home page be a static HTML file in the package or dynamically generated?"
+    options:
+      a: "Dynamically generated at request time — reads the current registered pages list and renders HTML"
+      b: "Static HTML template with client-side JS that fetches page list from an API endpoint"
+      c: "Static HTML file that's updated at startup with the page list"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The page list is known at startup and doesn't change. Dynamic generation at request time is simplest — a function returns an HTML string with a page listing. No client-side JS needed. No stale-file concerns."
+      observable: false
+      recommendation: a
+      rationale: "Server-side generation is simplest for a small page listing. The page set is fixed after startup. No API round-trip or client JS needed."
+      stakes: low
+
+  - id: D19
+    scope: [S3]
+    question: "Where does the Oculus serve its own static assets (stylesheet)?"
+    options:
+      a: "/static/* — serves from the oculus package's static/ directory"
+      b: "/oculus/* — namespaced under the apparatus name"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "The stylesheet link injected into chrome uses a path that pages reference. /static/style.css is conventional. No namespace collision risk since contributed pages are under /pages/{id}/."
+      observable: true
+      recommendation: a
+      rationale: "/static/ is conventional. The Oculus owns the root URL space; there's no collision concern."
+      stakes: low
+
+  - id: D20
+    scope: [S3]
+    question: "How should the Oculus resolve the filesystem path to its own static assets at runtime?"
+    options:
+      a: "import.meta.url to resolve relative to the source file, then navigate to the static/ directory"
+      b: "process.cwd() relative path"
+      c: "__dirname equivalent via import.meta.dirname (Node 21+)"
+    selected: c
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The codebase targets Node 24 (package.json engines: node 24.x). import.meta.dirname is available from Node 21+. It gives the directory of the current module file — stable whether running from src/ or dist/. import.meta.url requires URL-to-path conversion. process.cwd() is fragile."
+      observable: false
+      recommendation: c
+      rationale: "Node 24 target means import.meta.dirname is available and is the cleanest path. No URL parsing needed."
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════
+  # S4 — Tool→REST auto-mapping
+  # ════════════════════════════════════════════════════════════════════
+
+  - id: D21
+    scope: [S4]
+    question: "Which tools should be auto-mapped to REST endpoints — all tools, or only patron-callable tools?"
+    options:
+      a: "All tools from instrumentarium.list() regardless of callableBy"
+      b: "Only tools callable by 'patron' (matching the CLI's filter logic)"
+      c: "All tools from instrumentarium.list() but exclude library-only tools"
+    selected: b
+    analysis:
+      audience: [patron, author]
+      confidence: high
+      context: "The brief says 'The Oculus resolves tools with caller: patron, same as the CLI.' The CLI filters to tools with no callableBy restriction or callableBy including 'cli' (soon 'patron'). Exposing anima-only tools via REST would be confusing — they're designed for AI sessions, not human use."
+      observable: true
+      recommendation: b
+      rationale: "Brief is explicit: the Oculus uses caller: 'patron'. This mirrors CLI behavior and excludes anima-only tools."
+      stakes: high
+
+  - id: D22
+    scope: [S4]
+    question: "How should the permission level be extracted for HTTP method inference when the permission string contains a colon (e.g. 'clerk:read')?"
+    options:
+      a: "Split on colon, take the last segment — 'clerk:read' → 'read'"
+      b: "Match the full string against known levels — 'clerk:read' doesn't match 'read', falls through to default"
+      c: "Split on colon, take the last segment if colon present; use full string if no colon — handles both 'clerk:read' and 'read'"
+    selected: c
+    analysis:
+      audience: [patron, author]
+      confidence: high
+      context: "In the codebase, tool permissions use two formats: simple levels ('read', 'write', 'delete') and plugin-prefixed ('clerk:read', 'clerk:write', 'spider:write'). Both need to map to the correct HTTP method. The level (read/write/delete/admin) is always the last segment."
+      observable: true
+      recommendation: c
+      rationale: "Handles both permission formats consistently. Simple string operation: split on ':', take last element."
+      stakes: high
+
+  - id: D23
+    scope: [S4]
+    question: "What HTTP method should be used for tools with custom/unknown permission levels (e.g. 'animate')?"
+    options:
+      a: "Default to POST — unknown levels are assumed to be write-like operations"
+      b: "Default to GET — permissionless tools default to GET, so unknown levels should too"
+    selected: a
+    analysis:
+      audience: [patron]
+      confidence: medium
+      context: "The brief specifies: read/no-permission → GET, write/admin → POST, delete → DELETE. Custom levels like 'animate' aren't covered. Custom permissions usually gate non-trivial operations (session launch, etc.) — defaulting to POST is safer than GET since GET should be side-effect-free."
+      observable: true
+      recommendation: a
+      rationale: "POST is the safe default for unknown operations. GET implies idempotent/side-effect-free, which can't be guaranteed for custom permission levels."
+      stakes: low
+
+  - id: D24
+    scope: [S4]
+    question: "How should tool names be transformed into URL paths?"
+    options:
+      a: "Split on first hyphen only — 'writ-list' → /api/writ/list, 'rig-for-writ' → /api/rig/for-writ, 'signal' → /api/signal"
+      b: "Split on all hyphens — 'writ-list' → /api/writ/list, 'rig-for-writ' → /api/rig/for/writ"
+    selected: a
+    analysis:
+      audience: [patron, author]
+      confidence: high
+      context: "The brief is explicit with examples: 'rig-for-writ → GET /api/rig/for-writ'. This is first-hyphen split only, consistent with the CLI's grouping logic (findGroupPrefixes)."
+      observable: true
+      recommendation: a
+      rationale: "Brief provides explicit examples showing first-hyphen-only split."
+      stakes: high
+
+  - id: D25
+    scope: [S4]
+    question: "How should query string parameters be coerced for GET endpoints?"
+    options:
+      a: "Number coercion only — reuse the same logic as coerceCliOpts from cli/helpers.ts"
+      b: "Number + boolean coercion — extend coercion to handle 'true'/'false' strings as boolean"
+    selected: b
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "All query params arrive as strings. The CLI only needed number coercion because Commander handles boolean flags natively (--flag sets true). HTTP query strings have no such convention — ?verbose=true arrives as the string 'true'. Zod's boolean schema will reject strings. The brief says 'the same string→number/boolean coercion the CLI applies' — explicitly mentions boolean."
+      observable: true
+      recommendation: b
+      rationale: "Brief explicitly mentions boolean coercion. HTTP query strings need it since all values are strings."
+      stakes: high
+
+  - id: D26
+    scope: [S4]
+    question: "How should POST/DELETE request bodies be parsed?"
+    options:
+      a: "Expect JSON body (Content-Type: application/json) — parse with c.req.json()"
+      b: "Accept both JSON body and form-encoded body"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "This is a programmatic API consumed by JavaScript fetch() calls from page code. JSON is the standard for REST APIs. Form encoding adds complexity with no benefit for JS-driven pages."
+      observable: true
+      recommendation: a
+      rationale: "JSON-only is standard for programmatic APIs. Page JS uses fetch() with JSON bodies. No form consumers expected."
+      stakes: low
+
+  - id: D27
+    scope: [S4]
+    question: "What HTTP status codes should tool endpoint errors use?"
+    options:
+      a: "400 for Zod validation errors, 500 for handler errors, 404 for unknown routes"
+      b: "Always 200 with error in JSON body (like MCP)"
+      c: "400 for validation, 500 for handler errors, 405 for wrong HTTP method"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "Standard REST conventions. 400 for bad input (Zod parse failure), 500 for server-side handler errors. Hono handles 404 for unmatched routes automatically."
+      observable: true
+      recommendation: a
+      rationale: "Standard HTTP status codes. Page authors using fetch() can check response.ok without parsing the body."
+      stakes: low
+
+  - id: D28
+    scope: [S4]
+    question: "What is the error response JSON shape?"
+    options:
+      a: "{ error: string } — simple message"
+      b: "{ error: string, details?: unknown } — message plus optional Zod error details"
+    selected: b
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "Zod validation errors contain structured information about which fields failed and why. Surfacing this helps page authors debug API calls during development."
+      observable: true
+      recommendation: b
+      rationale: "Structured error details help page authors debug. The 'details' field is optional — handler errors just have a message."
+      stakes: low
+
+  - id: D29
+    scope: [S4]
+    question: "When should tool routes be registered — at startup (snapshot of tools at start time) or lazily (resolve tools per request)?"
+    options:
+      a: "At startup — snapshot all tools, register Hono routes, fixed for server lifetime"
+      b: "Lazily — resolve tools on each request via a catch-all /api/* route"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: medium
+      context: "Tools are registered by the Instrumentarium at startup. Late-arriving apparatus supportKit tools fire via plugin:initialized, which the Oculus subscribes to. After all plugins have initialized, the tool set is stable. However, lazy resolution would catch any tools added after Oculus initialization."
+      observable: false
+      recommendation: a
+      rationale: "Startup registration matches the static nature of the tool registry. Pre-registering routes enables conflict detection with custom routes. The plugin:initialized subscription catches late arrivals."
+      stakes: low
+
+  - id: D30
+    scope: [S4]
+    question: "How should the Oculus handle tool auto-mapping given that tools arrive in phases (kits before apparatus start, then supportKits via plugin:initialized)?"
+    options:
+      a: "Register all tool routes only after all plugins have initialized — defer route registration to the end of the start sequence"
+      b: "Register tool routes from list() during start(), then add routes for late-arriving tools via plugin:initialized handler"
+    selected: b
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The Instrumentarium's list() returns all tools registered so far. By the time the Oculus's start() runs, the Instrumentarium has already scanned all kits and its own supportKit. Late-arriving apparatus supportKit tools arrive via plugin:initialized. The Oculus can register routes for initial tools in start(), then add routes for new tools in the event handler. This matches how the Instrumentarium and Loom handle progressive discovery."
+      observable: false
+      recommendation: b
+      rationale: "Matches the progressive discovery pattern used by Instrumentarium and Loom. Routes from initial tools are ready immediately; late tools are added via events."
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════
+  # S5 — Custom route contributions
+  # ════════════════════════════════════════════════════════════════════
+
+  - id: D31
+    scope: [S5]
+    question: "What type should the route handler accept — Hono Context or a simpler custom type?"
+    options:
+      a: "Hono Context directly — handler: (c: Context) => Response | Promise<Response>"
+      b: "A framework-defined handler type that wraps Request/Response without exposing Hono"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: medium
+      context: "The brief says Hono 'is a framework dependency of the Oculus package — not exposed to page authors.' Page authors don't write custom routes. Kit/apparatus plugin authors do — these are framework developers who can take a dependency on Hono's types. However, exposing Hono's Context type in the public API creates a coupling."
+      observable: true
+      recommendation: a
+      rationale: "Custom routes are escape hatches for advanced use cases (SSE, WebSocket). Plugin authors writing custom routes need full Hono capabilities. Wrapping would limit functionality and add abstraction with no benefit."
+      stakes: low
+
+  - id: D32
+    scope: [S5]
+    question: "Should the Oculus validate that custom route paths start with /api/?"
+    options:
+      a: "Yes — reject routes not under /api/ with a startup warning"
+      b: "No — trust plugin authors to follow the convention"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "The brief says 'Custom routes must be under /api/.' Validation at registration time catches mistakes early. Without validation, a custom route at / could hijack the home page."
+      observable: true
+      recommendation: a
+      rationale: "Brief is explicit. Startup validation catches misconfiguration before it causes confusing behavior."
+      stakes: low
+
+  - id: D33
+    scope: [S5]
+    question: "How should custom route conflicts with auto-mapped tool routes be detected and warned?"
+    options:
+      a: "After registering all custom routes and computing tool routes, compare paths. Log warning if overlap. Custom route wins because it was registered first."
+      b: "Maintain a Set of custom route paths. When registering tool routes, check the Set. Skip tool route if conflict, log warning."
+    selected: b
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The brief says 'custom route wins (with a startup warning)'. The simplest implementation: register custom routes first, track their paths, skip conflicting tool routes with a warning."
+      observable: true
+      recommendation: b
+      rationale: "Simple, explicit, and produces clear warnings. No reliance on Hono's route matching order."
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════
+  # S6 — API tool index
+  # ════════════════════════════════════════════════════════════════════
+
+  - id: D34
+    scope: [S6]
+    question: "What fields should each entry in the GET /api/_tools response include?"
+    options:
+      a: "{ name, route, method } — minimal discovery"
+      b: "{ name, route, method, description, params } — includes description and param schema for self-documenting use"
+    selected: b
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "The brief says 'parameter schemas'. The tools-show tool already extracts param info (type, description, optional) from Zod schemas. Including description and params makes the endpoint genuinely self-documenting — page authors can build API calls from this response alone."
+      observable: true
+      recommendation: b
+      rationale: "The brief explicitly requests parameter schemas. Including description makes the endpoint a complete API reference."
+      stakes: low
+
+  - id: D35
+    scope: [S6]
+    question: "How should param schemas be represented in the _tools response?"
+    options:
+      a: "Reuse the extractParams pattern from tools-show.ts — { type, description, optional } per param"
+      b: "Use z.toJSONSchema() for full JSON Schema representation"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "tools-show already has extractParams() that walks Zod shapes and produces { type: string, description: string | null, optional: boolean }. z.toJSONSchema() produces verbose JSON Schema objects. The simpler format is more readable for page authors and consistent with the existing tools-show output."
+      observable: true
+      recommendation: a
+      rationale: "Consistent with existing tools-show output. Simpler for page authors to consume. Avoids JSON Schema verbosity."
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════
+  # S7 — Oculus home page
+  # ════════════════════════════════════════════════════════════════════
+
+  - id: D36
+    scope: [S7]
+    question: "Should the home page also display the guild name?"
+    options:
+      a: "Yes — read guild name from guildConfig().name and display it in the header"
+      b: "No — just show the page listing"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: "The guild name is readily available from guild().guildConfig().name. Displaying it provides context when an operator has multiple guilds. One extra line of code."
+      observable: true
+      recommendation: a
+      rationale: "Minimal cost, useful context. Especially when operators run multiple guilds."
+      stakes: low
+
+  - id: D37
+    scope: [S7]
+    question: "Should the home page receive chrome injection (nav + stylesheet) like contributed pages?"
+    options:
+      a: "Yes — the home page is a full HTML page with the same chrome as contributed pages"
+      b: "No — the home page is generated dynamically and includes the stylesheet/nav directly in its HTML"
+    selected: b
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The home page is dynamically generated by the Oculus itself (D18). It can include the stylesheet link and nav directly in the generated HTML — no need for a separate injection pass. Chrome injection is for contributed pages that don't know about the Oculus's chrome."
+      observable: false
+      recommendation: b
+      rationale: "The home page is generated by the Oculus. Including chrome directly is simpler and avoids a redundant inject-then-serve pipeline."
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════
+  # Cross-cutting
+  # ════════════════════════════════════════════════════════════════════
+
+  - id: D38
+    scope: [S2, S4]
+    question: "Should the Oculus add CORS headers to API responses?"
+    options:
+      a: "No — the dashboard and API are same-origin (both served by the Oculus)"
+      b: "Yes — add permissive CORS headers for local development flexibility"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "Pages are served from /pages/{id}/ and APIs from /api/ — same origin. No cross-origin requests occur in normal use. The brief says no authentication/access control. CORS can be added later if external clients need it."
+      observable: false
+      recommendation: a
+      rationale: "Same-origin. No cross-origin scenario exists in the designed architecture. Avoid unnecessary headers."
+      stakes: low
+
+  - id: D39
+    scope: [S2, S3]
+    question: "How should the page contribution's dir field be resolved — absolute path provided by the kit, or relative to the package in node_modules?"
+    options:
+      a: "Kit provides an absolute path to the page directory"
+      b: "Kit provides a path relative to its package root; the Oculus resolves it via node_modules/{packageName}/{dir}"
+    selected: b
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "Kit contributions are passive — they're defined at module scope and can't access guild().home or runtime paths. Using a relative path (like instructionsFile in ToolDefinition) lets the Oculus resolve via the same node_modules pattern used by the Instrumentarium for instructionsFile. The Oculus knows the guild home and the kit's packageName from the LoadedPlugin."
+      observable: true
+      recommendation: b
+      rationale: "Consistent with how instructionsFile works in ToolDefinition — a relative path resolved against the package root in node_modules."
+      stakes: high
+
+  - id: D40
+    scope: [S2]
+    question: "Should the Oculus contribute any tools via supportKit?"
+    options:
+      a: "No supportKit — the Oculus is purely a serving apparatus"
+      b: "Yes — contribute an 'oculus-status' tool that returns the dashboard URL and registered pages"
+    selected: a
+    analysis:
+      audience: [patron]
+      confidence: medium
+      context: "The brief doesn't mention any tools contributed by the Oculus. The Instrumentarium contributes tools-list/tools-show via supportKit, but those are introspection tools for its own domain. An oculus-status tool could be useful but is not in the brief."
+      observable: false
+      recommendation: a
+      rationale: "Not in the brief. Can be added in a future commission if needed. Keeps the initial scope focused."
+      stakes: low
