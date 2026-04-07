@@ -1,0 +1,188 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: How should Spider declare its soft dependency on Oculus?
+    answer: "Add recommends: ['oculus'] to the apparatus declaration"
+    justification: Brief explicitly says 'recommends' — Spider must function without Oculus.
+  - id: D2
+    scope:
+      - S1
+    question: Should @shardworks/oculus-apparatus be added to spider's package.json dependencies for compile-time types?
+    answer: No — define compatible shapes inline in spider, avoid the import
+    justification: Avoids a compile-time dependency from spider to oculus for what is a runtime-advisory relationship. The
+      shapes are simple and stable.
+  - id: D3
+    scope:
+      - S1
+    question: Should hono be added to spider's package.json dependencies for route handler typing?
+    answer: Yes — add hono as a dependency so route handlers get typed Context parameter
+    justification: Hono is lightweight, already in the dependency tree, and gives typed access to c.json(), c.text(), etc.
+  - id: D4
+    scope:
+      - S1
+    question: What page ID and title should the Spider page use?
+    answer: "id: 'spider', title: 'Spider'"
+    justification: Matches the plugin id and avoids naming confusion between the apparatus name and the page.
+  - id: D5
+    scope:
+      - S1
+    question: Where should the static page assets live within the spider package?
+    answer: "src/static/ — referenced as dir: 'src/static' in PageContribution, add 'src/static' to package.json files array
+      for publishing"
+    justification: Keeps static assets with the source code. Adding to files[] is simpler than a build-time copy step.
+  - id: D6
+    scope:
+      - S2
+    question: What data source should the rig list use — existing tool REST endpoints or custom API routes?
+    answer: "Use existing auto-mapped tool endpoints: GET /api/rig/list, GET /api/rig/show, GET /api/rig/for-writ"
+    justification: Reuses existing infrastructure. Adding custom routes would duplicate what the tool mapping already provides.
+  - id: D7
+    scope:
+      - S2
+    question: How should the writ link in the rig list point — given no clerk Oculus page exists yet?
+    answer: Link to /pages/clerk/?writ={writId} as a forward reference — works when clerk page is built, 404s otherwise
+    justification: Matches the brief's intent. When the clerk page arrives, these links work with no spider changes.
+  - id: D8
+    scope:
+      - S2
+    question: Where should sorting and filtering happen — client-side JavaScript or server-side query params?
+    answer: Server-side via existing rig-list query params for status filter, client-side for everything else
+    justification: Uses server-side status filtering where it exists, avoids building new server endpoints for sort variations.
+  - id: D9
+    scope:
+      - S2
+    question: What metadata columns should the rig list table display?
+    answer: id, writId, status, engine summary (e.g. '3/5 completed'), createdAt
+    justification: The engine progress summary provides the most useful at-a-glance information for deciding which rig to inspect.
+  - id: D10
+    scope:
+      - S2
+    question: What UI controls should the rig list provide for filtering?
+    answer: Status dropdown filter + writId text input + date range filter
+    justification: Directly matches the brief's two named filter dimensions.
+  - id: D11
+    scope:
+      - S3
+    question: How should the rig detail view display engine relationships?
+    answer: Visual pipeline/flowchart using CSS flexbox/grid with arrows between engine boxes
+    justification: Provides genuine relationship visualization without heavy dependencies. CSS layout handles both linear
+      pipelines and small DAGs.
+  - id: D12
+    scope:
+      - S3
+    question: How should clicking an engine show its details?
+    answer: Separate detail section/panel that updates when an engine is selected
+    justification: Keeps the pipeline layout intact while showing full engine details. The split-panel pattern is standard
+      for master-detail views.
+  - id: D13
+    scope:
+      - S3
+    question: What fields should the engine detail panel display?
+    answer: All fields from (a), with givensSpec and yields shown in collapsible readonly JSON blocks
+    justification: Gives full visibility into engine state. Collapsible JSON blocks handle the verbosity of givensSpec and yields.
+  - id: D14
+    scope:
+      - S3
+    question: How should the rig detail be loaded — separate fetch or reuse list data?
+    answer: Reuse the RigDoc already fetched in the list (list returns full docs)
+    justification: Avoids redundant network round-trips. The list response already contains all detail data.
+  - id: D15
+    scope:
+      - S4
+    question: How should rig templates be displayed?
+    answer: Readonly <pre><code> blocks per template with JSON content
+    justification: Semantically correct for readonly display, already styled by oculus CSS, avoids the false affordance of a textarea.
+  - id: D16
+    scope:
+      - S4
+    question: How should each template be identified in the config UI?
+    answer: Show each template under its key name (the writ type it matches, or 'default')
+    justification: Shows the writ-type-to-template mapping clearly.
+  - id: D17
+    scope:
+      - S4
+      - S5
+    question: How should engine design data be obtained for the config UI — extend FabricatorApi or scan guild() in a custom
+      route?
+    answer: Add a 'listEngineDesigns' method to FabricatorApi. Also, create missing tools for listing/showing engine designs
+      from the unified set. Use standard tool endpoints.
+    justification: patron specified
+  - id: D18
+    scope:
+      - S4
+      - S5
+    question: How should block type data be obtained for the config UI — extend SpiderApi or scan guild()?
+    answer: Add a 'listBlockTypes' method to SpiderApi. Also, create missing tools for listing/showing engine designs from
+      the unified set. Use standard tool endpoints.
+    justification: patron specified
+  - id: D19
+    scope:
+      - S4
+      - S5
+    question: What details should be shown for each engine design in the config UI?
+    answer: id, contributing plugin, has-collect indicator (boolean)
+    justification: The has-collect flag distinguishes clockwork engines (no collect) from quick engines with custom yield
+      assembly, which is operationally useful.
+  - id: D20
+    scope:
+      - S4
+      - S5
+    question: What details should be shown for each block type in the config UI?
+    answer: id, contributing plugin, pollIntervalMs
+    justification: pollIntervalMs is actionable info. Zod schema display would require fragile introspection for limited value.
+  - id: D21
+    scope:
+      - S5
+    question: What path namespace should the custom API routes use?
+    answer: Single endpoint /api/spider/config returning all config data in one response
+    justification: Single fetch is simpler for the frontend. All three config datasets are small and logically related.
+  - id: D22
+    scope:
+      - S5
+    question: How should the guild-scanning route handler detect engine designs and block types from kit contributions?
+    answer: Replicate the duck-type checks from Fabricator (typeof id === 'string' && typeof run === 'function') and Spider
+      (typeof id === 'string' && typeof check === 'function')
+    justification: Matches the existing pattern and provides safety against malformed kit contributions.
+  - id: D23
+    scope:
+      - S2
+      - S3
+      - S4
+    question: What frontend technology should the page use?
+    answer: Vanilla HTML/CSS/JS — no framework, no build step
+    justification: No build step, no framework dependency, consistent with the oculus's zero-framework approach.
+  - id: D24
+    scope:
+      - S2
+      - S3
+      - S4
+    question: How should the page organize the runtime UI and config UI?
+    answer: Tab-based navigation — 'Rigs' tab and 'Config' tab within the page
+    justification: Tabs cleanly separate the two concerns without cluttering the global nav.
+  - id: D25
+    scope:
+      - S2
+      - S3
+    question: How should the page handle navigation between rig list and rig detail views?
+    answer: In-page view switching — clicking a rig replaces the list with the detail view, with a back button
+    justification: Maximizes screen real estate for each view. Simple state management with vanilla JS.
+  - id: D26
+    scope:
+      - S2
+    question: Should the rig list auto-refresh or require manual refresh?
+    answer: Manual refresh via a button
+    justification: Avoids disruptive UI updates. Operator clicks refresh when they want current state.
+  - id: D27
+    scope:
+      - S3
+    question: What status badge colors should map to each engine status?
+    answer: "Use existing oculus badge classes: completed→success(green), running→active(cyan+pulse), failed→error(red),
+      blocked→warning(yellow), pending→default(dim), cancelled→default(dim)"
+    justification: Reuses existing CSS. The color semantics map directly to engine status meanings.
+  - id: D28
+    scope:
+      - S1
+    question: Where should the route handler code live within the spider package?
+    answer: In a new file packages/plugins/spider/src/oculus-routes.ts
+    justification: Keeps spider.ts focused on apparatus logic. A single file is proportionate to the amount of route code.
