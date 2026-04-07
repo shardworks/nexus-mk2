@@ -1,0 +1,675 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: Where should the static page files (index.html, app.js, CSS) live within the parlour package?
+    options:
+      a: src/static/parlour/ — alongside source, mirroring oculus's own src/static/ pattern
+      b: static/parlour/ — top-level directory separate from source
+      c: pages/parlour/ — top-level, matching the test fixture convention in oculus tests
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The oculus itself uses src/static/ for its CSS. The PageContribution.dir is relative to package root in node_modules. In pnpm workspace, symlink resolves to the package directory directly.
+      observable: false
+      recommendation: a
+      rationale: Consistent with oculus's own src/static/ convention; keeps all source artifacts under src/
+      stakes: low
+  - id: D2
+    scope:
+      - S1
+    question: What page id and title should the contribution use?
+    options:
+      a: "id: 'parlour', title: 'Parlour'"
+      b: "id: 'chat', title: 'Chat'"
+      c: "id: 'parlour', title: 'Chat'"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The page id becomes the URL segment (/pages/parlour/) and the title appears in the Oculus nav bar. The apparatus is called 'The Parlour'.
+      observable: true
+      recommendation: a
+      rationale: Consistent naming with the apparatus; the nav link should say 'Parlour' since that's the guild's name for this capability
+      stakes: low
+  - id: D3
+    scope:
+      - S1
+    question: Should the page use vanilla JS or a framework/bundler?
+    options:
+      a: Vanilla JS — no build step, plain HTML/CSS/JS served as static files
+      b: A lightweight framework (Preact/Lit) with a build step
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The oculus serves static files directly. No other page contributions exist in the codebase. Adding a build step would require bundler config, dev/prod divergence, and additional devDependencies. The page is a single-purpose chat UI — not a complex SPA.
+      observable: false
+      recommendation: a
+      rationale: No existing build pipeline for page assets; vanilla JS keeps it simple and consistent with the static file serving model
+      stakes: low
+  - id: D4
+    scope:
+      - S1
+    question: Should the parlour package add @shardworks/oculus-apparatus as a dependency for the PageContribution/RouteContribution types?
+    options:
+      a: No dependency — use duck typing; the Oculus casts supportKit to OculusKit at scan time anyway
+      b: Add as a dependency and import the types for type safety
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The Oculus scans supportKit via `apparatus.apparatus.supportKit as OculusKit`. No other plugin imports oculus types to contribute pages. Adding the dep would create a circular-ish concern (parlour → oculus, but the Oculus already scans all apparatus). The supportKit object is untyped by design — it's a grab bag consumed by different apparatus.
+      observable: false
+      recommendation: a
+      rationale: Follows the existing duck-typed supportKit pattern; avoids unnecessary dependency
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: How should the package.json files array be updated to include static page assets in published packages?
+    options:
+      a: Add 'src/static' to the files array alongside 'dist'
+      b: Copy static files into dist/ during build and keep files as ['dist']
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: Current files array is ['dist']. The static page files are not TypeScript — they don't go through tsc. Option b adds build complexity. Option a is simpler but mixes source and dist in the published package.
+      observable: false
+      recommendation: a
+      rationale: Simpler; static files don't need compilation; the dir reference in PageContribution stays consistent between dev and prod
+      stakes: low
+  - id: D6
+    scope:
+      - S1
+    question: Should the route handlers be defined inline in parlour.ts or in a separate routes file?
+    options:
+      a: "Separate file: src/routes.ts (or src/routes/index.ts) — imported into parlour.ts"
+      b: Inline in parlour.ts alongside the existing supportKit
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: parlour.ts is already 712 lines. Adding 5-6 route handlers with SSE streaming would make it unwieldy. The existing tool definitions follow this pattern — they live in src/tools/ and are imported.
+      observable: false
+      recommendation: a
+      rationale: Follows the existing tools/ separation pattern; keeps parlour.ts focused on the core API
+      stakes: low
+  - id: D7
+    scope:
+      - S2
+    question: What streaming transport should the turn endpoint use to deliver ConversationChunks to the browser?
+    options:
+      a: Server-Sent Events (SSE) via Hono's streamSSE helper
+      b: WebSocket connection
+      c: Long polling
+    selected: a
+    analysis:
+      audience:
+        - implementer
+        - author
+      confidence: high
+      context: "Hono 4.7.x includes streamSSE from 'hono/streaming'. @hono/node-server 1.13.x supports streaming responses. SSE is unidirectional (server→client) which matches our pattern: the client POSTs a message, then receives a stream of chunks. WebSocket is bidirectional and overkill. Long polling gives poor UX."
+      observable: true
+      recommendation: a
+      rationale: SSE is the natural fit for server-push streaming; Hono has built-in support; no additional dependencies needed
+      stakes: high
+  - id: D8
+    scope:
+      - S2
+    question: Should the streaming turn endpoint combine the human turn recording and anima turn into a single request, or require two separate API calls?
+    options:
+      a: Single POST — the server records the human turn, then immediately starts the anima turn and streams the response
+      b: Two calls — client POSTs the human turn, then POSTs a separate request to start the anima streaming turn
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: For a consult conversation, every human message is immediately followed by an anima response. Splitting into two calls adds latency, complexity, and race conditions. The route handler can call parlour.takeTurn() for the human participant, then parlour.takeTurnStreaming() for the anima participant, all within one SSE response.
+      observable: true
+      recommendation: a
+      rationale: Simpler client code; atomic operation; avoids race condition between human turn recording and anima turn start
+      stakes: high
+  - id: D9
+    scope:
+      - S2
+    question: What HTTP method and path should the streaming turn endpoint use?
+    options:
+      a: POST /api/parlour/turn — body contains conversationId and message
+      b: POST /api/parlour/chat — body contains conversationId and message
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Existing tool routes use the pattern /api/{noun}/{verb}. 'turn' aligns with the Parlour's domain language (takeTurn). 'chat' is more consumer-friendly but less consistent with the API.
+      observable: true
+      recommendation: a
+      rationale: Consistent with Parlour domain language; 'turn' maps directly to the ParlourApi.takeTurn concept
+      stakes: low
+  - id: D10
+    scope:
+      - S2
+    question: How should the streaming turn endpoint determine participant IDs (human and anima) from the request?
+    options:
+      a: Client sends only conversationId and message; server looks up participants from the conversation doc
+      b: Client sends conversationId, humanParticipantId, animaParticipantId, and message
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: For consult conversations, there is exactly one human and one anima participant. The server can look them up from the conversation doc. Requiring the client to track and send participant IDs adds complexity and potential for desync.
+      observable: true
+      recommendation: a
+      rationale: Simpler client; participant IDs are an implementation detail the client shouldn't need to manage
+      stakes: low
+  - id: D11
+    scope:
+      - S2
+    question: How should tool_use and tool_result SessionChunks be handled in the chat UI?
+    options:
+      a: Display a compact inline indicator (e.g. a small pill/badge showing the tool name) — no details
+      b: Omit entirely — don't render tool chunks at all
+      c: Show a collapsible section with tool name and result
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: The brief says 'Omit tool call messages entirely, or display them in a very minimalistic/summarized way inline.' Option a gives the user awareness that tools are being used without cluttering the chat. Option b is simpler but loses observability.
+      observable: true
+      recommendation: a
+      rationale: Provides awareness of tool activity without clutter; brief explicitly allows this approach
+      stakes: low
+  - id: D12
+    scope:
+      - S2
+    question: How should human and anima messages be visually differentiated?
+    options:
+      a: Alignment-based — human messages right-aligned, anima messages left-aligned (chat bubble style)
+      b: Color-based — different background colors, both left-aligned with name labels
+      c: Mixed — left-aligned with color differentiation and participant name labels
+    selected: c
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: The brief says messages should be 'styled and/or positioned so that they are clearly differentiated.' The Tokyo Night palette provides distinct colors. Left-aligning both with labels is more readable for longer messages (code, explanations) than right-aligning user messages. Name labels help when reviewing history.
+      observable: true
+      recommendation: c
+      rationale: Better readability for long-form technical content; name labels provide context; uses the Tokyo Night color palette for differentiation
+      stakes: low
+  - id: D13
+    scope:
+      - S2
+    question: How should 'thinking' messages from the anima be identified and styled?
+    options:
+      a: Treat all text chunks as regular anima text — no thinking differentiation
+      b: Use a CSS class for subdued styling; identify thinking content by checking if the chunk text is wrapped in <thinking> tags or similar provider-specific markers
+      c: Use the SessionChunk type to distinguish — but SessionChunk only has 'text', 'tool_use', 'tool_result' with no thinking type
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: "The SessionChunk type only defines { type: 'text', text: string }. There is no separate 'thinking' chunk type in the Animator/provider interface. Claude Code's stream parser (packages/plugins/claude-code/src/stream-parser.test.ts) may emit thinking content as regular text chunks. Without a distinct chunk type, the frontend cannot reliably distinguish thinking from regular text."
+      observable: true
+      recommendation: a
+      rationale: No thinking chunk type exists in the SessionChunk union; attempting to detect thinking via text heuristics would be fragile and provider-specific
+      stakes: low
+  - id: D14
+    scope:
+      - S2
+    question: What loading indicator should be shown while awaiting the anima's response?
+    options:
+      a: A pulsing dot animation in the chat area where the anima's message will appear
+      b: A spinner icon on the send button area
+      c: Both — pulsing dots in chat area plus disabled/loading state on send button
+    selected: c
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief says 'spinner, animation, or other clear indicator' and 'the submit/send button should be disabled.' A chat-area indicator shows where the response will appear; a button state change prevents double-submission.
+      observable: true
+      recommendation: c
+      rationale: Covers both feedback locations the user looks at; brief explicitly requires disabled button state
+      stakes: low
+  - id: D15
+    scope:
+      - S3
+    question: How should the roles list be obtained for the dropdown? The LoomApi has no listRoles() method.
+    options:
+      a: Read guild().guildConfig().loom?.roles directly in a custom route handler — returns guild-defined roles only
+      b: Extend LoomApi with a listRoles() method that returns both guild-defined and kit-contributed roles
+      c: Read guild().guildConfig().loom?.roles in a custom route handler, plus scan kit contributions at route registration time to capture kit roles
+    selected: custom
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: medium
+      context: The brief says 'all roles in the system.' Guild-defined roles are in guildConfig().loom.roles. Kit-contributed roles are in the Loom's internal kitRoles Map — not accessible from outside. Option b requires modifying the Loom apparatus (out of scope). Option c is fragile — the route handler would need to replicate the Loom's kit scanning logic. Option a covers the primary use case (guild-defined roles are what operators configure).
+      observable: true
+      recommendation: a
+      rationale: Simplest approach that works without modifying the Loom; guild-defined roles are the primary configuration path; kit roles can be added later when LoomApi gains listRoles()
+      stakes: high
+    patron_override: Extend LoomApi with a `listRoles()` method that returns both guild-defined and kit-contributed roles. Create 'role-list' and 'role-show' tools in the Loom as well.
+  - id: D16
+    scope:
+      - S3
+    question: What API endpoint should serve the roles list?
+    options:
+      a: GET /api/parlour/roles — custom route on the parlour's supportKit
+      b: Add a loom-roles tool to the Loom apparatus and let the Oculus auto-map it
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: Adding a tool to the Loom is out of scope for this commission. A custom route on the Parlour is self-contained and doesn't require modifying other apparatus.
+      observable: true
+      recommendation: a
+      rationale: Self-contained in the Parlour package; no cross-apparatus modifications needed
+      stakes: low
+  - id: D17
+    scope:
+      - S3
+    question: When the user selects a different role, what should happen to the current conversation state?
+    options:
+      a: Clear the chat area and show the session sidebar for the new role — no auto-create of a new conversation
+      b: Clear the chat area and automatically create a new conversation for the new role
+      c: Prompt the user to confirm before switching if there's an active conversation
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief says 'when an anima is selected, a sidebar listing existing conversations is presented' and 'start a new conversation fresh (which is the default when an anima is selected and no conversation is picked).' This implies selecting a role shows the sidebar, not that it auto-creates a conversation. The user may want to resume an existing conversation.
+      observable: true
+      recommendation: a
+      rationale: "Matches the brief's description: selecting a role shows the sidebar, user then picks a conversation or starts new"
+      stakes: low
+  - id: D18
+    scope:
+      - S4
+    question: How should conversations be filtered to show only those for the selected role?
+    options:
+      a: Fetch all active consult conversations via the existing conversation-list tool route, then filter client-side by participant name matching the role
+      b: Add a custom route GET /api/parlour/conversations?role=X that filters server-side
+      c: Extend parlour.list() with a participantName filter option
+    selected: b
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: The existing conversation-list tool has no participant filter. Client-side filtering (option a) fetches all conversations and wastes bandwidth. Extending parlour.list() (option c) changes the ParlourApi contract. A custom route (option b) is self-contained, does the filtering server-side using parlour.list() + in-memory filter, and doesn't change the core API.
+      observable: true
+      recommendation: b
+      rationale: Server-side filtering without modifying the ParlourApi; clean separation between page-specific routes and core API
+      stakes: low
+  - id: D19
+    scope:
+      - S4
+    question: What should be displayed as the conversation title in the sidebar?
+    options:
+      a: Use topic if non-null, otherwise format createdAt as a readable date/time
+      b: Always use createdAt formatted as date/time
+      c: Use the first human message as the title, truncated
+    selected: custom
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief says 'An appropriate short title can be displayed, or if there is no suitable field for conversations a date/time will work.' ConversationDoc has topic (string | null). When set, it's meaningful. When null, createdAt is the fallback.
+      observable: true
+      recommendation: a
+      rationale: Directly matches the brief's guidance; topic is the most informative field available
+      stakes: low
+    patron_override: Use topic if non-null, otherwise use the first human message (truncated) as the title
+  - id: D20
+    scope:
+      - S4
+    question: Where should the session sidebar be positioned?
+    options:
+      a: Left side — like ChatGPT and Claude's web UI
+      b: Right side
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief says 'similar to what is used on ChatGPT or Claude's web UI.' Both of those place the conversation list on the left.
+      observable: true
+      recommendation: a
+      rationale: Matches the explicit reference to ChatGPT/Claude UI conventions
+      stakes: low
+  - id: D21
+    scope:
+      - S4
+    question: What reason should be used when 'ending' a conversation from the sidebar?
+    options:
+      a: Always use 'concluded' — the default end reason
+      b: Use 'abandoned' — since the user is choosing to stop rather than reaching a natural conclusion
+      c: Let the user choose between 'concluded' and 'abandoned'
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: The brief says 'a way to end conversations, setting their status in the appropriate Stacks Book.' The conversation-end tool defaults to 'concluded'. 'Abandoned' is for timeouts/disconnects. A user explicitly ending a chat is a deliberate conclusion, not abandonment.
+      observable: true
+      recommendation: a
+      rationale: Deliberate user action to end is a conclusion, not abandonment; consistent with the tool default
+      stakes: low
+  - id: D22
+    scope:
+      - S4
+    question: Should the sidebar be always visible, or collapsible?
+    options:
+      a: Always visible when a role is selected
+      b: Collapsible with a toggle button
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: ChatGPT's sidebar is collapsible. Claude's is always visible. For a first implementation, always-visible is simpler and ensures the user can always see their conversations. The page layout isn't screen-constrained since it's a tool UI.
+      observable: true
+      recommendation: a
+      rationale: Simpler implementation; adequate for a tool dashboard context
+      stakes: low
+  - id: D23
+    scope:
+      - S5
+    question: Where should the cost card be positioned?
+    options:
+      a: Below the chat area, above the message input
+      b: Below the message input area
+      c: In a sidebar panel or header
+    selected: custom
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief says 'beneath the conversation UI.' The conversation UI includes the chat display and message input. Below the entire conversation area is the natural reading position.
+      observable: true
+      recommendation: b
+      rationale: Matches brief's 'beneath the conversation UI' directive; doesn't interrupt the chat flow
+      stakes: low
+    patron_override: in the sidebar with the session selector, below the sessions and aligned to the bottom of the chat ui
+  - id: D24
+    scope:
+      - S5
+    question: What token breakdown should the cost card show?
+    options:
+      a: Total input tokens and total output tokens (aggregated across all turns)
+      b: Just total tokens (input + output combined)
+      c: Input tokens, output tokens, and cache tokens (read + write)
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: TokenUsage has inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?. The brief says 'both in tokens and USD.' Input/output split gives useful cost insight without overwhelming detail. Cache tokens are optional and not always present.
+      observable: true
+      recommendation: a
+      rationale: Input/output split is the most useful breakdown for cost awareness without unnecessary complexity
+      stakes: low
+  - id: D25
+    scope:
+      - S5
+    question: Should the cost card update in real-time during streaming, or only after the turn completes?
+    options:
+      a: Update after each turn completes — use the turn_complete chunk's costUsd and the updated conversation detail
+      b: Update in real-time with partial token counts during streaming
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Token usage and cost are only available in the final SessionResult/turn_complete chunk. There's no per-chunk cost data in SessionChunk. The cost card can be refreshed after each turn by re-fetching conversation detail.
+      observable: true
+      recommendation: a
+      rationale: Cost data is only available at turn completion; no per-chunk cost information exists in the streaming protocol
+      stakes: low
+  - id: D26
+    scope:
+      - S6
+    question: How should anima response text be made available for conversation history display?
+    options:
+      a: Extend TurnSummary to include an 'output' field; populate it from SessionDoc.output in parlour.show()
+      b: Add a separate custom route that fetches turns enriched with session output
+      c: Don't modify TurnSummary; have the page make separate session-show calls per turn
+    selected: a
+    analysis:
+      audience:
+        - author
+        - patron
+      confidence: high
+      context: parlour.show() already fetches SessionDocs to aggregate costUsd. Adding output (and tokenUsage) to the existing loop adds negligible overhead. Extending TurnSummary is clean — any consumer of show() benefits, not just the page. Option c would require N additional API calls per conversation load.
+      observable: true
+      recommendation: a
+      rationale: show() already reads SessionDocs; adding output is trivial; benefits all consumers of the API, not just the page
+      stakes: high
+  - id: D27
+    scope:
+      - S6
+    question: Should TurnSummary also include per-turn cost and token usage?
+    options:
+      a: Yes — add costUsd and tokenUsage fields to TurnSummary, populated from SessionDoc
+      b: No — keep only the aggregate totalCostUsd on ConversationDetail
+    selected: a
+    analysis:
+      audience:
+        - author
+        - patron
+      confidence: high
+      context: The cost card needs token counts. ConversationSummary has totalCostUsd but no totalTokens. SessionDoc has tokenUsage. Since show() already reads each SessionDoc, pulling tokenUsage costs nothing extra. Per-turn cost and token data enables the cost card to display aggregated totals.
+      observable: true
+      recommendation: a
+      rationale: Data is already fetched; per-turn granularity supports cost card and future analytics without additional queries
+      stakes: high
+  - id: D28
+    scope:
+      - S6
+      - S5
+    question: Should ConversationDetail/ConversationSummary be extended with aggregate token totals, or should the page sum per-turn token data client-side?
+    options:
+      a: Add totalInputTokens and totalOutputTokens to ConversationDetail, computed in show()
+      b: Page sums the per-turn tokenUsage from the enriched TurnSummary array client-side
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: If D27 adds tokenUsage to TurnSummary, the page can sum it trivially. Adding aggregate fields to ConversationDetail changes the type signature for a calculation the client can do in a few lines. Keeps the API surface minimal.
+      observable: false
+      recommendation: b
+      rationale: Trivial client-side calculation; avoids expanding the ConversationDetail type further
+      stakes: low
+  - id: D29
+    scope:
+      - S1
+      - S2
+      - S3
+      - S4
+    question: What is the complete set of custom API routes the parlour page needs?
+    options:
+      a: GET /api/parlour/roles, GET /api/parlour/conversations, POST /api/parlour/create, POST /api/parlour/turn
+      b: GET /api/parlour/roles, POST /api/parlour/turn only — reuse existing tool routes for list/show/end/create
+      c: GET /api/parlour/roles, GET /api/parlour/conversations, POST /api/parlour/turn only — reuse existing tool routes for show/end, add a create route
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: |
+        Existing tool routes cover conversation-list (GET), conversation-show (GET), conversation-end (POST).
+        But conversation-list has no role filter (need D18's filtered route).
+        There's no conversation-create tool (need a create route).
+        There's no streaming turn endpoint (need SSE route).
+        There's no roles endpoint (need roles route).
+        The existing conversation-show and conversation-end tool routes CAN be reused from the page.
+      observable: true
+      recommendation: a
+      rationale: Four custom routes cover the gaps; existing tool routes handle show and end; create needs a custom route because there's no create tool and it needs server-side cwd resolution
+      stakes: low
+  - id: D30
+    scope:
+      - S1
+      - S4
+    question: What cwd should be used when creating new conversations from the page?
+    options:
+      a: guild().home — the guild root directory
+      b: A configurable workspace path from guild.json
+      c: process.cwd()
+    selected: custom
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The Parlour requires a persistent cwd for --resume across turns. The web UI has no concept of task-specific workspaces. guild().home is the guildhall — always valid, always persistent, always available.
+      observable: true
+      recommendation: a
+      rationale: Simplest valid choice; the guildhall is always available and persistent; matches the 'conversation in guild context' semantics
+      stakes: low
+    patron_override: In addition to the anima dropdown, provide a dropdown to select a codex. If no codex is selected, use guild().home. If a codex is selected, use the Codex tools to lazily create a worktree for the conversation and use that as the cwd.
+  - id: D31
+    scope:
+      - S2
+      - S4
+    question: What should the initial page state be on load (before any role is selected)?
+    options:
+      a: Empty state — show the role dropdown with a prompt to select a role; chat area and sidebar are hidden or show placeholder text
+      b: Auto-select the first role alphabetically and load its conversations
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief says the dropdown lets the user 'select which anima they wish to speak with.' Forcing a selection on load may start unwanted sessions or confuse the user about which role is active.
+      observable: true
+      recommendation: a
+      rationale: Explicit selection is safer; no risk of accidental conversation creation with the wrong role
+      stakes: low
+  - id: D32
+    scope:
+      - S2
+    question: How should the page handle errors from the streaming turn endpoint (e.g., conversation ended mid-stream, animator failure)?
+    options:
+      a: Display an error message in the chat area as a system message (distinct from human/anima messages)
+      b: Show a toast/banner notification
+      c: Show an alert dialog
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Errors during a conversation are contextual — they belong in the conversation flow. A system message in the chat area keeps the context visible and scrollable.
+      observable: true
+      recommendation: a
+      rationale: Inline error messages maintain conversation context; more natural than interrupting dialogs
+      stakes: low
+  - id: D33
+    scope:
+      - S4
+    question: Should the 'New Conversation' action create the conversation immediately, or wait until the user sends the first message?
+    options:
+      a: Create immediately — call parlour.create() and show the empty chat for the new conversation
+      b: Lazy create — show an empty chat, but only call parlour.create() when the first message is sent
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Eager creation would create empty conversation records if the user switches roles or navigates away without chatting. Lazy creation avoids orphaned records. The conversation is created server-side in the POST /api/parlour/turn handler when no conversationId is provided.
+      observable: true
+      recommendation: b
+      rationale: Avoids creating empty conversation records; the create+first-turn can be atomic in the streaming turn handler
+      stakes: low
+  - id: D34
+    scope:
+      - S2
+    question: How should the streaming turn endpoint handle the case where the client sends a message but no conversation exists yet (new conversation, lazy creation)?
+    options:
+      a: POST /api/parlour/turn accepts an optional conversationId; when absent, it also accepts 'role' and creates the conversation first, then takes both turns
+      b: POST /api/parlour/create is always called first to get a conversationId; POST /api/parlour/turn always requires conversationId
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: "This follows from D33 (lazy creation). A single POST that optionally creates + takes turn is atomic and simpler for the client. The route handler checks: if no conversationId, create a consult conversation with the given role, then proceed with human+anima turns."
+      observable: true
+      recommendation: a
+      rationale: Keeps lazy creation atomic; single round-trip; the server has all the context needed to create the conversation
+      stakes: high
+  - id: D35
+    scope:
+      - S2
+    question: What request body shape should the POST /api/parlour/turn endpoint accept?
+    options:
+      a: "{ conversationId?: string, role?: string, message: string } — conversationId for existing conversations, role for new ones"
+      b: "{ conversationId: string, message: string } with a separate create endpoint"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Follows from D34. When conversationId is present, role is ignored. When conversationId is absent, role is required. The handler creates the conversation if needed, records the human turn, triggers the anima turn, and streams the response.
+      observable: true
+      recommendation: a
+      rationale: Unified endpoint supports both new and existing conversations; reduces client complexity
+      stakes: low
+  - id: D36
+    scope:
+      - S2
+    question: Should the SSE stream include the newly-created conversationId and participant IDs when a new conversation is created via the turn endpoint?
+    options:
+      a: Yes — emit a 'conversation_created' event as the first SSE message with { conversationId, participants }
+      b: No — return conversationId in a response header
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: SSE responses don't support custom headers after streaming starts. The client needs the conversationId to update its state, fetch history later, and send subsequent messages. An initial SSE event is the cleanest way to deliver this.
+      observable: true
+      recommendation: a
+      rationale: SSE is the only channel once streaming begins; a typed event carries the data cleanly
+      stakes: high
