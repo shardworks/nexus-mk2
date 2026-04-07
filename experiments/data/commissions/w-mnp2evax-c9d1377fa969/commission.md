@@ -1,0 +1,5 @@
+- Codex is NOT optional for writs. If one is not supplied, writs cannot be posted. (disable box, validation errors, etc)
+- The codex field should be a dropdown of available codexes int eh guild -- not a freeform text area. If there is only one codex, preselect it. Otherwise, require a selection
+- Some writ bodies are VERY long and make the table unreadable. Constrain their content to a generally large, but limited height, text area and add scrollbars as needed
+- Update the table styling to match the tables on the 'Spider' page
+- Reorder table columns: Status, Title, Type, ID, Created
