@@ -1,0 +1,245 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+      - S7
+      - S8
+    question: How should rig template provenance (config vs kit-contributed) be determined and displayed?
+    answer: Add listTemplates() and listTemplateMappings() to SpiderApi that return provenance info; update config route to
+      use them
+    justification: Follows the established listBlockTypes() pattern and provides accurate provenance rather than relying on
+      naming heuristics
+  - id: D2
+    scope:
+      - S1
+      - S8
+    question: What shape should the template listing API return?
+    answer: "{ name: string, source: 'config' | string (pluginId), template: RigTemplate }[]"
+    justification: Consistent with listBlockTypes() and listEngineDesigns() array-of-objects convention
+  - id: D3
+    scope:
+      - S1
+      - S8
+    question: What shape should the template mappings API return?
+    answer: Record<string, string> — writType → templateName (merging config and kit mappings, config wins)
+    justification: Dashboard consumers want the effective mapping. Two separate maps adds confusion without benefit.
+  - id: D4
+    scope:
+      - S1
+    question: What columns should the rig templates table display?
+    answer: Name | Source | Engines | Resolution Engine | Writ Types
+    justification: Covers all brief-requested metadata without redundancy; engine IDs visible in expanded view
+  - id: D5
+    scope:
+      - S1
+    question: How should the rig template expand/collapse interaction work?
+    answer: Click row to show a detail view below the entire table (replacing current JSON blocks)
+    justification: Natural fit for config tab layout; simpler than accordion-in-table; less heavy than full view switch
+  - id: D6
+    scope:
+      - S1
+    question: How should the template graphical view render engine nodes (given templates have no runtime state)?
+    answer: Reuse renderPipeline() by mapping RigTemplateEngine[] to synthetic EngineInstance-like objects with status
+      'pending' for all
+    justification: DRY — reuses existing pipeline renderer with minimal adaptation
+  - id: D7
+    scope:
+      - S1
+    question: What should clicking a template engine node show in the detail panel?
+    answer: Design ID, upstream list, givens spec (template-level, not resolved)
+    justification: Shows the full config state per engine; consistent with brief's 'static config state for details'
+  - id: D8
+    scope:
+      - S1
+    question: Where should the template spec JSON appear in the expanded view?
+    answer: Below the graphical pipeline, in a collapsible <details> block
+    justification: Consistent with existing collapsible pattern; avoids responsive layout complexity
+  - id: D9
+    scope:
+      - S2
+    question: How should writ titles be fetched for the rig list?
+    answer: Fetch GET /api/writ/list?limit=100 in parallel with rig list; build writId → title lookup map client-side
+    justification: Single parallel fetch is simple, fast, and requires no backend changes
+  - id: D10
+    scope:
+      - S2
+    question: What should the Writ Title column show when the writ is not found in the lookup map?
+    answer: Show '—' (em dash) as placeholder
+    justification: Consistent with existing '—' convention for absent data
+  - id: D11
+    scope:
+      - S2
+    question: Should the Writ Title column be sortable?
+    answer: No — writ title is not a field on the rig, sorting would be unreliable
+    justification: Writ title is not a rig field; adding custom sort path is overhead the brief doesn't request
+  - id: D12
+    scope:
+      - S2
+    question: What is the exact column order and which columns are sortable?
+    answer: Status (sortable) | Writ Title (not sortable) | Engines (not sortable) | Rig Id (sortable) | Writ Id (sortable)
+      | Created (sortable)
+    justification: Preserves existing sort capability on all direct rig fields; only excludes non-rig fields
+  - id: D13
+    scope:
+      - S3
+    question: How should the writ details be fetched when entering rig detail view?
+    answer: Fetch GET /api/writ/show?id=<writId> on entering detail view
+    justification: Reliable full fetch on detail entry; writ body is needed and might not be in the list cache
+  - id: D14
+    scope:
+      - S3
+    question: How should the writ body be displayed?
+    answer: Resizable <textarea> with readonly attribute, above the engine pipeline
+    justification: Brief explicitly says 'text area'; readonly textarea provides native resize and the correct element
+  - id: D15
+    scope:
+      - S3
+    question: Where in the rig detail view should the writ details appear?
+    answer: As a new card between the meta table and the engine pipeline heading
+    justification: Clean separation of rig metadata and writ content; body textarea would bloat the meta card
+  - id: D16
+    scope:
+      - S3
+    question: What default height should the writ body textarea have?
+    answer: 200px with resize:vertical (CSS)
+    justification: 200px is a reasonable default for spec text; resize:vertical lets users adjust
+  - id: D17
+    scope:
+      - S4
+    question: What format should elapsed time use?
+    answer: "Compact: '1h 13m 22s' — omit zero-value leading units (e.g. '5m 12s' not '0h 5m 12s')"
+    justification: Matches the brief's example; omitting leading zeros is standard UX
+  - id: D18
+    scope:
+      - S4
+    question: Where should elapsed time appear in the engine detail panel?
+    answer: As a new 'Elapsed' field in the dl, between 'Completed At' and any error/session fields
+    justification: Additive — preserves existing timestamp fields, adds elapsed as an extra datum
+  - id: D19
+    scope:
+      - S4
+    question: What should display for running engines (startedAt set, no completedAt)?
+    answer: Show 'running...' placeholder text with a spinner, matching the brief's 'placeholder similar to what is shown
+      for the completed line while an engine is running'
+    justification: Brief explicitly asks for a placeholder for running engines, not a live counter
+  - id: D20
+    scope:
+      - S5
+      - S9
+    question: How should session transcript data be served to the dashboard?
+    answer: New custom route GET /api/spider/session-transcript?sessionId=xxx that reads from animator/transcripts stacks book
+    justification: Follows existing spider custom route pattern; avoids bloating session-show with transcript data
+  - id: D21
+    scope:
+      - S5
+    question: How should real-time updates for running sessions be handled?
+    answer: Poll the session-show endpoint every N seconds to check status; once terminal, fetch transcript via the new route
+    justification: Transcript data only exists after session completion; polling session status is the pragmatic path given
+      current architecture
+  - id: D22
+    scope:
+      - S5
+    question: What polling interval should be used for checking running session status?
+    answer: 3 seconds
+    justification: 3s balances responsiveness with request frequency; session-show is a cheap read
+  - id: D23
+    scope:
+      - S5
+    question: How should transcript messages be displayed in the session log?
+    answer: Render assistant text content and tool use/result markers; ignore result-type messages
+    justification: Human-readable rendering of the key message types; raw JSON is too noisy for a log view
+  - id: D24
+    scope:
+      - S5
+    question: How should the session log text area be sized and positioned?
+    answer: Below the engine detail dl, in a resizable textarea (readonly), default 300px height
+    justification: Brief says 'large/resizable'; collapsing it by default contradicts immediate visibility
+  - id: D25
+    scope:
+      - S5
+    question: When should session log polling start and stop?
+    answer: Start when showEngineDetail() is called for an engine with sessionId and status 'running'; stop when navigating
+      away (back to list, different engine, or session completes)
+    justification: Only one engine detail is visible at a time; polling only the viewed engine is efficient
+  - id: D26
+    scope:
+      - S6
+    question: How should session cost data be fetched for completed quick engines?
+    answer: Fetch GET /api/session/show?id=<sessionId> when showEngineDetail() is called for a completed engine with a
+      sessionId
+    justification: Works for both freshly-completed and historically-completed engines
+  - id: D27
+    scope:
+      - S6
+    question: Where should the cost summary appear in the engine detail panel?
+    answer: "As additional fields in the engine detail dl: 'Input Tokens', 'Output Tokens', 'Cost (USD)'"
+    justification: Consistent with existing dl-based layout; no need for a separate card
+  - id: D28
+    scope:
+      - S6
+    question: How should USD cost be formatted?
+    answer: "'$0.0342' — dollar sign prefix, 4 decimal places"
+    justification: Standard API cost format; 4 decimal places preserves precision for small amounts
+  - id: D29
+    scope:
+      - S6
+    question: What should display when session cost data is unavailable (e.g. provider didn't report it)?
+    answer: Hide the cost fields entirely
+    justification: Consistent with existing conditional field display (error, sessionId only when present)
+  - id: D30
+    scope:
+      - S7
+      - S8
+    question: What name should the new SpiderApi methods use?
+    answer: listTemplates() → RigTemplateInfo[] and listTemplateMappings() → Record<string, string>
+    justification: Parallels listBlockTypes() naming; 'Rig' prefix is redundant in the Spider context
+  - id: D31
+    scope:
+      - S7
+    question: How should the config route response change?
+    answer: Replace rigTemplates with templates (from listTemplates()) and add templateMappings (from
+      listTemplateMappings()); keep engineDesigns and blockTypes
+    justification: Route is internal to the spider dashboard; no external consumers to maintain backward compat for
+  - id: D32
+    scope:
+      - S9
+    question: What path should the new transcript route use?
+    answer: GET /api/spider/session-transcript?sessionId=xxx
+    justification: Descriptive path and param name; consistent with /api/spider/ namespace
+  - id: D33
+    scope:
+      - S9
+    question: What should the transcript route return?
+    answer: "{ messages: TranscriptMessage[], sessionStatus: string } — include current session status for the poller"
+    justification: Combining status + messages in one response saves a round-trip; raw messages keep client in control of rendering
+  - id: D34
+    scope:
+      - S9
+    question: What should the transcript route return when the session is still running (transcript not yet persisted)?
+    answer: "{ messages: [], sessionStatus: 'running' } — empty messages, status indicates running"
+    justification: Unambiguous response; client can show spinner for 'running' without error handling for 404
+  - id: D35
+    scope:
+      - S2
+      - S3
+    question: Should the writ data be fetched with each rig list refresh, or cached?
+    answer: Re-fetch writ list on every rig list refresh (fetchRigs call)
+    justification: Keeps writ titles fresh; one additional GET per refresh is negligible
+  - id: D36
+    scope:
+      - S5
+      - S6
+    question: Should session data (status, transcript, costs) be cached or re-fetched when re-selecting an engine?
+    answer: Re-fetch every time showEngineDetail() is called for an engine with a sessionId
+    justification: Simple and always-fresh; session data is small enough that caching adds complexity without benefit
+  - id: D37
+    scope:
+      - S1
+      - S2
+      - S3
+      - S4
+      - S5
+      - S6
+    question: Should spider.js remain a vanilla JS IIFE, or should this be an opportunity to migrate to a module/framework?
+    answer: Keep vanilla JS IIFE — add features within the existing pattern
+    justification: Codebase convention; no build pipeline exists for dashboard pages; migration is out of scope

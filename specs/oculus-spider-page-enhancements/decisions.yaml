@@ -1,0 +1,781 @@
+decisions:
+  # ════════════════════════════════════════════════════════════════════════
+  # S1 — Rig Templates tabular display
+  # ════════════════════════════════════════════════════════════════════════
+
+  - id: D1
+    scope: [S1, S7, S8]
+    question: "How should rig template provenance (config vs kit-contributed) be determined and displayed?"
+    options:
+      a: "Add listTemplates() and listTemplateMappings() to SpiderApi that return provenance info; update config route to use them"
+      b: "Infer provenance from naming convention (kit templates are qualified as pluginId.templateName, config templates are plain names)"
+      c: "Only show config-declared templates (current behavior of config route); ignore kit contributions"
+    selected: a
+    analysis:
+      audience: [patron, author]
+      confidence: medium
+      context: >
+        The RigTemplateRegistry internally tracks config vs kit provenance and stores kit templates
+        under qualified names (pluginId.templateName). SpiderApi currently has no template listing method.
+        The existing listBlockTypes() returns BlockTypeInfo[] with pluginId — same pattern would apply.
+      observable: true
+      recommendation: a
+      rationale: "Follows the established listBlockTypes() pattern and provides accurate provenance rather than relying on naming heuristics"
+      stakes: high
+
+  - id: D2
+    scope: [S1, S8]
+    question: "What shape should the template listing API return?"
+    options:
+      a: "{ name: string, source: 'config' | string (pluginId), template: RigTemplate }[]"
+      b: "Record<string, { source: string, template: RigTemplate }>"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: >
+        listBlockTypes() returns BlockTypeInfo[] (array). listEngineDesigns() returns EngineDesignInfo[] (array).
+        Both follow the array-of-info-objects pattern. Returning a Record would diverge.
+      observable: true
+      recommendation: a
+      rationale: "Consistent with listBlockTypes() and listEngineDesigns() array-of-objects convention"
+      stakes: low
+
+  - id: D3
+    scope: [S1, S8]
+    question: "What shape should the template mappings API return?"
+    options:
+      a: "Record<string, string> — writType → templateName (merging config and kit mappings, config wins)"
+      b: "{ configMappings: Record<string, string>, kitMappings: Record<string, string> }"
+    selected: a
+    analysis:
+      audience: [patron, author]
+      confidence: high
+      context: >
+        The runtime lookup already merges config and kit mappings with config-wins semantics.
+        The dashboard consumer wants to show which writ types route to which templates.
+        Splitting config vs kit adds visual complexity for no operator benefit — they want the resolved mapping.
+      observable: true
+      recommendation: a
+      rationale: "Dashboard consumers want the effective mapping. Two separate maps adds confusion without benefit."
+      stakes: low
+
+  - id: D4
+    scope: [S1]
+    question: "What columns should the rig templates table display?"
+    options:
+      a: "Name | Source | Engines | Resolution Engine | Writ Types"
+      b: "Name | Source | Engines | Resolution Engine | Writ Types | Engine IDs"
+    selected: a
+    analysis:
+      audience: [patron, operator]
+      confidence: high
+      context: >
+        The brief says "id, contributing plugin/guild config, # of engines, writ type mappings,
+        resolution engine, that sort of thing." Option (a) covers all explicitly listed items.
+        Engine IDs are visible in the expanded graphical view, so duplicating them in the table is redundant.
+      observable: true
+      recommendation: a
+      rationale: "Covers all brief-requested metadata without redundancy; engine IDs visible in expanded view"
+      stakes: low
+
+  - id: D5
+    scope: [S1]
+    question: "How should the rig template expand/collapse interaction work?"
+    options:
+      a: "Click row to expand inline below the row (accordion pattern within the table)"
+      b: "Click row to show a detail view below the entire table (replacing current JSON blocks)"
+      c: "Click row to navigate to a separate view (like rig-list → rig-detail)"
+    selected: b
+    analysis:
+      audience: [patron, operator]
+      confidence: medium
+      context: >
+        The brief says 'clicking an entry in this table should display the rig template graphically'.
+        The current rig templates section renders template blocks one after another. Option (b) fits
+        this layout naturally — the table replaces the current block list, and clicking a row shows
+        a detail panel below the table. This is simpler than accordion-in-table (a) and avoids a
+        full view switch (c) for what is a config inspection feature.
+      observable: true
+      recommendation: b
+      rationale: "Natural fit for config tab layout; simpler than accordion-in-table; less heavy than full view switch"
+      stakes: low
+
+  - id: D6
+    scope: [S1]
+    question: "How should the template graphical view render engine nodes (given templates have no runtime state)?"
+    options:
+      a: "Reuse renderPipeline() by mapping RigTemplateEngine[] to synthetic EngineInstance-like objects with status 'pending' for all"
+      b: "Write a separate renderTemplatePipeline() function that renders nodes without status badges"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: >
+        The existing renderPipeline() takes a rig-like object with engines array; each engine
+        has id, upstream, status. RigTemplateEngine has id, designId, upstream. Mapping to
+        {id, designId, upstream: upstream || [], status: 'pending', givensSpec: givens || {}}
+        is trivial and lets us reuse the full pipeline renderer including topoSort and click handlers.
+        Nodes show 'pending' badges — visually neutral, clearly static.
+      observable: false
+      recommendation: a
+      rationale: "DRY — reuses existing pipeline renderer with minimal adaptation"
+      stakes: low
+
+  - id: D7
+    scope: [S1]
+    question: "What should clicking a template engine node show in the detail panel?"
+    options:
+      a: "Design ID, upstream list, givens spec (template-level, not resolved)"
+      b: "Design ID only"
+    selected: a
+    analysis:
+      audience: [patron, operator]
+      confidence: high
+      context: >
+        Template engines have designId, upstream, and givens (with $-variable references).
+        Showing all three gives operators a complete picture of what each engine slot does.
+        The brief says 'static config state for details' — givens spec IS config state.
+      observable: true
+      recommendation: a
+      rationale: "Shows the full config state per engine; consistent with brief's 'static config state for details'"
+      stakes: low
+
+  - id: D8
+    scope: [S1]
+    question: "Where should the template spec JSON appear in the expanded view?"
+    options:
+      a: "Below the graphical pipeline, in a collapsible <details> block"
+      b: "Alongside the graphical pipeline (side-by-side layout)"
+    selected: a
+    analysis:
+      audience: [patron, operator]
+      confidence: high
+      context: >
+        The existing engine detail uses <details class='collapsible'> for JSON content (givensSpec, yields).
+        The config tab has a vertical layout. Side-by-side would require responsive breakpoints that
+        don't exist in the current CSS. A collapsible block keeps it consistent and clean.
+      observable: true
+      recommendation: a
+      rationale: "Consistent with existing collapsible pattern; avoids responsive layout complexity"
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════════
+  # S2 — Rigs list column reorder and writ title
+  # ════════════════════════════════════════════════════════════════════════
+
+  - id: D9
+    scope: [S2]
+    question: "How should writ titles be fetched for the rig list?"
+    options:
+      a: "Fetch GET /api/writ/list?limit=100 in parallel with rig list; build writId → title lookup map client-side"
+      b: "For each unique writId, fetch GET /api/writ/show?id=xxx individually (N requests)"
+      c: "Add a new backend route that returns rigs enriched with writ titles"
+    selected: a
+    analysis:
+      audience: [patron, implementer]
+      confidence: high
+      context: >
+        The rig list fetches up to 100 rigs. Each has a writId. The writ-list tool supports
+        limit=100 and returns WritDoc[] including title. One parallel fetch is simpler than
+        N individual fetches (b) and doesn't require backend changes (c). The writ list may
+        return writs not associated with any rig, but that's harmless — it's a lookup map.
+        Only active/ready/recent writs matter, so limit=100 covers the practical working set.
+      observable: false
+      recommendation: a
+      rationale: "Single parallel fetch is simple, fast, and requires no backend changes"
+      stakes: low
+
+  - id: D10
+    scope: [S2]
+    question: "What should the Writ Title column show when the writ is not found in the lookup map?"
+    options:
+      a: "Show '—' (em dash) as placeholder"
+      b: "Show the writId as fallback"
+      c: "Show '(unknown)'"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: >
+        The rig list already uses '—' for missing data in other columns (e.g. engine design table
+        uses '—' for missing poll interval). Consistent with existing empty-value convention.
+      observable: true
+      recommendation: a
+      rationale: "Consistent with existing '—' convention for absent data"
+      stakes: low
+
+  - id: D11
+    scope: [S2]
+    question: "Should the Writ Title column be sortable?"
+    options:
+      a: "Yes — add data-sort='writTitle' to the th; sort uses the lookup map value"
+      b: "No — writ title is not a field on the rig, sorting would be unreliable"
+    selected: b
+    analysis:
+      audience: [operator]
+      confidence: medium
+      context: >
+        The sort mechanism works on rig fields (sortField maps to rig[sortField]).
+        Writ title comes from a separate lookup and is not a rig property. Adding sort
+        support would require a custom sort path. The brief specifies column order but
+        does not mention sorting on writ title. Status, Rig Id, Writ Id, and Created
+        remain sortable (existing behavior).
+      observable: true
+      recommendation: b
+      rationale: "Writ title is not a rig field; adding custom sort path is overhead the brief doesn't request"
+      stakes: low
+
+  - id: D12
+    scope: [S2]
+    question: "What is the exact column order and which columns are sortable?"
+    options:
+      a: "Status (sortable) | Writ Title (not sortable) | Engines (not sortable) | Rig Id (sortable) | Writ Id (sortable) | Created (sortable)"
+      b: "Status (sortable) | Writ Title (not sortable) | Engines (not sortable) | Rig Id (sortable) | Writ Id (not sortable) | Created (sortable)"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: >
+        The brief specifies column order exactly: Status, Writ Title, Engines, Rig Id, Writ Id, Created.
+        Currently ID/Writ/Status/Created are sortable. Writ Title and Engines have no natural sort key
+        on the rig object. Status, Rig Id, Writ Id, Created are direct rig fields — keep them sortable.
+      observable: true
+      recommendation: a
+      rationale: "Preserves existing sort capability on all direct rig fields; only excludes non-rig fields"
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════════
+  # S3 — Writ details panel in rig detail view
+  # ════════════════════════════════════════════════════════════════════════
+
+  - id: D13
+    scope: [S3]
+    question: "How should the writ details be fetched when entering rig detail view?"
+    options:
+      a: "Fetch GET /api/writ/show?id=<writId> on entering detail view"
+      b: "Reuse the writ lookup map already fetched for the rig list (S2) — includes title but not body"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: >
+        The brief requires the writ body in a text area. The writ-list response (used for
+        lookup map in S2) returns full WritDoc including body. However, the rig detail view
+        may be entered directly without the list being populated. A dedicated fetch on detail
+        entry is reliable and gets the full document. If the writ is already in the lookup
+        map, the title can show immediately while the full fetch completes, but since writ-show
+        returns quickly this optimization is unnecessary.
+      observable: false
+      recommendation: a
+      rationale: "Reliable full fetch on detail entry; writ body is needed and might not be in the list cache"
+      stakes: low
+
+  - id: D14
+    scope: [S3]
+    question: "How should the writ body be displayed?"
+    options:
+      a: "Resizable <textarea> with readonly attribute, above the engine pipeline"
+      b: "A <div> with overflow-y:auto and CSS resize:vertical, above the engine pipeline"
+      c: "A <pre> block with scrolling, above the engine pipeline"
+    selected: a
+    analysis:
+      audience: [patron, operator]
+      confidence: high
+      context: >
+        The brief says 'sufficiently large/resizable text area'. A readonly <textarea> with
+        CSS resize:vertical gives native browser resize handles. The HTML <textarea> element
+        provides this by default on most browsers. A <div> (b) requires custom CSS for resize.
+        A <pre> (c) is not resizable without extra CSS.
+      observable: true
+      recommendation: a
+      rationale: "Brief explicitly says 'text area'; readonly textarea provides native resize and the correct element"
+      stakes: low
+
+  - id: D15
+    scope: [S3]
+    question: "Where in the rig detail view should the writ details appear?"
+    options:
+      a: "Inside the existing detail-meta card, as additional rows (Writ Title row + Body row)"
+      b: "As a new card between the meta table and the engine pipeline heading"
+      c: "Replace the detail-meta card with a writ-focused header card"
+    selected: b
+    analysis:
+      audience: [patron, operator]
+      confidence: high
+      context: >
+        The brief says writ details 'should be clearly visible at the top of the page'. The
+        current detail-meta card shows ID, Writ link, Status, Created. Adding a body textarea
+        inside that card would bloat it. A separate card with writ title as a heading and body
+        textarea below is clean separation. The meta card keeps rig-level info; the writ card
+        shows writ-level info.
+      observable: true
+      recommendation: b
+      rationale: "Clean separation of rig metadata and writ content; body textarea would bloat the meta card"
+      stakes: low
+
+  - id: D16
+    scope: [S3]
+    question: "What default height should the writ body textarea have?"
+    options:
+      a: "200px with resize:vertical (CSS)"
+      b: "120px with resize:vertical"
+      c: "Auto-fit to content with a max-height"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: medium
+      context: >
+        Writ bodies are typically multi-paragraph spec text. 200px shows ~8-10 lines of 13px
+        monospace text, which is enough to read context without dominating the page. The user
+        can resize. Auto-fit (c) is harder with plain textarea. 120px (b) feels cramped for
+        spec text.
+      observable: true
+      recommendation: a
+      rationale: "200px is a reasonable default for spec text; resize:vertical lets users adjust"
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════════
+  # S4 — Elapsed time on engine cards
+  # ════════════════════════════════════════════════════════════════════════
+
+  - id: D17
+    scope: [S4]
+    question: "What format should elapsed time use?"
+    options:
+      a: "Compact: '1h 13m 22s' — omit zero-value leading units (e.g. '5m 12s' not '0h 5m 12s')"
+      b: "Always show all units: '0h 5m 12s'"
+      c: "Show seconds-only for durations under 1 minute: '42s', then '5m 12s', etc."
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: >
+        The brief gives the example '1h 13m 22s'. Omitting leading zeros is natural and
+        more readable. For short durations (<1 minute), this means '42s'. For 0 seconds,
+        it would show '<1s' or '0s'.
+      observable: true
+      recommendation: a
+      rationale: "Matches the brief's example; omitting leading zeros is standard UX"
+      stakes: low
+
+  - id: D18
+    scope: [S4]
+    question: "Where should elapsed time appear in the engine detail panel?"
+    options:
+      a: "As a new 'Elapsed' field in the dl, between 'Completed At' and any error/session fields"
+      b: "Replace 'Started At' / 'Completed At' with a single 'Duration' field"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: >
+        The brief says 'the engine card should show the elapsed time'. It does not say to
+        remove existing timestamp fields. Operators benefit from seeing both exact timestamps
+        and computed elapsed. The existing Started At / Completed At fields are already there.
+      observable: true
+      recommendation: a
+      rationale: "Additive — preserves existing timestamp fields, adds elapsed as an extra datum"
+      stakes: low
+
+  - id: D19
+    scope: [S4]
+    question: "What should display for running engines (startedAt set, no completedAt)?"
+    options:
+      a: "Show a live-updating elapsed counter (re-renders every second)"
+      b: "Show 'running...' placeholder text with a spinner, matching the brief's 'placeholder similar to what is shown for the completed line while an engine is running'"
+      c: "Show the elapsed since startedAt as a static snapshot (updates only on re-render)"
+    selected: b
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: >
+        The brief says 'A placeholder, similar to what is shown for the completed line while
+        an engine is running, can be used before it completes.' This explicitly calls for a
+        placeholder rather than a live counter. A spinner or pulsing indicator is consistent
+        with the badge--active animation already in the CSS.
+      observable: true
+      recommendation: b
+      rationale: "Brief explicitly asks for a placeholder for running engines, not a live counter"
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════════
+  # S5 — Quick engine session log
+  # ════════════════════════════════════════════════════════════════════════
+
+  - id: D20
+    scope: [S5, S9]
+    question: "How should session transcript data be served to the dashboard?"
+    options:
+      a: "New custom route GET /api/spider/session-transcript?sessionId=xxx that reads from animator/transcripts stacks book"
+      b: "Extend the existing session-show tool to include transcript messages"
+      c: "Read transcripts via a generic stacks query endpoint"
+    selected: a
+    analysis:
+      audience: [author, operator]
+      confidence: high
+      context: >
+        The session-show tool returns SessionDoc from the sessions book — it does not read the
+        transcripts book. Extending session-show (b) would add a heavy optional payload to every
+        session show call. There is no generic stacks query endpoint (c). A custom spider route (a)
+        follows the existing oculus-routes.ts pattern and can be scoped to exactly what the dashboard needs.
+        The route handler would use stacks.readBook<TranscriptDoc>('animator', 'transcripts').get(sessionId).
+      observable: true
+      recommendation: a
+      rationale: "Follows existing spider custom route pattern; avoids bloating session-show with transcript data"
+      stakes: high
+
+  - id: D21
+    scope: [S5]
+    question: "How should real-time updates for running sessions be handled?"
+    options:
+      a: "Poll the session-show endpoint every N seconds to check status; once terminal, fetch transcript via the new route"
+      b: "Poll the transcript route every N seconds — returns empty/partial for running, full for completed"
+      c: "Add an SSE streaming endpoint that pushes session chunks in real time"
+    selected: a
+    analysis:
+      audience: [patron, operator]
+      confidence: high
+      context: >
+        The animator/transcripts book is only written when a session completes (in recordSession(),
+        called after providerResultPromise resolves). For a running session, the transcript book
+        has NO data — it's all in-memory in the provider process. Option (b) would return empty
+        data for running sessions, providing no benefit over (a). Option (c) would require significant
+        architecture changes (in-memory chunk store, SSE support in the vanilla JS dashboard).
+        Option (a) is honest: show a spinner while running, poll for status change, display full
+        transcript on completion. The brief's 'real time' expectation hits an architectural limit.
+      observable: true
+      recommendation: a
+      rationale: "Transcript data only exists after session completion; polling session status is the pragmatic path given current architecture"
+      stakes: high
+
+  - id: D22
+    scope: [S5]
+    question: "What polling interval should be used for checking running session status?"
+    options:
+      a: "5 seconds"
+      b: "3 seconds"
+      c: "10 seconds"
+    selected: b
+    analysis:
+      audience: [operator]
+      confidence: medium
+      context: >
+        The spider's crawl-continual tool uses a configurable poll interval (default 5s).
+        For dashboard UX checking session status, 3s feels responsive without being excessive.
+        Session-show is a lightweight stacks read.
+      observable: false
+      recommendation: b
+      rationale: "3s balances responsiveness with request frequency; session-show is a cheap read"
+      stakes: low
+
+  - id: D23
+    scope: [S5]
+    question: "How should transcript messages be displayed in the session log?"
+    options:
+      a: "Render assistant text content and tool use/result markers; ignore result-type messages"
+      b: "Show raw JSON of each transcript message"
+      c: "Show only assistant text content, hiding tool calls"
+    selected: a
+    analysis:
+      audience: [patron, operator]
+      confidence: high
+      context: >
+        TranscriptMessages have types: 'assistant' (text + tool_use), 'user' (tool_result), 'result' (metrics).
+        Operators want to see what the anima said and what tools it called. Raw JSON (b) is noisy.
+        Hiding tool calls (c) loses important context about what the engine is doing.
+        Rendering text blocks as text, tool_use as '🔧 <tool_name>', and tool_result as '✓ <tool_name>'
+        gives a readable log. The 'result' message is metrics — already shown in costs (S6).
+      observable: true
+      recommendation: a
+      rationale: "Human-readable rendering of the key message types; raw JSON is too noisy for a log view"
+      stakes: low
+
+  - id: D24
+    scope: [S5]
+    question: "How should the session log text area be sized and positioned?"
+    options:
+      a: "Below the engine detail dl, in a resizable textarea (readonly), default 300px height"
+      b: "In a collapsible <details> block like givensSpec/yields, with a resizable textarea inside"
+    selected: a
+    analysis:
+      audience: [patron, operator]
+      confidence: high
+      context: >
+        The brief says 'a large/resizable text area'. Putting it in a collapsible block means
+        the operator must click to expand before seeing the log, which contradicts 'clearly visible'.
+        For running engines, the session log is the primary thing the operator wants to see.
+        Showing it open by default, below the engine metadata, makes it immediately visible.
+      observable: true
+      recommendation: a
+      rationale: "Brief says 'large/resizable'; collapsing it by default contradicts immediate visibility"
+      stakes: low
+
+  - id: D25
+    scope: [S5]
+    question: "When should session log polling start and stop?"
+    options:
+      a: "Start when showEngineDetail() is called for an engine with sessionId and status 'running'; stop when navigating away (back to list, different engine, or session completes)"
+      b: "Start when entering rig detail view for any rig with running engines; poll all running engines"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: >
+        Only one engine detail panel is visible at a time. Polling all running engines (b) wastes
+        requests when the operator is looking at a specific engine. Starting/stopping on the
+        specific engine view is efficient and matches the single-engine-detail UX.
+      observable: false
+      recommendation: a
+      rationale: "Only one engine detail is visible at a time; polling only the viewed engine is efficient"
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════════
+  # S6 — Quick engine cost summary
+  # ════════════════════════════════════════════════════════════════════════
+
+  - id: D26
+    scope: [S6]
+    question: "How should session cost data be fetched for completed quick engines?"
+    options:
+      a: "Fetch GET /api/session/show?id=<sessionId> when showEngineDetail() is called for a completed engine with a sessionId"
+      b: "Piggyback on the session status poll (D21) — when session transitions to terminal, the response already has cost data"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: >
+        Session-show returns SessionDoc which includes tokenUsage and costUsd. When the operator
+        clicks a completed engine, one fetch gets all the data. Option (b) only works if the
+        operator was watching the engine while it ran — if they click a long-completed engine,
+        there's no poll to piggyback on. Option (a) works for both cases.
+      observable: false
+      recommendation: a
+      rationale: "Works for both freshly-completed and historically-completed engines"
+      stakes: low
+
+  - id: D27
+    scope: [S6]
+    question: "Where should the cost summary appear in the engine detail panel?"
+    options:
+      a: "As additional fields in the engine detail dl: 'Input Tokens', 'Output Tokens', 'Cost (USD)'"
+      b: "As a separate 'Cost Summary' card below the engine detail dl"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: >
+        The engine detail panel uses a single dl for all metadata fields. Adding cost fields
+        to the dl is consistent. A separate card (b) over-emphasizes cost data relative to
+        other engine metadata.
+      observable: true
+      recommendation: a
+      rationale: "Consistent with existing dl-based layout; no need for a separate card"
+      stakes: low
+
+  - id: D28
+    scope: [S6]
+    question: "How should USD cost be formatted?"
+    options:
+      a: "'$0.0342' — dollar sign prefix, 4 decimal places"
+      b: "'0.0342 USD' — suffix label"
+      c: "'$0.03' — 2 decimal places"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: >
+        API costs are typically in the range of $0.001–$5.00. Two decimal places (c) loses
+        precision for small amounts. Four decimal places with a dollar sign is conventional
+        for API cost display. Suffix (b) is less scannable.
+      observable: true
+      recommendation: a
+      rationale: "Standard API cost format; 4 decimal places preserves precision for small amounts"
+      stakes: low
+
+  - id: D29
+    scope: [S6]
+    question: "What should display when session cost data is unavailable (e.g. provider didn't report it)?"
+    options:
+      a: "Show '—' for each cost field"
+      b: "Hide the cost fields entirely"
+    selected: b
+    analysis:
+      audience: [operator]
+      confidence: medium
+      context: >
+        TokenUsage and costUsd are optional on SessionDoc. If the provider doesn't report costs,
+        showing empty dashes for three fields adds noise. The existing engine detail already
+        conditionally shows fields (error only if present, sessionId only if present).
+        Following the same pattern: only show cost fields when data exists.
+      observable: true
+      recommendation: b
+      rationale: "Consistent with existing conditional field display (error, sessionId only when present)"
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════════
+  # S7 — Extend config route
+  # ════════════════════════════════════════════════════════════════════════
+
+  - id: D30
+    scope: [S7, S8]
+    question: "What name should the new SpiderApi methods use?"
+    options:
+      a: "listTemplates() → RigTemplateInfo[] and listTemplateMappings() → Record<string, string>"
+      b: "listRigTemplates() → RigTemplateInfo[] and listRigTemplateMappings() → Record<string, string>"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: >
+        Existing methods: listBlockTypes(). The 'Rig' prefix is redundant in the Spider context
+        — everything here is rig-related. listTemplates() parallels listBlockTypes().
+      observable: true
+      recommendation: a
+      rationale: "Parallels listBlockTypes() naming; 'Rig' prefix is redundant in the Spider context"
+      stakes: low
+
+  - id: D31
+    scope: [S7]
+    question: "How should the config route response change?"
+    options:
+      a: "Replace rigTemplates with templates (from listTemplates()) and add templateMappings (from listTemplateMappings()); keep engineDesigns and blockTypes"
+      b: "Add templates and templateMappings alongside existing rigTemplates for backward compatibility"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: >
+        The config route is consumed only by the spider dashboard JS. There are no external
+        consumers relying on the current shape. The dashboard code will be updated in the same
+        change. Keeping both old and new fields is unnecessary duplication.
+      observable: true
+      recommendation: a
+      rationale: "Route is internal to the spider dashboard; no external consumers to maintain backward compat for"
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════════
+  # S9 — Transcript route
+  # ════════════════════════════════════════════════════════════════════════
+
+  - id: D32
+    scope: [S9]
+    question: "What path should the new transcript route use?"
+    options:
+      a: "GET /api/spider/session-transcript?sessionId=xxx"
+      b: "GET /api/spider/transcript?id=xxx"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: >
+        The existing spider route uses /api/spider/config. Session-related, so 'session-transcript'
+        is descriptive. Using 'sessionId' as the param name is explicit about what's being looked up.
+        Option (b) is ambiguous — 'id' could mean anything.
+      observable: false
+      recommendation: a
+      rationale: "Descriptive path and param name; consistent with /api/spider/ namespace"
+      stakes: low
+
+  - id: D33
+    scope: [S9]
+    question: "What should the transcript route return?"
+    options:
+      a: "{ messages: TranscriptMessage[] } — the raw messages array from TranscriptDoc"
+      b: "{ messages: TranscriptMessage[], sessionStatus: string } — include current session status for the poller"
+      c: "{ messages: RenderedMessage[] } — server-side rendered to a simplified format"
+    selected: b
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: >
+        The dashboard polls session-show to check status, then fetches transcript when terminal.
+        If the transcript route also returns session status, the dashboard can combine the
+        status-check and transcript-fetch into a single request once the session is complete.
+        This saves one round-trip. Raw messages (not server-rendered) lets the client control formatting.
+      observable: false
+      recommendation: b
+      rationale: "Combining status + messages in one response saves a round-trip; raw messages keep client in control of rendering"
+      stakes: low
+
+  - id: D34
+    scope: [S9]
+    question: "What should the transcript route return when the session is still running (transcript not yet persisted)?"
+    options:
+      a: "{ messages: [], sessionStatus: 'running' } — empty messages, status indicates running"
+      b: "404 — transcript not found"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: >
+        The transcript book has no entry for a running session (only written at completion).
+        Returning 404 would force the client to distinguish 'not found' from 'not yet written'.
+        Returning empty messages with the session status is unambiguous and lets the client
+        show a spinner. The route can check the sessions book for status and the transcripts
+        book for messages in a single handler.
+      observable: false
+      recommendation: a
+      rationale: "Unambiguous response; client can show spinner for 'running' without error handling for 404"
+      stakes: low
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Cross-cutting
+  # ════════════════════════════════════════════════════════════════════════
+
+  - id: D35
+    scope: [S2, S3]
+    question: "Should the writ data be fetched with each rig list refresh, or cached?"
+    options:
+      a: "Re-fetch writ list on every rig list refresh (fetchRigs call)"
+      b: "Cache writs after first fetch; invalidate on manual refresh only"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: >
+        Writ titles can change (writs have updatedAt). The rig list already re-fetches on
+        every refresh and status filter change. Fetching writs in parallel adds one request
+        but keeps data fresh. The overhead is minimal (one GET).
+      observable: false
+      recommendation: a
+      rationale: "Keeps writ titles fresh; one additional GET per refresh is negligible"
+      stakes: low
+
+  - id: D36
+    scope: [S5, S6]
+    question: "Should session data (status, transcript, costs) be cached or re-fetched when re-selecting an engine?"
+    options:
+      a: "Re-fetch every time showEngineDetail() is called for an engine with a sessionId"
+      b: "Cache session data per sessionId; clear cache on rig refresh"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: >
+        Session data is small (one document). Re-clicking the same engine should show current
+        data (e.g. if the session completed between clicks). Caching adds complexity for
+        negligible performance gain.
+      observable: false
+      recommendation: a
+      rationale: "Simple and always-fresh; session data is small enough that caching adds complexity without benefit"
+      stakes: low
+
+  - id: D37
+    scope: [S1, S2, S3, S4, S5, S6]
+    question: "Should spider.js remain a vanilla JS IIFE, or should this be an opportunity to migrate to a module/framework?"
+    options:
+      a: "Keep vanilla JS IIFE — add features within the existing pattern"
+      b: "Migrate to ES modules with a build step"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: >
+        The file comment says 'No framework, no modules, no imports'. The Oculus serves static
+        assets with no build pipeline. All other spider page code follows this pattern.
+        Introducing a build step for one page is out of scope and would affect the packaging.
+      observable: false
+      recommendation: a
+      rationale: "Codebase convention; no build pipeline exists for dashboard pages; migration is out of scope"
+      stakes: low
