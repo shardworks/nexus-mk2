@@ -26,7 +26,31 @@ In `routes.ts`, the turn handler:
 
 One-line fix: add `message: message.trim()` to the `takeTurnStreaming` call.
 
+### Bug #2: Anima identity never applied
+
+Both `takeTurn` and `takeTurnStreaming` call `loom.weave({ role: undefined })`
+instead of passing the participant's role name. The Loom composes the system
+prompt from the anima's identity layers (charter, role instructions,
+curriculum, temperament) — but only when it knows which role to weave. With
+`role: undefined`, the Loom returns a bare-minimum context with no anima
+identity, no role instructions, and no role-specific tools.
+
+The result: every anima in the Parlour responds as generic Claude. The
+artificer introduced itself as "Claude, an AI assistant made by Anthropic"
+instead of speaking from its role identity.
+
+Two-line fix: pass `participant.name` as the role to `loom.weave()` in both
+the streaming and non-streaming paths.
+
 ## Observations
+
+### Two bugs, same pattern: correct parts, broken wiring
+
+Both bugs share the same shape: the Parlour has the right data available
+(the user's message, the participant's role name) and the downstream
+consumer expects it (assembleConsultMessage checks request.message,
+loom.weave uses the role parameter). The code on both sides is correct
+in isolation. The wiring between them — the call site — drops the values.
 
 ### High test count ≠ functional correctness
 
