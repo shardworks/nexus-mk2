@@ -1,0 +1,4 @@
+- Tool usage cleanup: Currently, tool uses run together with each other and with the next line of text: `⚙ tool⚙ tool⚙ tool⚙ tool⚙ tool⚙ tool⚙ tool⚙ toolHere's the current guild status — things are looking pretty healthy overall:` .... they render as pills while they anima is thinking, but then become plain inline text wshen the message lands. They should stay as pills/capsules on a separate line from the followup text (although stacking all tools together onto one line is fine)
+- Tool usage: in addition to just showing 'tool', we should show the name of the tool which is being invoked. if its a guild took, make the friendly name and not some mcp string with weird underscores
+- Markdown: if the anima responds with markdown, it should be rendered as html
+- Cost Card: increase the contrast for the 'in' and 'out' values, they are too hard to read now; make the usd cost (yellow) a bit less noticeable, it is distracting
