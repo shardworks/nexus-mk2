@@ -272,13 +272,14 @@ Read the locked inputs, check for gaps, then produce the spec. The user prompt p
 
 Read the input files specified in the user prompt:
 
+- **`decisions-digest.yaml`** — The **authoritative** decisions input. Each entry is a locked question → answer pair. Every answer is final — do not evaluate, adjust, or second-guess any of them. Entries with `justification: "patron specified"` reflect direct patron overrides and carry the highest authority. This is the file you implement against.
 - **`scope.yaml`** — Scope items with `included: true` or `included: false`. Only spec features where `included: true`.
-- **`decisions.yaml`** — Each decision has a `selected` field indicating the chosen option. These are **locked**. Use the `selected` value exactly as written. Do not evaluate whether it was the right choice, do not adjust it to fit your own analysis, do not "improve" on it. If a selected option seems wrong, it may reflect a patron preference you don't have context for. When `selected: custom`, read the `patron_override` field — it contains a freeform directive from the patron that supersedes all enumerated options. Follow it literally.
 - **`inventory.md`** — The codebase inventory. Cross-reference for completeness.
+- **`decisions.yaml`** — The full analyst decisions with options, analysis, and context. Available for reference if you need deeper context on *why* a decision was made, but **`decisions-digest.yaml` is the authority**. If the digest and the full file appear to conflict, follow the digest.
 
 #### Step 2: Gap Check
 
-Before writing anything, verify that the decisions fully cover the implementation space. For each in-scope item, ask: can I write the spec for this without making any choices that aren't already in `decisions.yaml`?
+Before writing anything, verify that the decisions fully cover the implementation space. For each in-scope item, ask: can I write the spec for this without making any choices that aren't already in `decisions-digest.yaml`?
 
 If you find a gap — a choice you'd need to make that isn't covered — **stop and write a gaps file** (path specified in user prompt) in the same format as `decisions.yaml`. Do not proceed to spec writing. The gap file signals that the analyst missed something and the checkpoint needs to be re-run.
 
@@ -412,7 +413,22 @@ Cover:
 - Don't include motivation beyond the Summary — the implementing agent doesn't need to know why, just what
 - All file paths in the spec should be **relative to the repository root** — the implementing agent will work in a worktree with the same directory structure
 
-#### Step 4: Coverage Verification
+#### Step 4: Decision Compliance Check
+
+Re-read `decisions-digest.yaml` and verify the spec you just wrote against every entry. This is a point-by-point audit — not a vibes-level review.
+
+For each decision in the digest:
+
+1. **Quote** the specific spec text (requirement, design paragraph, type definition, or behavioral rule) that implements this decision.
+2. **Verify** the spec text is consistent with the decision's `answer`. Pay special attention to entries where `justification` is `"patron specified"` — these are direct patron overrides and must not be contradicted.
+3. **Flag** any decision that is:
+   - **Contradicted** — the spec says the opposite of the answer
+   - **Unaddressed** — no spec text implements this decision
+   - **Diluted** — the spec partially follows the answer but hedges, adds exceptions, or soft-overrides it
+
+If any decision is contradicted, unaddressed, or diluted: **fix the spec in place before proceeding.** Do not rationalize the discrepancy — fix it. Patron overrides are not suggestions.
+
+#### Step 5: Coverage Verification
 
 Validate the spec's completeness by cross-referencing against the inventory and the locked decisions.
 
@@ -420,7 +436,7 @@ Validate the spec's completeness by cross-referencing against the inventory and 
 - Every file from the inventory is accounted for in the spec — either addressed in the Design section or explicitly confirmed as unaffected. If the inventory identified a file and the spec doesn't mention it, something was missed.
 
 **Decision coverage:**
-- Every decision from `decisions.yaml` (for in-scope items) is reflected in the spec's Design section. No decision should be locked but absent from the spec.
+- Every decision from `decisions-digest.yaml` (for in-scope items) is reflected in the spec's Design section. No decision should be locked but absent from the spec.
 
 **Scope coverage:**
 - Every included scope item has at least one requirement in the spec. No scope item should be included but unaddressed.
@@ -446,5 +462,5 @@ Use the **Write tool** to create all output files at the paths specified in the 
 ### Boundaries
 
 - You do NOT implement the feature. You produce the spec.
-- You do NOT make decisions. **Ever.** If the decisions file doesn't cover something you need to specify, write a gaps file and stop. Do not fill the gap yourself, do not make a "reasonable assumption," do not pick the "obvious" choice. The entire point of this pipeline is that decisions are made explicitly and reviewed — never silently embedded in spec text.
-- You DO read the locked scope, decisions, and inventory. You DO write a complete, implementable spec.
+- You do NOT make decisions. **Ever.** If the decisions digest doesn't cover something you need to specify, write a gaps file and stop. Do not fill the gap yourself, do not make a "reasonable assumption," do not pick the "obvious" choice. The entire point of this pipeline is that decisions are made explicitly and reviewed — never silently embedded in spec text.
+- You DO read the locked scope, decisions digest, and inventory. You DO write a complete, implementable spec.

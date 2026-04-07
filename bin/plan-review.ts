@@ -753,19 +753,88 @@ function startAnalystRevise(slug: string, amendment: string): void {
     '\n- ' + path.join(specDir, 'observations.md'));
 }
 
+/**
+ * Generate decisions-digest.yaml from decisions.yaml + scope.yaml.
+ *
+ * The digest strips analyst reasoning and presents each decision as a flat
+ * question → answer pair. Patron overrides become structurally identical to
+ * every other decision — just an answer with justification "patron specified".
+ */
+function generateDecisionsDigest(slug: string): void {
+  const decisionsRaw = readSpecFile(slug, 'decisions.yaml');
+  const scopeRaw = readSpecFile(slug, 'scope.yaml');
+  if (!decisionsRaw) throw new Error('No decisions.yaml found for ' + slug);
+  if (!scopeRaw) throw new Error('No scope.yaml found for ' + slug);
+
+  const decisions = parse(decisionsRaw) as { decisions: any[] };
+  const scope = parse(scopeRaw) as { scope: any[] };
+
+  // Build set of included scope IDs
+  const includedScopes = new Set(
+    (scope.scope ?? [])
+      .filter((s: any) => s.included !== false)
+      .map((s: any) => s.id)
+  );
+
+  const digest: any[] = [];
+  for (const d of decisions.decisions ?? []) {
+    // Skip decisions whose scope items are all excluded
+    const dScopes = d.scope ?? [];
+    const hasIncludedScope = dScopes.length === 0 || dScopes.some((s: string) => includedScopes.has(s));
+    if (!hasIncludedScope) continue;
+
+    let answer: string;
+    let justification: string;
+
+    if (d.selected === 'custom' && d.patron_override) {
+      answer = d.patron_override;
+      justification = 'patron specified';
+    } else if (d.selected && d.options?.[d.selected]) {
+      answer = d.options[d.selected];
+      justification = d.analysis?.rationale ?? '';
+    } else {
+      // Fallback: use selected value as-is
+      answer = String(d.selected ?? '');
+      justification = d.analysis?.rationale ?? '';
+    }
+
+    digest.push({
+      id: d.id,
+      scope: d.scope,
+      question: d.question,
+      answer,
+      justification,
+    });
+  }
+
+  const digestPath = path.join(SPECS_DIR, slug, 'decisions-digest.yaml');
+  fs.writeFileSync(digestPath, stringify({ decisions: digest }, { lineWidth: 120 }));
+  console.log('[workshop] Generated decisions-digest.yaml for ' + slug + ' (' + digest.length + ' decisions)');
+}
+
 function startWriter(slug: string, brief: string): void {
   const meta = readMeta(slug);
   const sessionId = meta.sessions?.reader ?? meta.sessionId ?? '';
   const specDir = path.join(SPECS_DIR, slug);
+
+  // Generate the decisions digest before launching the writer
+  try {
+    generateDecisionsDigest(slug);
+  } catch (err: any) {
+    console.error('[workshop] Failed to generate decisions digest: ' + err.message);
+    sendSSE(slug, 'status', { step: 'writer', state: 'failed', error: 'digest generation failed: ' + err.message });
+    return;
+  }
 
   const args = sessionId ? ['--resume', sessionId] : [];
 
   runPipelineStep(slug, 'writer', args,
     'MODE: WRITER\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
     '\n\nThe analyst has written scope and decisions, and the patron has reviewed and locked them. Read these input files:' +
+    '\n- ' + path.join(specDir, 'decisions-digest.yaml') + ' (PRIMARY — the authoritative decisions input)' +
     '\n- ' + path.join(specDir, 'scope.yaml') +
-    '\n- ' + path.join(specDir, 'decisions.yaml') +
     '\n- ' + path.join(specDir, 'inventory.md') +
+    '\n- ' + path.join(specDir, 'decisions.yaml') + ' (REFERENCE ONLY — full analyst reasoning, for context if needed)' +
     '\n\nFollowing your instructions, produce the spec. Write output to: ' + path.join(specDir, 'spec.md') +
     '\nIf gaps are found, write: ' + path.join(specDir, 'gaps.yaml'));
 }
