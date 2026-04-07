@@ -1,0 +1,644 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: How are kit-contributed rig template names qualified?
+    options:
+      a: pluginId.templateName (e.g., quality-tools.audit) — matching the Loom's roles pattern
+      b: Unqualified names (same as config templates) with first-registered-wins semantics
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "The brief explicitly says 'Kit-contributed templates are namespace-qualified: pluginId.templateName' and directs following the Loom's roles pattern."
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit. Matches Loom precedent.
+      stakes: high
+  - id: D2
+    scope:
+      - S1
+    question: Where does the rig template registry live — a new class or inline state?
+    options:
+      a: New RigTemplateRegistry class within spider.ts, mirroring BlockTypeRegistry
+      b: Inline Map<string, RigTemplate> variable in the createSpider() closure
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: The Spider already uses a BlockTypeRegistry class for block types. The Loom uses inline Maps. Both work. The registry here needs to track source kit for validation error messages.
+      observable: false
+      recommendation: a
+      rationale: BlockTypeRegistry class is the existing Spider convention. A class encapsulates the qualified-naming, override, and validation logic cleanly.
+      stakes: low
+  - id: D3
+    scope:
+      - S1
+    question: What consumes tokens should the Spider declare for the new contribution types?
+    options:
+      a: Add 'rigTemplates' and 'rigTemplateMappings' as separate tokens to consumes array
+      b: Add only 'rigTemplates' and fold mappings into the same consumption pass
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: medium
+      context: "The brief says 'The Spider declares consumes: [\"rigTemplateMappings\"] (or folds this into its existing rigTemplates consumption — planner's call on the cleanest approach).' The consumes tokens drive Arbor's startup warnings for unconsumed kit contributions. A kit that contributes rigTemplateMappings but not rigTemplates would get a false 'no consumer' warning under option b."
+      observable: true
+      recommendation: a
+      rationale: Separate tokens are more precise for startup warnings and match the kit's actual field structure. A kit can contribute just mappings (to remap an existing writ type to a different existing template) without contributing templates.
+      stakes: low
+  - id: D4
+    scope:
+      - S1
+    question: What startup scanning pattern should the Spider use for rig template contributions?
+    options:
+      a: Phase 1a (g.kits()) + Phase 1b (g.apparatuses()) + Phase 2 (plugin:initialized subscription) — the Loom pattern
+      b: Phase 1 (g.kits()) + Phase 2 (plugin:initialized subscription) — the existing BlockTypeRegistry pattern
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: The Loom scans both g.kits() and g.apparatuses() in start(). The Spider's existing blockType scan only does g.kits() + subscribe. The difference matters if an apparatus that starts BEFORE the Spider has a supportKit with rigTemplates. Currently the Spider's deps (stacks, clerk, fabricator) don't have rigTemplates, but using the Loom pattern is defensive and correct for future apparatus that might.
+      observable: false
+      recommendation: a
+      rationale: Loom pattern is strictly more correct. The brief says 'follow the roles pattern.' The marginal cost is one extra loop.
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: How does guild config override a kit-contributed template?
+    options:
+      a: "At registration time: if spider.rigTemplates defines a key matching the qualified name, the kit contribution is silently skipped"
+      b: "At lookup time: config templates take precedence over kit templates in the merged registry"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: "The brief says 'Guild config overrides kit contributions: if spider.rigTemplates defines a key matching a kit's qualified name, the config wins and the kit contribution is silently skipped.' The Loom implements this same pattern at registration time."
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit about registration-time skipping. Matches Loom pattern. Simpler mental model than lookup-time precedence.
+      stakes: high
+  - id: D6
+    scope:
+      - S1
+      - S5
+    question: How does dependency-scoped validation work for kit-contributed rig templates — how does the Spider know which plugin contributed a given engine designId?
+    options:
+      a: Spider builds a designId-to-pluginId map at start() by scanning g.kits() and g.apparatuses() for engines contributions
+      b: Spider asks the Fabricator for the source plugin of a designId (requires FabricatorApi change)
+      c: Spider only validates that the designId exists in the Fabricator (no dependency-scope check)
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: medium
+      context: The Fabricator's getEngineDesign() returns the design but not its source plugin. Adding a provenance API to the Fabricator is scope expansion. The Spider can build this map independently by inspecting loaded plugins' engine contributions — the same data the Fabricator scans. Spider already imports isLoadedKit/isLoadedApparatus.
+      observable: true
+      recommendation: a
+      rationale: Self-contained (no Fabricator API change), matches Loom's self-contained permission validation. The map is built once at start() and reused for each kit registration.
+      stakes: high
+  - id: D7
+    scope:
+      - S1
+      - S5
+    question: What is the set of allowed designIds for dependency-scoped validation of a kit's rig template?
+    options:
+      a: Engine designIds from plugins in kit.requires + kit.recommends + the kit itself + Spider's built-in engines
+      b: Engine designIds from plugins in kit.requires + kit.recommends only + Spider's built-in engines (not the kit's own)
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The brief says 'engine designIds from plugins declared in its requires or recommends, plus the Spider's own built-in engines.' The Loom also includes the plugin itself in its allowedPlugins set. A kit that contributes both engines and rig templates should be able to reference its own engines.
+      observable: true
+      recommendation: a
+      rationale: A kit must be able to reference its own engines in its own templates. The Loom includes pluginId in its allowed set.
+      stakes: high
+  - id: D8
+    scope:
+      - S1
+      - S5
+    question: What happens when a kit's rig template references a designId that fails dependency-scoped validation?
+    options:
+      a: Console.warn and skip the entire template (Loom approach — warn and drop)
+      b: Throw an error, failing startup
+      c: Console.warn and drop only the offending engine entry, keeping the rest of the template
+    selected: a
+    analysis:
+      audience:
+        - operator
+        - author
+      confidence: medium
+      context: The Loom drops individual invalid permissions with a warning but still registers the role. For templates, partially dropping engines would create an invalid template (broken upstream refs). The brief says validation should 'identify the contributing kit in the error message' — implying warnings, not fatal errors. Config template validation already throws (hard failure). The question is whether kit contributions should be softer.
+      observable: true
+      recommendation: a
+      rationale: Kit contributions should be warn-and-skip like the Loom, not throw. A broken kit template shouldn't prevent the guild from starting — it just means that kit's template is unavailable. Config templates remain throw-on-error (guild owner's explicit config should fail fast).
+      stakes: high
+  - id: D9
+    scope:
+      - S1
+    question: Should kit-contributed templates also run the existing validation checks (non-empty engines, duplicate IDs, upstream refs, cycles, variable refs)?
+    options:
+      a: Yes — run all existing checks plus dependency-scoped designId check
+      b: Only run the dependency-scoped designId check
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: A kit-contributed template with a cycle or dangling upstream ref is just as broken as a config template with the same issue. The validation checks are safety nets for template authors.
+      observable: true
+      recommendation: a
+      rationale: All validation checks apply to kit templates. Broken templates should not silently enter the registry regardless of source.
+      stakes: low
+  - id: D10
+    scope:
+      - S2
+    question: Are kit-contributed writ type names namespace-qualified?
+    options:
+      a: No — unqualified, user-facing names (e.g., 'quality-audit')
+      b: Yes — qualified with pluginId (e.g., 'quality-tools.quality-audit')
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: "Brief is explicit: 'Kit-contributed writ type names are not namespace-qualified — they are user-facing names that appear on writs.'"
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit.
+      stakes: high
+  - id: D11
+    scope:
+      - S2
+    question: How does the Clerk resolve the merged set of valid writ types at post() time?
+    options:
+      a: resolveWritTypes() reads from an in-memory Set that was populated at startup from config + kit contributions
+      b: resolveWritTypes() re-scans config and kit state on every call
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The current resolveWritTypes() re-reads config on every call (it calls resolveClerkConfig() each time). For kit contributions, scanning on every call would be wasteful. A startup-populated Set that's additive (via plugin:initialized) is the right approach.
+      observable: false
+      recommendation: a
+      rationale: Kit contributions don't change after startup. An in-memory Set populated during start() and updated via plugin:initialized is efficient and consistent with how other registries work.
+      stakes: low
+  - id: D12
+    scope:
+      - S2
+    question: Does the Clerk need a full registry class for writ types, or can it use inline state?
+    options:
+      a: "Inline state: a Set<string> for names, populated in start() and by plugin:initialized handler"
+      b: A WritTypeRegistry class mirroring BlockTypeRegistry
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "Writ type contributions are simple: an array of {name, description} objects. The Clerk just needs to track which names are valid. No qualified naming, no validation beyond name uniqueness. A Set is sufficient."
+      observable: false
+      recommendation: a
+      rationale: A class would be over-engineering for a flat name set. The BlockTypeRegistry pattern is warranted for block types (which have complex shapes); writ types are just names.
+      stakes: low
+  - id: D13
+    scope:
+      - S2
+    question: How does config override a kit-contributed writ type with the same name?
+    options:
+      a: "At registration time: if config.writTypes contains the same name, the kit contribution is silently skipped"
+      b: Both are registered but config's entry takes semantic precedence (e.g., its description wins)
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Brief says 'Config-defined writ types override kit contributions with the same name.' Since WritTypeEntry only has name + optional description, the practical effect is the same either way. But for consistency with the Loom/Spider override pattern, registration-time skip is cleaner.
+      observable: false
+      recommendation: a
+      rationale: Consistent with the registration-time skip pattern used by the Loom and proposed for Spider templates.
+      stakes: low
+  - id: D14
+    scope:
+      - S2
+    question: What startup scanning pattern should the Clerk use?
+    options:
+      a: Phase 1a (g.kits()) + Phase 1b (g.apparatuses()) + Phase 2 (plugin:initialized) — Loom pattern
+      b: Phase 1 (g.kits()) + Phase 2 (plugin:initialized) — simpler pattern
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: The Clerk currently has no kit scanning. It requires only ['stacks'], meaning stacks started before it but other apparatus may start after. An apparatus that starts before the Clerk and has writTypes in its supportKit would be missed by option b. This is defensive correctness.
+      observable: false
+      recommendation: a
+      rationale: Same reasoning as D4. Loom pattern is strictly more correct. The Clerk's start() currently receives but ignores ctx — it needs to use it now.
+      stakes: low
+  - id: D15
+    scope:
+      - S2
+    question: What happens when two different kits contribute a writ type with the same name?
+    options:
+      a: First-registered wins silently (registration order depends on plugin load order in guild.json)
+      b: Console.warn about the duplicate, first-registered wins
+      c: Throw an error at startup
+    selected: b
+    analysis:
+      audience:
+        - operator
+        - author
+      confidence: medium
+      context: Two kits claiming the same unqualified writ type name is a legitimate conflict the operator should know about, but not necessarily fatal. The Loom's qualified naming avoids this problem for roles. Since writ types are intentionally unqualified, collisions are more likely and should be surfaced.
+      observable: true
+      recommendation: b
+      rationale: Silent first-wins hides a potential misconfiguration. A warning gives the operator visibility without crashing the guild.
+      stakes: low
+  - id: D16
+    scope:
+      - S2
+    question: Does the Clerk's start() signature need to change?
+    options:
+      a: "Yes — change from start(_ctx: StartupContext) to start(ctx: StartupContext) and use ctx.on()"
+      b: No — keep ignoring ctx, scan only once at start time
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The Clerk currently declares `start(_ctx: StartupContext)` — the underscore prefix indicates the parameter is unused. To subscribe to plugin:initialized for late-arriving apparatus supportKits, it needs to use ctx."
+      observable: false
+      recommendation: a
+      rationale: Required for the Phase 2 subscription.
+      stakes: low
+  - id: D17
+    scope:
+      - S3
+    question: Are kit-contributed rig template mapping keys (writ type names) namespace-qualified?
+    options:
+      a: No — mapping keys are writ type names which are unqualified user-facing names
+      b: Yes — qualified with pluginId
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Mapping keys are writ types. Per D10, writ types are unqualified. The brief's example shows 'quality-audit' as a mapping key (unqualified).
+      observable: true
+      recommendation: a
+      rationale: Mapping keys are writ types; writ types are unqualified per the brief.
+      stakes: high
+  - id: D18
+    scope:
+      - S3
+    question: Can kit-contributed mapping values reference any template name, or only templates from the same kit?
+    options:
+      a: Any registered template name (config or kit-contributed, any kit)
+      b: Only templates from the same kit or from config
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Brief says 'Values may reference any registered rig template name, including qualified kit-contributed names.' This explicitly allows cross-kit references.
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit.
+      stakes: low
+  - id: D19
+    scope:
+      - S3
+      - S5
+    question: When should dangling mapping reference validation run — at registration time or as a deferred check?
+    options:
+      a: "Deferred: validate all mappings after all kits have been scanned (end of start())"
+      b: "At registration time: validate each mapping as the kit is scanned"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: A mapping from kit A may reference a template from kit B. If kit A is scanned before kit B, option b would falsely reject the mapping. Deferred validation after all Phase 1a/1b scanning is complete (but before Phase 2 subscriptions fire) is correct. For Phase 2 (late-arriving apparatus supportKits), validate incrementally.
+      observable: false
+      recommendation: a
+      rationale: Cross-kit references require deferred validation to avoid false ordering-dependent failures.
+      stakes: high
+  - id: D20
+    scope:
+      - S3
+    question: What happens when two kits contribute mappings for the same writ type?
+    options:
+      a: First-registered wins silently
+      b: Console.warn about the duplicate, first-registered wins
+    selected: b
+    analysis:
+      audience:
+        - operator
+        - author
+      confidence: medium
+      context: Same reasoning as D15 for writ types. Conflicting mappings from different kits should be surfaced.
+      observable: true
+      recommendation: b
+      rationale: Consistent with D15. Silent overwrites are confusing for operators.
+      stakes: low
+  - id: D21
+    scope:
+      - S4
+    question: What is the exact lookup precedence chain for lookupTemplate()?
+    options:
+      a: |
+        1. Config rigTemplateMappings[writType] → template name → merged registry
+        2. Kit rigTemplateMappings[writType] → template name → merged registry
+        3. Merged template registry[writType] directly (backward compat: template name = writ type)
+        4. Config rigTemplateMappings['default'] → template name → merged registry
+        5. Merged template registry['default'] directly
+        6. Throw
+      b: |
+        1. Config rigTemplateMappings[writType] → template name → merged registry
+        2. Kit rigTemplateMappings[writType] → template name → merged registry
+        3. Merged template registry['default'] directly
+        4. Throw
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - author
+        - operator
+      confidence: high
+      context: "The current behavior is: rigTemplates[writType] then rigTemplates['default']. For backward compatibility, a config template named 'mandate' should still match writ type 'mandate' without an explicit mapping. Step 3 preserves this: if a template exists whose name matches the writ type, use it. Steps 4-5 handle the 'default' fallback for both mappings and templates."
+      observable: true
+      recommendation: a
+      rationale: Preserves full backward compatibility with existing configs where rigTemplates keys are writ type names. The 'default' fallback chain is also preserved.
+      stakes: high
+  - id: D22
+    scope:
+      - S4
+    question: Does lookupTemplate() change its signature or use closure state?
+    options:
+      a: Use closure state — access the template registry and mapping registry from createSpider() scope
+      b: Change signature to accept merged registries as parameters
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The function is private to spider.ts. The Spider already uses closure state for spiderConfig, fabricator, clerk, etc. Passing registries as parameters adds noise to a private function.
+      observable: false
+      recommendation: a
+      rationale: Matches existing Spider convention for private functions accessing shared state.
+      stakes: low
+  - id: D23
+    scope:
+      - S5
+    question: Should config template validation remain throw-on-error while kit template validation is warn-and-skip?
+    options:
+      a: Yes — config templates throw (fast fail on operator's own config); kit templates warn and skip (don't let a broken plugin crash the guild)
+      b: Both throw — fail fast on any bad template regardless of source
+      c: Both warn — never fail startup on template issues
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Config templates are the guild owner's own declarations — errors there are bugs in their config and should fail fast. Kit templates are third-party contributions that the guild owner may not control — a broken kit shouldn't prevent the guild from starting.
+      observable: true
+      recommendation: a
+      rationale: "Matches the Loom's pattern: config roles are validated strictly, kit roles warn and skip. Maintains the existing config validation behavior."
+      stakes: high
+  - id: D24
+    scope:
+      - S5
+    question: When should dangling mapping validation errors surface — as warnings or thrown errors?
+    options:
+      a: Config mappings pointing to nonexistent templates throw; kit mappings warn and skip
+      b: All dangling mappings warn
+      c: All dangling mappings throw
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Consistent with D23. Config is strict (operator's mistake), kit is lenient (third-party issue).
+      observable: true
+      recommendation: a
+      rationale: Same config-strict / kit-lenient split as template validation.
+      stakes: low
+  - id: D25
+    scope:
+      - S5
+    question: What format should kit validation warning messages use?
+    options:
+      a: '[spider] Kit "pluginId" rigTemplates.templateName: specific issue description'
+      b: "[spider] rigTemplates: kit 'pluginId' template 'templateName' — specific issue"
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The Loom uses `[loom] Kit "pluginId" role "roleName"` prefix pattern. Existing Spider validation uses `[spider] rigTemplates.templateKey:` prefix.
+      observable: true
+      recommendation: a
+      rationale: "Combines both conventions: Spider's [spider] prefix with kit identification matching the Loom pattern."
+      stakes: low
+  - id: D26
+    scope:
+      - S6
+    question: What type is the new spider.rigTemplateMappings config field?
+    options:
+      a: Record<string, string> — writ type name to template name
+      b: "Array of { writType: string; templateName: string } objects"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief defines kit rigTemplateMappings as Record<string, string>. The config field should match for consistency.
+      observable: true
+      recommendation: a
+      rationale: Matches kit field shape and is more ergonomic for JSON config.
+      stakes: low
+  - id: D27
+    scope:
+      - S6
+      - S4
+    question: Does the existing spider.rigTemplates config field change its semantics?
+    options:
+      a: No change — keys remain writ-type-or-template names, values remain RigTemplate objects. Backward compatible.
+      b: Redefine keys as pure template names, require explicit rigTemplateMappings for writ type binding
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Existing guilds have spider.rigTemplates with keys like 'mandate' and 'default'. These must keep working. The lookup chain (D21 step 3) provides backward compatibility by checking the template registry for a template whose name matches the writ type.
+      observable: true
+      recommendation: a
+      rationale: Breaking existing config semantics would require migration. The lookup chain already handles the dual-purpose nature of these keys.
+      stakes: high
+  - id: D28
+    scope:
+      - S7
+    question: Where should SpiderKit and ClerkKit interfaces be defined?
+    options:
+      a: In the respective types.ts files (spider/src/types.ts, clerk/src/types.ts) and re-exported from index.ts
+      b: In the respective index.ts barrel files directly
+      c: In the main implementation files (spider.ts, clerk.ts) alongside the registration logic, like LoomKit
+    selected: c
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: medium
+      context: The Loom defines KitRoleDefinition and LoomKit in loom.ts (the implementation file), not in a separate types file. The Loom exports them from loom.ts and re-exports from index.ts. However, the Spider and Clerk have separate types.ts files for their public types, which the Loom does not.
+      observable: true
+      recommendation: c
+      rationale: "Follow the Loom's convention: define kit interfaces in the implementation file where the registration logic lives. Re-export from the barrel."
+      stakes: low
+  - id: D29
+    scope:
+      - S7
+    question: What fields does the SpiderKit interface include?
+    options:
+      a: "rigTemplates?: Record<string, RigTemplate>; rigTemplateMappings?: Record<string, string>"
+      b: "rigTemplates?: Record<string, RigTemplate>; rigTemplateMappings?: Record<string, string>; blockTypes?: Record<string, BlockType>"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: SpiderKit should cover only the new contribution types added by this work. BlockTypes are already consumed by the Spider but don't have a dedicated kit interface type — adding them would be scope expansion.
+      observable: true
+      recommendation: a
+      rationale: Keep scope narrow. SpiderKit covers the new contributions. BlockTypes can get a type interface in a separate commission.
+      stakes: low
+  - id: D30
+    scope:
+      - S7
+    question: What fields does the ClerkKit interface include?
+    options:
+      a: "writTypes?: WritTypeEntry[]"
+      b: "writTypes?: Array<{ name: string; description?: string }> (inline shape, no import needed)"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: WritTypeEntry already exists in clerk/src/types.ts and is the canonical shape. Kit authors importing ClerkKit would also import WritTypeEntry.
+      observable: true
+      recommendation: a
+      rationale: Reuse existing type rather than duplicating the shape.
+      stakes: low
+  - id: D31
+    scope:
+      - S1
+      - S2
+      - S3
+    question: Should the Spider and Clerk scan apparatus supportKits that started BEFORE them, or only after?
+    options:
+      a: Both before and after — scan g.kits() + g.apparatuses() at start, plus subscribe to plugin:initialized
+      b: Only g.kits() at start + subscribe to plugin:initialized (current Spider blockType pattern)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: Covered as a cross-cutting concern for D4 and D14. The Loom pattern (Phase 1a + 1b + Phase 2) is the most correct approach and handles the edge case where an apparatus with a supportKit starts before the consuming apparatus.
+      observable: false
+      recommendation: a
+      rationale: Defensive correctness. Brief says follow Loom pattern.
+      stakes: low
+  - id: D32
+    scope:
+      - S1
+      - S3
+      - S5
+    question: When should the Spider validate the merged registries — during scanning, after all Phase 1 scanning, or both?
+    options:
+      a: Validate config templates immediately at start (existing behavior). Validate kit templates at registration time. Validate mappings (both config and kit) as a deferred pass after all Phase 1 scanning completes.
+      b: Validate everything in one deferred pass after all Phase 1 scanning.
+      c: Validate everything immediately as it's registered.
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Config template validation must remain at its current position (before any rig operations). Kit templates should be validated at registration time because all the information needed (the kit's requires/recommends, the designId source map) is available then. Mappings must be deferred (D19) because cross-kit references may not yet be registered.
+      observable: false
+      recommendation: a
+      rationale: Preserves existing config validation timing. Kit template validation can be eager (all info available). Mapping validation must be deferred (cross-kit ordering).
+      stakes: low
+  - id: D33
+    scope:
+      - S1
+      - S2
+      - S3
+    question: How should the test fixtures be extended to support kit contribution testing?
+    options:
+      a: Extend buildFixture() to accept an array of LoadedKit objects; fakeGuild.kits() returns them
+      b: Use the existing fire('plugin:initialized', kit) pattern to inject kits after spider starts
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Kits are loaded before any apparatus starts. The Spider scans g.kits() in Phase 1a. For tests, the fakeGuild.kits() function must return mock kits before spider.start() runs. Option b would only test Phase 2 (late subscription), missing the primary code path.
+      observable: false
+      recommendation: a
+      rationale: Tests must exercise the primary Phase 1a scan. This requires kits to be available via g.kits() before start().
+      stakes: low
+  - id: D34
+    scope:
+      - S1
+      - S2
+      - S3
+    question: When a kit contribution has a malformed field (wrong type, missing required sub-field), what happens?
+    options:
+      a: Console.warn identifying the kit and field, silently skip the contribution
+      b: Throw, failing startup
+    selected: a
+    analysis:
+      audience:
+        - operator
+        - author
+      confidence: high
+      context: "The Loom skips malformed kit contributions with a warning: 'Kit \"pluginId\" role \"roleName\" is missing required \"permissions\" array — skipped'. The BlockTypeRegistry silently skips non-conforming values. The warn-and-skip approach is the established pattern for kit contributions."
+      observable: true
+      recommendation: a
+      rationale: Kit contributions are third-party; malformed ones should not crash the guild.
+      stakes: low
+  - id: D35
+    scope:
+      - S6
+    question: Does spider.rigTemplateMappings support a 'default' key?
+    options:
+      a: "Yes — a 'default' mapping acts the same as a 'default' template entry: used when no writ-type-specific match is found"
+      b: No — 'default' is only valid as a template name, not as a mapping key
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: "Currently, spider.rigTemplates supports a 'default' key as a fallback template. If the operator wants all writs to use a specific kit-contributed template as the default, they'd need rigTemplateMappings: { 'default': 'quality-tools.audit' }. Without this, the only way to set a default kit template is to define it under 'default' in spider.rigTemplates (which requires copying the template definition into config)."
+      observable: true
+      recommendation: a
+      rationale: Allows operators to set a kit-contributed template as the default via a one-line mapping instead of copying the whole template into config.
+      stakes: low
