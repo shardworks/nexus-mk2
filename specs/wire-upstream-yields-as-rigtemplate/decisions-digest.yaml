@@ -1,0 +1,127 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What is the variable namespace prefix for yield references?
+    answer: "'$yields.<engine_id>.<yield_name>' — explicit 'yields' prefix (as brief suggests)"
+    justification: Explicit prefix avoids collisions with $vars namespace and matches the brief's proposal
+  - id: D2
+    scope:
+      - S1
+    question: How deep can yield property access go — single property only, or dotted paths for nested access?
+    answer: "Single property only: $yields.<engine_id>.<property> (one level into the yields object)"
+    justification: All yield shapes are flat; single-level access is consistent with $vars.* precedent and covers all
+      current use cases
+  - id: D3
+    scope:
+      - S1
+    question: What regex pattern validates yield references after normalization?
+    answer: /^\$yields\.[a-zA-Z][a-zA-Z0-9-]*\.[a-zA-Z_][a-zA-Z0-9_]*$/ (allow hyphens in engine id)
+    justification: Engine ids commonly use hyphens; yield property names follow JS identifier conventions
+  - id: D4
+    scope:
+      - S1
+      - S3
+    question: What happens when a yield reference resolves to undefined at run time (engine completed but yield object lacks
+      the property)?
+    answer: Omit the key from givens entirely (consistent with $vars.* when variable is absent)
+    justification: Consistent with established $vars.* undefined-omission behavior
+  - id: D5
+    scope:
+      - S1
+    question: Should both bare ($yields.draft.path) and curly-brace (${yields.draft.path}) forms be supported?
+    answer: Support both forms (consistent with $writ/${writ} and $vars.*/${vars.*} duality)
+    justification: normalizeVarRef already handles brace stripping; both forms are free and consistent
+  - id: D6
+    scope:
+      - S2
+    question: Should the startup validator check that the yield reference's engine_id is reachable via transitive upstream,
+      or only in the direct upstream array?
+    answer: Transitive reachability — compute graph reachability, allow $yields.draft.path in revise even if draft is not in
+      revise.upstream directly
+    justification: Matches runtime behavior (buildUpstreamMap includes all completed engines); avoids forcing redundant
+      upstream declarations
+  - id: D7
+    scope:
+      - S2
+    question: Should the validator also check that the engine_id referenced is NOT the engine itself (self-reference)?
+    answer: No — the upstream reachability check already handles it (an engine is never in its own upstream)
+    justification: The upstream reachability check already makes self-references invalid; no special case needed
+  - id: D8
+    scope:
+      - S2
+    question: For config templates, should an invalid yield reference (bad engine_id or not upstream) throw like other
+      config validation errors, or warn?
+    answer: Throw — same as existing unrecognized-variable behavior in validateTemplates()
+    justification: Consistent with existing config template validation pattern — fail fast
+  - id: D9
+    scope:
+      - S2
+    question: For kit templates, should an invalid yield reference warn and skip (like other kit validation errors), or throw?
+    answer: Warn and skip the template (consistent with existing kit validation pattern)
+    justification: Consistent with existing kit template validation — warn and skip
+  - id: D10
+    scope:
+      - S3
+    question: Where do unresolved $yields.* references live between spawn and run time?
+    answer: In givensSpec as literal strings — resolveGivens() passes them through, resolved later in tryRun()/tryCollect()
+    justification: Minimally invasive — no schema change, no downstream breakage, only two resolution points
+  - id: D11
+    scope:
+      - S3
+    question: How should resolveGivens() handle $yields.* strings at spawn time?
+    answer: Pass them through as literal strings into givensSpec (add $yields.* to the recognized-but-deferred set)
+    justification: Without an explicit pass-through, yield references would be silently dropped at spawn time — the string
+      must be preserved in givensSpec
+  - id: D12
+    scope:
+      - S3
+    question: Should a new standalone function handle yield resolution, or inline it in tryRun()/tryCollect()?
+    answer: "New function: resolveYieldRefs(givensSpec, upstream) → Record<string, unknown>"
+    justification: DRY — same logic needed at two call sites; standalone function is testable and clear
+  - id: D13
+    scope:
+      - S3
+    question: Should tryCollect() also resolve yield references in givens before calling design.collect()?
+    answer: Yes — resolve in both tryRun() and tryCollect() for consistency
+    justification: Consistent givens contract — engines should see resolved values in both run() and collect()
+  - id: D14
+    scope:
+      - S3
+    question: Where in tryRun() should yield resolution happen — before or after marking the engine as running?
+    answer: Before marking running — resolve immediately after building givens from givensSpec, alongside building the
+      upstream map
+    justification: Group yield resolution with other givens assembly; no side effects so order is purely for readability
+  - id: D15
+    scope:
+      - S4
+    question: How should the RigTemplateEngine.givens JSDoc describe the timing split?
+    answer: Single list of all supported refs with a note that $yields.* resolves at run time
+    justification: Simpler — authors care about what refs are available, not when they resolve internally
+  - id: D16
+    scope:
+      - S4
+    question: Should EngineInstance.givensSpec comment change from 'Literal givens values set at spawn time' to something
+      that acknowledges deferred refs?
+    answer: Yes — update to note that yield references remain as strings until run time
+    justification: Current comment would be factually wrong after this change
+  - id: D17
+    scope:
+      - S2
+    question: How should the upstream reachability check be implemented in the validators?
+    answer: Build a reachability set per engine using DFS/BFS over the template's upstream arrays, then check engine_id
+      membership
+    justification: Separate reachability pass is simpler and doesn't risk breaking existing cycle detection
+  - id: D18
+    scope:
+      - S2
+    question: Should the error message for a yield reference to a non-upstream engine mention reachability explicitly?
+    answer: Yes — e.g., 'engine "implement" references $yields.seal.sealedCommit but "seal" is not upstream of "implement"'
+    justification: Specific error message helps authors diagnose the exact problem — engine exists but isn't upstream
+  - id: D19
+    scope:
+      - S2
+    question: Should the validator distinguish between 'engine_id not in template' and 'engine_id not reachable upstream' as
+      separate error messages?
+    answer: Yes — two distinct messages for the two failure modes
+    justification: Different mistakes deserve different diagnostics — typo vs. wrong dependency direction

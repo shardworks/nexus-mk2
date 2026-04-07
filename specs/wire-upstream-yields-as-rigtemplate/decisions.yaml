@@ -1,0 +1,327 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What is the variable namespace prefix for yield references?
+    options:
+      a: "'$yields.<engine_id>.<yield_name>' — explicit 'yields' prefix (as brief suggests)"
+      b: "'$<engine_id>.<yield_name>' — bare engine id, no prefix (as spider.md 'Future Evolution' suggested)"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: The brief explicitly proposes the '$yields.' prefix. The spider.md 'Future Evolution' section mentioned a different syntax ('${draft.worktreePath}') but that doc is stale and aspirational. The '$yields.' prefix avoids ambiguity with '$vars.' and any future namespaces.
+      observable: true
+      recommendation: a
+      rationale: Explicit prefix avoids collisions with $vars namespace and matches the brief's proposal
+      stakes: high
+  - id: D2
+    scope:
+      - S1
+    question: How deep can yield property access go — single property only, or dotted paths for nested access?
+    options:
+      a: "Single property only: $yields.<engine_id>.<property> (one level into the yields object)"
+      b: "Dotted paths: $yields.<engine_id>.<path.to.field> (arbitrary nesting)"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: All five built-in engine yield shapes (DraftYields, ImplementYields, ReviewYields, ReviseYields, SealYields) are flat objects — no nesting. The $vars.* syntax already enforces single-level keys via regex. ReviewYields.mechanicalChecks is an array, but accessing array elements via dot syntax would be unusual and complex to validate.
+      observable: true
+      recommendation: a
+      rationale: All yield shapes are flat; single-level access is consistent with $vars.* precedent and covers all current use cases
+      stakes: low
+  - id: D3
+    scope:
+      - S1
+    question: What regex pattern validates yield references after normalization?
+    options:
+      a: /^\$yields\.[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$/
+      b: /^\$yields\.[a-zA-Z][a-zA-Z0-9-]*\.[a-zA-Z_][a-zA-Z0-9_]*$/ (allow hyphens in engine id)
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Engine ids in the codebase use simple identifiers ('draft', 'implement', etc.) but kit-contributed engine ids could include hyphens (common in npm-style naming). The engine id segment should match what's actually valid for engine ids. Looking at the codebase, engine ids like 'writ-status' exist for block types, and kit-contributed template engine ids are arbitrary strings. However, the current $vars.* regex uses [a-zA-Z_][a-zA-Z0-9_]* — which is for JS-like variable names in config. Engine ids are a different concern and could include hyphens. The safest approach is to allow alphanumeric plus hyphens for the engine_id segment, and standard identifier chars for the yield_name segment.
+      observable: false
+      recommendation: b
+      rationale: Engine ids commonly use hyphens; yield property names follow JS identifier conventions
+      stakes: low
+  - id: D4
+    scope:
+      - S1
+      - S3
+    question: What happens when a yield reference resolves to undefined at run time (engine completed but yield object lacks the property)?
+    options:
+      a: Omit the key from givens entirely (consistent with $vars.* when variable is absent)
+      b: Pass undefined as the value
+      c: Fail the engine with an error
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "The existing $vars.* behavior: when the variable key is absent from the config variables dict, the givens key is omitted entirely. This is documented in RigTemplateEngine.givens JSDoc ('Variables that resolve to undefined cause the key to be omitted'). Engines already handle optional givens gracefully (e.g., review engine checks 'if (givens.buildCommand)')."
+      observable: true
+      recommendation: a
+      rationale: Consistent with established $vars.* undefined-omission behavior
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: Should both bare ($yields.draft.path) and curly-brace (${yields.draft.path}) forms be supported?
+    options:
+      a: Support both forms (consistent with $writ/${writ} and $vars.*/${vars.*} duality)
+      b: Only curly-brace form ${yields.*.*}
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: normalizeVarRef() already strips ${...} braces generically. Both $writ and $vars.* accept either form. Supporting both requires zero additional code — normalizeVarRef handles it.
+      observable: true
+      recommendation: a
+      rationale: normalizeVarRef already handles brace stripping; both forms are free and consistent
+      stakes: low
+  - id: D6
+    scope:
+      - S2
+    question: Should the startup validator check that the yield reference's engine_id is reachable via transitive upstream, or only in the direct upstream array?
+    options:
+      a: Transitive reachability — compute graph reachability, allow $yields.draft.path in revise even if draft is not in revise.upstream directly
+      b: Direct upstream only — engine_id must appear in the engine's own upstream array
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: At run time, buildUpstreamMap() includes ALL completed engine yields regardless of graph distance. So $yields.draft.path is available in revise (draft is transitively upstream via implement → review → revise). Restricting to direct upstream would force template authors to explicitly list transitive dependencies, which is cumbersome and inconsistent with runtime reality. Computing transitive reachability uses the same DFS already implemented for cycle detection.
+      observable: true
+      recommendation: a
+      rationale: Matches runtime behavior (buildUpstreamMap includes all completed engines); avoids forcing redundant upstream declarations
+      stakes: high
+  - id: D7
+    scope:
+      - S2
+    question: Should the validator also check that the engine_id referenced is NOT the engine itself (self-reference)?
+    options:
+      a: Yes — reject self-references at validation time
+      b: No — the upstream reachability check already handles it (an engine is never in its own upstream)
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: An engine cannot be in its own upstream (the cycle detection check already prevents this). So a self-referencing $yields.myEngine.foo would fail the upstream reachability check anyway.
+      observable: false
+      recommendation: b
+      rationale: The upstream reachability check already makes self-references invalid; no special case needed
+      stakes: low
+  - id: D8
+    scope:
+      - S2
+    question: For config templates, should an invalid yield reference (bad engine_id or not upstream) throw like other config validation errors, or warn?
+    options:
+      a: Throw — same as existing unrecognized-variable behavior in validateTemplates()
+      b: Warn — softer failure
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: "Config template validation already throws for unrecognized variables (line 314 of spider.ts). Kit template validation returns an error string that becomes a console.warn. The pattern is clear: config errors throw, kit errors warn."
+      observable: true
+      recommendation: a
+      rationale: Consistent with existing config template validation pattern — fail fast
+      stakes: low
+  - id: D9
+    scope:
+      - S2
+    question: For kit templates, should an invalid yield reference warn and skip (like other kit validation errors), or throw?
+    options:
+      a: Warn and skip the template (consistent with existing kit validation pattern)
+      b: Throw (stricter)
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: validateKitTemplate() returns a string error message on failure, which the caller wraps in console.warn and skips the template (line 519-523 of spider.ts). This is the established pattern for all kit validation errors.
+      observable: false
+      recommendation: a
+      rationale: Consistent with existing kit template validation — warn and skip
+      stakes: low
+  - id: D10
+    scope:
+      - S3
+    question: Where do unresolved $yields.* references live between spawn and run time?
+    options:
+      a: In givensSpec as literal strings — resolveGivens() passes them through, resolved later in tryRun()/tryCollect()
+      b: In a new separate field (e.g., givensTemplate) on EngineInstance
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: givensSpec is Record<string, unknown> so strings are valid values. Adding a new field to EngineInstance changes the persisted data model (stored in Stacks) and requires updating every place that reads the rig. Keeping unresolved strings in givensSpec is minimally invasive — only the resolution points (tryRun, tryCollect) need to know about them.
+      observable: false
+      recommendation: a
+      rationale: Minimally invasive — no schema change, no downstream breakage, only two resolution points
+      stakes: low
+  - id: D11
+    scope:
+      - S3
+    question: How should resolveGivens() handle $yields.* strings at spawn time?
+    options:
+      a: Pass them through as literal strings into givensSpec (add $yields.* to the recognized-but-deferred set)
+      b: Leave the current code unchanged — unrecognized $-prefixed strings already fall through to the output (they're silently dropped since neither $writ nor $vars.* branch matches)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "Looking at resolveGivens() closely: the else-if chain for $writ/$vars.* does NOT have a fallthrough — if neither matches, the key is simply not added to result (line 191 comment says 'caught at validation time' — but at runtime it silently omits). So yield refs would be DROPPED at spawn time if we don't add an explicit pass-through. This is a critical correctness issue."
+      observable: false
+      recommendation: a
+      rationale: Without an explicit pass-through, yield references would be silently dropped at spawn time — the string must be preserved in givensSpec
+      stakes: high
+  - id: D12
+    scope:
+      - S3
+    question: Should a new standalone function handle yield resolution, or inline it in tryRun()/tryCollect()?
+    options:
+      a: "New function: resolveYieldRefs(givensSpec, upstream) → Record<string, unknown>"
+      b: Inline the resolution logic at each call site
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The same logic is needed in two places (tryRun and tryCollect). Duplication increases maintenance risk. A standalone function is testable in isolation and follows the same pattern as resolveGivens().
+      observable: false
+      recommendation: a
+      rationale: DRY — same logic needed at two call sites; standalone function is testable and clear
+      stakes: low
+  - id: D13
+    scope:
+      - S3
+    question: Should tryCollect() also resolve yield references in givens before calling design.collect()?
+    options:
+      a: Yes — resolve in both tryRun() and tryCollect() for consistency
+      b: No — only resolve in tryRun(); collect() has context.upstream anyway
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: tryCollect() already passes givens and context to design.collect(). If givens contain unresolved $yields.* strings, the collect() implementation would receive raw template strings instead of values. Even though collect() could use context.upstream directly, the givens contract should be consistent between run() and collect() — both should see fully-resolved values.
+      observable: true
+      recommendation: a
+      rationale: Consistent givens contract — engines should see resolved values in both run() and collect()
+      stakes: low
+  - id: D14
+    scope:
+      - S3
+    question: Where in tryRun() should yield resolution happen — before or after marking the engine as running?
+    options:
+      a: Before marking running — resolve immediately after building givens from givensSpec, alongside building the upstream map
+      b: After marking running — resolve just before calling design.run()
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The upstream map is built at line 967 ('const upstream = buildUpstreamMap(rig)') and givens at line 968 ('const givens = { ...pending.givensSpec }'). The natural place to resolve yield refs is right after these lines — the upstream map is available and givens are freshly copied. Resolution is a pure data transform with no side effects, so ordering relative to the 'mark running' step doesn't matter for correctness, but doing it early keeps the resolution grouped with other givens assembly.
+      observable: false
+      recommendation: a
+      rationale: Group yield resolution with other givens assembly; no side effects so order is purely for readability
+      stakes: low
+  - id: D15
+    scope:
+      - S4
+    question: How should the RigTemplateEngine.givens JSDoc describe the timing split?
+    options:
+      a: "Group by resolution time: spawn-time refs ($writ, $vars.*) then run-time refs ($yields.*.*)"
+      b: Single list of all supported refs with a note that $yields.* resolves at run time
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The current JSDoc lists refs as bullet points. Adding a timing distinction for one of three namespaces would overcomplicate the doc. A note suffices.
+      observable: false
+      recommendation: b
+      rationale: Simpler — authors care about what refs are available, not when they resolve internally
+      stakes: low
+  - id: D16
+    scope:
+      - S4
+    question: Should EngineInstance.givensSpec comment change from 'Literal givens values set at spawn time' to something that acknowledges deferred refs?
+    options:
+      a: Yes — update to note that yield references remain as strings until run time
+      b: No — the comment is close enough and implementation detail
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The current comment explicitly says 'Literal givens values set at spawn time.' After this change, givensSpec can contain unresolved $yields.* strings. An implementer reading the comment would be misled.
+      observable: false
+      recommendation: a
+      rationale: Current comment would be factually wrong after this change
+      stakes: low
+  - id: D17
+    scope:
+      - S2
+    question: How should the upstream reachability check be implemented in the validators?
+    options:
+      a: Build a reachability set per engine using DFS/BFS over the template's upstream arrays, then check engine_id membership
+      b: Reuse the cycle detection DFS already in the validator, extending it to also compute reachability
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The cycle detection DFS (lines 271-294 for config, 573-598 for kit) visits all transitive dependencies. However, it's structured around detecting back-edges, not collecting reachable sets. A separate reachability computation is simpler to reason about and doesn't risk breaking the existing cycle detection. The template engine arrays are tiny (5-10 entries typically), so performance is irrelevant.
+      observable: false
+      recommendation: a
+      rationale: Separate reachability pass is simpler and doesn't risk breaking existing cycle detection
+      stakes: low
+  - id: D18
+    scope:
+      - S2
+    question: Should the error message for a yield reference to a non-upstream engine mention reachability explicitly?
+    options:
+      a: Yes — e.g., 'engine "implement" references $yields.seal.sealedCommit but "seal" is not upstream of "implement"'
+      b: Use generic unrecognized-variable message (same as other bad refs)
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: If the engine_id exists in the template but is not upstream, a generic 'unrecognized variable' message would be confusing — the author would wonder why a valid engine id isn't recognized. A specific message pointing out the upstream relationship is much more actionable.
+      observable: true
+      recommendation: a
+      rationale: Specific error message helps authors diagnose the exact problem — engine exists but isn't upstream
+      stakes: low
+  - id: D19
+    scope:
+      - S2
+    question: Should the validator distinguish between 'engine_id not in template' and 'engine_id not reachable upstream' as separate error messages?
+    options:
+      a: Yes — two distinct messages for the two failure modes
+      b: No — single message 'engine_id is not a valid upstream engine'
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: "These are different author mistakes: (1) typo in engine id, (2) referencing an engine that exists but runs after, not before. Different messages help the author fix the right thing."
+      observable: true
+      recommendation: a
+      rationale: Different mistakes deserve different diagnostics — typo vs. wrong dependency direction
+      stakes: low
