@@ -1,0 +1,437 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What are the variants of CheckResult?
+    options:
+      a: "'cleared' | 'pending' | 'failed' | { failed: string } — string literals plus object for reason"
+      b: "{ status: 'cleared' | 'pending' | 'failed', reason?: string } — uniform object shape"
+      c: "boolean | 'failed' | { failed: string } — backward-compatible extension of boolean"
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Brief explicitly specifies this exact type. Option (c) would avoid breaking existing checkers but the brief explicitly calls this a breaking change and says to replace booleans entirely.
+      observable: true
+      recommendation: a
+      rationale: "Brief is explicit — 'cleared' | 'pending' | 'failed' | { failed: string }"
+      stakes: high
+  - id: D2
+    scope:
+      - S1
+    question: Where in types.ts should CheckResult be placed relative to BlockType?
+    options:
+      a: Immediately before the BlockType interface (in the 'Block type' section)
+      b: In a new 'Check result' section above the 'Block type' section
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: CheckResult is exclusively used by BlockType.check. The codebase groups related types together (e.g. BlockRecord is near BlockType, EngineStatus is near EngineInstance).
+      observable: false
+      recommendation: a
+      rationale: Colocate with its sole consumer, matching existing codebase layout conventions
+      stakes: low
+  - id: D3
+    scope:
+      - S1
+    question: Should the JSDoc on BlockType.check describe the return semantics?
+    options:
+      a: Yes — brief description of each variant in the JSDoc
+      b: No — the type is self-documenting, just reference CheckResult
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: Current JSDoc says 'returns true if the blocking condition has cleared.' This needs updating. The codebase uses descriptive JSDoc on public interfaces (see EngineRunResult, CrawlResult docs).
+      observable: false
+      recommendation: a
+      rationale: Matches existing convention — EngineRunResult has per-variant JSDoc
+      stakes: low
+  - id: D4
+    scope:
+      - S2
+    question: How should tryCheckBlocked() discriminate between CheckResult variants?
+    options:
+      a: Match on result === 'cleared', result === 'pending', then treat anything else as failure
+      b: Match on result === 'cleared', result === 'pending', result === 'failed', typeof result === 'object' — exhaustive
+      c: Match on result === 'cleared' for unblock, then check for failure (result === 'failed' or object with 'failed' key), else pending
+    selected: c
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The current code has `if (!cleared)` for pending and falls through to the unblock path. The new code needs three branches: cleared, failed, pending. Option (c) mirrors the existing structure best — check cleared first (happy path), then check failure, else pending. This also makes pending the default for any unexpected value, which is the safest behavior."
+      observable: false
+      recommendation: c
+      rationale: Cleared first, then failure, else pending — matches existing structure and is safest for forward compatibility
+      stakes: low
+  - id: D5
+    scope:
+      - S2
+    question: "What local variable name/type replaces `let cleared: boolean`?"
+    options:
+      a: "let result: CheckResult"
+      b: "let checkResult: CheckResult"
+      c: const result = await blockType.check(...) — inline, no separate declaration
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The current code uses `let cleared: boolean` with a try/catch assignment. The try/catch pattern requires the variable to be declared before the try block. 'result' is the natural name for a return value."
+      observable: false
+      recommendation: a
+      rationale: Simple, readable, and the try/catch pattern requires pre-declaration
+      stakes: low
+  - id: D6
+    scope:
+      - S2
+    question: What error message should Spider construct for the 'failed' (no reason) variant?
+    options:
+      a: Block "${blockType}" failed permanently
+      b: Block checker "${blockType}" signaled permanent failure
+      c: 'Engine blocked on "${blockType}": permanent failure'
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: 'Brief explicitly specifies the format: Block "${blockType}" failed permanently'
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit
+      stakes: low
+  - id: D7
+    scope:
+      - S2
+    question: "What error message should Spider construct for the { failed: reason } variant?"
+    options:
+      a: 'Block "${blockType}" failed: ${reason}'
+      b: 'Block "${blockType}" failed permanently: ${reason}'
+      c: 'Block checker "${blockType}": ${reason}'
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: 'Brief explicitly specifies: Block "${blockType}" failed: ${reason}'
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit
+      stakes: low
+  - id: D8
+    scope:
+      - S2
+    question: In the error message template, what value is interpolated for blockType — the block type id string from engine.block.type, or the BlockType object?
+    options:
+      a: engine.block.type (the string id, e.g. 'writ-status')
+      b: blockType.id (the BlockType object's id field)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Both are the same value (engine.block.type matched the registry key which is blockType.id). Using engine.block.type is consistent with the existing console.warn message in the catch block which uses engine.block.type.
+      observable: false
+      recommendation: a
+      rationale: Consistent with existing error message at same location; both values are identical
+      stakes: low
+  - id: D9
+    scope:
+      - S2
+    question: Should the failure path update lastCheckedAt before calling failEngine?
+    options:
+      a: No — failEngine overwrites the engines array entirely; lastCheckedAt is moot on a failed engine
+      b: Yes — for observability, record when the fatal check occurred
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: failEngine() replaces the engine with a failed status and clears block on cancelled engines. The block record is discarded. Updating lastCheckedAt would be immediately overwritten. The existing failure paths (session failure, serialization failure) don't update any intermediate state before calling failEngine.
+      observable: false
+      recommendation: a
+      rationale: failEngine overwrites engine state; intermediate updates are discarded. Matches existing patterns.
+      stakes: low
+  - id: D10
+    scope:
+      - S2
+    question: Should the failure path store the block record in pendingPriorBlocks before failing?
+    options:
+      a: No — the engine is failed, it will never re-run; priorBlock is meaningless
+      b: Yes — for symmetry with the cleared path
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: pendingPriorBlocks is read only in tryRun() when building EngineRunContext for a pending engine. A failed engine will never reach tryRun(). Storing the block would be dead data.
+      observable: false
+      recommendation: a
+      rationale: Failed engine never re-runs — priorBlock would be dead data
+      stakes: low
+  - id: D11
+    scope:
+      - S2
+    question: Should the failure path return immediately (like the cleared path) or continue checking other engines?
+    options:
+      a: Return immediately with rig-completed/failed — consistent with all other failEngine call sites
+      b: Continue to check remaining blocked engines before returning
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: All three existing failEngine call sites return immediately. failEngine sets the rig to failed and cancels all other engines. Continuing to check engines that are already cancelled would be nonsensical.
+      observable: true
+      recommendation: a
+      rationale: failEngine cancels all other engines; there's nothing left to check. Matches all existing patterns.
+      stakes: high
+  - id: D12
+    scope:
+      - S3
+    question: For scheduled-time and book-updated, is the conversion purely mechanical (true→'cleared', false→'pending')?
+    options:
+      a: Yes — pure mechanical replacement, no new logic
+      b: No — add failure cases for edge conditions
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: "Brief explicitly says: scheduled-time 'No failure case — time always arrives.' book-updated 'No obvious permanent failure case.'"
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit that these two have no failure cases
+      stakes: low
+  - id: D13
+    scope:
+      - S3
+    question: Should the return type annotation on check() methods change from Promise<boolean> to Promise<CheckResult>?
+    options:
+      a: Yes — update the explicit return type annotation to Promise<CheckResult>
+      b: No — remove explicit annotation and let TypeScript infer from the BlockType interface
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "All three built-in checkers currently have explicit `async check(condition: unknown): Promise<boolean>`. The codebase convention is to annotate return types on interface implementations. This also catches implementation bugs at the definition site."
+      observable: false
+      recommendation: a
+      rationale: Matches existing convention and catches bugs at definition site
+      stakes: low
+  - id: D14
+    scope:
+      - S4
+    question: What constitutes a 'terminal status' for a writ in the writ-status checker?
+    options:
+      a: "Hardcode the set: 'completed', 'failed', 'cancelled' — matching Clerk's TERMINAL_STATUSES"
+      b: Import WritStatus type from clerk and define terminal set locally
+      c: Import TERMINAL_STATUSES from clerk (would require clerk to export it)
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: medium
+      context: Clerk defines `const TERMINAL_STATUSES = new Set<WritStatus>(['completed', 'failed', 'cancelled'])` but does NOT export it. The spider already depends on @shardworks/clerk-apparatus and imports WritDoc. Exporting TERMINAL_STATUSES would require changing the clerk package — out of scope. The terminal set is stable (writ lifecycle is foundational) and the checker already hardcodes the import of WritDoc.
+      observable: true
+      recommendation: a
+      rationale: TERMINAL_STATUSES is not exported from clerk; hardcoding matches the existing pattern where writ-status already knows about writ semantics
+      stakes: low
+  - id: D15
+    scope:
+      - S4
+    question: What error message format for 'writ not found'?
+    options:
+      a: "{ failed: 'Writ not found' }"
+      b: '{ failed: `Writ "${writId}" not found` } — include the writ id'
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: "Brief specifies the exact string: 'Writ not found'. The Spider's error message template will prepend the block type name, so the full engine error will be: Block \"writ-status\" failed: Writ not found. The writId is already in the block condition payload which is on the persisted BlockRecord."
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit — 'Writ not found'
+      stakes: low
+  - id: D16
+    scope:
+      - S4
+    question: What error message format for 'terminal status mismatch'?
+    options:
+      a: '{ failed: `Writ reached terminal status "${actual}" instead of "${target}"` }'
+      b: '{ failed: `Writ status is "${actual}", will never reach "${target}"` }'
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: 'Brief specifies the exact template: Writ reached terminal status "${actual}" instead of "${target}"'
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit
+      stakes: low
+  - id: D17
+    scope:
+      - S4
+    question: Should the terminal-status check fire when the writ IS at a terminal status that IS the target?
+    options:
+      a: No — if writ.status === targetStatus, return 'cleared' regardless of whether it's terminal
+      b: Yes — check terminal first, then match
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The purpose of the writ-status block type is to wait until a writ reaches a target status. If the target is 'completed' and the writ is 'completed', that's a cleared condition — not a failure. The terminal-mismatch check only applies when the writ is terminal AND not at the target.
+      observable: true
+      recommendation: a
+      rationale: Target match is the success condition; terminal-mismatch is specifically for wrong terminal states
+      stakes: high
+  - id: D18
+    scope:
+      - S4
+    question: What order should the checks be in the writ-status checker?
+    options:
+      a: Not found → target match (cleared) → terminal mismatch (failed) → pending
+      b: Not found → terminal mismatch (failed) → target match (cleared) → pending
+      c: Target match (cleared) → not found (failed) → terminal mismatch (failed) → pending
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "Option (a) is the natural flow: bail early on not-found, then check for success, then check for terminal failure, else pending. Since target match is checked before terminal mismatch, a writ at target status (even terminal) correctly returns 'cleared' per D17."
+      observable: false
+      recommendation: a
+      rationale: Natural early-return flow; checking target before terminal ensures D17 correctness
+      stakes: low
+  - id: D19
+    scope:
+      - S5
+    question: Where should CheckResult appear in the index.ts export list?
+    options:
+      a: Alphabetically among the existing type exports
+      b: Adjacent to BlockType (since CheckResult is used by BlockType)
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The current export list groups related types together (EngineStatus near EngineInstance, etc.) rather than strictly alphabetical. BlockType is currently last among the type exports before yield types.
+      observable: false
+      recommendation: b
+      rationale: Matches existing grouping convention
+      stakes: low
+  - id: D20
+    scope:
+      - S6
+    question: How should existing mock block types in tests be updated?
+    options:
+      a: Replace `return true` with `return 'cleared'` and `return false` with `return 'pending'` — mechanical
+      b: Replace with CheckResult-typed variables for test flexibility
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The existing tests use inline boolean returns. A direct substitution is simplest and preserves test readability. Some tests use mutable `let checkerResult = false` — these become `let checkerResult: CheckResult = 'pending'`."
+      observable: false
+      recommendation: a
+      rationale: Mechanical replacement preserves test clarity and minimizes churn
+      stakes: low
+  - id: D21
+    scope:
+      - S6
+    question: How should the existing 'checker returns false when writ does not exist' test be updated?
+    options:
+      a: "Change expectation from false to assert.deepEqual(result, { failed: 'Writ not found' })"
+      b: Replace with a new test; delete the old one
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The test's intent remains valid — it tests the 'writ does not exist' case. Only the expectation changes. Using deepEqual for the object variant is the correct assertion (assert.equal checks reference equality and would fail for objects).
+      observable: false
+      recommendation: a
+      rationale: Same test intent, just update the expected value. deepEqual needed for object comparison.
+      stakes: low
+  - id: D22
+    scope:
+      - S6
+    question: What new test cases are needed for the failure signal path?
+    options:
+      a: "Minimal: one test for 'failed' string, one test for { failed: reason } object, one integration test showing rig reaches failed state"
+      b: "Comprehensive: (a) plus writ-status specific failure cases (not found, terminal mismatch), checker failure with multiple blocked engines, checker failure on a rig that was 'running' vs 'blocked'"
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The existing blocking test suite is comprehensive (~40 tests). The failure path introduces meaningfully new behavior. The writ-status failure cases are the most complex logic being added and need their own coverage. Multiple-engine scenarios matter because failEngine cancels sibling engines.
+      observable: false
+      recommendation: b
+      rationale: New failure path has enough edge cases to warrant comprehensive coverage matching existing test thoroughness
+      stakes: low
+  - id: D23
+    scope:
+      - S6
+    question: Should existing built-in block type tests that check for boolean returns be updated to use string comparison or deepEqual?
+    options:
+      a: assert.equal(result, 'cleared') and assert.equal(result, 'pending') — string comparison via assert.equal
+      b: assert.strictEqual for all string returns, assert.deepEqual for object returns
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "assert.equal in Node's strict assertion module IS strict equality (===). String literal comparison works with ===. Object returns ({ failed: reason }) need assert.deepEqual. The existing tests already use assert.equal throughout."
+      observable: false
+      recommendation: a
+      rationale: "assert.equal handles string literals correctly; use assert.deepEqual only for { failed: string } objects"
+      stakes: low
+  - id: D24
+    scope:
+      - S2
+    question: "How should tryCheckBlocked() detect the { failed: string } variant vs the 'failed' string?"
+    options:
+      a: typeof result === 'object' && result !== null && 'failed' in result
+      b: typeof result === 'object' && result !== null && typeof (result as any).failed === 'string'
+      c: "Combined: result === 'failed' || (typeof result === 'object' && result !== null && 'failed' in result) — then extract message accordingly"
+    selected: c
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The function needs to handle both failure variants to construct the right error message. A combined check is cleanest: first check cleared, then check failure (both variants), then default to pending. Extract the message with a ternary based on which variant matched."
+      observable: false
+      recommendation: c
+      rationale: Single failure branch with message extraction is cleaner than two separate failure branches
+      stakes: low
+  - id: D25
+    scope:
+      - S2
+    question: Should the checker throwing still be treated as 'engine stays blocked, retry next cycle' or should it now be treated as a failure?
+    options:
+      a: Keep current behavior — throw means transient error, engine stays blocked, retry next cycle
+      b: Change to treat throw as permanent failure
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: Brief does not mention changing throw behavior. The current behavior (console.warn + continue) is explicitly intentional for transient errors (network failures, etc). The new CheckResult gives checkers an explicit way to signal permanent failure — they should return 'failed' instead of throwing. Throws remain for unexpected/transient errors.
+      observable: true
+      recommendation: a
+      rationale: Brief doesn't change throw semantics; throws represent transient errors, 'failed' represents permanent — different signals
+      stakes: high

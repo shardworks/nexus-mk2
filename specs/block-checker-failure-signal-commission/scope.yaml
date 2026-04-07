@@ -1,0 +1,34 @@
+brief: |
+  The `BlockType.check()` interface returns `Promise<boolean>` — it can signal "cleared" or "not yet cleared," but it cannot signal "this will never clear; fail the engine." When a blocking condition becomes permanently unresolvable (patron rejects an input request, a dependency writ is cancelled, an external resource is deleted or fails), the only recourse is manual intervention via `rig-resume`, followed by the engine having to detect and handle the failure itself on re-run. The checker is the component with the knowledge that the condition is unrecoverable. It should be able to say so. A block type checker can signal permanent failure, causing the Spider to fail the blocked engine (and propagate rig failure) without requiring manual intervention or engine-side workarounds.
+slug: block-checker-failure-signal-commission
+
+scope:
+  - id: S1
+    description: "Replace BlockType.check() return type from Promise<boolean> to Promise<CheckResult> with 'cleared', 'pending', 'failed', and { failed: string } variants"
+    rationale: "Core type change stated explicitly in the brief — the foundation everything else builds on"
+    included: true
+
+  - id: S2
+    description: "Spider tryCheckBlocked() handles the new 'failed' / { failed: string } result by calling failEngine() and returning rig-completed/failed"
+    rationale: "Brief specifies the exact Spider handling: failEngine + rig-completed/failed CrawlResult"
+    included: true
+
+  - id: S3
+    description: "Update all three built-in block type checkers (writ-status, scheduled-time, book-updated) from boolean returns to CheckResult string literals"
+    rationale: "Breaking change to the interface requires updating all existing implementors"
+    included: true
+
+  - id: S4
+    description: "Add failure detection to writ-status checker: fail when writ not found, fail when writ reaches a terminal status that isn't the target"
+    rationale: "Brief explicitly lists these two new failure cases for writ-status"
+    included: true
+
+  - id: S5
+    description: "Export the new CheckResult type from the spider-apparatus package public API"
+    rationale: "Kit authors implementing custom block types need this type; implied by the interface being public"
+    included: true
+
+  - id: S6
+    description: "Update existing tests and add new tests for the failure signal path"
+    rationale: "All existing mock block types in tests return booleans and must be updated; new failure path needs coverage"
+    included: true
