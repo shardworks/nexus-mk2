@@ -1,0 +1,73 @@
+brief: |
+  Six apparatuses independently implement a scan+subscribe pattern to discover contributions from other plugins.
+  This pattern is fragile — g.apparatuses() returns unstarted apparatuses, causing double-registration.
+  Visible symptom: duplicate pages in the Oculus nav bar.
+  Solution: introduce a Wire phase that collects all kit contributions before any start(), expose via ctx.kits(type),
+  rename plugin:initialized to apparatus:started, add phase:started event, and fix g.apparatuses() to return only started.
+slug: fix-startup-lifecycle-phases-and
+
+scope:
+  - id: S1
+    description: "Wire phase — Arbor collects all kit and supportKit contributions into a flat KitEntry[] before any apparatus start()"
+    rationale: "R1, R3 — the core mechanism that replaces fragile scan+subscribe. All downstream consumer changes depend on this."
+    included: true
+
+  - id: S2
+    description: "StartupContext.kits(type) — expose collected KitEntry records, queryable by contribution type, on the context passed to start()"
+    rationale: "R2 — the consumer-facing API that replaces g.kits()/g.apparatuses()/plugin:initialized scanning."
+    included: true
+
+  - id: S3
+    description: "g.apparatuses() returns only started apparatuses — tracks startup progress and returns a growing list as each apparatus completes start()"
+    rationale: "R4 — fixes the root cause of double-registration. Currently returns all ordered apparatuses regardless of start status."
+    included: true
+
+  - id: S4
+    description: "Rename plugin:initialized event to apparatus:started — fire both names during deprecation period with a warning on the old name"
+    rationale: "R5 — narrows the event's purpose to apparatus-to-apparatus coordination, no longer used for contribution discovery."
+    included: true
+
+  - id: S5
+    description: "Add phase:started event — fires once after all apparatus start() calls complete"
+    rationale: "R6 — provides a clean hook for post-startup work when the guild is fully operational."
+    included: true
+
+  - id: S6
+    description: "Oculus consumer refactoring — replace scan+subscribe with ctx.kits('pages') and ctx.kits('routes')"
+    rationale: "R7 — the apparatus with the visible double-registration bug (duplicate nav bar entries)."
+    included: true
+
+  - id: S7
+    description: "Instrumentarium consumer refactoring — replace scan+subscribe with ctx.kits('tools')"
+    rationale: "R8 — simplifies tool registration; currently correct by accident but fragile."
+    included: true
+
+  - id: S8
+    description: "Fabricator consumer refactoring — replace scan+subscribe with ctx.kits('engines')"
+    rationale: "R9 — same fragile pattern as Instrumentarium, simplify to one query."
+    included: true
+
+  - id: S9
+    description: "Loom consumer refactoring — replace scan+subscribe with ctx.kits('roles')"
+    rationale: "R10 — has the g.apparatuses() bug (latent, not manifesting). Loom's dependency-scoped permission validation needs special handling."
+    included: true
+
+  - id: S10
+    description: "Spider consumer refactoring — replace scan+subscribe with ctx.kits('engines'), ctx.kits('rigTemplates'), ctx.kits('blockTypes')"
+    rationale: "R11 — most complex consumer, three contribution types, plus buildDesignSourceMap needs rework."
+    included: true
+
+  - id: S11
+    description: "Clerk consumer refactoring — replace scan+subscribe with ctx.kits('writTypes')"
+    rationale: "R12 — has the g.apparatuses() bug (latent, not manifesting)."
+    included: true
+
+  - id: S12
+    description: "Stacks adaptation — update schema reconciliation to work with the new g.apparatuses() behavior"
+    rationale: "Implied by R4. Stacks calls g.apparatuses() during start() to discover all book contributions. With R4, this returns only started apparatuses (none at Stacks start time), breaking book schema creation."
+    included: true
+
+  - id: S13
+    description: "Tests — all existing tests pass, new tests for Wire phase, ctx.kits(), g.apparatuses() fix, event renaming, no-double-registration"
+    rationale: "R13, R14 — verification that the refactoring is correct."
+    included: true

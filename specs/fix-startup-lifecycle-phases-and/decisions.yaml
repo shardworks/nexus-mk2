@@ -1,0 +1,653 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: Where does the KitEntry interface live?
+    options:
+      a: packages/framework/core/src/plugin.ts — alongside Kit, Apparatus, StartupContext
+      b: New file packages/framework/core/src/kit-entry.ts
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: All plugin-system types (Kit, Apparatus, LoadedKit, LoadedApparatus, StartupContext) live in plugin.ts. KitEntry is the same category.
+      observable: true
+      recommendation: a
+      rationale: Consistent with existing type colocation pattern.
+      stakes: low
+  - id: D2
+    scope:
+      - S1
+    question: Which kit fields are excluded from KitEntry collection during Wire?
+    options:
+      a: "Skip only framework fields: requires, recommends"
+      b: Skip framework fields plus books
+      c: Skip framework fields plus consumes
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - implementer
+      confidence: medium
+      context: Kit is an open record where requires/recommends are framework fields and everything else is a contribution. The brief says 'Books excluded from KitEntry collection' but S12 needs Stacks to use ctx.kits('books') since g.apparatuses() will no longer return unstarted apparatuses. Including books in KitEntry is the simplest path to fix Stacks. The consumes field on Apparatus (not Kit) is separate — supportKit itself doesn't have consumes.
+      observable: true
+      recommendation: a
+      rationale: Only requires and recommends are framework-level Kit fields. All contribution types including books should be collected — Stacks needs ctx.kits('books') after the g.apparatuses() fix.
+      stakes: high
+  - id: D3
+    scope:
+      - S1
+    question: Where does the wireKitEntries function live?
+    options:
+      a: guild-lifecycle.ts as a pure function
+      b: arbor.ts inline in createGuild
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: guild-lifecycle.ts contains all pure logic (validation, ordering, warnings). Wire is pure logic — no I/O, just iterating data structures. arbor.ts handles I/O and orchestration.
+      observable: false
+      recommendation: a
+      rationale: "Follows the existing split: pure logic in guild-lifecycle.ts, I/O in arbor.ts."
+      stakes: low
+  - id: D4
+    scope:
+      - S1
+    question: What is the Wire phase iteration order?
+    options:
+      a: Standalone kits first, then ordered apparatuses (matches brief's pseudocode)
+      b: All plugins in guild.json declaration order
+      c: Ordered apparatuses first, then kits
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The brief's pseudocode shows [...kits, ...orderedApparatuses]. Kits first gives them nominal priority in any first-wins semantics (e.g. tool name conflicts). This also matches the existing pattern where kits are scanned before apparatuses.
+      observable: true
+      recommendation: a
+      rationale: Matches brief pseudocode exactly and preserves existing precedence semantics.
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: When in the createGuild flow does the Wire phase execute?
+    options:
+      a: After validation + startup warnings, before guild singleton is set
+      b: After validation + startup warnings, after guild singleton is set, before any apparatus start()
+      c: After topo sort, before validation
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Wire reads static plugin data (kit objects, supportKit objects) — no I/O needed. Must happen before any start() so ctx.kits() is available. The guild singleton is set before start() in current code (line 180). Wire should happen after the singleton is set to keep the existing order (guild is available by the time start runs). Wire doesn't need guild() itself — it operates on the LoadedKit/LoadedApparatus arrays directly.
+      observable: false
+      recommendation: b
+      rationale: Keep guild singleton set timing unchanged. Wire operates on in-memory arrays and doesn't need the singleton, but inserting it after setGuild preserves the existing invariant that guild() is available from start() onward.
+      stakes: low
+  - id: D6
+    scope:
+      - S1
+    question: Does the Wire phase fire plugin:initialized for kits (matching current behavior)?
+    options:
+      a: Yes — preserve the existing behavior of firing plugin:initialized for kits before any start
+      b: No — stop firing for kits since no consumer uses it (kit events are dead code today)
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: Currently arbor.ts fires plugin:initialized for each kit before any apparatus starts. But no apparatus handler can receive these events because no handler has been registered yet (handlers are registered during start()). The kit firings are dead code. With the Wire phase, contribution discovery is decoupled from events entirely. The renamed apparatus:started event should only fire for apparatuses.
+      observable: true
+      recommendation: b
+      rationale: Dead code removal. No handler can ever receive kit events because kit events fire before any start() registers handlers.
+      stakes: low
+  - id: D7
+    scope:
+      - S2
+    question: Does ctx.kits(type) return a copy or a reference to the internal array?
+    options:
+      a: Filtered copy (new array each call) — matches g.kits()/g.apparatuses() snapshot pattern
+      b: Reference to internal filtered array — callers must not mutate
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: g.kits() and g.apparatuses() both return spread copies ([...array]) to prevent external mutation. ctx.kits(type) should follow the same defensive pattern.
+      observable: true
+      recommendation: a
+      rationale: Consistent with existing snapshot-copy pattern throughout the Guild API.
+      stakes: low
+  - id: D8
+    scope:
+      - S2
+    question: How is ctx.kits(type) implemented — pre-indexed Map or on-demand filter?
+    options:
+      a: Pre-build a Map<string, KitEntry[]> during Wire, ctx.kits(type) reads from Map
+      b: Store flat KitEntry[], ctx.kits(type) filters on each call
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: ctx.kits() may be called multiple times by a single apparatus (Spider calls it for 3 types). Pre-indexing avoids redundant filtering. The number of KitEntry records is small (dozens at most) so performance is irrelevant, but the Map approach is also cleaner code.
+      observable: false
+      recommendation: a
+      rationale: Cleaner code, avoids repeated filtering, trivial to implement.
+      stakes: low
+  - id: D9
+    scope:
+      - S2
+    question: What does ctx.kits(type) return for an unknown type?
+    options:
+      a: Empty array []
+      b: Throw an error
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Querying for a contribution type that no plugin provides is a normal condition, not an error. A kit may contribute a novel type with no consumer installed. Returning [] is idiomatic — callers iterate the result, and an empty iteration is a no-op.
+      observable: true
+      recommendation: a
+      rationale: Consistent with how g.kits() returns [] when no kits are installed. Empty result, not error.
+      stakes: low
+  - id: D10
+    scope:
+      - S3
+    question: How is the started-apparatus tracking implemented?
+    options:
+      a: Mutable startedApparatuses array in createGuild, pushed to after each start(). g.apparatuses() returns spread copy of it.
+      b: Keep orderedApparatuses but add a startedSet and filter on each apparatuses() call.
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The provides Map is already populated progressively during the start loop. A parallel startedApparatuses array follows the same pattern. Option (a) avoids filtering on every call and is simpler to reason about.
+      observable: false
+      recommendation: a
+      rationale: Matches the existing progressive-population pattern (provides Map) and avoids per-call filtering.
+      stakes: low
+  - id: D11
+    scope:
+      - S3
+    question: When is an apparatus added to the started list — before or after its plugin:initialized/apparatus:started event fires?
+    options:
+      a: After start() returns, before the event fires — event handlers see the apparatus in g.apparatuses()
+      b: After start() returns and after the event fires
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "An apparatus:started event handler may call g.apparatuses() and reasonably expect to see the just-started apparatus. Adding to the list before firing the event makes the started apparatus visible to event handlers, which is consistent with the semantics: the apparatus has started."
+      observable: true
+      recommendation: a
+      rationale: Event name is apparatus:started — the apparatus should be visible in g.apparatuses() by the time handlers run.
+      stakes: low
+  - id: D12
+    scope:
+      - S4
+    question: How is the deprecation warning triggered?
+    options:
+      a: Warn once when ctx.on('plugin:initialized', ...) is called — at registration time
+      b: Warn once when the old event is fired and handlers exist
+      c: Warn every time the old event fires
+    selected: custom
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: "Registration-time warning gives the clearest signal: the warning appears during the subscribing apparatus's start(), so the operator can identify which apparatus needs updating. Firing-time warnings would repeat per-apparatus and be harder to attribute."
+      observable: true
+      recommendation: a
+      rationale: Warning at registration time is attributable to the subscribing apparatus. One warning per registration, not per fire.
+      stakes: low
+    patron_override: Do not have a deprecation period -- just remove plugin:initialized outright, and update consumers as needed
+  - id: D13
+    scope:
+      - S4
+    question: Does apparatus:started fire for the same apparatus that is currently starting, or only for other apparatuses?
+    options:
+      a: Fires for ALL apparatuses — including those that started before the subscribing apparatus registered its handler (same as current plugin:initialized behavior)
+      b: Fires only for apparatuses that start AFTER the subscribing apparatus
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Events are fire-and-forget — handlers registered after the event has already fired don't receive it. This is how plugin:initialized works today and is the standard pattern for the EventHandlerMap. Changing to retroactive delivery would be a fundamentally different event model. With ctx.kits(type) handling contribution discovery, apparatus:started is only for coordination with apparatuses that start after you — and that's what event subscription naturally provides.
+      observable: true
+      recommendation: b
+      rationale: Current behavior — events don't fire retroactively. Contribution discovery is now handled by ctx.kits(), so apparatus:started is purely for forward coordination.
+      stakes: low
+  - id: D14
+    scope:
+      - S4
+    question: What argument is passed to apparatus:started handlers?
+    options:
+      a: The LoadedApparatus object (same as current plugin:initialized)
+      b: Just the apparatus id string
+      c: A new typed object { id, packageName, version }
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Current plugin:initialized passes the full LoadedApparatus or LoadedKit. Since apparatus:started only fires for apparatuses, it will always be LoadedApparatus. Keeping the same argument type maintains backward compatibility during deprecation — handlers that work with plugin:initialized will work with apparatus:started.
+      observable: true
+      recommendation: a
+      rationale: Backward compatible with existing plugin:initialized handlers during deprecation.
+      stakes: low
+  - id: D15
+    scope:
+      - S4
+    question: During the deprecation period, in what order are the two event names fired?
+    options:
+      a: apparatus:started first, then plugin:initialized
+      b: plugin:initialized first, then apparatus:started
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: New code should use the new name; old code uses the old name. Firing the new name first means new handlers run before deprecated handlers. Either order works — the handlers for each event are independent sets — but new-first is a convention that lets new code take precedence if there are any interaction effects.
+      observable: false
+      recommendation: a
+      rationale: New name fires first as a convention — forward-looking handlers take precedence.
+      stakes: low
+  - id: D16
+    scope:
+      - S5
+    question: When exactly does phase:started fire?
+    options:
+      a: After the last apparatus start() and its apparatus:started event complete
+      b: After the last apparatus start() but before its apparatus:started event
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: phase:started means 'all startup is done, guild is fully operational.' This includes all apparatus:started event processing completing. Otherwise a phase:started handler could race with apparatus:started handlers.
+      observable: true
+      recommendation: a
+      rationale: phase:started should mean everything is done — including all per-apparatus event processing.
+      stakes: low
+  - id: D17
+    scope:
+      - S5
+    question: What argument is passed to phase:started handlers?
+    options:
+      a: No arguments
+      b: The Guild instance
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: phase:started handlers already have access to guild() — it's set before any start(). There's no meaningful per-invocation data to pass. Keeping arguments empty is cleaner.
+      observable: true
+      recommendation: a
+      rationale: guild() is already available. No per-invocation data to pass.
+      stakes: low
+  - id: D18
+    scope:
+      - S6
+    question: Does the Oculus still subscribe to apparatus:started for tool route registration after the refactoring?
+    options:
+      a: No — tool routes are registered from ctx.kits('tools') like pages/routes, all at start() time
+      b: Yes — keep apparatus:started subscription to pick up tools registered by apparatuses that start after Oculus
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Currently the Oculus subscribes to plugin:initialized to pick up new tools from late-starting apparatuses. With ctx.kits('tools'), ALL tool contributions are available at Oculus start time — no need for event-driven tool route registration. The Instrumentarium's list() also queries the full registry which will be populated from ctx.kits('tools') before Oculus starts (Oculus requires tools).
+      observable: false
+      recommendation: a
+      rationale: ctx.kits('tools') provides all tool contributions. The Instrumentarium registry is fully populated before Oculus start() since Oculus requires ['tools'].
+      stakes: low
+  - id: D19
+    scope:
+      - S6
+    question: Can the Oculus remove scanKit/scanApparatus helper functions entirely?
+    options:
+      a: Yes — replace both with inline ctx.kits('pages')/ctx.kits('routes') iteration
+      b: No — keep a registerFromEntry helper for readability
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: scanKit and scanApparatus exist to handle the kit/supportKit duality — one extracts from kit.kit, the other from apparatus.supportKit. With KitEntry, the duality is gone. The registration logic (registerPage, registerCustomRoute) remains, but the scan wrapper functions become unnecessary.
+      observable: false
+      recommendation: a
+      rationale: The scan functions exist solely to handle kit vs supportKit duality, which KitEntry eliminates.
+      stakes: low
+  - id: D20
+    scope:
+      - S7
+    question: Does the Instrumentarium still need explicit self-registration of its own supportKit tools (tools-list, tools-show)?
+    options:
+      a: No — Wire phase collects Instrumentarium's own supportKit tools into KitEntry, so ctx.kits('tools') includes them
+      b: Yes — keep self-registration to ensure tools-list and tools-show are always available
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "Currently Instrumentarium explicitly registers its own supportKit tools (lines 339-341) because the scan path doesn't include self-discovery. With Wire, all supportKit contributions are collected — including the Instrumentarium's own. Its supportKit: { tools: [toolsList, toolsShow] } becomes a KitEntry with type='tools'. When start() iterates ctx.kits('tools'), it will find its own tools alongside all others."
+      observable: false
+      recommendation: a
+      rationale: Wire collects all supportKit contributions including the Instrumentarium's own. Self-registration becomes redundant.
+      stakes: low
+  - id: D21
+    scope:
+      - S7
+    question: How does the Instrumentarium adapt its ToolRegistry.register(plugin) method to work with KitEntry?
+    options:
+      a: Replace register(plugin) calls with a new registerFromEntry(entry) that takes a KitEntry directly
+      b: Keep register(plugin) and adapt its callers to construct a synthetic LoadedPlugin from KitEntry
+      c: Inline the registration logic — iterate ctx.kits('tools') entries and call registerToolsFromKit directly
+    selected: c
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The existing register(plugin) extracts tools from kit or supportKit, then calls registerToolsFromKit(pluginId, packageName, kitBag). With KitEntry, the extraction is already done — entry.value is the tools array, entry.pluginId is the plugin id, entry.packageName is the package name. The cleanest approach is to iterate entries and register tools directly.
+      observable: false
+      recommendation: c
+      rationale: KitEntry already provides the extracted values. No need for the LoadedPlugin→kit extraction layer.
+      stakes: low
+  - id: D22
+    scope:
+      - S8
+    question: How does the Fabricator adapt its EngineRegistry.register(plugin) method?
+    options:
+      a: Replace with iteration over ctx.kits('engines') entries, calling registerFromKit(entry.value, entry.pluginId) directly
+      b: Keep register(plugin) for backward compatibility
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Same pattern as Instrumentarium. The duality-handling register(plugin) method becomes unnecessary when KitEntry provides the extracted value directly. The Fabricator's registerFromKit(kit, pluginId) already takes the kit bag and pluginId — it can be adapted to take entry.value and entry.pluginId.
+      observable: false
+      recommendation: a
+      rationale: Same simplification as D21. KitEntry eliminates the kit/supportKit extraction layer.
+      stakes: low
+  - id: D23
+    scope:
+      - S9
+    question: How does the Loom get the kit's requires/recommends fields for dependency-scoped permission validation when using KitEntry?
+    options:
+      a: Look up the standalone kit from g.kits() by pluginId; for supportKit entries (not found in g.kits()), default to pluginId as the sole allowed plugin
+      b: Extend KitEntry with optional requires/recommends fields populated from the parent kit
+      c: Drop dependency-scoped permission validation
+    selected: custom
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: "Loom's registerKitRoles computes allowedPlugins from kit.requires + kit.recommends. This data is on the parent Kit, not on individual KitEntry records. For standalone kits, g.kits() provides the full Kit record. For apparatus supportKits, none currently have requires/recommends fields — they're apparatus-level concerns. Falling back to [pluginId] for supportKit entries is safe and correct: a supportKit can only reference its own apparatus's permissions."
+      observable: false
+      recommendation: a
+      rationale: g.kits() provides full Kit for standalone kits. No apparatus supportKit has requires/recommends — fallback to [pluginId] is always correct in practice.
+      stakes: low
+    patron_override: determine the requires/recommends for the parent apparatus plugin, and use that
+  - id: D24
+    scope:
+      - S9
+    question: How does Loom's registerKitRoles signature change?
+    options:
+      a: Keep (pluginId, packageName, kit, home) — reconstruct the kit bag from KitEntry.value plus g.kits() lookup
+      b: "Change to (entry: KitEntry, home: string) — pass the whole entry and have registerKitRoles extract what it needs"
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: "registerKitRoles currently receives the full kit bag (to access roles, requires, recommends). With KitEntry, entry.value is just the roles contribution. The function needs to be adapted: it receives entry.value (the roles object), entry.pluginId, entry.packageName, and looks up requires/recommends separately."
+      observable: false
+      recommendation: b
+      rationale: Passing KitEntry aligns with the new pattern. The function extracts pluginId/packageName from entry and looks up kit metadata separately.
+      stakes: low
+  - id: D25
+    scope:
+      - S10
+    question: How does Spider's buildDesignSourceMap adapt to ctx.kits?
+    options:
+      a: Change buildDesignSourceMap to accept KitEntry[] (from ctx.kits('engines')) instead of LoadedKit[] + LoadedApparatus[]
+      b: Remove buildDesignSourceMap and build the map inline from ctx.kits('engines')
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: buildDesignSourceMap iterates kits and apparatuses to extract engine designIds and map them to pluginIds. With ctx.kits('engines'), each KitEntry has pluginId and value (the engines object). The method can be simplified to iterate KitEntry[] instead of two separate lists.
+      observable: false
+      recommendation: a
+      rationale: Preserves the method's purpose (building the map) while simplifying its input from two lists to one typed list.
+      stakes: low
+  - id: D26
+    scope:
+      - S10
+    question: Does Spider's blockTypeRegistry.register still need the LoadedPlugin parameter type?
+    options:
+      a: Yes — keep register(plugin) and wrap KitEntry data into it
+      b: No — change to accept KitEntry directly, extract blockTypes from entry.value
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Same pattern as other consumer refactorings. The register(LoadedPlugin) method handles kit/supportKit duality. With KitEntry, entry.value IS the blockTypes value directly. The method should accept entry.value and entry.pluginId.
+      observable: false
+      recommendation: b
+      rationale: Consistent with the elimination of kit/supportKit duality across all consumers.
+      stakes: low
+  - id: D27
+    scope:
+      - S10
+    question: Spider currently subscribes to plugin:initialized for late-arriving apparatuses to register blockTypes and rigTemplates incrementally. Should any apparatus:started subscription remain?
+    options:
+      a: No — ctx.kits() provides all contributions. Remove the subscription entirely.
+      b: Yes — keep apparatus:started for the validateIncrementalMappings call
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The current subscription handles late-arriving apparatus supportKit contributions (blockTypes and rigTemplates). With ctx.kits(), all contributions are available at start() time. Template validation (validateDeferredMappings) runs once after all contributions are loaded — the incremental validation path (validateIncrementalMappings) becomes unnecessary because there are no late arrivals.
+      observable: false
+      recommendation: a
+      rationale: All contributions are available at start() time via ctx.kits(). No late arrivals means no need for incremental registration or validation.
+      stakes: low
+  - id: D28
+    scope:
+      - S11
+    question: How does Clerk's registerKitWritTypes adapt?
+    options:
+      a: Change to accept KitEntry — extract writTypes array from entry.value, pluginId from entry.pluginId
+      b: Keep (pluginId, kit) signature and pass entry.value as the kit parameter
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: registerKitWritTypes(pluginId, kit) extracts kit.writTypes. With KitEntry, entry.value IS the writTypes array. The function simplifies to registerWritTypesFromEntry(entry).
+      observable: false
+      recommendation: a
+      rationale: Consistent with all other consumer adaptations.
+      stakes: low
+  - id: D29
+    scope:
+      - S12
+    question: How does Stacks discover book contributions after g.apparatuses() is fixed?
+    options:
+      a: Use ctx.kits('books') — include books in KitEntry collection, update Stacks start() to iterate entries
+      b: Pass the full orderedApparatuses list to Stacks through a private/internal mechanism
+      c: Stacks accesses the raw apparatus list before the guild singleton is set
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - implementer
+      confidence: high
+      context: The brief says 'Books excluded from KitEntry collection — Stacks handles book registration through its own mechanism.' However, R4 requires g.apparatuses() to return only started ones, which breaks Stacks. The simplest resolution is to include books in KitEntry (they're just another contribution type) and have Stacks use ctx.kits('books'). This is consistent with the overall design and doesn't require special-case plumbing. The brief's scope note likely intended to exclude Stacks from the consumer refactoring list (R7-R12), not to prevent books from being collected.
+      observable: true
+      recommendation: a
+      rationale: Simplest fix. Books are just another contribution type. Including them avoids special-case plumbing for Stacks.
+      stakes: high
+  - id: D30
+    scope:
+      - S12
+    question: How does Stacks adapt reconcileSchemas to use ctx.kits('books')?
+    options:
+      a: Change reconcileSchemas to iterate KitEntry[] — each entry has pluginId (ownerId) and value (books record)
+      b: Add a new method reconcileFromEntries alongside the existing reconcileSchemas
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: reconcileSchemas currently takes LoadedPlugin[] and calls extractBooks(plugin) to get the books record. With KitEntry, each entry has pluginId and value (the books object). The method can iterate entries directly, calling ensureBook for each book in entry.value.
+      observable: false
+      recommendation: a
+      rationale: Direct replacement — no need for parallel methods.
+      stakes: low
+  - id: D31
+    scope:
+      - S12
+    question: Does Stacks need to accept the StartupContext parameter now?
+    options:
+      a: Yes — start(ctx) already receives StartupContext, but the internal StacksApparatus.start() ignores it. Update to pass and use ctx.
+      b: No — pass KitEntry[] to reconcileSchemas from the outer start() closure
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The apparatus start(ctx) already receives StartupContext. The inner StacksApparatus.start(_) uses _ (ignores ctx). Updating it to use ctx.kits('books') is a natural change — pass ctx through to the inner start or call ctx.kits('books') in the outer closure.
+      observable: false
+      recommendation: a
+      rationale: ctx is already available in the closure. Just use it.
+      stakes: low
+  - id: D32
+    scope:
+      - S13
+    question: How should test helpers build a StartupContext with kits()?
+    options:
+      a: Add kitEntries parameter to buildTestContext/buildCtx helpers; construct a Map for kits(type) lookup
+      b: Use the real buildStartupContext from guild-lifecycle.ts with synthetic KitEntry data
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Each consumer test file has its own buildTestContext/buildCtx helper that constructs a StartupContext with on(). These need to also provide kits(type). Adding a kitEntries parameter and constructing a simple filter/Map is minimal and keeps tests self-contained. Using the real buildStartupContext would couple consumer tests to framework internals.
+      observable: false
+      recommendation: a
+      rationale: Keeps tests self-contained. Matches existing pattern of building mock contexts with minimal helpers.
+      stakes: low
+  - id: D33
+    scope:
+      - S13
+    question: Where do the new Wire phase tests go?
+    options:
+      a: guild-lifecycle.test.ts for wireKitEntries (unit), arbor.test.ts for integration
+      b: Only arbor.test.ts (integration tests cover both)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The existing split: guild-lifecycle.test.ts has unit tests for pure functions (validateRequires, topoSort, etc.). arbor.test.ts has integration tests (createGuild with real temp dirs). wireKitEntries is a pure function — its unit tests belong in guild-lifecycle.test.ts. The integration test (Wire phase produces correct KitEntry during createGuild) belongs in arbor.test.ts."
+      observable: false
+      recommendation: a
+      rationale: "Follows existing test organization: pure logic unit tests in guild-lifecycle.test.ts, integration in arbor.test.ts."
+      stakes: low
+  - id: D34
+    scope:
+      - S13
+    question: Should the arbor.test.ts installFakeApparatus helper gain supportKit support?
+    options:
+      a: Yes — add a supportKit parameter to installFakeApparatus for testing Wire phase
+      b: No — create a separate helper installFakeApparatusWithSupportKit
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: installFakeApparatus already has an opts parameter with requires, provides, consumes, startBody. Adding supportKit is a natural extension of the same pattern.
+      observable: false
+      recommendation: a
+      rationale: Extends existing helper naturally — consistent with the opts pattern already in use.
+      stakes: low
+  - id: D35
+    scope:
+      - S1
+      - S4
+    question: Should collectStartupWarnings check supportKit contribution types against consumes?
+    options:
+      a: No — out of scope for this change; currently only checks standalone kits. Keep behavior unchanged.
+      b: Yes — the Wire phase makes all contributions visible; extend the warning check to cover supportKit types too.
+    selected: b
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: collectStartupWarnings currently only checks standalone kit contributions against apparatus consumes tokens. SupportKit contributions are not checked. The Wire phase makes all contributions visible as KitEntry, which would make extending the check easy. But it's a behavior change beyond the brief's scope.
+      observable: true
+      recommendation: a
+      rationale: Out of scope. The brief is about fixing scan+subscribe, not extending startup warnings. Can be done in a follow-up.
+      stakes: low
+  - id: D36
+    scope:
+      - S1
+      - S2
+    question: Does ctx.kits(type) need to be available after start() completes, or only during start()?
+    options:
+      a: Only during start() — same lifecycle as ctx.on()
+      b: Persists — ctx can be captured and kits() called later (e.g., in handlers)
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The StartupContext is a plain object. If an apparatus captures a reference to ctx, it can call ctx.kits() later. The KitEntry data is immutable after Wire — there's no reason to invalidate it. Practically, since ctx.on() remains usable for event registration, ctx is already a long-lived object reference. Making kits() work on a captured reference is free and avoids confusing failure modes.
+      observable: true
+      recommendation: b
+      rationale: KitEntry data is immutable after Wire. No reason to restrict access. Avoids confusing errors if someone captures ctx.
+      stakes: low
+  - id: D37
+    scope:
+      - S6
+      - S7
+      - S8
+      - S9
+      - S10
+      - S11
+      - S12
+    question: Do consumers remove their imports of isLoadedKit/isLoadedApparatus after refactoring?
+    options:
+      a: Yes — remove unused imports for isLoadedKit, isLoadedApparatus, LoadedPlugin, LoadedKit, LoadedApparatus where they are only used for the scan+subscribe pattern
+      b: No — keep imports for potential future use
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Each consumer currently imports isLoadedKit/isLoadedApparatus and LoadedPlugin to discriminate between kit and apparatus in plugin:initialized handlers. With the refactoring, these type guards are no longer needed in consumers that fully switch to ctx.kits(). Some consumers may still need LoadedApparatus for other purposes (e.g., Oculus references g.apparatuses() in the status endpoint).
+      observable: false
+      recommendation: a
+      rationale: Clean up unused imports. Check each consumer individually — only remove imports that are truly unused after the refactoring.
+      stakes: low
