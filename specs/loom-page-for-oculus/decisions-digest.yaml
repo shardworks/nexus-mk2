@@ -1,0 +1,206 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: How should the Loom expose role listing — new method on LoomApi, or only via tool handlers accessing closure
+      state directly?
+    answer: Add listRoles() to the LoomApi interface — tool handlers and other apparatus can call it
+    justification: Consistent with the codebase pattern where apparatus expose capabilities via their provides API
+  - id: D2
+    scope:
+      - S1
+    question: What type shape should listRoles() return?
+    answer: "Array of RoleInfo objects: { name, permissions, strict, source }"
+    justification: Arrays are the standard return shape for list-style API methods in this codebase (instrumentarium.list(),
+      guild.kits(), guild.apparatuses())
+  - id: D3
+    scope:
+      - S1
+    question: What should the RoleInfo.source field contain for kit-contributed roles?
+    answer: A string literal 'guild' for guild roles, the plugin ID string for kit roles
+    justification: Minimal type surface; the string 'guild' is unambiguous since no plugin can have the id 'guild'
+  - id: D4
+    scope:
+      - S1
+    question: Should RoleInfo include whether the role has instructions (from roleInstructions map)?
+    answer: No — the page can infer instruction presence from the weave result's systemPrompt
+    justification: Keeps RoleInfo minimal; the weave result already conveys instruction presence via the system prompt
+  - id: D5
+    scope:
+      - S1
+    question: Where should the RoleInfo type be defined?
+    answer: In loom.ts alongside the other public types (LoomApi, RoleDefinition, etc.)
+    justification: Follow existing file layout — all Loom public types in loom.ts
+  - id: D6
+    scope:
+      - S1
+    question: Should RoleInfo.name for a kit-contributed role be the full qualified name (e.g. 'animator.scribe') or the
+      short name (e.g. 'scribe')?
+    answer: Full qualified name — matches the key used in kitRoles and the name you pass to weave()
+    justification: The name must match what weave() accepts — that's the qualified name
+  - id: D7
+    scope:
+      - S2
+    question: "Should the Loom add recommends: ['oculus'] at the apparatus level?"
+    answer: "Yes — add recommends: ['oculus'] to the apparatus definition"
+    justification: "The brief explicitly requires it, and it matches the Animator's pattern of recommends: ['loom']"
+  - id: D8
+    scope:
+      - S2
+    question: What page ID and title should the contributed page use?
+    answer: "id: 'loom', title: 'Roles'"
+    justification: Page ID matches the apparatus ID (namespacing); title describes the content for the nav link
+  - id: D9
+    scope:
+      - S2
+    question: Where should the static page files live in the Loom package?
+    answer: "packages/plugins/loom/pages/loom/ — top-level pages directory, dir: 'pages/loom'"
+    justification: Separates static page assets from TypeScript source; mirrors how static directories typically live at package root
+  - id: D10
+    scope:
+      - S2
+    question: Should the package.json 'files' array be updated to include 'pages'?
+    answer: Yes — add 'pages' to the files array so pages are included in the published npm package
+    justification: Published packages must include pages directory to function correctly
+  - id: D11
+    scope:
+      - S3
+    question: How should the page's data endpoints be implemented — patron tools in supportKit or custom Hono routes?
+    answer: Patron tools via supportKit.tools — Oculus auto-maps them to REST endpoints
+    justification: No new dependencies, leverages existing Oculus tool→REST infrastructure
+  - id: D12
+    scope:
+      - S3
+    question: What tool names should be used for the data API?
+    answer: loom-roles and loom-weave → /api/loom/roles and /api/loom/weave
+    justification: Consistent with namespace:action naming convention (tools-list, writ-list); namespaced to 'loom'
+  - id: D13
+    scope:
+      - S3
+    question: What should the callableBy setting be for the new tools?
+    answer: No callableBy — accessible to all callers including animas
+    justification: Introspection tools for the dashboard — no use case for anima invocation
+  - id: D14
+    scope:
+      - S3
+    question: What parameters should the loom-weave tool accept?
+    answer: "role: z.string() — required role name"
+    justification: The tool exists to preview a specific role's weave — role is always known at call time
+  - id: D15
+    scope:
+      - S3
+    question: How should the loom-weave tool serialize ResolvedTool[] in the response (since it contains Zod schemas and
+      function handlers)?
+    answer: Map each ResolvedTool to { name, description, permission, pluginId }
+    justification: Provides enough detail for the page to show useful tool info without including non-serializable fields
+  - id: D16
+    scope:
+      - S3
+    question: Should the loom-weave tool call the internal api.weave() or reimplement the logic?
+    answer: Call api.weave() and transform the result for JSON serialization
+    justification: Single source of truth for weave logic — the tool is a thin serialization wrapper
+  - id: D17
+    scope:
+      - S3
+    question: Should the loom-roles tool have a permission field?
+    answer: No permission — permissionless GET endpoint
+    justification: Introspection endpoints should be freely readable; avoids circular permission dependency
+  - id: D18
+    scope:
+      - S3
+    question: Should the loom-weave tool handler call api.weave() directly (closure reference) or go through
+      guild().apparatus<LoomApi>('loom').weave()?
+    answer: Direct closure reference — the tool is defined inside createLoom() and has access to the api object
+    justification: Follows the Oculus's own pattern where supportKit tools reference the closure api object directly
+  - id: D19
+    scope:
+      - S4
+    question: Should the page be a single index.html file with inline JavaScript, or separate .html and .js files?
+    answer: Single index.html with inline <script> — simplest; no module loading concerns
+    justification: Minimal page with no build tooling — inline JS avoids module loading complexity
+  - id: D20
+    scope:
+      - S4
+    question: What layout should the roles page use?
+    answer: Role list table at top, detail panel below when a role is selected
+    justification: Consistent with the Oculus's vertical card layout; works without responsive breakpoints
+  - id: D21
+    scope:
+      - S4
+    question: What should the role list table columns be?
+    answer: Name, Permissions (count), Strict, Source
+    justification: Balances information density with readability; full details available on selection
+  - id: D22
+    scope:
+      - S4
+    question: How should the detail panel display the system prompt?
+    answer: In a collapsible <details> element, since prompts can be very long
+    justification: Follows the Oculus home page pattern for large text content (guild.json uses <details>)
+  - id: D23
+    scope:
+      - S4
+    question: Should the page use the Oculus's shared CSS classes or define custom styles?
+    answer: Use shared classes (.card, .data-table, .badge, etc.) — no custom CSS needed
+    justification: The shared stylesheet has all needed classes; adding custom CSS would be unnecessary divergence
+  - id: D24
+    scope:
+      - S4
+    question: What badge style should be used for role source in the table?
+    answer: badge (default dim) for guild roles, badge--info for kit roles
+    justification: "Matches the Oculus home page pattern: kits get badge--info, the 'expected' type gets the default treatment"
+  - id: D25
+    scope:
+      - S4
+    question: How should the page handle the case where there are zero roles?
+    answer: Show an empty-state message using the .empty-state class
+    justification: Follows existing Oculus empty-state pattern
+  - id: D26
+    scope:
+      - S4
+    question: How should the detail panel display tools — as a table or a list?
+    answer: "Table with columns: Name, Permission, Plugin"
+    justification: Structured tool data is best presented in a table; matches data-table usage pattern
+  - id: D27
+    scope:
+      - S4
+    question: Should the page display environment variables as a table or key-value pairs?
+    answer: "Table with columns: Variable, Value"
+    justification: Consistent with data-table pattern used elsewhere on the page
+  - id: D28
+    scope:
+      - S3
+      - S4
+    question: Should the loom-roles tool and loom-weave tool provide descriptions aimed at patron CLI usage or dashboard usage?
+    answer: Generic descriptions that work for both CLI and dashboard contexts
+    justification: Tools are exposed to both CLI and dashboard; descriptions should be universally clear
+  - id: D29
+    scope:
+      - S1
+    question: Should listRoles() be synchronous or asynchronous?
+    answer: Synchronous — returns RoleInfo[] directly, since all role data is cached in memory at startup
+    justification: Follows instrumentarium.list() pattern — cached data is returned synchronously
+  - id: D30
+    scope:
+      - S2
+    question: Should the Loom import tool() as a runtime import or continue using only type imports from
+      @shardworks/tools-apparatus?
+    answer: Add runtime import of tool from @shardworks/tools-apparatus alongside existing type imports
+    justification: The tool() factory is the canonical way to define tools in this codebase; package is already a dependency
+  - id: D31
+    scope:
+      - S1
+    question: Should the RoleInfo type export from index.ts be a type-only export?
+    answer: No — export it alongside other types in the existing type export block
+    justification: Match the existing export pattern in index.ts
+  - id: D32
+    scope:
+      - S4
+    question: Should the page fetch roles on load automatically or require a user action?
+    answer: Fetch roles automatically on page load
+    justification: Immediate display is the expected UX for a dashboard page
+  - id: D33
+    scope:
+      - S4
+    question: When the user selects a role, should the page highlight the selected row?
+    answer: Yes — apply a visual highlight (background color) to the selected row
+    justification: Standard UX for list-detail views; provides clear visual feedback

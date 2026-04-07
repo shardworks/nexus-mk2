@@ -1,0 +1,576 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: How should the Loom expose role listing — new method on LoomApi, or only via tool handlers accessing closure state directly?
+    options:
+      a: Add listRoles() to the LoomApi interface — tool handlers and other apparatus can call it
+      b: Keep LoomApi unchanged — tool handlers access closure variables (config, kitRoles) directly
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The LoomApi is the public surface other apparatus use. Adding listRoles() makes role introspection a first-class capability. The tool handler would call the same method. Option b works but couples the data endpoint to closure internals with no reusable API.
+      observable: true
+      recommendation: a
+      rationale: Consistent with the codebase pattern where apparatus expose capabilities via their provides API
+      stakes: high
+  - id: D2
+    scope:
+      - S1
+    question: What type shape should listRoles() return?
+    options:
+      a: "Array of RoleInfo objects: { name, permissions, strict, source }"
+      b: Record<string, RoleInfo> keyed by role name
+      c: Array with additional fields like hasInstructions, instructionsLength
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: The page needs an iterable list of roles. An array is simpler for JSON serialization and matches the page's rendering needs. The consumer is primarily the page and the patron tool.
+      observable: true
+      recommendation: a
+      rationale: Arrays are the standard return shape for list-style API methods in this codebase (instrumentarium.list(), guild.kits(), guild.apparatuses())
+      stakes: low
+  - id: D3
+    scope:
+      - S1
+    question: What should the RoleInfo.source field contain for kit-contributed roles?
+    options:
+      a: The plugin ID (e.g. 'animator') — extracted from the qualified name prefix before the first dot
+      b: "The full qualified name prefix plus a type discriminator (e.g. { type: 'kit', pluginId: 'animator' })"
+      c: A string literal 'guild' for guild roles, the plugin ID string for kit roles
+    selected: c
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: Kit roles are stored with qualified names like 'animator.scribe' where the prefix before the dot is the plugin ID. Guild roles are stored with simple names. The page needs to display source provenance. A simple string is sufficient — the type is implicit ('guild' vs any other string).
+      observable: true
+      recommendation: c
+      rationale: Minimal type surface; the string 'guild' is unambiguous since no plugin can have the id 'guild'
+      stakes: low
+  - id: D4
+    scope:
+      - S1
+    question: Should RoleInfo include whether the role has instructions (from roleInstructions map)?
+    options:
+      a: Yes — include a hasInstructions boolean field
+      b: No — the page can infer instruction presence from the weave result's systemPrompt
+    selected: b
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: The page shows the full system prompt when a role is selected (via weave). The instructions are woven into the prompt. Adding hasInstructions to listRoles is extra data the page doesn't strictly need — the system prompt in the weave result already reveals whether instructions contributed content.
+      observable: false
+      recommendation: b
+      rationale: Keeps RoleInfo minimal; the weave result already conveys instruction presence via the system prompt
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: Where should the RoleInfo type be defined?
+    options:
+      a: In loom.ts alongside the other public types (LoomApi, RoleDefinition, etc.)
+      b: In a separate types.ts file
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The Loom has no types.ts — all public types live in loom.ts. The RoleInfo type is small and directly related to the LoomApi.
+      observable: false
+      recommendation: a
+      rationale: Follow existing file layout — all Loom public types in loom.ts
+      stakes: low
+  - id: D6
+    scope:
+      - S1
+    question: Should RoleInfo.name for a kit-contributed role be the full qualified name (e.g. 'animator.scribe') or the short name (e.g. 'scribe')?
+    options:
+      a: Full qualified name — matches the key used in kitRoles and the name you pass to weave()
+      b: Short name with source providing the prefix
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: "The qualified name is what you pass to weave({ role: 'animator.scribe' }). Using the qualified name in listRoles means the page can directly use the name to call weave. For guild roles, the name is already the simple string stored in config.roles."
+      observable: true
+      recommendation: a
+      rationale: The name must match what weave() accepts — that's the qualified name
+      stakes: high
+  - id: D7
+    scope:
+      - S2
+    question: "Should the Loom add recommends: ['oculus'] at the apparatus level?"
+    options:
+      a: "Yes — add recommends: ['oculus'] to the apparatus definition"
+      b: No — the page/tools work without it since the Oculus scans supportKit contributions generically
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: The brief explicitly says 'add a recommends dependency on the oculus'. The recommends field generates startup warnings when the Oculus is not installed, which is appropriate — the page is pointless without the Oculus.
+      observable: true
+      recommendation: a
+      rationale: "The brief explicitly requires it, and it matches the Animator's pattern of recommends: ['loom']"
+      stakes: low
+  - id: D8
+    scope:
+      - S2
+    question: What page ID and title should the contributed page use?
+    options:
+      a: "id: 'loom', title: 'Roles'"
+      b: "id: 'roles', title: 'Roles'"
+      c: "id: 'loom', title: 'Loom'"
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: "The page ID becomes the URL segment: /pages/{id}/. Using 'loom' namespaces the page to the contributing apparatus. The title 'Roles' describes the page content, which is what appears in the nav bar. Other potential Loom pages (e.g. charter preview) could be added later under different IDs."
+      observable: true
+      recommendation: a
+      rationale: Page ID matches the apparatus ID (namespacing); title describes the content for the nav link
+      stakes: low
+  - id: D9
+    scope:
+      - S2
+    question: Where should the static page files live in the Loom package?
+    options:
+      a: "packages/plugins/loom/pages/loom/ — top-level pages directory, dir: 'pages/loom'"
+      b: "packages/plugins/loom/src/pages/loom/ — under src, dir: 'src/pages/loom'"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: The dir field in PageContribution is resolved relative to the package root in node_modules. In the pnpm workspace, node_modules/@shardworks/loom-apparatus symlinks to packages/plugins/loom. Placing pages at the top level keeps static assets separate from TypeScript source. The Oculus's own static files are under src/static/, but those are co-located with the apparatus code — contributed pages are a different concern.
+      observable: false
+      recommendation: a
+      rationale: Separates static page assets from TypeScript source; mirrors how static directories typically live at package root
+      stakes: low
+  - id: D10
+    scope:
+      - S2
+    question: Should the package.json 'files' array be updated to include 'pages'?
+    options:
+      a: Yes — add 'pages' to the files array so pages are included in the published npm package
+      b: No — workspace usage doesn't require it and the files array only matters for npm publish
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The files array controls what's included when the package is published to npm. Without 'pages', the page assets would be missing in published packages. Even though this may be workspace-only for now, the array should be correct.
+      observable: false
+      recommendation: a
+      rationale: Published packages must include pages directory to function correctly
+      stakes: low
+  - id: D11
+    scope:
+      - S3
+    question: How should the page's data endpoints be implemented — patron tools in supportKit or custom Hono routes?
+    options:
+      a: Patron tools via supportKit.tools — Oculus auto-maps them to REST endpoints
+      b: Custom routes via supportKit.routes — requires Hono as a dependency
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: The Oculus auto-exposes patron-callable tools as REST endpoints via tool name → route mapping. The Loom already depends on @shardworks/tools-apparatus (which provides the tool() factory). Using custom routes would require adding hono as a runtime dependency. The patron tools approach needs zero new dependencies and follows the established REST endpoint pattern.
+      observable: false
+      recommendation: a
+      rationale: No new dependencies, leverages existing Oculus tool→REST infrastructure
+      stakes: high
+  - id: D12
+    scope:
+      - S3
+    question: What tool names should be used for the data API?
+    options:
+      a: loom-roles and loom-weave → /api/loom/roles and /api/loom/weave
+      b: roles-list and roles-weave → /api/roles/list and /api/roles/weave
+      c: loom-list and loom-preview → /api/loom/list and /api/loom/preview
+    selected: a
+    analysis:
+      audience:
+        - operator
+        - author
+      confidence: high
+      context: "Tool names map to routes via toolNameToRoute(): first hyphen becomes the namespace separator. 'loom-roles' → /api/loom/roles (GET), 'loom-weave' → /api/loom/weave (GET). The 'loom' prefix matches the apparatus ID and avoids name collisions. The existing pattern uses noun-verb or noun-noun (e.g. tools-list, tools-show, writ-list)."
+      observable: true
+      recommendation: a
+      rationale: Consistent with namespace:action naming convention (tools-list, writ-list); namespaced to 'loom'
+      stakes: low
+  - id: D13
+    scope:
+      - S3
+    question: What should the callableBy setting be for the new tools?
+    options:
+      a: "callableBy: ['patron'] — only humans via CLI/dashboard, not animas in sessions"
+      b: No callableBy — accessible to all callers including animas
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: These tools are introspection endpoints for the dashboard page. An anima in a session has no reason to list roles or preview weave results — it's already in a woven session. The Oculus only maps patron-callable tools to REST endpoints.
+      observable: true
+      recommendation: a
+      rationale: Introspection tools for the dashboard — no use case for anima invocation
+      stakes: low
+  - id: D14
+    scope:
+      - S3
+    question: What parameters should the loom-weave tool accept?
+    options:
+      a: "role: z.string() — required role name"
+      b: "role: z.string().optional() — optional, returns charter-only weave when omitted"
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The page calls this when the user selects a role. Without a role name there's nothing meaningful to weave — the page wouldn't call it without a selection. Making role required avoids serving a confusing empty result.
+      observable: true
+      recommendation: a
+      rationale: The tool exists to preview a specific role's weave — role is always known at call time
+      stakes: low
+  - id: D15
+    scope:
+      - S3
+    question: How should the loom-weave tool serialize ResolvedTool[] in the response (since it contains Zod schemas and function handlers)?
+    options:
+      a: Map each ResolvedTool to { name, description, permission, pluginId }
+      b: Map each ResolvedTool to { name, description } only
+      c: Return tool names as a flat string array
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The page needs to display tool details for the selected role. The permission field and pluginId provide useful context (which plugin contributed the tool, what access level). These are all simple string fields from ToolDefinition and ResolvedTool — no serialization issues.
+      observable: true
+      recommendation: a
+      rationale: Provides enough detail for the page to show useful tool info without including non-serializable fields
+      stakes: low
+  - id: D16
+    scope:
+      - S3
+    question: Should the loom-weave tool call the internal api.weave() or reimplement the logic?
+    options:
+      a: Call api.weave() and transform the result for JSON serialization
+      b: Reimplement tool resolution and prompt composition in the tool handler
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The weave() method already does all the work — role lookup, tool resolution, prompt composition. The tool handler just needs to call it and strip non-serializable fields from tools[].
+      observable: false
+      recommendation: a
+      rationale: Single source of truth for weave logic — the tool is a thin serialization wrapper
+      stakes: high
+  - id: D17
+    scope:
+      - S3
+    question: Should the loom-roles tool have a permission field?
+    options:
+      a: No permission — permissionless GET endpoint
+      b: "permission: 'read' — requires loom:read grant"
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: "The Oculus tool→REST mapping uses permissionToMethod(undefined) → GET for permissionless tools. These are introspection-only endpoints with callableBy: ['patron']. Adding a permission would create a dependency-ordering issue: the tool would need the Loom's own permissions resolved before being callable, but permissions are what we're listing. Permissionless is appropriate for read-only introspection."
+      observable: false
+      recommendation: a
+      rationale: Introspection endpoints should be freely readable; avoids circular permission dependency
+      stakes: low
+  - id: D18
+    scope:
+      - S3
+    question: Should the loom-weave tool handler call api.weave() directly (closure reference) or go through guild().apparatus<LoomApi>('loom').weave()?
+    options:
+      a: Direct closure reference — the tool is defined inside createLoom() and has access to the api object
+      b: Via guild().apparatus() — the tool goes through the public API
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The tool is defined within createLoom()'s closure, just like the Oculus's own tool calls api.port() via closure. Using guild().apparatus() would work but adds an unnecessary indirection — the api object is right there in scope.
+      observable: false
+      recommendation: a
+      rationale: Follows the Oculus's own pattern where supportKit tools reference the closure api object directly
+      stakes: low
+  - id: D19
+    scope:
+      - S4
+    question: Should the page be a single index.html file with inline JavaScript, or separate .html and .js files?
+    options:
+      a: Single index.html with inline <script> — simplest; no module loading concerns
+      b: Separate index.html + app.js — cleaner separation
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: The page is a simple dashboard view with fetch calls and DOM manipulation. No framework, no build step. The Oculus only injects chrome into index.html — separate JS files are served without modification. A single file is simpler for a page this small. The Oculus home page itself is a single inline HTML template (though server-rendered).
+      observable: false
+      recommendation: a
+      rationale: Minimal page with no build tooling — inline JS avoids module loading complexity
+      stakes: low
+  - id: D20
+    scope:
+      - S4
+    question: What layout should the roles page use?
+    options:
+      a: Role list table at top, detail panel below when a role is selected
+      b: "Two-column layout: role list on left, detail panel on right"
+      c: Single table with expandable rows
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: The page needs to show a list of roles and detail for one selected role. A top/bottom split is simpler to implement and works well at all viewport widths. The Oculus home page uses a vertical card-based layout. A two-column layout would need responsive breakpoints.
+      observable: true
+      recommendation: a
+      rationale: Consistent with the Oculus's vertical card layout; works without responsive breakpoints
+      stakes: low
+  - id: D21
+    scope:
+      - S4
+    question: What should the role list table columns be?
+    options:
+      a: Name, Permissions (count), Strict, Source
+      b: Name, Source, Permissions (full list)
+      c: Name, Source
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: The brief says 'name, configuration, and source'. Configuration means permissions and strict flag. Showing the full permission list in the table would be visually noisy — a count or summary is better for the list view, with full details in the detail panel.
+      observable: true
+      recommendation: a
+      rationale: Balances information density with readability; full details available on selection
+      stakes: low
+  - id: D22
+    scope:
+      - S4
+    question: How should the detail panel display the system prompt?
+    options:
+      a: In a <pre> block, showing the full composed text
+      b: In a collapsible <details> element, since prompts can be very long
+      c: Truncated with a 'show full' toggle
+    selected: b
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: System prompts can be very long (charter + tool instructions + role instructions). A collapsible details element lets the user expand when needed without overwhelming the page on initial selection. The Oculus home page uses <details> for guild.json display — same pattern.
+      observable: true
+      recommendation: b
+      rationale: Follows the Oculus home page pattern for large text content (guild.json uses <details>)
+      stakes: low
+  - id: D23
+    scope:
+      - S4
+    question: Should the page use the Oculus's shared CSS classes or define custom styles?
+    options:
+      a: Use shared classes (.card, .data-table, .badge, etc.) — no custom CSS needed
+      b: Use shared classes plus a separate page-specific CSS file
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The Oculus injects /static/style.css with all the shared classes (card, data-table, badge variants, btn, toolbar, empty-state). These classes provide everything needed for a role list table, detail cards, and badges for source provenance. No custom CSS is required.
+      observable: false
+      recommendation: a
+      rationale: The shared stylesheet has all needed classes; adding custom CSS would be unnecessary divergence
+      stakes: low
+  - id: D24
+    scope:
+      - S4
+    question: What badge style should be used for role source in the table?
+    options:
+      a: badge--info for guild roles, badge--success for kit roles (generic color per source type)
+      b: badge (default dim) for guild roles, badge--info for kit roles
+    selected: b
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: Guild roles are the 'normal' case — default badge styling (dim/subtle) fits. Kit-contributed roles are the more interesting case (contributed by another plugin) — badge--info (cyan) calls attention to the provenance. This follows the Oculus home page where kit type uses badge--info.
+      observable: true
+      recommendation: b
+      rationale: "Matches the Oculus home page pattern: kits get badge--info, the 'expected' type gets the default treatment"
+      stakes: low
+  - id: D25
+    scope:
+      - S4
+    question: How should the page handle the case where there are zero roles?
+    options:
+      a: Show an empty-state message using the .empty-state class
+      b: Show the table header with no rows
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The Oculus home page uses .empty-state for the no-pages case. Consistent pattern.
+      observable: true
+      recommendation: a
+      rationale: Follows existing Oculus empty-state pattern
+      stakes: low
+  - id: D26
+    scope:
+      - S4
+    question: How should the detail panel display tools — as a table or a list?
+    options:
+      a: "Table with columns: Name, Permission, Plugin"
+      b: Bulleted list of tool names
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The loom-weave response includes name, description, permission, and pluginId for each tool. A table presents this structured data cleanly. The Oculus style includes data-table for this pattern.
+      observable: true
+      recommendation: a
+      rationale: Structured tool data is best presented in a table; matches data-table usage pattern
+      stakes: low
+  - id: D27
+    scope:
+      - S4
+    question: Should the page display environment variables as a table or key-value pairs?
+    options:
+      a: "Table with columns: Variable, Value"
+      b: Inline formatted as KEY=value
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: Currently there are only two environment variables (GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL). A small data-table is clean and consistent with the rest of the page.
+      observable: true
+      recommendation: a
+      rationale: Consistent with data-table pattern used elsewhere on the page
+      stakes: low
+  - id: D28
+    scope:
+      - S3
+      - S4
+    question: Should the loom-roles tool and loom-weave tool provide descriptions aimed at patron CLI usage or dashboard usage?
+    options:
+      a: Generic descriptions that work for both CLI and dashboard contexts
+      b: Dashboard-focused descriptions
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: "Patron tools are accessible via both the CLI and the Oculus dashboard. Descriptions should be brief and context-neutral. Example: 'List all roles and their configuration' works for both."
+      observable: true
+      recommendation: a
+      rationale: Tools are exposed to both CLI and dashboard; descriptions should be universally clear
+      stakes: low
+  - id: D29
+    scope:
+      - S1
+    question: Should listRoles() be synchronous or asynchronous?
+    options:
+      a: Synchronous — returns RoleInfo[] directly, since all role data is cached in memory at startup
+      b: Asynchronous — returns Promise<RoleInfo[]> for future flexibility
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: All role data (config.roles and kitRoles) is loaded at startup and cached in closure variables. No I/O is needed to list roles. weave() is async because it calls the Instrumentarium, but listRoles() just reads maps. The Instrumentarium's own list() method is synchronous for the same reason.
+      observable: true
+      recommendation: a
+      rationale: Follows instrumentarium.list() pattern — cached data is returned synchronously
+      stakes: low
+  - id: D30
+    scope:
+      - S2
+    question: Should the Loom import tool() as a runtime import or continue using only type imports from @shardworks/tools-apparatus?
+    options:
+      a: Add runtime import of tool from @shardworks/tools-apparatus alongside existing type imports
+      b: Define tools inline without the tool() factory
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "@shardworks/tools-apparatus is already in the Loom's package.json dependencies. Currently only type-imported (import type { InstrumentariumApi, ResolvedTool }). Adding a runtime import of tool() is trivial and follows how every other apparatus/kit defines tools."
+      observable: false
+      recommendation: a
+      rationale: The tool() factory is the canonical way to define tools in this codebase; package is already a dependency
+      stakes: low
+  - id: D31
+    scope:
+      - S1
+    question: Should the RoleInfo type export from index.ts be a type-only export?
+    options:
+      a: Yes — export type { RoleInfo } since it's only used as a type by consumers
+      b: No — export it alongside other types in the existing type export block
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The existing index.ts exports types using 'export { type LoomApi, type WeaveRequest, ... }' — each type is individually marked with the type keyword within the export block. RoleInfo should follow the same pattern.
+      observable: false
+      recommendation: b
+      rationale: Match the existing export pattern in index.ts
+      stakes: low
+  - id: D32
+    scope:
+      - S4
+    question: Should the page fetch roles on load automatically or require a user action?
+    options:
+      a: Fetch roles automatically on page load
+      b: Show a 'Load' button that triggers the fetch
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The role list is the primary content of the page. There's no reason to require a click before showing it. The API call is cheap (reads cached in-memory data). Every dashboard page should show its content immediately.
+      observable: true
+      recommendation: a
+      rationale: Immediate display is the expected UX for a dashboard page
+      stakes: low
+  - id: D33
+    scope:
+      - S4
+    question: When the user selects a role, should the page highlight the selected row?
+    options:
+      a: Yes — apply a visual highlight (background color) to the selected row
+      b: No — the detail panel below is sufficient indication
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: When the detail panel appears below the table, the user needs to know which role it corresponds to. A selected-row highlight provides clear visual linkage.
+      observable: true
+      recommendation: a
+      rationale: Standard UX for list-detail views; provides clear visual feedback
+      stakes: low
