@@ -1,0 +1,144 @@
+decisions:
+  - id: D1
+    scope: [S1]
+    question: "How to implement curly-brace support — normalize early (strip braces to bare form, then reuse existing logic) or duplicate match branches for both syntaxes?"
+    options:
+      a: "Normalize early: add a small helper that converts ${foo} → $foo, call it once per value in both resolveGivens and validateTemplates before existing match logic"
+      b: "Duplicate branches: add parallel checks for ${writ}, ${role}, /^\\$\\{spider\\.[...]\\}$/ alongside existing checks"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "Normalization keeps the existing match logic untouched and avoids doubling every branch. It also automatically handles any future variables added to the bare-$ matching without needing a parallel curly-brace branch."
+      observable: false
+      recommendation: a
+      rationale: "Less code, zero risk of branch divergence, and the existing match logic stays as-is."
+      stakes: low
+
+  - id: D2
+    scope: [S1]
+    question: "Where does the normalization helper live — a named local function in spider.ts, or inline logic?"
+    options:
+      a: "Named local function (e.g. normalizeVarRef) in the helpers section of spider.ts"
+      b: "Inline the two-line check at each call site (resolveGivens and validateTemplates)"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "There are exactly two call sites. A named function avoids repeating the logic and makes the intent self-documenting."
+      observable: false
+      recommendation: a
+      rationale: "Two call sites is enough to justify extraction; a named function is clearer and avoids drift."
+      stakes: low
+
+  - id: D3
+    scope: [S1]
+    question: "What is the normalization logic — what constitutes a valid curly-brace form?"
+    options:
+      a: "Match /^\\$\\{(.+)\\}$/ — any ${...} string gets the braces stripped, then the resulting $... value goes through the existing validation/resolution"
+      b: "Match only the three known forms explicitly: ${writ}, ${role}, ${spider.<ident>}"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The normalization step should be syntax-only (strip braces); semantic validation (is the inner name recognized?) is already handled by the existing match logic and the R7 validator. Duplicating the known-variable list in the normalizer would couple it to the variable registry unnecessarily."
+      observable: false
+      recommendation: a
+      rationale: "Separation of concerns: normalization handles syntax, existing logic handles semantics. ${badName} normalizes to $badName which then fails validation as expected."
+      stakes: low
+
+  - id: D4
+    scope: [S1]
+    question: "Should the startsWith('$') guard be updated to also detect '${' explicitly, or is it already sufficient?"
+    options:
+      a: "No change needed — '${foo}' already starts with '$', so the existing guard catches it"
+      b: "Add an explicit startsWith('${') check for clarity"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The string '${writ}' starts with '$', so `value.startsWith('$')` is true. Adding a separate check would be redundant."
+      observable: false
+      recommendation: a
+      rationale: "'${' starts with '$' — the existing guard works unchanged."
+      stakes: low
+
+  - id: D5
+    scope: [S1]
+    question: "When a curly-brace variable fails validation, what does the error message show — the original form or the normalized form?"
+    options:
+      a: "Show the original form the user wrote (e.g. '${badVar}')"
+      b: "Show the normalized form (e.g. '$badVar')"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: "The error message is '[spider] rigTemplates.<key>: engine \"<id>\" has unrecognized variable \"<value>\"'. Showing the original input helps the operator find and fix the problem in their config."
+      observable: true
+      recommendation: a
+      rationale: "Error messages should reflect what the user wrote, not an internal transformation."
+      stakes: low
+
+  - id: D6
+    scope: [S1]
+    question: "In resolveGivens, when extracting the spider config key from a curly-brace form like ${spider.buildCommand}, should the slice offset be computed from the normalized value or the original?"
+    options:
+      a: "Normalize first, then slice from the normalized '$spider.' prefix as the existing code already does"
+      b: "Slice from the original '${spider.' prefix with a different offset"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "If normalization happens before branching, the rest of the function sees '$spider.buildCommand' regardless of input form. The existing `.slice('$spider.'.length)` works unchanged."
+      observable: false
+      recommendation: a
+      rationale: "This is the whole point of the normalize-early approach — downstream code doesn't change."
+      stakes: low
+
+  - id: D7
+    scope: [S1]
+    question: "What edge cases to handle — empty braces '${  }', whitespace '${  writ  }', nested braces '${${writ}}'?"
+    options:
+      a: "No special handling — normalize strips outermost ${...}, result goes through existing validation which rejects anything not matching a known pattern"
+      b: "Add explicit rejection of malformed brace forms before normalization"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "'${}' normalizes to '$' which fails the existing checks. '${ writ }' normalizes to '$ writ ' which also fails. The existing validation is the right place to reject invalid variable names — the normalizer doesn't need its own error path."
+      observable: false
+      recommendation: a
+      rationale: "Existing validation catches all malformed results; adding a separate rejection layer is unnecessary."
+      stakes: low
+
+  - id: D8
+    scope: [S1]
+    question: "How many new tests, and what do they cover?"
+    options:
+      a: "Mirror each existing bare-$ resolution test with a curly-brace equivalent, plus curly-brace-specific validation tests"
+      b: "Add one resolution test that covers all three variable types in curly-brace form, plus one validation acceptance test and one validation rejection test"
+    selected: b
+    analysis:
+      audience: [implementer]
+      confidence: medium
+      context: "The normalization is a single code path — if it works for ${writ}, it works for ${role} and ${spider.foo} since all three go through the same normalizer. Exhaustive per-variable mirroring adds bulk without proportional confidence gain. However, a single combined test plus targeted validation tests gives adequate coverage."
+      observable: false
+      recommendation: b
+      rationale: "The normalization is a trivial transform; testing it once per code path (resolution, validation-accept, validation-reject) is sufficient."
+      stakes: low
+
+  - id: D9
+    scope: [S2]
+    question: "What should the updated JSDoc on RigTemplateEngine.givens say?"
+    options:
+      a: "Add 'or ${name}' to the existing sentence: 'String values starting with \"$\" (either $name or ${name}) are variable references resolved at spawn time.'"
+      b: "Rewrite the comment to enumerate both forms separately"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "The existing comment is concise and correct for the bare form. A parenthetical addition is the minimal edit."
+      observable: true
+      recommendation: a
+      rationale: "Minimal change, stays concise, communicates the equivalence clearly."
+      stakes: low
