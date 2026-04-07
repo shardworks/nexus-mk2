@@ -1,0 +1,225 @@
+=== REFERENCED FILE: packages/framework/cli/src/helpers.ts (pre-commission state) ===
+/**
+ * Pure helper functions for CLI command generation.
+ *
+ * Extracted from program.ts so they can be tested independently
+ * without pulling in heavy runtime dependencies (Arbor, Instrumentarium).
+ */
+
+import { z } from 'zod';
+import type { ToolDefinition } from '@shardworks/tools-apparatus';
+
+/**
+ * Convert camelCase key to kebab-case CLI flag.
+ * e.g. 'writId' → '--writ-id'
+ */
+export function toFlag(key: string): string {
+  return `--${key.replace(/([A-Z])/g, (c) => `-${c.toLowerCase()}`)}`;
+}
+
+/**
+ * Detect whether a Zod schema accepts booleans (and only booleans).
+ * Used to register Commander flags without <value> for boolean params.
+ */
+export function isBooleanSchema(schema: z.ZodTypeAny): boolean {
+  return (
+    schema.safeParse(true).success &&
+    schema.safeParse(false).success &&
+    !schema.safeParse(42).success &&
+    !schema.safeParse('test').success
+  );
+}
+
+/**
+ * Check whether a Zod schema is a number type, possibly wrapped
+ * in ZodOptional and/or ZodDefault.
+ */
+function isNumberSchema(schema: z.ZodTypeAny): boolean {
+  let inner: z.ZodTypeAny = schema;
+
+  if (inner instanceof z.ZodOptional) {
+    inner = inner.unwrap() as z.ZodTypeAny;
+  }
+  if (inner instanceof z.ZodDefault) {
+    inner = inner.unwrap() as z.ZodTypeAny;
+  }
+  // Handle the reverse nesting order too (default wrapping optional)
+  if (inner instanceof z.ZodOptional) {
+    inner = inner.unwrap() as z.ZodTypeAny;
+  }
+
+  return inner instanceof z.ZodNumber;
+}
+
+/**
+ * Coerce Commander string opts to match the expected Zod schema types.
+ *
+ * Commander passes all --option <value> arguments as strings. This function
+ * walks the Zod shape and converts string values to numbers where the
+ * schema expects z.number() (including when wrapped in ZodOptional/ZodDefault).
+ *
+ * Undefined values pass through unchanged — Zod handles optional/default.
+ * Non-number schemas are left untouched.
+ */
+export function coerceCliOpts(
+  shape: Record<string, z.ZodTypeAny>,
+  opts: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...opts };
+
+  for (const [key, schema] of Object.entries(shape)) {
+    const value = result[key];
+    if (typeof value !== 'string') continue;
+
+    if (isNumberSchema(schema)) {
+      result[key] = Number(value);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Determine which hyphen prefixes have enough tools to warrant a group.
+ *
+ * Returns a Set of prefixes that have 2+ tools sharing them.
+ * 'plugin-list' + 'plugin-install' → 'plugin' is a group.
+ * 'show-writ' alone → 'show' is NOT a group.
+ */
+export function findGroupPrefixes(tools: ToolDefinition[]): Set<string> {
+  const prefixCounts = new Map<string, number>();
+
+  for (const t of tools) {
+    const idx = t.name.indexOf('-');
+    if (idx === -1) continue;
+    const prefix = t.name.slice(0, idx);
+    prefixCounts.set(prefix, (prefixCounts.get(prefix) ?? 0) + 1);
+  }
+
+  const groups = new Set<string>();
+  for (const [prefix, count] of prefixCounts) {
+    if (count >= 2) groups.add(prefix);
+  }
+  return groups;
+}
+
+=== REFERENCED FILE: packages/plugins/tools/src/tools/tools-show.ts (pre-commission state) ===
+/**
+ * tools-show — show full details for a single tool.
+ *
+ * Returns name, description, plugin, permission, callableBy, parameter
+ * schema, and instructions for the named tool. Returns null if not found.
+ *
+ * Requires `tools:read` permission.
+ */
+
+import { z } from 'zod';
+
+import { tool } from '../tool.ts';
+import type { InstrumentariumApi } from '../instrumentarium.ts';
+
+/** Parameter info derived from the Zod schema. */
+export interface ParamInfo {
+  type: string;
+  description: string | null;
+  optional: boolean;
+}
+
+/** Full detail returned for a single tool. */
+export interface ToolDetail {
+  name: string;
+  description: string;
+  pluginId: string;
+  permission: string | null;
+  callableBy: string[] | null;
+  params: Record<string, ParamInfo>;
+  instructions: string | null;
+}
+
+/**
+ * Extract parameter info from a Zod object schema.
+ *
+ * Walks the shape, unwraps ZodOptional/ZodDefault wrappers, and
+ * derives the JSON Schema type name from the inner Zod type.
+ */
+function extractParams(schema: z.ZodObject<z.ZodRawShape>): Record<string, ParamInfo> {
+  const shape = schema.shape;
+  const result: Record<string, ParamInfo> = {};
+
+  for (const [key, zodType] of Object.entries(shape)) {
+    result[key] = extractSingleParam(zodType as z.ZodType);
+  }
+
+  return result;
+}
+
+/** Extract info for a single Zod parameter. */
+function extractSingleParam(zodType: z.ZodType): ParamInfo {
+  let isOptional = false;
+  let inner: z.ZodType = zodType;
+
+  // Unwrap ZodOptional
+  if (inner instanceof z.ZodOptional) {
+    isOptional = true;
+    inner = inner.unwrap() as z.ZodType;
+  }
+
+  // Unwrap ZodDefault
+  if (inner instanceof z.ZodDefault) {
+    isOptional = true;
+    inner = inner.unwrap() as z.ZodType;
+  }
+
+  return {
+    type: zodTypeToJsonType(inner),
+    description: inner.description ?? null,
+    optional: isOptional,
+  };
+}
+
+/** Map a Zod type to a JSON Schema type string. */
+function zodTypeToJsonType(zodType: z.ZodType): string {
+  if (zodType instanceof z.ZodString) return 'string';
+  if (zodType instanceof z.ZodNumber) return 'number';
+  if (zodType instanceof z.ZodBoolean) return 'boolean';
+  if (zodType instanceof z.ZodArray) return 'array';
+  if (zodType instanceof z.ZodObject) return 'object';
+  if (zodType instanceof z.ZodEnum) return 'string';
+  if (zodType instanceof z.ZodLiteral) return typeof zodType._def.values[0];
+  if (zodType instanceof z.ZodUnion) return 'union';
+  if (zodType instanceof z.ZodNullable) return zodTypeToJsonType(zodType.unwrap() as z.ZodType);
+  return 'unknown';
+}
+
+export function createToolsShow(getApi: () => InstrumentariumApi) {
+  return tool({
+    name: 'tools-show',
+    description:
+      'Show details for a tool by name, including parameter schema and instructions.',
+    permission: 'read',
+    params: {
+      name: z.string().describe('Tool name to look up.'),
+    },
+    handler: async ({ name }) => {
+      const api = getApi();
+      const resolved = api.find(name);
+
+      if (!resolved) return null;
+
+      const { definition, pluginId } = resolved;
+
+      const detail: ToolDetail = {
+        name: definition.name,
+        description: definition.description,
+        pluginId,
+        permission: definition.permission ?? null,
+        callableBy: definition.callableBy ?? null,
+        params: extractParams(definition.params),
+        instructions: definition.instructions ?? null,
+      };
+
+      return detail;
+    },
+  });
+}
+

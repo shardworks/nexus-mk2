@@ -1,0 +1,2750 @@
+=== CONTEXT FILE: README.md ===
+# Nexus Mk 2.1
+
+A framework for operating multi-agent AI workforces. Nexus provides the guild model: a structured workspace where animas (AI identities) receive commissions, use tools, record work, and collaborate through a shared Books database and event-driven Clockworks.
+
+The framework is plugin-based. Almost everything — tools, engines, database schemas, anima management — is contributed by plugins. The core runtime is intentionally minimal.
+
+---
+
+## For users
+
+### Install the CLI
+
+```sh
+npm install -g @shardworks/nexus
+```
+
+This installs the `nsg` command globally.
+
+### Initialize a guild
+
+A guild is the workspace where animas operate. Create one with `nsg init`:
+
+```sh
+nsg init ./my-guild --name my-guild
+cd my-guild
+```
+
+This writes `guild.json`, `package.json`, `.gitignore`, and the `.nexus/` directory structure. It does not install any plugins or create any animas.
+
+### Install plugins
+
+Plugins are npm packages that contribute tools, engines, database schemas, and other capabilities to your guild. Install them with `nsg rig install`:
+
+```sh
+# Install from npm
+nsg rig install @shardworks/nexus-stdlib
+
+# Pin a version
+nsg rig install @shardworks/nexus-stdlib@1.2.0
+
+# Install from a git repository
+nsg rig install git+https://github.com/acme/my-plugin.git
+
+# Symlink a local directory during development
+nsg rig install ./path/to/my-plugin --type link
+```
+
+By default, a plugin's tools are added to `baseTools` (available to all animas). To assign tools to specific roles instead:
+
+```sh
+nsg rig install @shardworks/nexus-stdlib --roles artificer,scribe
+```
+
+List installed plugins:
+
+```sh
+nsg rig list
+```
+
+Remove a plugin:
+
+```sh
+nsg rig remove nexus-stdlib
+```
+
+### Check guild status
+
+```sh
+nsg status          # guild name, nexus version, installed plugins, roles
+nsg version         # framework version + installed plugin versions
+```
+
+### `guild.json`
+
+The guild's central configuration file. Updated automatically by `nsg rig install` and `nsg rig remove`. Stores the plugin list, role definitions, tool assignments, Clockworks standing orders, and guild settings.
+
+Plugins are listed by their derived plugin id (package name with the `@shardworks/` scope stripped):
+
+```json
+{
+  "name": "my-guild",
+  "nexus": "2.1.0",
+  "plugins": ["nexus-stdlib", "nexus-clockworks"],
+  "baseTools": ["commission", "signal", "list-writs"],
+  "roles": { ... },
+  "settings": { "model": "claude-opus-4-5" }
+}
+```
+
+---
+
+## For plugin authors
+
+Nexus plugins are npm packages that contribute capabilities to a guild. There are two kinds:
+
+- **Kit** — a passive package contributing tools, engines, relays, or other capabilities. No lifecycle; contributions are read at load time and used by consuming apparatuses.
+- **Apparatus** — a package contributing persistent running infrastructure. Has a `start`/`stop` lifecycle, receives `GuildContext` at startup, and exposes a runtime API via `provides`.
+
+Plugin authors import exclusively from `@shardworks/nexus-core`. The arbor runtime (`@shardworks/nexus-arbor`) is an internal concern of the CLI and session provider.
+
+### Key points
+
+- A plugin's **name is inferred from its npm package name** at load time — never declared in the manifest.
+- A **kit** is a plain object exported as `{ kit: { ... } }`. The `tools` field (array of `ToolDefinition`) is the most common contribution.
+- An **apparatus** is exported as `{ apparatus: { start, stop?, provides?, requires?, supportKit?, consumes? } }`.
+- `requires` on a kit names apparatuses whose runtime APIs the kit's tool handlers will call. Hard startup failure if not installed.
+- `requires` on an apparatus names other apparatuses that must be started first. Determines start order.
+- Apparatus `provides` objects are retrieved at handler invocation time via `ctx.apparatus<T>(name)`.
+
+### Authoring tools
+
+The `tool()` function is the primary authoring entry point. Define a name, description, Zod param schema, and a handler:
+
+```typescript
+import { tool } from '@shardworks/nexus-core';
+import { z } from 'zod';
+
+const greet = tool({
+  name: 'greet',
+  description: 'Greet someone by name',
+  params: {
+    name: z.string().describe('Name to greet'),
+  },
+  handler: async ({ name }, ctx) => {
+    return `Hello, ${name}! Guild root: ${ctx.home}`;
+  },
+});
+```
+
+The handler receives:
+- `params` — validated input, typed from your Zod schemas
+- `ctx` — a `HandlerContext` with `home` (guild root path) and `apparatus<T>(name)` for accessing started apparatus APIs
+
+Restrict a tool to specific callers with `callableBy`:
+
+```typescript
+tool({
+  name: 'admin-reset',
+  callableBy: ['cli'],    // CLI only — not available to animas
+  // ...
+});
+```
+
+### Exporting a kit
+
+A kit is the simplest plugin form — a plain object with a `kit` key:
+
+```typescript
+import { tool, type Kit } from '@shardworks/nexus-core';
+
+const myTool = tool({ name: 'lookup', /* ... */ });
+
+export default {
+  kit: {
+    tools: [myTool],
+
+    // Optional: declare required apparatuses whose APIs your handlers call
+    requires: ['nexus-books'],
+
+    // Optional: document contribution fields for consuming apparatuses
+    // (field types are defined by the apparatus packages that consume them)
+    books: {
+      records: { indexes: ['status', 'createdAt'] },
+    },
+  } satisfies Kit,
+};
+```
+
+The `tools` field is the most common kit contribution. Other contribution fields (`engines`, `relays`, etc.) are defined by the apparatus packages that consume them — the framework treats any unknown field as opaque data.
+
+### Exporting an apparatus
+
+An apparatus has a `start`/`stop` lifecycle and can expose a runtime API:
+
+```typescript
+import { type Apparatus, type GuildContext } from '@shardworks/nexus-core';
+
+// The API you expose to other plugins
+interface MyApi {
+  lookup(key: string): string | null;
+}
+
+const store = new Map<string, string>();
+
+export default {
+  apparatus: {
+    // Apparatuses this one requires to be started first
+    requires: ['nexus-books'],
+
+    // The runtime API object exposed via ctx.apparatus<MyApi>('my-plugin')
+    provides: {
+      lookup(key: string) { return store.get(key) ?? null; },
+    } satisfies MyApi,
+
+    async start(ctx: GuildContext) {
+      // ctx.apparatus<BooksApi>('nexus-books') is available here
+      // ctx.kits() — snapshot of all loaded kits
+      // ctx.on('plugin:initialized', handler) — react to kit contributions
+    },
+
+    async stop() {
+      store.clear();
+    },
+  } satisfies Apparatus,
+};
+```
+
+Consumers retrieve your `provides` object via `ctx.apparatus<MyApi>('my-plugin')` — either in their own `start()` or in tool handlers via `HandlerContext.apparatus<T>()`.
+
+An apparatus can also contribute tools via `supportKit`:
+
+```typescript
+export default {
+  apparatus: {
+    supportKit: {
+      tools: [myAdminTool],
+    },
+    // ...
+  },
+};
+```
+
+### `HandlerContext`
+
+Injected into every tool and engine handler at invocation time:
+
+```typescript
+interface HandlerContext {
+  home: string;                        // absolute path to the guild root
+  apparatus<T>(name: string): T;       // access a started apparatus's provides object
+}
+```
+
+### Further reading
+
+- [`packages/arbor/README.md`](packages/arbor/README.md) — runtime API reference (`createArbor`, `Arbor`, `LoadedKit`, `LoadedApparatus`, `derivePluginId`, Books database)
+- [`docs/architecture/plugins.md`](docs/architecture/plugins.md) — full plugin architecture specification
+- [`docs/architecture/apparatus/books.md`](docs/architecture/apparatus/books.md) — Books apparatus design (in progress)
+
+=== CONTEXT FILE: package.json ===
+{
+  "private": true,
+  "packageManager": "pnpm@10.32.1",
+  "version": "0.0.0",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shardworks/nexus-mk2"
+  },
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "nsg": "node --disable-warning=ExperimentalWarning --experimental-transform-types packages/framework/cli/src/cli.ts",
+    "vibe": "node --disable-warning=ExperimentalWarning --experimental-transform-types packages/framework/cli/src/cli.ts --guild-root /workspace/vibers"
+  },
+  "devDependencies": {
+    "@tsconfig/node24": "24.0.4",
+    "typescript": "5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
+}
+
+=== CONTEXT FILE: LICENSE ===
+ISC License
+
+Copyright (c) 2026 Sean Boots
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+=== CONTEXT FILE: packages/framework/cli/src/program.test.ts ===
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { z } from 'zod';
+import { toFlag, isBooleanSchema, findGroupPrefixes, coerceCliOpts } from './helpers.ts';
+import type { ToolDefinition } from '@shardworks/tools-apparatus';
+
+// Helper to create a minimal ToolDefinition for testing
+function fakeTool(name: string): ToolDefinition {
+  return {
+    name,
+    description: `test tool ${name}`,
+    params: z.object({}),
+    handler: async () => null,
+  };
+}
+
+describe('toFlag', () => {
+  it('converts camelCase to kebab-case flag', () => {
+    assert.equal(toFlag('writId'), '--writ-id');
+    assert.equal(toFlag('guildRoot'), '--guild-root');
+  });
+
+  it('handles single-word keys', () => {
+    assert.equal(toFlag('name'), '--name');
+    assert.equal(toFlag('json'), '--json');
+  });
+
+  it('handles multiple capital letters', () => {
+    assert.equal(toFlag('myLongOptionName'), '--my-long-option-name');
+  });
+});
+
+describe('isBooleanSchema', () => {
+  it('detects z.boolean()', () => {
+    assert.ok(isBooleanSchema(z.boolean()));
+  });
+
+  it('detects z.boolean().optional()', () => {
+    assert.ok(isBooleanSchema(z.boolean().optional()));
+  });
+
+  it('rejects z.string()', () => {
+    assert.ok(!isBooleanSchema(z.string()));
+  });
+
+  it('rejects z.string().optional()', () => {
+    assert.ok(!isBooleanSchema(z.string().optional()));
+  });
+
+  it('rejects z.number()', () => {
+    assert.ok(!isBooleanSchema(z.number()));
+  });
+
+  it('rejects z.enum()', () => {
+    assert.ok(!isBooleanSchema(z.enum(['a', 'b'])));
+  });
+});
+
+describe('findGroupPrefixes', () => {
+  it('groups prefixes with 2+ tools', () => {
+    const tools = [
+      fakeTool('plugin-list'),
+      fakeTool('plugin-install'),
+      fakeTool('plugin-remove'),
+    ];
+    const groups = findGroupPrefixes(tools);
+    assert.ok(groups.has('plugin'));
+    assert.equal(groups.size, 1);
+  });
+
+  it('does not group singleton prefixes', () => {
+    const tools = [
+      fakeTool('show-writ'),
+      fakeTool('list-writs'),
+      fakeTool('post-writ'),
+    ];
+    const groups = findGroupPrefixes(tools);
+    // Each prefix (show, list, post) has only 1 tool
+    assert.ok(!groups.has('show'));
+    assert.ok(!groups.has('list'));
+    assert.ok(!groups.has('post'));
+  });
+
+  it('ignores tools without hyphens', () => {
+    const tools = [
+      fakeTool('version'),
+      fakeTool('status'),
+      fakeTool('signal'),
+    ];
+    const groups = findGroupPrefixes(tools);
+    assert.equal(groups.size, 0);
+  });
+
+  it('handles mixed grouped and ungrouped', () => {
+    const tools = [
+      fakeTool('plugin-list'),
+      fakeTool('plugin-install'),
+      fakeTool('version'),
+      fakeTool('show-writ'),
+      fakeTool('anima-create'),
+      fakeTool('anima-list'),
+    ];
+    const groups = findGroupPrefixes(tools);
+    assert.ok(groups.has('plugin'));
+    assert.ok(groups.has('anima'));
+    assert.ok(!groups.has('show'));
+    assert.equal(groups.size, 2);
+  });
+});
+
+describe('coerceCliOpts', () => {
+  // Number coercion — happy path
+  it('converts integer string to number', () => {
+    const shape = { limit: z.number() };
+    assert.deepEqual(coerceCliOpts(shape, { limit: '5' }), { limit: 5 });
+  });
+
+  it('converts float string to number', () => {
+    const shape = { ratio: z.number() };
+    assert.deepEqual(coerceCliOpts(shape, { ratio: '1.5' }), { ratio: 1.5 });
+  });
+
+  it('converts negative number string', () => {
+    const shape = { offset: z.number() };
+    assert.deepEqual(coerceCliOpts(shape, { offset: '-3' }), { offset: -3 });
+  });
+
+  it('coerces optional number', () => {
+    const shape = { limit: z.number().optional() };
+    assert.deepEqual(coerceCliOpts(shape, { limit: '10' }), { limit: 10 });
+  });
+
+  it('coerces optional number with default', () => {
+    const shape = { limit: z.number().optional().default(20) };
+    assert.deepEqual(coerceCliOpts(shape, { limit: '5' }), { limit: 5 });
+  });
+
+  it('coerces number with default (no optional)', () => {
+    const shape = { limit: z.number().default(20) };
+    assert.deepEqual(coerceCliOpts(shape, { limit: '5' }), { limit: 5 });
+  });
+
+  // Pass-through — values that must not be coerced
+  it('leaves string param unchanged', () => {
+    const shape = { name: z.string() };
+    assert.deepEqual(coerceCliOpts(shape, { name: 'hello' }), { name: 'hello' });
+  });
+
+  it('leaves enum param unchanged', () => {
+    const shape = { status: z.enum(['ready', 'active']) };
+    assert.deepEqual(coerceCliOpts(shape, { status: 'ready' }), { status: 'ready' });
+  });
+
+  it('passes undefined through unchanged', () => {
+    const shape = { limit: z.number().optional() };
+    assert.deepEqual(coerceCliOpts(shape, { limit: undefined }), { limit: undefined });
+  });
+
+  it('passes missing key through unchanged', () => {
+    const shape = { limit: z.number().optional() };
+    assert.deepEqual(coerceCliOpts(shape, {}), {});
+  });
+
+  it('leaves boolean value (true) unchanged', () => {
+    const shape = { force: z.boolean().optional() };
+    assert.deepEqual(coerceCliOpts(shape, { force: true }), { force: true });
+  });
+
+  // Mixed shapes
+  it('only coerces number fields in mixed shape', () => {
+    const shape = {
+      name: z.string(),
+      limit: z.number().optional(),
+      status: z.enum(['a', 'b']).optional(),
+    };
+    const opts = { name: 'test', limit: '5', status: 'a' };
+    assert.deepEqual(coerceCliOpts(shape, opts), { name: 'test', limit: 5, status: 'a' });
+  });
+
+  // Edge / error cases
+  it('non-numeric string becomes NaN', () => {
+    const shape = { limit: z.number() };
+    const result = coerceCliOpts(shape, { limit: 'abc' });
+    assert.ok(Number.isNaN(result['limit'] as number));
+  });
+
+  it('empty string becomes 0 (Number("") === 0)', () => {
+    const shape = { limit: z.number() };
+    assert.deepEqual(coerceCliOpts(shape, { limit: '' }), { limit: 0 });
+  });
+
+  it('empty shape leaves extra keys unchanged', () => {
+    const shape = {};
+    assert.deepEqual(coerceCliOpts(shape, { anything: 'value' }), { anything: 'value' });
+  });
+});
+
+=== CONTEXT FILE: packages/framework/cli/src/helpers.ts ===
+/**
+ * Pure helper functions for CLI command generation.
+ *
+ * Extracted from program.ts so they can be tested independently
+ * without pulling in heavy runtime dependencies (Arbor, Instrumentarium).
+ */
+
+import { z } from 'zod';
+import type { ToolDefinition } from '@shardworks/tools-apparatus';
+
+/**
+ * Convert camelCase key to kebab-case CLI flag.
+ * e.g. 'writId' → '--writ-id'
+ */
+export function toFlag(key: string): string {
+  return `--${key.replace(/([A-Z])/g, (c) => `-${c.toLowerCase()}`)}`;
+}
+
+/**
+ * Detect whether a Zod schema accepts booleans (and only booleans).
+ * Used to register Commander flags without <value> for boolean params.
+ */
+export function isBooleanSchema(schema: z.ZodTypeAny): boolean {
+  return (
+    schema.safeParse(true).success &&
+    schema.safeParse(false).success &&
+    !schema.safeParse(42).success &&
+    !schema.safeParse('test').success
+  );
+}
+
+/**
+ * Check whether a Zod schema is a number type, possibly wrapped
+ * in ZodOptional and/or ZodDefault.
+ */
+function isNumberSchema(schema: z.ZodTypeAny): boolean {
+  let inner: z.ZodTypeAny = schema;
+
+  if (inner instanceof z.ZodOptional) {
+    inner = inner.unwrap() as z.ZodTypeAny;
+  }
+  if (inner instanceof z.ZodDefault) {
+    inner = inner.unwrap() as z.ZodTypeAny;
+  }
+  // Handle the reverse nesting order too (default wrapping optional)
+  if (inner instanceof z.ZodOptional) {
+    inner = inner.unwrap() as z.ZodTypeAny;
+  }
+
+  return inner instanceof z.ZodNumber;
+}
+
+/**
+ * Coerce Commander string opts to match the expected Zod schema types.
+ *
+ * Commander passes all --option <value> arguments as strings. This function
+ * walks the Zod shape and converts string values to numbers where the
+ * schema expects z.number() (including when wrapped in ZodOptional/ZodDefault).
+ *
+ * Undefined values pass through unchanged — Zod handles optional/default.
+ * Non-number schemas are left untouched.
+ */
+export function coerceCliOpts(
+  shape: Record<string, z.ZodTypeAny>,
+  opts: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...opts };
+
+  for (const [key, schema] of Object.entries(shape)) {
+    const value = result[key];
+    if (typeof value !== 'string') continue;
+
+    if (isNumberSchema(schema)) {
+      result[key] = Number(value);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Determine which hyphen prefixes have enough tools to warrant a group.
+ *
+ * Returns a Set of prefixes that have 2+ tools sharing them.
+ * 'plugin-list' + 'plugin-install' → 'plugin' is a group.
+ * 'show-writ' alone → 'show' is NOT a group.
+ */
+export function findGroupPrefixes(tools: ToolDefinition[]): Set<string> {
+  const prefixCounts = new Map<string, number>();
+
+  for (const t of tools) {
+    const idx = t.name.indexOf('-');
+    if (idx === -1) continue;
+    const prefix = t.name.slice(0, idx);
+    prefixCounts.set(prefix, (prefixCounts.get(prefix) ?? 0) + 1);
+  }
+
+  const groups = new Set<string>();
+  for (const [prefix, count] of prefixCounts) {
+    if (count >= 2) groups.add(prefix);
+  }
+  return groups;
+}
+
+=== CONTEXT FILE: packages/framework/cli/src/commands ===
+tree dfac453:packages/framework/cli/src/commands
+
+index.ts
+init.test.ts
+init.ts
+plugin.test.ts
+plugin.ts
+status.test.ts
+status.ts
+test-helpers.ts
+upgrade.test.ts
+upgrade.ts
+version.test.ts
+version.ts
+
+=== CONTEXT FILE: packages/framework/cli/src/commands/init.test.ts ===
+/**
+ * Tests for the `init` framework command.
+ *
+ * Tests the handler directly — no CLI layer involved.
+ * init does not use guild() — it creates a new guild from scratch.
+ */
+
+import { describe, it, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+
+import initTool from './init.ts';
+import { makeTmpDir, cleanupTestState } from './test-helpers.ts';
+
+afterEach(() => {
+  cleanupTestState();
+});
+
+describe('nsg init', () => {
+  it('creates guild.json with correct shape', async () => {
+    const tmp = makeTmpDir('init');
+    const guildPath = path.join(tmp, 'my-guild');
+
+    await initTool.handler({ path: guildPath });
+
+    const config = JSON.parse(fs.readFileSync(path.join(guildPath, 'guild.json'), 'utf-8'));
+    assert.equal(config.name, 'my-guild');
+    assert.equal(config.settings?.model, 'sonnet');
+    assert.deepEqual(config.plugins, []);
+    // V3: no baseTools or roles (permission model — roles owned by Loom)
+    assert.equal(config.baseTools, undefined);
+    assert.equal(config.roles, undefined);
+    assert.equal(config.tools, undefined);
+    assert.equal(config.engines, undefined);
+  });
+
+  it('creates package.json', async () => {
+    const tmp = makeTmpDir('init');
+    const guildPath = path.join(tmp, 'test-guild');
+
+    await initTool.handler({ path: guildPath });
+
+    const pkg = JSON.parse(fs.readFileSync(path.join(guildPath, 'package.json'), 'utf-8'));
+    assert.equal(pkg.name, 'guild-test-guild');
+    assert.equal(pkg.private, true);
+    assert.equal(pkg.type, 'module');
+  });
+
+  it('creates .gitignore', async () => {
+    const tmp = makeTmpDir('init');
+    const guildPath = path.join(tmp, 'g');
+
+    await initTool.handler({ path: guildPath });
+
+    const gitignore = fs.readFileSync(path.join(guildPath, '.gitignore'), 'utf-8');
+    assert.ok(gitignore.includes('node_modules/'));
+    assert.ok(gitignore.includes('.nexus/'));
+  });
+
+  it('scaffolds directories', async () => {
+    const tmp = makeTmpDir('init');
+    const guildPath = path.join(tmp, 'g');
+
+    await initTool.handler({ path: guildPath });
+
+    assert.ok(fs.existsSync(path.join(guildPath, '.nexus')));
+  });
+
+  it('respects --name override', async () => {
+    const tmp = makeTmpDir('init');
+    const guildPath = path.join(tmp, 'dir-name');
+
+    await initTool.handler({ path: guildPath, name: 'custom-name' });
+
+    const config = JSON.parse(fs.readFileSync(path.join(guildPath, 'guild.json'), 'utf-8'));
+    assert.equal(config.name, 'custom-name');
+  });
+
+  it('respects --model override', async () => {
+    const tmp = makeTmpDir('init');
+    const guildPath = path.join(tmp, 'g');
+
+    await initTool.handler({ path: guildPath, model: 'opus' });
+
+    const config = JSON.parse(fs.readFileSync(path.join(guildPath, 'guild.json'), 'utf-8'));
+    assert.equal(config.settings?.model, 'opus');
+  });
+
+  it('fails on non-empty directory', async () => {
+    const tmp = makeTmpDir('init');
+    const guildPath = path.join(tmp, 'exists');
+    fs.mkdirSync(guildPath);
+    fs.writeFileSync(path.join(guildPath, 'file.txt'), 'not empty');
+
+    await assert.rejects(
+      async () => initTool.handler({ path: guildPath }),
+      /not empty/,
+    );
+  });
+});
+
+=== CONTEXT FILE: packages/framework/cli/src/commands/test-helpers.ts ===
+/**
+ * Shared test helpers for CLI command tests.
+ *
+ * Provides guild accessor setup, temp directory management, and minimal
+ * guild.json scaffolding. Extracted from status.test.ts, version.test.ts,
+ * and plugin.test.ts where these were copy-pasted identically.
+ */
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { setGuild, clearGuild } from '@shardworks/nexus-core';
+
+/** Accumulates temp dirs for cleanup in afterEach. */
+let tmpDirs: string[] = [];
+
+/** Set up a minimal guild accessor pointing at the given directory. */
+export function setupGuildAccessor(home: string): void {
+  setGuild({
+    home,
+    apparatus: () => { throw new Error('not available in test'); },
+    config: () => ({}) as never,
+    writeConfig: () => { throw new Error('not available in test'); },
+    guildConfig: () => ({}) as never,
+    kits: () => [],
+    apparatuses: () => [],
+    failedPlugins: () => [],
+  });
+}
+
+/** Create a temp directory and register it for cleanup. */
+export function makeTmpDir(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `nsg-${prefix}-test-`));
+  tmpDirs.push(dir);
+  return dir;
+}
+
+/** Write a minimal guild.json to dir, with optional overrides. */
+export function makeGuild(dir: string, overrides: Record<string, unknown> = {}): void {
+  const config = {
+    name: 'test-guild',
+    nexus: '0.0.0',
+    plugins: [],
+    settings: { model: 'sonnet' },
+    ...overrides,
+  };
+  fs.writeFileSync(path.join(dir, 'guild.json'), JSON.stringify(config, null, 2) + '\n');
+}
+
+/** Write a guild-root package.json declaring the given npm dependencies. */
+export function makeGuildPackageJson(dir: string, deps: Record<string, string>): void {
+  const pkg = { name: 'test-guild', version: '1.0.0', dependencies: deps };
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
+}
+
+/** Clean up guild state and temp directories. Call from afterEach(). */
+export function cleanupTestState(): void {
+  clearGuild();
+  for (const dir of tmpDirs) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  tmpDirs = [];
+}
+
+=== CONTEXT FILE: packages/framework/cli/src/commands/index.ts ===
+/**
+ * Framework commands — hardcoded CLI commands that work with or without a guild.
+ *
+ * These are guild lifecycle and plugin management commands that the CLI
+ * registers directly, bypassing plugin discovery. They are the CLI's own
+ * commands, not tools contributed by kits or apparatus.
+ *
+ * Plugin-contributed tools are discovered at runtime via The Instrumentarium
+ * when a guild is present and the tools apparatus is installed.
+ */
+
+import type { ToolDefinition } from '@shardworks/tools-apparatus';
+import init from './init.ts';
+import version from './version.ts';
+import status from './status.ts';
+import upgrade from './upgrade.ts';
+import { pluginList, pluginInstall, pluginRemove, pluginUpgrade } from './plugin.ts';
+
+/** All framework commands, typed as the base ToolDefinition for uniform handling. */
+export const frameworkCommands = [
+  init,
+  version,
+  status,
+  upgrade,
+  pluginList,
+  pluginInstall,
+  pluginRemove,
+  pluginUpgrade,
+] as ToolDefinition[];
+
+=== CONTEXT FILE: packages/plugins/animator/src/tools/session-tools.test.ts ===
+/**
+ * Tests for session-list and session-show tools.
+ *
+ * Uses the same fake guild + in-memory Stacks harness as the main animator
+ * tests. Seeds session documents directly into Stacks, then exercises the
+ * tool handlers to verify query construction, filtering, and error handling.
+ */
+
+import { describe, it, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { setGuild, clearGuild } from '@shardworks/nexus-core';
+import type { Guild } from '@shardworks/nexus-core';
+import { createStacksApparatus } from '@shardworks/stacks-apparatus';
+import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
+import type { StacksApi, Book } from '@shardworks/stacks-apparatus';
+
+import type { SessionDoc } from '../types.ts';
+import sessionList from './session-list.ts';
+import sessionShow from './session-show.ts';
+
+// ── Test harness ────────────────────────────────────────────────────
+
+let stacks: StacksApi;
+let sessions: Book<SessionDoc>;
+
+function setup() {
+  const memBackend = new MemoryBackend();
+  const stacksPlugin = createStacksApparatus(memBackend);
+
+  const apparatusMap = new Map<string, unknown>();
+
+  const fakeGuild: Guild = {
+    home: '/tmp/fake-guild',
+    apparatus<T>(name: string): T {
+      const api = apparatusMap.get(name);
+      if (!api) throw new Error(`Apparatus "${name}" not installed`);
+      return api as T;
+    },
+    config<T>(): T {
+      return {} as T;
+    },
+    writeConfig() { /* noop in test */ },
+    guildConfig: () => ({
+      name: 'test-guild',
+      nexus: '0.0.0',
+      workshops: {},
+      roles: {},
+      baseTools: [],
+      plugins: [],
+      settings: { model: 'sonnet' },
+    }),
+    kits: () => [],
+    apparatuses: () => [],
+  };
+
+  setGuild(fakeGuild);
+
+  const sa = (stacksPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+  sa.start({ on: () => {} });
+  stacks = sa.provides as StacksApi;
+  apparatusMap.set('stacks', stacks);
+
+  memBackend.ensureBook({ ownerId: 'animator', book: 'sessions' }, {
+    indexes: ['startedAt', 'status', 'conversationId', 'provider'],
+  });
+
+  sessions = stacks.book<SessionDoc>('animator', 'sessions');
+}
+
+// ── Seed data ───────────────────────────────────────────────────────
+
+const seedSessions: SessionDoc[] = [
+  {
+    id: 'ses-00000001',
+    status: 'completed',
+    startedAt: '2026-04-01T10:00:00Z',
+    endedAt: '2026-04-01T10:05:00Z',
+    durationMs: 300000,
+    provider: 'claude-code',
+    exitCode: 0,
+    costUsd: 0.42,
+    conversationId: 'conv-aaa',
+    metadata: { trigger: 'summon', animaName: 'scribe' },
+  },
+  {
+    id: 'ses-00000002',
+    status: 'failed',
+    startedAt: '2026-04-01T11:00:00Z',
+    endedAt: '2026-04-01T11:01:00Z',
+    durationMs: 60000,
+    provider: 'claude-code',
+    exitCode: 1,
+    error: 'Process crashed',
+    conversationId: 'conv-bbb',
+  },
+  {
+    id: 'ses-00000003',
+    status: 'completed',
+    startedAt: '2026-04-01T12:00:00Z',
+    endedAt: '2026-04-01T12:10:00Z',
+    durationMs: 600000,
+    provider: 'other-provider',
+    exitCode: 0,
+    costUsd: 1.20,
+    conversationId: 'conv-aaa',
+  },
+  {
+    id: 'ses-00000004',
+    status: 'timeout',
+    startedAt: '2026-04-01T13:00:00Z',
+    endedAt: '2026-04-01T13:05:00Z',
+    durationMs: 300000,
+    provider: 'claude-code',
+    exitCode: 124,
+    error: 'Session timed out',
+  },
+  {
+    id: 'ses-00000005',
+    status: 'running',
+    startedAt: '2026-04-01T14:00:00Z',
+    provider: 'claude-code',
+  },
+];
+
+async function seedAll() {
+  for (const doc of seedSessions) {
+    await sessions.put(doc);
+  }
+}
+
+// ── Tests ───────────────────────────────────────────────────────────
+
+describe('session-list tool', () => {
+  beforeEach(async () => {
+    setup();
+    await seedAll();
+  });
+
+  afterEach(() => {
+    clearGuild();
+  });
+
+  it('returns all sessions with no filters', async () => {
+    const results = await sessionList.handler({ limit: 20 });
+    assert.equal(results.length, 5);
+  });
+
+  it('filters by status', async () => {
+    const results = await sessionList.handler({ status: 'completed', limit: 20 });
+    assert.equal(results.length, 2);
+    for (const r of results) {
+      assert.equal(r.status, 'completed');
+    }
+  });
+
+  it('filters by provider', async () => {
+    const results = await sessionList.handler({ provider: 'other-provider', limit: 20 });
+    assert.equal(results.length, 1);
+    assert.equal(results[0]!.id, 'ses-00000003');
+  });
+
+  it('filters by conversationId', async () => {
+    const results = await sessionList.handler({ conversationId: 'conv-aaa', limit: 20 });
+    assert.equal(results.length, 2);
+    const ids = results.map((r) => r.id).sort();
+    assert.deepEqual(ids, ['ses-00000001', 'ses-00000003']);
+  });
+
+  it('filters by running status', async () => {
+    const results = await sessionList.handler({ status: 'running', limit: 20 });
+    assert.equal(results.length, 1);
+    assert.equal(results[0]!.id, 'ses-00000005');
+  });
+
+  it('combines multiple filters', async () => {
+    const results = await sessionList.handler({
+      status: 'completed',
+      provider: 'claude-code',
+      limit: 20,
+    });
+    assert.equal(results.length, 1);
+    assert.equal(results[0]!.id, 'ses-00000001');
+  });
+
+  it('respects limit', async () => {
+    const results = await sessionList.handler({ limit: 2 });
+    assert.equal(results.length, 2);
+  });
+
+  it('returns summary projection (expected fields only)', async () => {
+    const results = await sessionList.handler({ limit: 1 });
+    assert.equal(results.length, 1);
+    const keys = Object.keys(results[0]!).sort();
+    assert.deepEqual(keys, [
+      'costUsd', 'durationMs', 'endedAt', 'exitCode',
+      'id', 'provider', 'startedAt', 'status',
+    ]);
+  });
+
+  it('returns empty array when no sessions match', async () => {
+    const results = await sessionList.handler({ provider: 'nonexistent', limit: 20 });
+    assert.equal(results.length, 0);
+  });
+});
+
+describe('session-show tool', () => {
+  beforeEach(async () => {
+    setup();
+    await seedAll();
+  });
+
+  afterEach(() => {
+    clearGuild();
+  });
+
+  it('returns full session record by id', async () => {
+    const result = await sessionShow.handler({ id: 'ses-00000001' });
+    assert.equal(result.id, 'ses-00000001');
+    assert.equal(result.status, 'completed');
+    assert.equal(result.provider, 'claude-code');
+    assert.equal(result.costUsd, 0.42);
+    assert.deepEqual(result.metadata, { trigger: 'summon', animaName: 'scribe' });
+  });
+
+  it('returns session with error fields', async () => {
+    const result = await sessionShow.handler({ id: 'ses-00000002' });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error, 'Process crashed');
+    assert.equal(result.exitCode, 1);
+  });
+
+  it('throws for missing session id', async () => {
+    await assert.rejects(
+      () => sessionShow.handler({ id: 'ses-nonexistent' }),
+      { message: 'Session "ses-nonexistent" not found.' },
+    );
+  });
+});
+
+=== CONTEXT FILE: packages/plugins/animator/src/tools/session-list.ts ===
+/**
+ * session-list tool — list recent sessions with optional filters.
+ *
+ * Queries The Animator's `sessions` book in The Stacks.
+ * Returns session summaries ordered by startedAt descending (newest first).
+ *
+ * See: docs/specification.md (animator § session-list tool)
+ */
+
+import { tool } from '@shardworks/tools-apparatus';
+import { guild } from '@shardworks/nexus-core';
+import { z } from 'zod';
+import type { StacksApi, WhereCondition } from '@shardworks/stacks-apparatus';
+import type { SessionDoc } from '../types.ts';
+
+export default tool({
+  name: 'session-list',
+  description: 'List recent sessions with optional filters',
+  instructions:
+    'Returns session summaries ordered by start time (newest first). ' +
+    'Use for investigating recent activity, debugging, or reporting. ' +
+    'Filters by indexed fields only — use Stacks queries directly for metadata fields.',
+  params: {
+    status: z.enum(['running', 'completed', 'failed', 'timeout']).optional()
+      .describe('Filter by session status'),
+    provider: z.string().optional()
+      .describe('Filter by provider name (e.g. "claude-code")'),
+    conversationId: z.string().optional()
+      .describe('Filter by conversation id'),
+    limit: z.number().optional().default(20)
+      .describe('Maximum results (default: 20)'),
+  },
+  permission: 'read',
+  handler: async (params) => {
+    const stacks = guild().apparatus<StacksApi>('stacks');
+    const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+
+    const where: WhereCondition[] = [];
+    if (params.status) where.push(['status', '=', params.status]);
+    if (params.provider) where.push(['provider', '=', params.provider]);
+    if (params.conversationId) where.push(['conversationId', '=', params.conversationId]);
+
+    const results = await sessions.find({
+      where: where.length > 0 ? where : undefined,
+      orderBy: ['startedAt', 'desc'],
+      limit: params.limit,
+    });
+
+    // Return summary projection
+    return results.map((s) => ({
+      id: s.id,
+      status: s.status,
+      provider: s.provider,
+      startedAt: s.startedAt,
+      endedAt: s.endedAt,
+      durationMs: s.durationMs,
+      exitCode: s.exitCode,
+      costUsd: s.costUsd,
+    }));
+  },
+});
+
+=== CONTEXT FILE: packages/plugins/animator/src/tools/session-show.ts ===
+/**
+ * session-show tool — show full detail for a single session by id.
+ *
+ * Reads the complete session record from The Animator's `sessions` book
+ * in The Stacks, including tokenUsage, metadata, and all indexed fields.
+ *
+ * See: docs/specification.md (animator § session-show tool)
+ */
+
+import { tool } from '@shardworks/tools-apparatus';
+import { guild } from '@shardworks/nexus-core';
+import { z } from 'zod';
+import type { StacksApi } from '@shardworks/stacks-apparatus';
+import type { SessionDoc } from '../types.ts';
+
+export default tool({
+  name: 'session-show',
+  description: 'Show full detail for a single session by id',
+  instructions:
+    'Returns the complete session record from The Stacks, including ' +
+    'tokenUsage, metadata, and all indexed fields.',
+  params: {
+    id: z.string().describe('Session id'),
+  },
+  permission: 'read',
+  handler: async (params) => {
+    const stacks = guild().apparatus<StacksApi>('stacks');
+    const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
+
+    const session = await sessions.get(params.id);
+    if (!session) {
+      throw new Error(`Session "${params.id}" not found.`);
+    }
+    return session;
+  },
+});
+
+=== CONTEXT FILE: packages/plugins/claude-code/src/index.ts ===
+/**
+ * Claude Code Session Provider
+ *
+ * Apparatus plugin that implements AnimatorSessionProvider for the
+ * Claude Code CLI. The Animator discovers this via guild config:
+ *
+ *   guild.json["animator"]["sessionProvider"] = "claude-code"
+ *
+ * Launches sessions via the `claude` CLI in autonomous mode (--print)
+ * with --output-format stream-json for structured telemetry.
+ *
+ * Key design choice: uses async spawn() instead of spawnSync().
+ * This is required for stream-json transcript parsing, timeout enforcement,
+ * and future concurrent session support.
+ */
+
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import type { Plugin } from '@shardworks/nexus-core';
+import type {
+  AnimatorSessionProvider,
+  SessionProviderConfig,
+  SessionProviderResult,
+  SessionChunk,
+} from '@shardworks/animator-apparatus';
+
+import { startMcpHttpServer } from './mcp-server.ts';
+import type { McpHttpHandle } from './mcp-server.ts';
+
+// ── Session File Preparation ────────────────────────────────────────────
+
+/** Prepared session files in a temp directory. */
+interface PreparedSession {
+  tmpDir: string;
+  args: string[];
+  /** If an MCP server was started, this handle closes it. */
+  mcpHandle?: McpHttpHandle;
+}
+
+/**
+ * Prepare session files and build base CLI args.
+ *
+ * Writes system prompt to a temp directory. Builds the base args array
+ * including --resume support. When tools are provided, starts an
+ * in-process MCP HTTP server and writes --mcp-config.
+ *
+ * Caller is responsible for cleaning up tmpDir and calling mcpHandle.close().
+ */
+async function prepareSession(config: SessionProviderConfig): Promise<PreparedSession> {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nsg-session-'));
+
+  const args: string[] = [
+    '--setting-sources', 'user',
+    '--dangerously-skip-permissions',
+    '--model', config.model,
+  ];
+
+  if (config.systemPrompt) {
+    const systemPromptPath = path.join(tmpDir, 'system-prompt.md');
+    fs.writeFileSync(systemPromptPath, config.systemPrompt);
+    args.push('--system-prompt-file', systemPromptPath);
+  }
+
+  // Resume an existing conversation
+  if (config.conversationId) {
+    args.push('--resume', config.conversationId);
+  }
+
+  // Tool-equipped session: start MCP HTTP server, write --mcp-config
+  let mcpHandle: McpHttpHandle | undefined;
+
+  if (config.tools && config.tools.length > 0) {
+    const tools = config.tools.map((rt) => rt.definition);
+    mcpHandle = await startMcpHttpServer(tools);
+
+    const mcpConfig = {
+      mcpServers: {
+        'nexus-guild': {
+          type: 'sse',
+          url: mcpHandle.url,
+        },
+      },
+    };
+
+    const mcpConfigPath = path.join(tmpDir, 'mcp-config.json');
+    fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig));
+    args.push('--mcp-config', mcpConfigPath, '--strict-mcp-config');
+  }
+
+  return { tmpDir, args, mcpHandle };
+}
+
+// ── Output extraction ───────────────────────────────────────────────
+
+/**
+ * Extract the final assistant text from a transcript.
+ *
+ * Walks the transcript backwards to find the last `assistant` message
+ * and concatenates its text content blocks.
+ *
+ * @internal Exported for testing only.
+ */
+export function extractFinalAssistantText(transcript: Record<string, unknown>[]): string | undefined {
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const msg = transcript[i]!;
+    if (msg.type !== 'assistant') continue;
+
+    const message = msg.message as Record<string, unknown> | undefined;
+    const content = message?.content as Array<Record<string, unknown>> | undefined;
+    if (!content) continue;
+
+    const text = content
+      .filter((block) => block.type === 'text' && typeof block.text === 'string')
+      .map((block) => block.text as string)
+      .join('');
+
+    return text || undefined;
+  }
+  return undefined;
+}
+
+// ── Result builder ──────────────────────────────────────────────────
+
+function buildResult(raw: StreamJsonResult): SessionProviderResult {
+  const status = raw.exitCode === 0 ? 'completed' as const : 'failed' as const;
+  return {
+    status,
+    exitCode: raw.exitCode,
+    error: status === 'failed' ? `claude exited with code ${raw.exitCode}` : undefined,
+    costUsd: raw.costUsd,
+    tokenUsage: raw.tokenUsage,
+    providerSessionId: raw.providerSessionId,
+    transcript: raw.transcript,
+    output: extractFinalAssistantText(raw.transcript),
+  };
+}
+
+// ── Provider implementation ──────────────────────────────────────────
+
+const provider: AnimatorSessionProvider = {
+  name: 'claude-code',
+
+  launch(config: SessionProviderConfig): {
+    chunks: AsyncIterable<SessionChunk>;
+    result: Promise<SessionProviderResult>;
+  } {
+    // prepareSession is async (MCP server start), so we wrap the launch
+    // in a promise. The chunks iterable bridges the async gap — it waits
+    // for prep to complete before yielding.
+
+    let chunkResolve: (() => void) | null = null;
+    let innerChunks: AsyncIterable<SessionChunk> | null = null;
+    let innerIterator: AsyncIterator<SessionChunk> | null = null;
+    let prepDone = false;
+    let prepError: Error | null = null;
+    let done = false;
+
+    const result = prepareSession(config).then(async ({ tmpDir, args, mcpHandle }) => {
+      // Autonomous mode: prompt piped via stdin (--print - reads from stdin).
+      // This avoids Commander parsing issues when the prompt starts with '-'
+      // (e.g. YAML frontmatter '---') and also avoids OS arg length limits.
+      const prompt = config.initialPrompt ?? '';
+      args.push(
+        '--print', '-',
+        '--output-format', 'stream-json',
+        '--verbose',
+      );
+
+      const cleanup = async () => {
+        await mcpHandle?.close().catch(() => {});
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      };
+
+      try {
+        if (config.streaming) {
+          const spawned = spawnClaudeStreamingJson(args, config.cwd, config.environment, prompt);
+          innerChunks = spawned.chunks;
+          prepDone = true;
+          if (chunkResolve) { chunkResolve(); chunkResolve = null; }
+
+          const raw = await spawned.result;
+          await cleanup();
+          return buildResult(raw);
+        }
+
+        // Non-streaming
+        prepDone = true;
+        done = true;
+        if (chunkResolve) { chunkResolve(); chunkResolve = null; }
+
+        const raw = await spawnClaudeStreamJson(args, config.cwd, config.environment, prompt);
+        await cleanup();
+        return buildResult(raw);
+      } catch (err) {
+        await cleanup();
+        throw err;
+      }
+    }).catch((err) => {
+      // If prep itself failed, unblock the chunk iterator
+      prepError = err instanceof Error ? err : new Error(String(err));
+      prepDone = true;
+      done = true;
+      if (chunkResolve) { chunkResolve(); chunkResolve = null; }
+      throw err;
+    });
+
+    // Chunks iterable that bridges the async prep gap. In non-streaming
+    // mode or on error, it completes immediately with no items.
+    const chunks: AsyncIterable<SessionChunk> = {
+      [Symbol.asyncIterator]() {
+        return {
+          async next(): Promise<IteratorResult<SessionChunk>> {
+            // Wait for prep to complete
+            while (!prepDone) {
+              await new Promise<void>((resolve) => { chunkResolve = resolve; });
+            }
+
+            if (prepError || done) {
+              return { value: undefined as unknown as SessionChunk, done: true };
+            }
+
+            // Delegate to inner streaming iterator
+            if (innerChunks && !innerIterator) {
+              innerIterator = innerChunks[Symbol.asyncIterator]();
+            }
+
+            if (innerIterator) {
+              return innerIterator.next();
+            }
+
+            return { value: undefined as unknown as SessionChunk, done: true };
+          },
+        };
+      },
+    };
+
+    return { chunks, result };
+  },
+};
+
+// ── Apparatus export ─────────────────────────────────────────────────
+
+/**
+ * Create the Claude Code session provider apparatus.
+ *
+ * The apparatus has no startup logic — it just provides the
+ * AnimatorSessionProvider implementation. The Animator looks it up
+ * via guild().apparatus('claude-code').
+ */
+export function createClaudeCodeProvider(): Plugin {
+  return {
+    apparatus: {
+      requires: [],
+      provides: provider,
+
+      start() {
+        // No startup work — the provider is stateless.
+      },
+    },
+  };
+}
+
+export default createClaudeCodeProvider();
+
+// ── MCP server re-exports ───────────────────────────────────────────
+// The MCP server module is used by the session provider to attach tools
+// to sessions via --mcp-config, and can be imported directly for
+// testing or custom integrations.
+
+export { createMcpServer, startMcpHttpServer } from './mcp-server.ts';
+export type { McpHttpHandle } from './mcp-server.ts';
+
+// ── Spawn helpers ────────────────────────────────────────────────────
+
+/** Parsed result from stream-json output. @internal */
+export interface StreamJsonResult {
+  exitCode: number;
+  transcript: Record<string, unknown>[];
+  costUsd?: number;
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+  providerSessionId?: string;
+}
+
+/**
+ * Parse a single NDJSON message from stream-json output.
+ *
+ * Returns parsed chunks for streaming and accumulates data into the
+ * provided accumulators (transcript, metrics).
+ *
+ * @internal Exported for testing only.
+ */
+export function parseStreamJsonMessage(
+  msg: Record<string, unknown>,
+  acc: {
+    transcript: Record<string, unknown>[];
+    costUsd?: number;
+    tokenUsage?: StreamJsonResult['tokenUsage'];
+    providerSessionId?: string;
+  },
+): SessionChunk[] {
+  const chunks: SessionChunk[] = [];
+
+  if (msg.type === 'assistant') {
+    acc.transcript.push(msg);
+
+    const message = msg.message as Record<string, unknown> | undefined;
+    if (message) {
+      const content = message.content as Array<Record<string, unknown>> | undefined;
+      if (content) {
+        for (const block of content) {
+          if (block.type === 'text' && typeof block.text === 'string') {
+            process.stderr.write(block.text);
+            chunks.push({ type: 'text', text: block.text });
+          } else if (block.type === 'tool_use' && typeof block.name === 'string') {
+            chunks.push({ type: 'tool_use', tool: block.name });
+          }
+        }
+      }
+    }
+  } else if (msg.type === 'user') {
+    acc.transcript.push(msg);
+
+    const content = (msg as Record<string, unknown>).content as Array<Record<string, unknown>> | undefined;
+    if (content) {
+      for (const block of content) {
+        if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
+          chunks.push({ type: 'tool_result', tool: String(block.tool_use_id) });
+        }
+      }
+    }
+  } else if (msg.type === 'result') {
+    acc.costUsd = typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : undefined;
+    acc.providerSessionId = typeof msg.session_id === 'string' ? msg.session_id : undefined;
+
+    const usage = msg.usage as Record<string, unknown> | undefined;
+    if (usage) {
+      acc.tokenUsage = {
+        inputTokens: (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0),
+        outputTokens: (typeof usage.output_tokens === 'number' ? usage.output_tokens : 0),
+        cacheReadTokens: typeof usage.cache_read_input_tokens === 'number'
+          ? usage.cache_read_input_tokens : undefined,
+        cacheWriteTokens: typeof usage.cache_creation_input_tokens === 'number'
+          ? usage.cache_creation_input_tokens : undefined,
+      };
+    }
+  }
+
+  return chunks;
+}
+
+/**
+ * Process NDJSON buffer, calling handler for each complete line.
+ * Returns the remaining incomplete buffer.
+ *
+ * @internal Exported for testing only.
+ */
+export function processNdjsonBuffer(
+  buffer: string,
+  handler: (msg: Record<string, unknown>) => void,
+): string {
+  let newlineIdx: number;
+  while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+    const line = buffer.slice(0, newlineIdx).trim();
+    buffer = buffer.slice(newlineIdx + 1);
+
+    if (!line) continue;
+
+    try {
+      const msg = JSON.parse(line) as Record<string, unknown>;
+      handler(msg);
+    } catch {
+      // Non-JSON line — ignore
+    }
+  }
+  return buffer;
+}
+
+/**
+ * Spawn Claude in autonomous mode with --output-format stream-json.
+ *
+ * Captures stdout (NDJSON lines), parses each line to extract:
+ * - assistant messages → transcript
+ * - result message → cost, token usage, session ID
+ *
+ * Forwards assistant text content to stderr so it's visible during execution.
+ */
+function spawnClaudeStreamJson(args: string[], cwd: string, env?: Record<string, string>, stdinData?: string): Promise<StreamJsonResult> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('claude', args, {
+      cwd,
+      stdio: ['pipe', 'pipe', 'inherit'],
+      env: { ...process.env, ...env },
+    });
+
+    // Pipe prompt via stdin (--print - reads from stdin)
+    if (stdinData !== undefined) {
+      proc.stdin!.write(stdinData);
+      proc.stdin!.end();
+    }
+
+    const acc: {
+      transcript: Record<string, unknown>[];
+      costUsd?: number;
+      tokenUsage?: StreamJsonResult['tokenUsage'];
+      providerSessionId?: string;
+    } = { transcript: [] };
+
+    let buffer = '';
+
+    proc.stdout!.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString();
+      buffer = processNdjsonBuffer(buffer, (msg) => {
+        parseStreamJsonMessage(msg, acc);
+      });
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to spawn claude: ${err.message}`));
+    });
+
+    proc.on('close', (code) => {
+      if (acc.transcript.length > 0) {
+        process.stderr.write('\n');
+      }
+
+      resolve({
+        exitCode: code ?? 1,
+        transcript: acc.transcript,
+        costUsd: acc.costUsd,
+        tokenUsage: acc.tokenUsage,
+        providerSessionId: acc.providerSessionId,
+      });
+    });
+  });
+}
+
+/**
+ * Spawn Claude with streaming — yields SessionChunks as they arrive
+ * while also accumulating the full result.
+ *
+ * Returns an async iterable of chunks for real-time consumption and
+ * a promise for the final StreamJsonResult.
+ */
+function spawnClaudeStreamingJson(args: string[], cwd: string, env?: Record<string, string>, stdinData?: string): {
+  chunks: AsyncIterable<SessionChunk>;
+  result: Promise<StreamJsonResult>;
+} {
+  const chunkQueue: SessionChunk[] = [];
+  let chunkResolve: (() => void) | null = null;
+  let done = false;
+
+  const acc: {
+    transcript: Record<string, unknown>[];
+    costUsd?: number;
+    tokenUsage?: StreamJsonResult['tokenUsage'];
+    providerSessionId?: string;
+  } = { transcript: [] };
+
+  const proc = spawn('claude', args, {
+    cwd,
+    stdio: ['pipe', 'pipe', 'inherit'],
+    env: { ...process.env, ...env },
+  });
+
+  // Pipe prompt via stdin (--print - reads from stdin)
+  if (stdinData !== undefined) {
+    proc.stdin!.write(stdinData);
+    proc.stdin!.end();
+  }
+
+  let buffer = '';
+
+  proc.stdout!.on('data', (chunk: Buffer) => {
+    buffer += chunk.toString();
+    buffer = processNdjsonBuffer(buffer, (msg) => {
+      const newChunks = parseStreamJsonMessage(msg, acc);
+      if (newChunks.length > 0) {
+        chunkQueue.push(...newChunks);
+        if (chunkResolve) {
+          chunkResolve();
+          chunkResolve = null;
+        }
+      }
+    });
+  });
+
+  const result = new Promise<StreamJsonResult>((resolve, reject) => {
+    proc.on('error', (err) => {
+      done = true;
+      if (chunkResolve) { chunkResolve(); chunkResolve = null; }
+      reject(new Error(`Failed to spawn claude: ${err.message}`));
+    });
+
+    proc.on('close', (code) => {
+      if (acc.transcript.length > 0) {
+        process.stderr.write('\n');
+      }
+      done = true;
+      if (chunkResolve) { chunkResolve(); chunkResolve = null; }
+      resolve({
+        exitCode: code ?? 1,
+        transcript: acc.transcript,
+        costUsd: acc.costUsd,
+        tokenUsage: acc.tokenUsage,
+        providerSessionId: acc.providerSessionId,
+      });
+    });
+  });
+
+  const chunks: AsyncIterable<SessionChunk> = {
+    [Symbol.asyncIterator]() {
+      return {
+        async next(): Promise<IteratorResult<SessionChunk>> {
+          while (true) {
+            if (chunkQueue.length > 0) {
+              return { value: chunkQueue.shift()!, done: false };
+            }
+            if (done) {
+              return { value: undefined as unknown as SessionChunk, done: true };
+            }
+            await new Promise<void>((resolve) => { chunkResolve = resolve; });
+          }
+        },
+      };
+    },
+  };
+
+  return { chunks, result };
+}
+
+=== CONTEXT FILE: packages/plugins/claude-code/src/stream-parser.test.ts ===
+/**
+ * Tests for the NDJSON stream parsing logic in the Claude Code session provider.
+ *
+ * Exercises parseStreamJsonMessage() and processNdjsonBuffer() — the pure
+ * functions that parse Claude's --output-format stream-json output into
+ * SessionChunks and accumulated metrics.
+ */
+
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  parseStreamJsonMessage,
+  processNdjsonBuffer,
+  extractFinalAssistantText,
+  type StreamJsonResult,
+} from './index.ts';
+
+// ── Helper ──────────────────────────────────────────────────────────
+
+function freshAcc(): {
+  transcript: Record<string, unknown>[];
+  costUsd?: number;
+  tokenUsage?: StreamJsonResult['tokenUsage'];
+  providerSessionId?: string;
+} {
+  return { transcript: [] };
+}
+
+// ── parseStreamJsonMessage ──────────────────────────────────────────
+
+describe('parseStreamJsonMessage()', () => {
+  it('parses assistant text content into text chunks', () => {
+    const acc = freshAcc();
+    const chunks = parseStreamJsonMessage({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'Hello world' },
+        ],
+      },
+    }, acc);
+
+    assert.equal(chunks.length, 1);
+    assert.deepEqual(chunks[0], { type: 'text', text: 'Hello world' });
+    assert.equal(acc.transcript.length, 1);
+  });
+
+  it('parses assistant tool_use into tool_use chunks', () => {
+    const acc = freshAcc();
+    const chunks = parseStreamJsonMessage({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', name: 'bash' },
+        ],
+      },
+    }, acc);
+
+    assert.equal(chunks.length, 1);
+    assert.deepEqual(chunks[0], { type: 'tool_use', tool: 'bash' });
+  });
+
+  it('parses multiple content blocks in one message', () => {
+    const acc = freshAcc();
+    const chunks = parseStreamJsonMessage({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'Let me run that.' },
+          { type: 'tool_use', name: 'bash' },
+        ],
+      },
+    }, acc);
+
+    assert.equal(chunks.length, 2);
+    assert.equal(chunks[0]!.type, 'text');
+    assert.equal(chunks[1]!.type, 'tool_use');
+  });
+
+  it('parses user tool_result into tool_result chunks', () => {
+    const acc = freshAcc();
+    const chunks = parseStreamJsonMessage({
+      type: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'tu_abc123' },
+      ],
+    }, acc);
+
+    assert.equal(chunks.length, 1);
+    assert.deepEqual(chunks[0], { type: 'tool_result', tool: 'tu_abc123' });
+  });
+
+  it('extracts cost and token usage from result message', () => {
+    const acc = freshAcc();
+    const chunks = parseStreamJsonMessage({
+      type: 'result',
+      total_cost_usd: 0.42,
+      session_id: 'sess-xyz',
+      usage: {
+        input_tokens: 1000,
+        output_tokens: 500,
+        cache_read_input_tokens: 200,
+        cache_creation_input_tokens: 100,
+      },
+    }, acc);
+
+    assert.equal(chunks.length, 0);
+    assert.equal(acc.costUsd, 0.42);
+    assert.equal(acc.providerSessionId, 'sess-xyz');
+    assert.deepEqual(acc.tokenUsage, {
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadTokens: 200,
+      cacheWriteTokens: 100,
+    });
+  });
+
+  it('handles result message without optional usage fields', () => {
+    const acc = freshAcc();
+    parseStreamJsonMessage({
+      type: 'result',
+      total_cost_usd: 0.10,
+      usage: {
+        input_tokens: 500,
+        output_tokens: 100,
+      },
+    }, acc);
+
+    assert.equal(acc.costUsd, 0.10);
+    assert.equal(acc.tokenUsage!.cacheReadTokens, undefined);
+    assert.equal(acc.tokenUsage!.cacheWriteTokens, undefined);
+  });
+
+  it('handles assistant message with no content blocks', () => {
+    const acc = freshAcc();
+    const chunks = parseStreamJsonMessage({
+      type: 'assistant',
+      message: {},
+    }, acc);
+
+    assert.equal(chunks.length, 0);
+    assert.equal(acc.transcript.length, 1);
+  });
+
+  it('handles assistant message with no message field', () => {
+    const acc = freshAcc();
+    const chunks = parseStreamJsonMessage({
+      type: 'assistant',
+    }, acc);
+
+    assert.equal(chunks.length, 0);
+    assert.equal(acc.transcript.length, 1);
+  });
+
+  it('ignores unknown message types', () => {
+    const acc = freshAcc();
+    const chunks = parseStreamJsonMessage({
+      type: 'system',
+      data: 'something',
+    }, acc);
+
+    assert.equal(chunks.length, 0);
+    assert.equal(acc.transcript.length, 0);
+  });
+
+  it('accumulates across multiple calls', () => {
+    const acc = freshAcc();
+
+    parseStreamJsonMessage({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'Part 1' }] },
+    }, acc);
+
+    parseStreamJsonMessage({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'Part 2' }] },
+    }, acc);
+
+    parseStreamJsonMessage({
+      type: 'result',
+      total_cost_usd: 0.50,
+      session_id: 'sess-123',
+      usage: { input_tokens: 2000, output_tokens: 800 },
+    }, acc);
+
+    assert.equal(acc.transcript.length, 2);
+    assert.equal(acc.costUsd, 0.50);
+    assert.equal(acc.providerSessionId, 'sess-123');
+  });
+});
+
+// ── extractFinalAssistantText ───────────────────────────────────────
+
+describe('extractFinalAssistantText()', () => {
+  it('returns undefined for empty transcript', () => {
+    assert.equal(extractFinalAssistantText([]), undefined);
+  });
+
+  it('returns undefined when no assistant messages', () => {
+    const transcript = [
+      { type: 'result', total_cost_usd: 0.01 },
+    ];
+    assert.equal(extractFinalAssistantText(transcript), undefined);
+  });
+
+  it('extracts text from the last assistant message', () => {
+    const transcript = [
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'First response' }] },
+      },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Final response' }] },
+      },
+    ];
+    assert.equal(extractFinalAssistantText(transcript), 'Final response');
+  });
+
+  it('concatenates multiple text blocks from the last assistant message', () => {
+    const transcript = [
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'text', text: 'Part one. ' },
+            { type: 'tool_use', name: 'bash' },
+            { type: 'text', text: 'Part two.' },
+          ],
+        },
+      },
+    ];
+    assert.equal(extractFinalAssistantText(transcript), 'Part one. Part two.');
+  });
+
+  it('skips non-text content blocks', () => {
+    const transcript = [
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', name: 'bash' },
+          ],
+        },
+      },
+    ];
+    assert.equal(extractFinalAssistantText(transcript), undefined);
+  });
+
+  it('skips earlier assistant messages and uses the last', () => {
+    const transcript = [
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Earlier' }] },
+      },
+      { type: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu_1' }] },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Later' }] },
+      },
+      { type: 'result', total_cost_usd: 0.05 },
+    ];
+    assert.equal(extractFinalAssistantText(transcript), 'Later');
+  });
+
+  it('returns undefined for assistant message with no content', () => {
+    const transcript = [
+      { type: 'assistant', message: {} },
+    ];
+    assert.equal(extractFinalAssistantText(transcript), undefined);
+  });
+
+  it('returns undefined for assistant message with no message field', () => {
+    const transcript = [
+      { type: 'assistant' },
+    ];
+    assert.equal(extractFinalAssistantText(transcript), undefined);
+  });
+});
+
+// ── processNdjsonBuffer ─────────────────────────────────────────────
+
+describe('processNdjsonBuffer()', () => {
+  it('processes complete lines and returns empty remainder', () => {
+    const messages: Record<string, unknown>[] = [];
+    const remainder = processNdjsonBuffer(
+      '{"type":"assistant"}\n{"type":"result"}\n',
+      (msg) => messages.push(msg),
+    );
+
+    assert.equal(messages.length, 2);
+    assert.equal(messages[0]!.type, 'assistant');
+    assert.equal(messages[1]!.type, 'result');
+    assert.equal(remainder, '');
+  });
+
+  it('returns incomplete trailing data as remainder', () => {
+    const messages: Record<string, unknown>[] = [];
+    const remainder = processNdjsonBuffer(
+      '{"type":"assistant"}\n{"type":"res',
+      (msg) => messages.push(msg),
+    );
+
+    assert.equal(messages.length, 1);
+    assert.equal(remainder, '{"type":"res');
+  });
+
+  it('handles empty buffer', () => {
+    const messages: Record<string, unknown>[] = [];
+    const remainder = processNdjsonBuffer('', (msg) => messages.push(msg));
+
+    assert.equal(messages.length, 0);
+    assert.equal(remainder, '');
+  });
+
+  it('skips blank lines', () => {
+    const messages: Record<string, unknown>[] = [];
+    const remainder = processNdjsonBuffer(
+      '{"type":"a"}\n\n\n{"type":"b"}\n',
+      (msg) => messages.push(msg),
+    );
+
+    assert.equal(messages.length, 2);
+    assert.equal(remainder, '');
+  });
+
+  it('skips non-JSON lines without throwing', () => {
+    const messages: Record<string, unknown>[] = [];
+    const remainder = processNdjsonBuffer(
+      'not-json-at-all\n{"type":"ok"}\n',
+      (msg) => messages.push(msg),
+    );
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0]!.type, 'ok');
+    assert.equal(remainder, '');
+  });
+
+  it('handles multiple chunks arriving incrementally', () => {
+    const messages: Record<string, unknown>[] = [];
+    const handler = (msg: Record<string, unknown>) => messages.push(msg);
+
+    let buf = processNdjsonBuffer('{"type":', handler);
+    assert.equal(messages.length, 0);
+
+    buf = processNdjsonBuffer(buf + '"assistant"}\n', handler);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0]!.type, 'assistant');
+    assert.equal(buf, '');
+  });
+});
+
+=== CONTEXT FILE: packages/plugins/claude-code/src/mcp-server.ts ===
+/**
+ * MCP Tool Server — serves guild tools as typed MCP tools during anima sessions.
+ *
+ * Two entry points:
+ *
+ * 1. **`createMcpServer(tools)`** — library function. Takes an array of
+ *    ToolDefinitions (already resolved by the Instrumentarium) and returns
+ *    a configured McpServer.
+ *
+ * 2. **`startMcpHttpServer(tools)`** — starts an in-process HTTP server
+ *    serving the MCP tool set via Streamable HTTP on an ephemeral localhost
+ *    port. Returns a handle with the URL (for --mcp-config) and a close()
+ *    function for cleanup.
+ *
+ * The MCP server is one-per-session. The claude-code provider owns the
+ * lifecycle — starts before the Claude process, stops after it exits.
+ *
+ * See: docs/architecture/apparatus/claude-code.md
+ */
+
+import http from 'node:http';
+
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { VERSION } from '@shardworks/nexus-core';
+import type { ToolDefinition } from '@shardworks/tools-apparatus';
+
+// ── Public types ────────────────────────────────────────────────────────
+
+/**
+ * Handle returned by startMcpHttpServer().
+ *
+ * Provides the URL for --mcp-config and a close() function for cleanup.
+ */
+export interface McpHttpHandle {
+  /** URL for --mcp-config (e.g. "http://127.0.0.1:PORT/mcp"). */
+  url: string;
+  /** Shut down the HTTP server and MCP transport. */
+  close(): Promise<void>;
+}
+
+// ── Library API ─────────────────────────────────────────────────────────
+
+/**
+ * Create and configure an MCP server with the given tools.
+ *
+ * Each tool's Zod param schema is registered directly with the MCP SDK
+ * (which handles JSON Schema conversion). The handler is wrapped to
+ * validate params via Zod and format the result as MCP tool output.
+ *
+ * Tools with `callableBy` set that does not include `'anima'` are
+ * filtered out. Tools without `callableBy` are included (available
+ * to all callers by default).
+ */
+export async function createMcpServer(tools: ToolDefinition[]): Promise<McpServer> {
+  const server = new McpServer({
+    name: 'nexus-guild',
+    version: VERSION,
+  });
+
+  for (const def of tools) {
+    // Filter by callableBy — only serve tools callable by animas.
+    // Tools with no callableBy default to all callers (available everywhere).
+    if (def.callableBy && !def.callableBy.includes('anima')) {
+      continue;
+    }
+
+    server.tool(
+      def.name,
+      def.description,
+      def.params.shape,
+      async (params) => {
+        try {
+          const validated = def.params.parse(params);
+          const result = await def.handler(validated);
+
+          return {
+            content: [{
+              type: 'text' as const,
+              text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+            }],
+          };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return {
+            content: [{ type: 'text' as const, text: `Error: ${message}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+  }
+
+  return server;
+}
+
+// ── HTTP Server ─────────────────────────────────────────────────────────
+
+/**
+ * Start an in-process HTTP server serving the MCP tool set via SSE.
+ *
+ * Uses the MCP SDK's SSE transport: the client GETs /sse to establish
+ * the event stream, then POSTs messages to /message. Claude Code's
+ * --mcp-config expects `type: "sse"` for HTTP-based MCP servers.
+ *
+ * The server binds to 127.0.0.1 only — not network-accessible.
+ *
+ * Returns a handle with the URL (for --mcp-config) and a close() function.
+ * The caller is responsible for calling close() after the session exits.
+ *
+ * Each session gets its own server instance. Concurrent sessions get
+ * independent servers on different ports.
+ */
+export async function startMcpHttpServer(tools: ToolDefinition[]): Promise<McpHttpHandle> {
+  const mcpServer = await createMcpServer(tools);
+
+  // SSE transport: the client GETs /sse, the transport tells it to POST
+  // messages to /message. One transport per connection (single-session).
+  let transport: SSEServerTransport | null = null;
+
+  const httpServer = http.createServer(async (req, res) => {
+    try {
+      if (req.method === 'GET' && req.url === '/sse') {
+        // New SSE connection — create transport bound to this response.
+        transport = new SSEServerTransport('/message', res);
+        await mcpServer.connect(transport);
+      } else if (req.method === 'POST' && req.url?.startsWith('/message')) {
+        if (!transport) {
+          res.writeHead(400).end('No active SSE connection');
+          return;
+        }
+        await transport.handlePostMessage(req, res);
+      } else {
+        res.writeHead(404).end('Not found');
+      }
+    } catch {
+      if (!res.headersSent) {
+        res.writeHead(500).end('Internal Server Error');
+      }
+    }
+  });
+
+  // Listen on ephemeral port, localhost only.
+  await new Promise<void>((resolve) => {
+    httpServer.listen(0, '127.0.0.1', resolve);
+  });
+
+  const addr = httpServer.address();
+  if (!addr || typeof addr === 'string') {
+    throw new Error('Failed to get server address');
+  }
+
+  const url = `http://127.0.0.1:${addr.port}/sse`;
+
+  return {
+    url,
+    async close() {
+      if (transport) {
+        await transport.close();
+      }
+      await new Promise<void>((resolve, reject) => {
+        httpServer.close((err) => (err ? reject(err) : resolve()));
+      });
+    },
+  };
+}
+
+=== CONTEXT FILE: packages/plugins/oculus/src ===
+tree dfac453:packages/plugins/oculus/src
+
+index.ts
+oculus.test.ts
+oculus.ts
+static/
+types.ts
+
+=== CONTEXT FILE: packages/plugins/oculus/src/static ===
+tree dfac453:packages/plugins/oculus/src/static
+
+style.css
+
+=== CONTEXT FILE: packages/plugins/tools/src/instrumentarium.ts ===
+/**
+ * The Instrumentarium — guild tool registry apparatus.
+ *
+ * Scans installed tools from kit contributions and apparatus supportKits,
+ * resolves permission-gated tool sets on demand, and serves as the single
+ * source of truth for "what tools exist and who can use them."
+ *
+ * The Instrumentarium is role-agnostic — it receives an already-resolved
+ * permissions array from the Loom and returns the matching tool set.
+ * Role definitions and permission grants are owned by the Loom.
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+import type {
+  StartupContext,
+  LoadedPlugin,
+  LoadedKit,
+  LoadedApparatus,
+  Plugin,
+} from '@shardworks/nexus-core';
+import {
+  guild,
+  isLoadedKit,
+  isLoadedApparatus,
+} from '@shardworks/nexus-core';
+
+import type { ToolDefinition, ToolCaller } from './tool.ts';
+import { isToolDefinition } from './tool.ts';
+import { createToolsList } from './tools/tools-list.ts';
+import { createToolsShow } from './tools/tools-show.ts';
+
+// ── Public types ──────────────────────────────────────────────────────
+
+/** A resolved tool with provenance metadata. */
+export interface ResolvedTool {
+  /** The tool definition (name, description, params schema, handler). */
+  definition: ToolDefinition;
+  /** Plugin id of the kit or apparatus that contributed this tool. */
+  pluginId: string;
+}
+
+/** Options for resolving a permission-gated tool set. */
+export interface ResolveOptions {
+  /**
+   * Permission grants in `plugin:level` format.
+   * Supports wildcards: `plugin:*`, `*:level`, `*:*`.
+   */
+  permissions: string[];
+  /**
+   * When true, permissionless tools are excluded unless the role grants
+   * `plugin:*` or `*:*` for the tool's plugin. When false (default),
+   * permissionless tools are included unconditionally.
+   */
+  strict?: boolean;
+  /** Filter by invocation caller. Tools with no callableBy pass all callers. */
+  caller?: ToolCaller;
+}
+
+/** The Instrumentarium's public API, exposed via `provides`. */
+export interface InstrumentariumApi {
+  /**
+   * Resolve the tool set for a given set of permissions.
+   *
+   * Evaluates each registered tool against the permission grants:
+   * - Tools with a `permission` field: included if any grant matches
+   * - Permissionless tools: always included (default) or gated by `strict`
+   * - Caller filtering applied last
+   */
+  resolve(options: ResolveOptions): ResolvedTool[];
+
+  /**
+   * Find a single tool by name. Returns null if not installed.
+   */
+  find(name: string): ResolvedTool | null;
+
+  /**
+   * List all installed tools, regardless of permissions.
+   */
+  list(): ResolvedTool[];
+}
+
+// ── Permission matching ──────────────────────────────────────────────
+
+/** A parsed permission grant. */
+interface ParsedGrant {
+  plugin: string;
+  level: string;
+}
+
+/** Parse a grant string like "plugin:level" into its components. */
+function parseGrant(grant: string): ParsedGrant | null {
+  const colonIdx = grant.indexOf(':');
+  if (colonIdx === -1) return null;
+  return {
+    plugin: grant.slice(0, colonIdx),
+    level: grant.slice(colonIdx + 1),
+  };
+}
+
+/**
+ * Check if a tool with the given permission level from the given plugin
+ * is matched by any of the parsed grants.
+ */
+function matchesPermission(
+  pluginId: string,
+  permission: string,
+  grants: ParsedGrant[],
+): boolean {
+  for (const grant of grants) {
+    // Exact match: plugin:level
+    if (grant.plugin === pluginId && grant.level === permission) return true;
+    // Plugin wildcard: plugin:*
+    if (grant.plugin === pluginId && grant.level === '*') return true;
+    // Level wildcard: *:level
+    if (grant.plugin === '*' && grant.level === permission) return true;
+    // Superuser: *:*
+    if (grant.plugin === '*' && grant.level === '*') return true;
+  }
+  return false;
+}
+
+/**
+ * Check if a permissionless tool from the given plugin should be included
+ * in strict mode. Only `plugin:*` or `*:*` opts in permissionless tools.
+ */
+function strictAllowsPermissionless(
+  pluginId: string,
+  grants: ParsedGrant[],
+): boolean {
+  for (const grant of grants) {
+    if (grant.plugin === pluginId && grant.level === '*') return true;
+    if (grant.plugin === '*' && grant.level === '*') return true;
+  }
+  return false;
+}
+
+// ── Implementation ────────────────────────────────────────────────────
+
+/**
+ * The tool registry — accumulates tools from plugin contributions
+ * and resolves permission-gated tool sets.
+ */
+class ToolRegistry {
+  /** Map from tool name → ResolvedTool. Last-write-wins for duplicates. */
+  private readonly tools = new Map<string, ResolvedTool>();
+  /** Guild root path — set at startup, used for instructionsFile resolution. */
+  private guildHome = '';
+
+  /** Set the guild root path for instructionsFile resolution. */
+  setHome(home: string): void {
+    this.guildHome = home;
+  }
+
+  /** Register all tools from a loaded plugin. */
+  register(plugin: LoadedPlugin): void {
+    const pluginId = plugin.id;
+    const packageName = plugin.packageName;
+
+    if (isLoadedKit(plugin)) {
+      this.registerToolsFromKit(pluginId, packageName, plugin.kit);
+    } else if (isLoadedApparatus(plugin)) {
+      if (plugin.apparatus.supportKit) {
+        this.registerToolsFromKit(pluginId, packageName, plugin.apparatus.supportKit);
+      }
+    }
+  }
+
+  /** Extract and register tools from a kit (or supportKit) contribution. */
+  private registerToolsFromKit(
+    pluginId: string,
+    packageName: string,
+    kit: Record<string, unknown>,
+  ): void {
+    const rawTools = kit.tools;
+    if (!Array.isArray(rawTools)) return;
+
+    for (const t of rawTools) {
+      if (isToolDefinition(t)) {
+        const definition = this.preloadInstructions(t, packageName);
+        this.tools.set(definition.name, { definition, pluginId });
+      }
+    }
+  }
+
+  /**
+   * Pre-load instructionsFile into instructions text.
+   *
+   * If the tool has an `instructionsFile`, resolve it relative to the
+   * package root in node_modules, read the file, and return a copy with
+   * `instructions` set to the file content and `instructionsFile` cleared.
+   *
+   * Tools with inline `instructions` or neither field are returned as-is.
+   */
+  private preloadInstructions(
+    tool: ToolDefinition,
+    packageName: string,
+  ): ToolDefinition {
+    if (!tool.instructionsFile) return tool;
+
+    const packageDir = path.join(this.guildHome, 'node_modules', packageName);
+    const filePath = path.join(packageDir, tool.instructionsFile);
+
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      // Return a mutated copy — instructionsFile consumed, instructions set
+      const { instructionsFile: _, ...rest } = tool;
+      return { ...rest, instructions: content } as ToolDefinition;
+    } catch {
+      console.warn(
+        `[instrumentarium] Could not read instructions file for tool "${tool.name}": ${filePath}`,
+      );
+      // Return tool without instructions — don't block registration
+      const { instructionsFile: _, ...rest } = tool;
+      return rest as ToolDefinition;
+    }
+  }
+
+  /** Register a single tool definition directly (for self-contributed tools). */
+  registerTool(definition: ToolDefinition, pluginId: string): void {
+    this.tools.set(definition.name, { definition, pluginId });
+  }
+
+  /** Find a tool by name. */
+  find(name: string): ResolvedTool | null {
+    return this.tools.get(name) ?? null;
+  }
+
+  /** List all installed tools. */
+  list(): ResolvedTool[] {
+    return [...this.tools.values()];
+  }
+
+  /**
+   * Resolve a permission-gated tool set.
+   *
+   * 1. Parse each grant into (plugin, level) pairs
+   * 2. For each registered tool:
+   *    a. If tool has no permission:
+   *       - If NOT strict → include
+   *       - If strict → include only if grants contain <tool's plugin>:* or *:*
+   *    b. If tool has a permission:
+   *       - Match against grants: exact, plugin wildcard, level wildcard, or superuser
+   *       - Include if any grant matches
+   * 3. Filter by caller (callableBy)
+   */
+  resolve(options: ResolveOptions): ResolvedTool[] {
+    const grants = options.permissions
+      .map(parseGrant)
+      .filter((g): g is ParsedGrant => g !== null);
+    const strict = options.strict ?? false;
+
+    const result: ResolvedTool[] = [];
+
+    for (const resolved of this.tools.values()) {
+      const { definition, pluginId } = resolved;
+      const permission = definition.permission;
+
+      // Permission check
+      if (permission === undefined) {
+        // Permissionless tool
+        if (strict && !strictAllowsPermissionless(pluginId, grants)) {
+          continue;
+        }
+        // In default mode, permissionless tools are always included
+      } else {
+        // Tool has a permission — must match against grants
+        if (!matchesPermission(pluginId, permission, grants)) {
+          continue;
+        }
+      }
+
+      // Caller filter
+      if (
+        options.caller &&
+        definition.callableBy &&
+        !definition.callableBy.includes(options.caller)
+      ) {
+        continue;
+      }
+
+      result.push(resolved);
+    }
+
+    return result;
+  }
+}
+
+// ── Apparatus factory ─────────────────────────────────────────────────
+
+/**
+ * Create the Instrumentarium apparatus plugin.
+ *
+ * Returns a Plugin with:
+ * - `consumes: ['tools']` — scans kit/supportKit contributions
+ * - `provides: InstrumentariumApi` — the tool registry API
+ */
+export function createInstrumentarium(): Plugin {
+  const registry = new ToolRegistry();
+
+  const api: InstrumentariumApi = {
+    resolve(options: ResolveOptions): ResolvedTool[] {
+      return registry.resolve(options);
+    },
+
+    find(name: string): ResolvedTool | null {
+      return registry.find(name);
+    },
+
+    list(): ResolvedTool[] {
+      return registry.list();
+    },
+  };
+
+  // Introspection tools use a lazy getter so they can query the registry
+  // after all plugins have registered their tools at startup.
+  const getApi = () => api;
+  const toolsList = createToolsList(getApi);
+  const toolsShow = createToolsShow(getApi);
+
+  return {
+    apparatus: {
+      requires: [],
+      consumes: ['tools'],
+      provides: api,
+
+      supportKit: {
+        tools: [toolsList, toolsShow],
+      },
+
+      start(ctx: StartupContext): void {
+        const g = guild();
+        registry.setHome(g.home);
+
+        // Register our own supportKit tools (tools-list, tools-show).
+        // These live on this apparatus and aren't discovered through the
+        // normal kit scanning path.
+        for (const t of [toolsList, toolsShow] as ToolDefinition[]) {
+          registry.registerTool(t, 'tools');
+        }
+
+        // Scan all already-loaded kits. These fired plugin:initialized before
+        // any apparatus started, so we can't catch them via events.
+        for (const kit of g.kits()) {
+          registry.register(kit);
+        }
+
+        // Subscribe to plugin:initialized for apparatus supportKits that
+        // fire after us in the startup sequence.
+        ctx.on('plugin:initialized', (plugin: unknown) => {
+          const loaded = plugin as LoadedPlugin;
+          // Skip kits — we already scanned them above.
+          if (isLoadedApparatus(loaded)) {
+            registry.register(loaded);
+          }
+        });
+      },
+    },
+  };
+}
+
+=== CONTEXT FILE: packages/plugins/tools/src/index.ts ===
+/**
+ * @shardworks/tools-apparatus — The Instrumentarium.
+ *
+ * Guild tool registry: scans kit contributions, resolves permission-gated
+ * tool sets, and provides the InstrumentariumApi for tool lookup and resolution.
+ *
+ * The tool() factory and ToolDefinition type live here canonically.
+ *
+ * See: docs/specification.md (instrumentarium)
+ */
+
+import { createInstrumentarium } from './instrumentarium.ts';
+
+// ── Tool authoring API ───────────────────────────────────────────────
+
+export {
+  type ToolCaller,
+  type ToolDefinition,
+  tool,
+  isToolDefinition,
+} from './tool.ts';
+
+// ── Instrumentarium API ───────────────────────────────────────────────
+
+export {
+  type InstrumentariumApi,
+  type ResolvedTool,
+  type ResolveOptions,
+} from './instrumentarium.ts';
+
+// ── Default export: the apparatus plugin ──────────────────────────────
+
+export default createInstrumentarium();
+
+=== CONTEXT FILE: packages/plugins/tools/src/tools ===
+tree dfac453:packages/plugins/tools/src/tools
+
+tools-list.test.ts
+tools-list.ts
+tools-show.test.ts
+tools-show.ts
+
+=== CONTEXT FILE: packages/plugins/tools/src/tools/tools-show.ts ===
+/**
+ * tools-show — show full details for a single tool.
+ *
+ * Returns name, description, plugin, permission, callableBy, parameter
+ * schema, and instructions for the named tool. Returns null if not found.
+ *
+ * Requires `tools:read` permission.
+ */
+
+import { z } from 'zod';
+
+import { tool } from '../tool.ts';
+import type { InstrumentariumApi } from '../instrumentarium.ts';
+
+/** Parameter info derived from the Zod schema. */
+export interface ParamInfo {
+  type: string;
+  description: string | null;
+  optional: boolean;
+}
+
+/** Full detail returned for a single tool. */
+export interface ToolDetail {
+  name: string;
+  description: string;
+  pluginId: string;
+  permission: string | null;
+  callableBy: string[] | null;
+  params: Record<string, ParamInfo>;
+  instructions: string | null;
+}
+
+/**
+ * Extract parameter info from a Zod object schema.
+ *
+ * Walks the shape, unwraps ZodOptional/ZodDefault wrappers, and
+ * derives the JSON Schema type name from the inner Zod type.
+ */
+function extractParams(schema: z.ZodObject<z.ZodRawShape>): Record<string, ParamInfo> {
+  const shape = schema.shape;
+  const result: Record<string, ParamInfo> = {};
+
+  for (const [key, zodType] of Object.entries(shape)) {
+    result[key] = extractSingleParam(zodType as z.ZodType);
+  }
+
+  return result;
+}
+
+/** Extract info for a single Zod parameter. */
+function extractSingleParam(zodType: z.ZodType): ParamInfo {
+  let isOptional = false;
+  let inner: z.ZodType = zodType;
+
+  // Unwrap ZodOptional
+  if (inner instanceof z.ZodOptional) {
+    isOptional = true;
+    inner = inner.unwrap() as z.ZodType;
+  }
+
+  // Unwrap ZodDefault
+  if (inner instanceof z.ZodDefault) {
+    isOptional = true;
+    inner = inner.unwrap() as z.ZodType;
+  }
+
+  return {
+    type: zodTypeToJsonType(inner),
+    description: inner.description ?? null,
+    optional: isOptional,
+  };
+}
+
+/** Map a Zod type to a JSON Schema type string. */
+function zodTypeToJsonType(zodType: z.ZodType): string {
+  if (zodType instanceof z.ZodString) return 'string';
+  if (zodType instanceof z.ZodNumber) return 'number';
+  if (zodType instanceof z.ZodBoolean) return 'boolean';
+  if (zodType instanceof z.ZodArray) return 'array';
+  if (zodType instanceof z.ZodObject) return 'object';
+  if (zodType instanceof z.ZodEnum) return 'string';
+  if (zodType instanceof z.ZodLiteral) return typeof zodType._def.values[0];
+  if (zodType instanceof z.ZodUnion) return 'union';
+  if (zodType instanceof z.ZodNullable) return zodTypeToJsonType(zodType.unwrap() as z.ZodType);
+  return 'unknown';
+}
+
+export function createToolsShow(getApi: () => InstrumentariumApi) {
+  return tool({
+    name: 'tools-show',
+    description:
+      'Show details for a tool by name, including parameter schema and instructions.',
+    permission: 'read',
+    params: {
+      name: z.string().describe('Tool name to look up.'),
+    },
+    handler: async ({ name }) => {
+      const api = getApi();
+      const resolved = api.find(name);
+
+      if (!resolved) return null;
+
+      const { definition, pluginId } = resolved;
+
+      const detail: ToolDetail = {
+        name: definition.name,
+        description: definition.description,
+        pluginId,
+        permission: definition.permission ?? null,
+        callableBy: definition.callableBy ?? null,
+        params: extractParams(definition.params),
+        instructions: definition.instructions ?? null,
+      };
+
+      return detail;
+    },
+  });
+}
+
