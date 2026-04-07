@@ -1,0 +1,399 @@
+decisions:
+  # ── S1: Core registration and resolution ─────────────────────────────
+
+  - id: D1
+    scope: [S1]
+    question: "What key on the kit manifest holds role contributions?"
+    options:
+      a: "`roles` — a Record<string, KitRoleDefinition>"
+      b: "`loomRoles` — namespaced to avoid ambiguity with other potential 'roles' fields"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "The brief explicitly says 'a `roles` field on the kit manifest'. The open Kit record convention uses short, descriptive field names (tools, engines, blockTypes, books)."
+      observable: true
+      recommendation: a
+      rationale: "Brief is explicit. Matches existing contribution field naming convention."
+      stakes: high
+
+  - id: D2
+    scope: [S1]
+    question: "What separator character joins pluginId and roleName in the qualified name?"
+    options:
+      a: "Dot: `{pluginId}.{roleName}` (e.g. `spider.crawler`)"
+      b: "Slash: `{pluginId}/{roleName}` (e.g. `spider/crawler`)"
+      c: "Colon: `{pluginId}:{roleName}` (e.g. `spider:crawler`)"
+    selected: a
+    analysis:
+      audience: [patron, operator]
+      confidence: high
+      context: "The brief says `{pluginId}.{roleName}`. Colon is already used for permissions (`plugin:level`). Slash is used for scoped plugin IDs (`acme/cache`). Dot avoids ambiguity with both."
+      observable: true
+      recommendation: a
+      rationale: "Brief is explicit. Dot avoids collision with existing colon (permissions) and slash (scoped IDs) conventions."
+      stakes: high
+
+  - id: D3
+    scope: [S1]
+    question: "How does the kit manifest specify roles — as an array of role objects (with a name field) or as a Record keyed by role name?"
+    options:
+      a: "`Record<string, KitRoleDefinition>` — keys are unqualified role names"
+      b: "`Array<KitRoleDefinition & { name: string }>` — each role carries its own name"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "Guild-defined roles in guild.json use Record<string, RoleDefinition> keyed by role name. Spider blockTypes uses Record<string, BlockType>. Tools uses an array (ToolDefinition[]) because tool names are on the ToolDefinition object. The brief says 'kit manifest roles field' without specifying shape, but requirement 2 says 'Plugin others only specify the roleName' — suggesting the role name is the key, not a field."
+      observable: true
+      recommendation: a
+      rationale: "Matches guild.json roles shape and blockTypes pattern. Key = unqualified role name, Loom qualifies it."
+      stakes: low
+
+  - id: D4
+    scope: [S1]
+    question: "Should the Loom scan `guild().apparatuses()` at startup in addition to `guild().kits()` to catch supportKit roles from apparatus that started before the Loom?"
+    options:
+      a: "Scan only `guild().kits()` + subscribe to `plugin:initialized` — match existing Instrumentarium/Fabricator/Spider pattern exactly"
+      b: "Scan `guild().kits()` + `guild().apparatuses()` + subscribe to `plugin:initialized` — more robust, handles apparatus that started before Loom"
+    selected: b
+    analysis:
+      audience: [implementer]
+      confidence: medium
+      context: "The Instrumentarium, Fabricator, and Spider all use pattern (a). They all have `requires: []`, so they start first — no apparatus fires `plugin:initialized` before they subscribe. The Loom has `requires: ['tools']`, so the Instrumentarium starts first. If a future apparatus with no Loom dependency contributes supportKit.roles, pattern (a) would miss it. The architecture docs show the more robust pattern: `for (const p of [...guild().kits(), ...guild().apparatuses()]) { register(p) }`."
+      observable: false
+      recommendation: b
+      rationale: "The Loom doesn't start first — apparatus that started before it have already fired plugin:initialized. Scanning apparatuses() closes this gap at negligible cost."
+      stakes: low
+
+  - id: D5
+    scope: [S1]
+    question: "Where does kit role state live inside the Loom — a separate Map or merged into the guild config roles?"
+    options:
+      a: "Separate `kitRoles: Map<string, RoleDefinition>` — weave() checks config.roles first, then kitRoles"
+      b: "Merge into `config.roles` at startup — single lookup in weave()"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "config.roles comes from guild.json. Mutating it would mix source-of-truth data with derived kit contributions, making guild override logic harder to reason about. The weave() function's two-step lookup (guild first, then kit) naturally expresses the override semantics."
+      observable: false
+      recommendation: a
+      rationale: "Clean separation of guild-authored vs kit-contributed. Override semantics are explicit in lookup order."
+      stakes: low
+
+  - id: D6
+    scope: [S1]
+    question: "What is the weave() lookup order when resolving a role name?"
+    options:
+      a: "Check `config.roles[name]` first (guild-defined), then `kitRoles.get(name)` (kit-contributed)"
+      b: "Check `kitRoles.get(name)` first (kit-contributed), then `config.roles[name]` (guild-defined)"
+    selected: a
+    analysis:
+      audience: [patron, operator]
+      confidence: high
+      context: "Requirement 5: 'A guild-defined role in loom.roles with the same qualified name fully overrides the kit-contributed role.' Guild config must take precedence."
+      observable: true
+      recommendation: a
+      rationale: "Brief is explicit — guild-defined roles override kit-contributed roles."
+      stakes: high
+
+  - id: D7
+    scope: [S1]
+    question: "When does the guild override check happen — at registration time (skip kit role if guild has it) or at weave time (check guild first)?"
+    options:
+      a: "Registration time — skip registering a kit role if config.roles already has the qualified name"
+      b: "Weave time — register all kit roles, but config.roles takes precedence during lookup"
+      c: "Both — skip at registration AND check at weave time"
+    selected: c
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "Option (a) alone misses kit roles registered via plugin:initialized after startup — the guild config is already loaded but new kit roles might arrive. Option (b) alone means kitRoles contains entries that will never be used, plus the instructionsFile for the overridden kit role would be read unnecessarily. Option (c) is belt-and-suspenders: skip at registration to avoid wasted work, and check at weave time as the authoritative gate."
+      observable: false
+      recommendation: c
+      rationale: "Skip at registration avoids wasted I/O on instructions; weave-time check is the authoritative override gate."
+      stakes: low
+
+  - id: D8
+    scope: [S1]
+    question: "Does the Loom declare `consumes: ['roles']` on its apparatus?"
+    options:
+      a: "Yes — declare `consumes: ['roles']`"
+      b: "No — don't declare consumes"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: "Every apparatus that scans a kit contribution field declares it in `consumes`. Instrumentarium: `consumes: ['tools']`, Spider: `consumes: ['blockTypes']`, Fabricator: `consumes: ['engines']`, Stacks: `consumes: ['books']`. Without it, Arbor warns 'kit contributes roles but no installed apparatus declares consumes: [roles]'."
+      observable: true
+      recommendation: a
+      rationale: "Established pattern. Without it, every guild with kit-contributed roles gets a false-positive startup warning."
+      stakes: low
+
+  - id: D9
+    scope: [S1]
+    question: "How does the Loom derive git identity (GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL) for qualified role names like `my-kit.artificer`?"
+    options:
+      a: "Apply existing logic to the full qualified name — `My-kit.artificer` / `my-kit.artificer@nexus.local`"
+      b: "Extract the roleName part (after the dot) for display — `Artificer` / `my-kit.artificer@nexus.local`"
+      c: "No special handling — but use the full qualified name for email, capitalize-first for display"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: medium
+      context: "Current code: `displayName = request.role.charAt(0).toUpperCase() + request.role.slice(1)`. For `my-kit.artificer` this produces `My-kit.artificer` — functional but ugly. Option (b) extracts the short name for display but keeps the qualified name for email. Option (a) is simplest, fully consistent, and guilds can override the role if they want a different identity."
+      observable: true
+      recommendation: a
+      rationale: "Consistency over aesthetics. No special-casing. Guild can override the role to customize identity."
+      stakes: low
+
+  - id: D10
+    scope: [S1]
+    question: "How are malformed kit role contributions handled (non-object roles field, role entry missing permissions)?"
+    options:
+      a: "Silent skip with console.warn for missing required fields (permissions)"
+      b: "Silent skip, no warning"
+      c: "Throw — hard startup failure"
+    selected: a
+    analysis:
+      audience: [author, operator]
+      confidence: high
+      context: "The Instrumentarium uses `isToolDefinition()` type guards and silently skips non-matching entries. The Spider uses `isBlockType()`. For roles, missing permissions is the most likely author error and deserves a visible warning. Non-object values (wrong type entirely) can be silently skipped."
+      observable: true
+      recommendation: a
+      rationale: "Warn on likely author errors (missing permissions), silently skip obviously wrong types. Don't crash the guild over a malformed kit."
+      stakes: low
+
+  - id: D11
+    scope: [S1]
+    question: "Should registration-time warnings log when a guild-defined role overrides a kit-contributed role?"
+    options:
+      a: "No — silent by design. The guild is in control, no need to warn."
+      b: "Yes — informational log so operators know a kit role is being overridden."
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: "Guild overrides are intentional. Warning about them would generate noise in a correctly-configured guild. The Instrumentarium doesn't warn when guild config overrides kit behavior."
+      observable: false
+      recommendation: a
+      rationale: "Guild overrides are intentional configuration, not error conditions."
+      stakes: low
+
+  # ── S2: Dependency-scoped permission validation ──────────────────────
+
+  - id: D12
+    scope: [S2]
+    question: "Are wildcard permission prefixes (`*:level`, `*:*`) allowed in kit-contributed role permissions?"
+    options:
+      a: "Block all `*`-prefixed permissions from kit roles — warn and drop"
+      b: "Allow `*:*` and `*:level` — treat `*` as a special allowed prefix"
+      c: "Block `*:*` (superuser) but allow `*:level` (cross-plugin level grant)"
+    selected: a
+    analysis:
+      audience: [patron, author]
+      confidence: medium
+      context: "The brief says 'a kit may only grant permissions referencing its own plugin ID, or plugin IDs declared in its requires or recommends.' The `*` wildcard is not a plugin ID — it's a meta-reference meaning 'all plugins'. Allowing `*:*` lets a kit grant superuser access, completely defeating the purpose of dependency scoping. Allowing `*:level` lets a kit grant cross-plugin access at a specific level, which is also beyond its declared scope. Guild-defined roles can still use `*:*` freely."
+      observable: true
+      recommendation: a
+      rationale: "Wildcards bypass the dependency-scoping boundary. A kit should not grant access to plugins it doesn't declare. Guilds can always override with broader permissions."
+      stakes: high
+
+  - id: D13
+    scope: [S2]
+    question: "How are the allowed plugin IDs for a kit role's permissions computed?"
+    options:
+      a: "`{kit.id}` union `(kit.kit.requires ?? [])` union `(kit.kit.recommends ?? [])`"
+      b: "`{kit.id}` union `(kit.kit.requires ?? [])` only — recommends are advisory, not sufficient for permission grants"
+    selected: a
+    analysis:
+      audience: [patron, author]
+      confidence: high
+      context: "The brief explicitly says 'its own plugin ID, or plugin IDs declared in its requires or recommends.' Including recommends is explicit in the brief. A kit that recommends an apparatus may want to grant permissions referencing that apparatus's tools when it's installed, while gracefully degrading when it's absent."
+      observable: true
+      recommendation: a
+      rationale: "Brief is explicit about including recommends."
+      stakes: high
+
+  - id: D14
+    scope: [S2]
+    question: "How is the pluginId extracted from a permission string for scope validation?"
+    options:
+      a: "Parse on first colon: `permission.slice(0, permission.indexOf(':'))` — matching Instrumentarium's parseGrant"
+      b: "Use a regex to handle edge cases"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The Instrumentarium's `parseGrant()` already parses `plugin:level` on the first colon. The same parsing logic applies. Permissions without a colon are invalid and should be dropped with a warning."
+      observable: false
+      recommendation: a
+      rationale: "Consistent with Instrumentarium's existing parseGrant() logic."
+      stakes: low
+
+  - id: D15
+    scope: [S2]
+    question: "What warning format for dropped permissions?"
+    options:
+      a: "`[loom] Kit \"<kitId>\" role \"<roleName>\" permission \"<perm>\" references undeclared plugin \"<pluginId>\" — dropped`"
+      b: "`[loom] warn: kit \"<kitId>\" role \"<qualifiedName>\": dropped permission \"<perm>\" (plugin \"<pluginId>\" not in requires/recommends)`"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: "Existing warning format in Arbor uses `[arbor] warn:` prefix, Instrumentarium uses `[instrumentarium]`. The Loom should use `[loom]`. Option (a) uses the unqualified roleName since the kitId already provides context for the namespace."
+      observable: true
+      recommendation: a
+      rationale: "Clear, actionable, consistent with existing warning conventions."
+      stakes: low
+
+  # ── S3: Kit role instructions ────────────────────────────────────────
+
+  - id: D16
+    scope: [S3]
+    question: "How is `instructionsFile` for a kit role resolved to an absolute path?"
+    options:
+      a: "`path.join(guild.home, 'node_modules', kit.packageName, instructionsFile)` — same as Instrumentarium"
+      b: "`path.join(guild.home, 'node_modules', kit.packageName, 'dist', instructionsFile)` — account for build output"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "The Instrumentarium resolves tool instructionsFile with `path.join(guildHome, 'node_modules', packageName, filePath)`. Kit authors specify paths relative to their package root. Whether the file is in `dist/` or `src/` is the kit author's concern — they specify the full relative path."
+      observable: true
+      recommendation: a
+      rationale: "Matches established Instrumentarium pattern exactly."
+      stakes: low
+
+  - id: D17
+    scope: [S3]
+    question: "When a kit role has both `instructions` and `instructionsFile`, which wins?"
+    options:
+      a: "`instructions` takes precedence, `instructionsFile` is ignored"
+      b: "Produce a warning and use `instructions`"
+      c: "`instructionsFile` takes precedence"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "The ToolInput type uses a discriminated union to make them mutually exclusive at the type level. For kit roles, runtime data from the open Kit record can't enforce this. Picking one consistently is sufficient — inline instructions are more intentional than a file reference."
+      observable: true
+      recommendation: a
+      rationale: "Inline is more explicit/intentional. Silent resolution avoids noise for an uncommon edge case."
+      stakes: low
+
+  - id: D18
+    scope: [S3]
+    question: "When does the Loom resolve kit role instructions (inline or file) — at registration time or at weave time?"
+    options:
+      a: "Registration time (during start/plugin:initialized) — read and cache, matching the charter/guild-role pattern"
+      b: "Weave time — read lazily on first weave() call"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The Loom reads ALL content at startup and caches it: charter files, guild role instructions, everything. The test suite explicitly tests this caching behavior ('content is cached at startup — deleting files after start does not affect weave()'). The Instrumentarium also pre-loads tool instructionsFile at registration time."
+      observable: false
+      recommendation: a
+      rationale: "Matches the Loom's startup-caching contract and Instrumentarium's preloadInstructions pattern."
+      stakes: low
+
+  - id: D19
+    scope: [S3]
+    question: "What happens when instructionsFile cannot be read (file not found, permission error)?"
+    options:
+      a: "Warn and register the role without instructions — don't block registration"
+      b: "Skip the role entirely"
+      c: "Hard error"
+    selected: a
+    analysis:
+      audience: [author, operator]
+      confidence: high
+      context: "The Instrumentarium handles unreadable instructionsFile by warning and returning the tool without instructions: `console.warn('[instrumentarium] Could not read instructions file...')`. The role's permissions and tool resolution still work — only the instructions layer is missing."
+      observable: true
+      recommendation: a
+      rationale: "Matches Instrumentarium behavior. A missing instructions file shouldn't prevent a role from working."
+      stakes: low
+
+  - id: D20
+    scope: [S3]
+    question: "For guild-defined overrides of kit roles (e.g. `loom.roles['my-kit.artificer']`), where do role instructions come from?"
+    options:
+      a: "From `roles/my-kit.artificer.md` — the existing convention applied to the qualified name"
+      b: "No instructions for overrides unless the guild file exists"
+    selected: a
+    analysis:
+      audience: [operator]
+      confidence: high
+      context: "The existing logic iterates config.roles keys and reads `roles/{roleName}.md` for each. If the key is `my-kit.artificer`, it reads `roles/my-kit.artificer.md`. The dot in the filename is valid on all platforms. No code change needed — the existing convention works naturally."
+      observable: true
+      recommendation: a
+      rationale: "Existing logic already handles this. No special-casing required."
+      stakes: low
+
+  # ── S4: LoomKit type export ──────────────────────────────────────────
+
+  - id: D21
+    scope: [S4]
+    question: "What is the exported kit-author interface called?"
+    options:
+      a: "`LoomKit` — matches the convention described in architecture docs (ClockworksKit, SpiderKit)"
+      b: "`RoleKit` — describes what it contributes"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "Docs describe the pattern as apparatus-name-based: ClockworksKit, SpiderKit. The Loom apparatus should export LoomKit."
+      observable: true
+      recommendation: a
+      rationale: "Matches established naming convention."
+      stakes: low
+
+  - id: D22
+    scope: [S4]
+    question: "What is the per-role type called — reuse `RoleDefinition` with added optional fields, or create a new type?"
+    options:
+      a: "New `KitRoleDefinition` type — extends RoleDefinition's fields plus `instructions?` and `instructionsFile?`"
+      b: "Extend `RoleDefinition` to add optional `instructions?` and `instructionsFile?` — one type for both guild and kit roles"
+    selected: a
+    analysis:
+      audience: [author, implementer]
+      confidence: medium
+      context: "Guild-defined roles use `roles/{name}.md` for instructions — they don't have instructions/instructionsFile fields. Kit-contributed roles carry instructions inline. Separate types keep the distinction clear. Adding instructions fields to the guild RoleDefinition would imply guilds can set inline instructions via guild.json, which is a different feature."
+      observable: true
+      recommendation: a
+      rationale: "Separate types prevent guild RoleDefinition from implying unsupported inline instructions in guild.json."
+      stakes: low
+
+  - id: D23
+    scope: [S4]
+    question: "What fields does KitRoleDefinition have?"
+    options:
+      a: "`{ permissions: string[]; strict?: boolean; instructions?: string; instructionsFile?: string }`"
+      b: "Same as (a) plus a `name` field for the role name"
+    selected: a
+    analysis:
+      audience: [author]
+      confidence: high
+      context: "The brief lists 'permissions, strict, instructions, instructionsFile'. The role name is the key in the Record, not a field — matching D3's decision and the guild RoleDefinition pattern."
+      observable: true
+      recommendation: a
+      rationale: "Brief is explicit. Role name is the Record key, not a field."
+      stakes: low
+
+  - id: D24
+    scope: [S4]
+    question: "Where are KitRoleDefinition and LoomKit defined — in loom.ts or a separate types file?"
+    options:
+      a: "In `loom.ts` alongside existing types, exported from `index.ts`"
+      b: "In a new `types.ts` file"
+    selected: a
+    analysis:
+      audience: [implementer]
+      confidence: high
+      context: "The existing RoleDefinition and LoomConfig are defined in loom.ts. The file is 222 lines — well within manageable size. Adding 10-15 lines of type definitions doesn't warrant a new file. Other apparatus (Instrumentarium, Spider) define their types in the main file or a separate types.ts depending on size; the Loom is small enough to keep everything in one file."
+      observable: false
+      recommendation: a
+      rationale: "File is small. Keep types co-located with their consumers."
+      stakes: low
