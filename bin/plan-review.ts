@@ -645,8 +645,12 @@ function runPipelineStep(slug: string, step: string, args: string[], prompt: str
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
-  // Send prompt via stdin to avoid arg-length limits and dash-prefix parsing issues
-  proc.stdin!.write(prompt);
+  // Send prompt via stdin to avoid arg-length limits and dash-prefix parsing issues.
+  // Prepend the absolute working directory so the agent doesn't have to guess paths
+  // when using the Write tool (which requires absolute paths). Without this, agents
+  // confabulate paths like /workspace/ or /app/ and burn tokens on permission errors.
+  const groundedPrompt = 'Your working directory is: ' + cloneDir + '\n\n' + prompt;
+  proc.stdin!.write(groundedPrompt);
   proc.stdin!.end();
 
   const pipeline: PipelineProcess = {
