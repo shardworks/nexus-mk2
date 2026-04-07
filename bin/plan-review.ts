@@ -829,7 +829,7 @@ function startWriter(slug: string, brief: string): void {
   const args = sessionId ? ['--resume', sessionId] : [];
 
   runPipelineStep(slug, 'writer', args,
-    'MODE: WRITER\n\nHere is the brief:\n\n' + brief + '\n\n---\n\nSlug: ' + slug +
+    'MODE: WRITER\n\nSlug: ' + slug +
     '\n\nThe analyst has written scope and decisions, and the patron has reviewed and locked them. Read these input files:' +
     '\n- ' + path.join(specDir, 'decisions-digest.yaml') + ' (PRIMARY — the authoritative decisions input)' +
     '\n- ' + path.join(specDir, 'scope.yaml') +
