@@ -1,0 +1,151 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What fields to display in the guild identity section?
+    answer: Status tool fields plus oculus port and uptime
+    justification: The port is immediately useful for operators sharing the dashboard URL; minimal extra effort
+  - id: D2
+    scope:
+      - S2
+    question: How to discriminate plugin type (kit vs apparatus) in the table?
+    answer: Use g.kits() and g.apparatuses() to show type, then merge g.failedPlugins() as a separate failed group
+    justification: Richer information with no extra cost — the data is already loaded
+  - id: D3
+    scope:
+      - S2
+    question: What columns to show in the plugins table?
+    answer: id, type (kit/apparatus), version, status badge (omit packageName)
+    justification: Cleaner table; packageName is rarely useful for operator-level overview
+  - id: D4
+    scope:
+      - S2
+    question: How to display failed plugins?
+    answer: Inline in the same table with a red 'failed' badge and the reason in a tooltip or sub-row
+    justification: One table to scan rather than two sections; the badge makes failures visually prominent
+  - id: D5
+    scope:
+      - S3
+    question: How to access startup warnings — add Guild.startupWarnings() to the core interface, or re-compute warnings in
+      the oculus?
+    answer: "Add startupWarnings(): string[] to the Guild interface, store them in arbor.ts during createGuild(), export
+      from nexus-core"
+    justification: Symmetric with failedPlugins(); no duplication; any apparatus can access warnings, not just the oculus
+  - id: D6
+    scope:
+      - S3
+    question: Where to display warnings on the landing page?
+    answer: A dedicated 'Warnings' card between the identity card and the plugins table, only shown when warnings exist
+    justification: Clean dashboard when things are healthy; prominent card when there are issues
+  - id: D7
+    scope:
+      - S4
+    question: Read-only or read-write display of guild.json?
+    answer: Read-only — formatted JSON in a <pre> block
+    justification: Read-only avoids write-path complexity and accidental configuration damage; can always be upgraded later
+  - id: D8
+    scope:
+      - S4
+    question: How to source the guild.json content — in-memory (g.guildConfig()) or from disk (readGuildConfig(g.home))?
+    answer: Read the raw file with fs.readFileSync — show the actual file text without re-parsing
+    justification: Shows the actual file as-is, including all plugin config sections and exact formatting; most useful for debugging
+  - id: D9
+    scope:
+      - S4
+    question: Should the config display be collapsed/expandable or always visible?
+    answer: Collapsed by default in a <details>/<summary> element
+    justification: Keeps the dashboard scannable; <details> is zero-JS and semantically correct
+  - id: D10
+    scope:
+      - S5
+    question: What route path for the guild status API endpoint?
+    answer: GET /api/_status
+    justification: Parallel to /api/_tools; concise; mirrors the 'status' concept from the CLI
+  - id: D11
+    scope:
+      - S5
+    question: What shape should the /api/_status response have?
+    answer: "Flat object with all fields at top level: { guild, nexus, home, model, plugins, kits, apparatuses,
+      failedPlugins, warnings, config }"
+    justification: Consistent with existing flat-object pattern; simpler to consume
+  - id: D12
+    scope:
+      - S5
+    question: Should the API response include the raw guild.json text?
+    answer: Include only the parsed config object as 'config'
+    justification: JSON API should return structured data; raw text display is a rendering concern
+  - id: D13
+    scope:
+      - S6
+    question: Should page links be completely removed from the landing page, or relocated?
+    answer: Completely removed — page links remain in the nav bar (buildNavHtml) which is always visible
+    justification: Nav bar already provides page links; no duplication needed
+  - id: D14
+    scope:
+      - S1
+      - S2
+      - S3
+      - S4
+      - S6
+    question: Should the landing page remain server-rendered HTML (template string in the route handler) or use a
+      client-side JS approach?
+    answer: Server-rendered HTML template string in the app.get('/') handler — same pattern as today
+    justification: No build tooling exists; all data is server-side; no dynamic updates needed; follow existing pattern
+  - id: D15
+    scope:
+      - S1
+      - S2
+      - S3
+      - S4
+    question: What order should the sections appear on the landing page?
+    answer: Identity card → Warnings (if any) → Plugins table → Configuration
+    justification: Most important information first; warnings are actionable and should be noticed before browsing plugins
+  - id: D16
+    scope:
+      - S1
+      - S2
+      - S3
+      - S4
+      - S6
+    question: Are new CSS classes or style changes needed, or is the existing style.css sufficient?
+    answer: Add minimal new CSS for the guild.json <pre> block and section spacing
+    justification: Small additions for config block and details element; the base palette and classes are sufficient for
+      everything else
+  - id: D17
+    scope:
+      - S3
+    question: What should the Guild.startupWarnings() method signature be?
+    answer: "startupWarnings(): string[] — returns the raw warning strings (same format as collectStartupWarnings)"
+    justification: Matches existing format; minimal change to arbor; can be restructured later if needed
+  - id: D18
+    scope:
+      - S3
+    question: Where to store startup warnings in the arbor Guild implementation?
+    answer: Capture the return value of collectStartupWarnings() into a const and close over it in the guildInstance
+    justification: Follows the identical pattern used for failedPlugins/allFailures — capture result, close over it
+  - id: D19
+    scope:
+      - S5
+    question: Should the /api/_status endpoint re-read guild.json from disk on each request, or return the in-memory config?
+    answer: Return the in-memory config from g.guildConfig() — fast, no I/O, consistent with other reads
+    justification: Consistent with how all other guild data access works; no I/O in the hot path
+  - id: D20
+    scope:
+      - S5
+    question: Should the /api/_status endpoint include plugin type discrimination (kits vs apparatuses) or just flat plugin IDs?
+    answer: "Include typed arrays: { apparatuses: [{id, version}], kits: [{id, version}], failedPlugins: [{id, reason}] }"
+    justification: Mirrors the Guild interface shape; natural for type-based rendering
+  - id: D21
+    scope:
+      - S4
+    question: For the server-rendered config display, read raw guild.json file text or JSON.stringify the in-memory config?
+    answer: fs.readFileSync the guild.json file for raw text — shows exact file contents
+    justification: Shows the actual file; no risk of losing untyped keys through serialization; faithful representation
+  - id: D22
+    scope:
+      - S2
+    question: What badge colors/labels for plugin status?
+    answer: apparatus → badge--success (green, 'apparatus'), kit → badge--info (cyan, 'kit'), failed → badge--error (red,
+      'failed')
+    justification: Green signals active/running (apparatus lifecycle), cyan signals passive/info (kit), red signals error —
+      matches semantic meaning
