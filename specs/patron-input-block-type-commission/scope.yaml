@@ -1,0 +1,44 @@
+brief: |
+  Engines sometimes need patron decisions before they can proceed. But currently, engines can't block on patron input, the Spider can't track whether answers are pending, and there's no tooling to submit responses.
+
+  The engine blocking infrastructure (block types, checkers, rig-resume) provides the mechanism. What's missing is a block type purpose-built for structured patron input — with a typed question format, answer validation, and CLI tools for the patron to respond.
+
+  Goal: An engine can pose a structured set of questions to the patron, block until all questions are answered and the patron marks the request complete, then resume with the answers available.
+
+slug: patron-input-block-type-commission
+
+scope:
+  - id: S1
+    description: "Input request data model and storage — InputRequestDoc types, question/answer type system, spider/input-requests Stacks book with indexes"
+    rationale: "Foundation for everything else — the types and storage must exist before anything can read or write them"
+    included: true
+
+  - id: S2
+    description: "patron-input block type and checker — condition schema, poll-based checker that returns cleared/failed/pending based on request status"
+    rationale: "The core mechanism that integrates patron input with the existing engine blocking infrastructure"
+    included: true
+
+  - id: S3
+    description: "Add rigId to EngineRunContext — modify Fabricator type, update Spider context assembly in tryRun() and tryCollect()"
+    rationale: "Explicitly required by brief; engines need rigId to query input-requests book on resume"
+    included: true
+
+  - id: S4
+    description: "CLI tools for patron interaction — list, show, answer, complete, reject input requests"
+    rationale: "The patron-facing interface; without these, there is no way to respond to input requests"
+    included: true
+
+  - id: S5
+    description: "YAML export/import for input requests — export a pending request as YAML, import answered YAML back"
+    rationale: "Brief mentions as stretch goal; enables batch answering and offline workflows"
+    included: true
+
+  - id: S6
+    description: "Spider apparatus wiring — register book, block type, and tools in supportKit; initialize book handle in start()"
+    rationale: "Implied by all other scope items — the new components must be wired into the Spider plugin"
+    included: true
+
+  - id: S7
+    description: "Test updates — add rigId to existing EngineRunContext constructions in spider.test.ts; new tests for block type, tools, and answer validation"
+    rationale: "Adding rigId to EngineRunContext is a breaking type change that requires updating existing tests; new functionality requires new tests"
+    included: true

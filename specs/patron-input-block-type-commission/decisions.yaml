@@ -1,0 +1,731 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What is the shape of the InputRequestDoc type?
+    options:
+      a: Questions as Record<string, QuestionSpec>, answers as Record<string, AnswerValue> — flat maps keyed by question key
+      b: Questions as an array of objects with an id field, answers as a parallel array
+    selected: a
+    analysis:
+      audience:
+        - author
+        - patron
+      confidence: high
+      context: Record-based shape matches the brief's design (keyed questions, keyed answers). Flat maps allow direct key-based lookup for answering individual questions. Array-based would require linear scans to find a question by key.
+      observable: true
+      recommendation: a
+      rationale: Brief specifies keyed question/answer maps; Record shape is idiomatic for this pattern
+      stakes: high
+  - id: D2
+    scope:
+      - S1
+    question: What is the discriminated type shape for question specs?
+    options:
+      a: Three separate interfaces (ChoiceQuestionSpec, BooleanQuestionSpec, TextQuestionSpec) unioned as QuestionSpec, discriminated by 'type' field
+      b: Single interface with optional fields and a type discriminant
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The three question types have different required fields (choice has options/allowCustom, others don't). Discriminated union with three interfaces is the standard TypeScript pattern.
+      observable: true
+      recommendation: a
+      rationale: Discriminated union gives precise type narrowing — ChoiceQuestionSpec.options is required, not optional-on-a-flat-interface
+      stakes: low
+  - id: D3
+    scope:
+      - S1
+    question: What type is AnswerValue — how are answers for different question types represented?
+    options:
+      a: "Union: ChoiceAnswer | boolean | string — where ChoiceAnswer = { selected: string } | { custom: string }"
+      b: "Wrapper object with type discriminant: { type: 'choice', value: ChoiceAnswer } | { type: 'boolean', value: boolean } | { type: 'text', value: string }"
+    selected: a
+    analysis:
+      audience:
+        - author
+        - patron
+      confidence: high
+      context: Brief explicitly specifies discriminated object for choice (selected vs custom) and boolean/text are unambiguous primitive types. The runtime can determine answer type by inspecting the corresponding question spec, so a wrapper discriminant is unnecessary.
+      observable: true
+      recommendation: a
+      rationale: Brief prescribes { selected } | { custom } for choice; boolean and string are unambiguous primitives that don't need wrappers
+      stakes: high
+  - id: D4
+    scope:
+      - S1
+    question: What ID prefix should InputRequestDoc use with generateId()?
+    options:
+      a: "'ir' — short for input-request (generates ir-{ts}-{rand})"
+      b: "'inreq' — more descriptive"
+      c: "'req' — short and generic"
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: "Existing codebase uses short prefixes: 'rig' (4 bytes), 'w' for writs, 'ses' for sessions. 'ir' follows the 2-3 char convention."
+      observable: true
+      recommendation: a
+      rationale: Consistent with codebase convention of short prefixes (rig, w, ses)
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: How many random bytes for the generateId() call?
+    options:
+      a: "4 bytes (8 hex chars) — matches rigs: generateId('rig', 4)"
+      b: 6 bytes (12 hex chars) — the generateId default
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Rigs use generateId('rig', 4). Input requests are rig-scoped, so collision domain is similar. 4 bytes gives 4 billion values per millisecond — ample.
+      observable: false
+      recommendation: a
+      rationale: Matches the spider's existing convention for rig IDs
+      stakes: low
+  - id: D6
+    scope:
+      - S1
+    question: What indexes should the input-requests book declare?
+    options:
+      a: "['status', 'rigId', 'engineId', 'createdAt', ['rigId', 'engineId', 'status']]"
+      b: "['status', 'createdAt'] — minimal, since checker uses get() by id"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The checker uses get(requestId) — no index needed. The list tool queries by status. The engine resume query uses rigId + engineId + status. The composite index covers the resume query. Individual indexes cover simpler filter combinations.
+      observable: false
+      recommendation: a
+      rationale: Composite index enables efficient resume query; single indexes cover list/filter use cases
+      stakes: low
+  - id: D7
+    scope:
+      - S1
+    question: Where do the new types live?
+    options:
+      a: In packages/plugins/spider/src/types.ts alongside existing spider types
+      b: In a new file packages/plugins/spider/src/input-request-types.ts
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: spider/src/types.ts is the canonical location for all Spider public types (RigDoc, BlockType, CheckResult, yield types). Adding InputRequestDoc and question types here follows the pattern. The file is ~380 lines — not large enough to warrant splitting.
+      observable: false
+      recommendation: a
+      rationale: Follows the established pattern of all spider types in types.ts
+      stakes: low
+  - id: D8
+    scope:
+      - S1
+    question: Should InputRequestDoc include a 'message' field for engine-provided human-readable context?
+    options:
+      a: "Yes — optional 'message?: string' for engines to describe what the request is about"
+      b: No — the question labels provide enough context
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: medium
+      context: The existing BlockRecord has an optional 'message' field for human-readable context. An engine blocking for patron input will want to explain *why* it's asking, not just list questions. This parallels how the 'message' field on EngineRunResult.blocked works.
+      observable: true
+      recommendation: a
+      rationale: Consistent with BlockRecord.message pattern; engines need to explain context beyond question labels
+      stakes: low
+  - id: D9
+    scope:
+      - S2
+    question: How does the checker access the input-requests book?
+    options:
+      a: guild().apparatus<StacksApi>('stacks').readBook<InputRequestDoc>('spider', 'input-requests') inside check() — stateless per call, same pattern as writ-status.ts
+      b: Capture the book handle in a closure variable during spider start(), pass to checker via closure
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: writ-status.ts uses guild().apparatus<StacksApi>('stacks').readBook<WritDoc>('clerk', 'writs') inside every check() call. This is the established pattern for block type checkers — they are standalone modules with no constructor injection.
+      observable: false
+      recommendation: a
+      rationale: Exact match to existing writ-status.ts checker pattern
+      stakes: low
+  - id: D10
+    scope:
+      - S2
+    question: Should the checker use book.get(requestId) or book.find() to look up the request?
+    options:
+      a: get(requestId) — direct primary key lookup
+      b: "find({ where: [['id', '=', requestId]], limit: 1 }) — query like writ-status.ts does"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: writ-status.ts uses find() because it was written before get() existed or to be consistent with other query patterns. get() is the natural choice for primary key lookups — it returns T | null directly. The ReadOnlyBook interface exposes get().
+      observable: false
+      recommendation: a
+      rationale: get() is the idiomatic method for primary-key lookup; simpler than find() with a where clause
+      stakes: low
+  - id: D11
+    scope:
+      - S2
+    question: What does the checker return when the request document is not found?
+    options:
+      a: "{ status: 'failed', reason: 'Input request not found' } — permanent failure"
+      b: "{ status: 'pending' } — treat as not-yet-created (lenient)"
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: "writ-status.ts returns { status: 'failed', reason: 'Writ not found' } for missing documents. The engine creates the request *before* returning blocked, so a missing document means data corruption or deletion — not a timing issue. Permanent failure is the correct signal."
+      observable: true
+      recommendation: a
+      rationale: Matches writ-status.ts precedent; engine creates request before blocking so absence is an error
+      stakes: high
+  - id: D12
+    scope:
+      - S2
+    question: What rejection reason does the checker use when the request is rejected?
+    options:
+      a: Use rejectionReason from the document if present, otherwise 'Request rejected by patron'
+      b: Always use the rejectionReason field (require it on rejection)
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The reject tool has reason as optional (matching the brief). The checker needs a fallback for when no reason is given.
+      observable: true
+      recommendation: a
+      rationale: Brief says rejection reason is optional; checker needs a sensible default
+      stakes: low
+  - id: D13
+    scope:
+      - S2
+    question: Should the checker use readBook() or book() to access the input-requests book?
+    options:
+      a: readBook('spider', 'input-requests') — read-only access, consistent with the checker's read-only role
+      b: book('spider', 'input-requests') — writable access, since spider owns this book
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "writ-status.ts uses readBook() for its cross-plugin read. While patron-input reads spider's own book, readBook() is still the correct choice: the checker only reads and should signal that intent. The StacksApi allows readBook() on your own books."
+      observable: false
+      recommendation: a
+      rationale: Checker only reads; readBook() signals intent and matches writ-status.ts pattern
+      stakes: low
+  - id: D14
+    scope:
+      - S3
+    question: Where in the EngineRunContext interface should rigId be positioned?
+    options:
+      a: First field, before engineId — rig is the broader container
+      b: After engineId — keep engineId first since it was there first
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: Conceptually, rigId is the parent scope (rig contains engines). Placing it first is natural for a hierarchical reading. However, engineId has been the first field since inception. No functional difference.
+      observable: true
+      recommendation: a
+      rationale: Rig is the broader context; rigId → engineId reads naturally as container → item
+      stakes: low
+  - id: D15
+    scope:
+      - S3
+    question: What JSDoc comment should rigId get?
+    options:
+      a: "'Unique rig identifier. Available for engines that need to query rig-scoped data (e.g. input requests).'"
+      b: "'The rig this engine instance belongs to.'"
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "Other fields use terse JSDoc: engineId gets 'Simple string identity for this engine instance'. A short factual comment is consistent."
+      observable: false
+      recommendation: b
+      rationale: Matches the terse JSDoc style of the other EngineRunContext fields
+      stakes: low
+  - id: D16
+    scope:
+      - S3
+    question: How many context assembly sites in spider.ts need updating?
+    options:
+      a: "Two: tryRun() line ~595 and tryCollect() line ~436"
+      b: "One: only tryRun() — tryCollect() context is for collect() which doesn't need rigId"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: EngineRunContext is the type for both run() and collect() context parameters. Adding rigId to the interface means both assembly sites must include it for type safety. Even if collect() doesn't currently use rigId, it should be there for interface consistency — and future collect() implementations might need it.
+      observable: false
+      recommendation: a
+      rationale: Both sites construct EngineRunContext; both must include rigId for type correctness
+      stakes: low
+  - id: D17
+    scope:
+      - S4
+    question: What naming convention should the CLI tools use?
+    options:
+      a: "'input-request-list', 'input-request-show', 'input-request-answer', 'input-request-complete', 'input-request-reject'"
+      b: "'input-list', 'input-show', 'input-answer', 'input-complete', 'input-reject'"
+      c: "'patron-input-list', etc. — prefixed with block type name"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: Existing spider tools use rig-list, rig-show, rig-resume — the entity name is the noun prefix. The entity here is 'input-request'. Option b is shorter but ambiguous ('input what?'). Option c couples the tool name to the block type name.
+      observable: true
+      recommendation: a
+      rationale: Follows rig-list/rig-show convention — entity name as noun prefix
+      stakes: low
+  - id: D18
+    scope:
+      - S4
+    question: What permissions should the read vs write tools use?
+    options:
+      a: "Read tools (list, show): 'read'; write tools (answer, complete, reject): 'spider:write'"
+      b: "All tools: 'spider:write' — patron operations are privileged"
+      c: "Read tools: 'spider:read'; write tools: 'spider:write'"
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: "Existing spider tools: rig-list and rig-show use permission 'read'. rig-resume and crawl-one use 'spider:write'. This commission's list/show are read-only queries; answer/complete/reject mutate state."
+      observable: true
+      recommendation: a
+      rationale: Exact match to existing spider tool permission pattern
+      stakes: low
+  - id: D19
+    scope:
+      - S4
+    question: How should the input-request-answer tool accept choice answers via CLI params?
+    options:
+      a: "Two mutually exclusive params: --select <key> and --custom <text>"
+      b: Single --answer param with a prefix convention ('select:key' or 'custom:text')
+      c: Positional argument with a --custom flag to switch modes
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: "Brief explicitly specifies: 'The CLI tool should use explicit flags (--select vs --custom) to determine which variant to produce.' This is the constraint, not a suggestion."
+      observable: true
+      recommendation: a
+      rationale: Brief mandates explicit --select vs --custom flags
+      stakes: high
+  - id: D20
+    scope:
+      - S4
+    question: How should the input-request-answer tool accept boolean answers?
+    options:
+      a: --value true or --value false — string parsed to boolean
+      b: --yes/--no flags
+      c: --value as a generic param that handles all non-choice types
+    selected: c
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: "The tool needs to handle both boolean and text answers. A single --value param covers both: for boolean questions, validate 'true'/'false'; for text, pass through as string. This avoids proliferating flags while keeping the interface simple. --select and --custom already handle choice; --value handles the rest."
+      observable: true
+      recommendation: c
+      rationale: Single --value param covers both boolean ('true'/'false') and text answers without extra flags
+      stakes: low
+  - id: D21
+    scope:
+      - S4
+    question: Should answer validation happen in the tool handler or in a shared validation function?
+    options:
+      a: Shared validation function in types.ts or a helper module — used by both the tool and the complete tool
+      b: Inline in each tool handler
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The answer tool validates type-appropriate answers (selected key exists in options, custom only when allowCustom, boolean parses). The complete tool validates all questions are answered. Sharing validation logic avoids duplication and keeps rules consistent.
+      observable: false
+      recommendation: a
+      rationale: Validation logic is non-trivial and shared across multiple tools; DRY principle applies
+      stakes: low
+  - id: D22
+    scope:
+      - S4
+    question: Where should the shared validation function live?
+    options:
+      a: New file packages/plugins/spider/src/input-request-validation.ts
+      b: Inside types.ts as exported functions
+      c: Inside the answer tool file, exported for the complete tool to import
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: types.ts is currently pure type definitions — no runtime code. Adding validation functions would mix concerns. A dedicated validation module keeps types pure and makes the validation logic easy to test independently.
+      observable: false
+      recommendation: a
+      rationale: Keeps types.ts pure; validation logic is testable independently in its own module
+      stakes: low
+  - id: D23
+    scope:
+      - S4
+    question: How do the CLI tools access the input-requests book?
+    options:
+      a: guild().apparatus<StacksApi>('stacks').book<InputRequestDoc>('spider', 'input-requests') — direct Stacks access
+      b: Add input-request methods to SpiderApi and call through spider apparatus
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: The brief does not mention extending SpiderApi. The tools are self-contained CRUD operations on a book — same pattern as how clerk tools call clerk.transition() but here there's no high-level API to call through. Direct Stacks access is used throughout the codebase for simple book operations.
+      observable: true
+      recommendation: a
+      rationale: No SpiderApi extension needed; tools are simple CRUD against a Stacks book
+      stakes: low
+  - id: D24
+    scope:
+      - S4
+    question: Should the input-request-list tool filter by status by default or show all?
+    options:
+      a: "Default to status: 'pending' — the patron primarily cares about pending requests"
+      b: Show all statuses by default, with optional --status filter
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: The brief says the list tool shows 'pending input requests'. The patron's primary use case is seeing what needs their attention. Defaulting to pending with an optional --status override covers both cases.
+      observable: true
+      recommendation: a
+      rationale: Brief says 'List pending input requests'; default to pending matches the use case
+      stakes: low
+  - id: D25
+    scope:
+      - S4
+    question: Should the input-request-complete tool return the updated document or a simple success response?
+    options:
+      a: Return the updated InputRequestDoc — useful for confirmation
+      b: "Return { ok: true } — matches rig-resume pattern"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: "rig-resume returns { ok: true }. Clerk tools like writ-cancel return the updated writ. Since the patron is completing a request with answers, returning the full document lets them verify what was submitted."
+      observable: true
+      recommendation: a
+      rationale: Returning the document lets the patron verify the completed request; clerk tools follow this pattern
+      stakes: low
+  - id: D26
+    scope:
+      - S4
+    question: Should the complete tool fail silently or with a clear error when questions are unanswered?
+    options:
+      a: Throw an error listing the unanswered question keys
+      b: "Return an error object { ok: false, unanswered: string[] }"
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: Tool handlers in the codebase throw for validation failures (e.g. clerk.transition throws on illegal state transitions). The CLI surfaces thrown errors as error messages. Returning an error object would require the caller to check a flag — less consistent.
+      observable: true
+      recommendation: a
+      rationale: "Codebase convention: throw on validation failure; CLI surfaces the error message"
+      stakes: low
+  - id: D27
+    scope:
+      - S4
+    question: Can a request be rejected after some questions are answered, or only when no answers exist?
+    options:
+      a: Reject at any time regardless of answer state — brief says rejection can happen at any point
+      b: Reject only if no answers have been given
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: Brief says 'Rejection triggers checker failure' — no preconditions mentioned. The patron might start answering, realize the questions are wrong, and reject. There's no reason to restrict this.
+      observable: true
+      recommendation: a
+      rationale: Brief implies no restrictions on when rejection can happen
+      stakes: low
+  - id: D28
+    scope:
+      - S4
+    question: Should tools prevent mutation of completed or rejected requests?
+    options:
+      a: Yes — answer, complete, and reject tools throw if request status is not 'pending'
+      b: No — allow overwriting answers on completed requests
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: Brief says lifecycle is pending → completed | rejected. Once completed, the checker clears the block and the engine reads the answers. Allowing mutation after completion could cause race conditions (engine reads stale answers). Once rejected, the engine has already failed.
+      observable: true
+      recommendation: a
+      rationale: Terminal statuses are terminal — mutation after completion or rejection causes race conditions
+      stakes: high
+  - id: D29
+    scope:
+      - S4
+    question: Should the answer tool allow overwriting a previously-given answer while the request is still pending?
+    options:
+      a: Yes — overwrite freely while pending; the patron might change their mind before completing
+      b: No — once answered, a question is locked
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The two-phase completion model exists precisely so the patron can review and adjust before committing. Preventing overwrites while pending defeats the purpose of the two-phase design.
+      observable: true
+      recommendation: a
+      rationale: Two-phase model implies answers are mutable until completion
+      stakes: low
+  - id: D30
+    scope:
+      - S4
+    question: What callableBy should the input-request tools use?
+    options:
+      a: "Unspecified (available to all callers: cli, anima, library)"
+      b: "callableBy: 'cli' only — patron tools should not be exposed to animas"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: medium
+      context: Input requests are patron-facing by design. Exposing them as MCP tools to animas would let animas answer their own questions, which defeats the purpose. The 'cli' restriction ensures only human operators can answer. The list/show tools could arguably be anima-visible for awareness, but keeping all input-request tools cli-only is simpler and safer.
+      observable: true
+      recommendation: b
+      rationale: Patron input tools are patron-only by design; animas should not answer their own input requests
+      stakes: high
+  - id: D31
+    scope:
+      - S5
+    question: What YAML library should the export/import tools use?
+    options:
+      a: No external YAML library — use JSON export/import instead (rename scope item)
+      b: Add a YAML dependency (e.g. 'yaml' npm package) to spider-apparatus
+    selected: b
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: The brief specifically says 'Export/import as YAML'. YAML is more human-readable than JSON for this use case. The 'yaml' npm package is a well-maintained, zero-dependency library. Adding it to spider-apparatus is low-cost.
+      observable: true
+      recommendation: b
+      rationale: Brief specifies YAML; the 'yaml' package is lightweight and purpose-built for this
+      stakes: low
+  - id: D32
+    scope:
+      - S5
+    question: Should export/import be two separate tools or a single tool with a mode flag?
+    options:
+      a: "Two tools: input-request-export and input-request-import"
+      b: "Single tool: input-request-yaml with --export/--import modes"
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: Codebase convention is one-action-per-tool (writ-cancel, writ-accept, writ-complete — not writ-lifecycle). Two tools gives clearer names and simpler params.
+      observable: true
+      recommendation: a
+      rationale: One action per tool is the codebase convention
+      stakes: low
+  - id: D33
+    scope:
+      - S5
+    question: Where does the YAML export go — stdout or a file?
+    options:
+      a: Return the YAML string as the tool result — CLI prints to stdout, pipeable to a file
+      b: Write to a specified file path
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: "Tool handlers return JSON-serializable values. Returning a YAML string (or { yaml: string }) lets the CLI print it. The patron can pipe to a file. This avoids filesystem path handling in the tool."
+      observable: true
+      recommendation: a
+      rationale: Returning a string lets the CLI print to stdout; patron pipes to file if needed
+      stakes: low
+  - id: D34
+    scope:
+      - S5
+    question: What does the YAML export format include?
+    options:
+      a: Full InputRequestDoc minus internal fields (id, rigId, engineId, createdAt, updatedAt) — just questions and answers
+      b: Full InputRequestDoc including all metadata
+      c: Questions and current answers, plus request id for re-import targeting
+    selected: c
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The import tool needs to know which request to update. Including the request id is required for re-import. Including questions is needed for the patron to read and answer. Including answers shows current state. Metadata like rigId/engineId is noise for the patron.
+      observable: true
+      recommendation: c
+      rationale: Patron needs id (for import target), questions (to read), and answers (to fill in)
+      stakes: low
+  - id: D35
+    scope:
+      - S5
+    question: Does the import tool validate answers the same way the answer tool does?
+    options:
+      a: Yes — same shared validation function; import fails with clear errors on invalid answers
+      b: No — trust the YAML contents
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: Hand-edited YAML can have typos. The same validation that protects the answer tool should protect the import tool. Using the shared validation function (D22) ensures consistency.
+      observable: true
+      recommendation: a
+      rationale: Same validation rules apply regardless of entry path; reuse shared validation
+      stakes: low
+  - id: D36
+    scope:
+      - S5
+    question: How does the import tool receive YAML — as a param string or a file path?
+    options:
+      a: File path param — tool reads the file
+      b: YAML string as a param (pasted or piped)
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: YAML documents are multi-line and can be large. Passing as a CLI string param is impractical. A file path is the natural complement to the export tool (export to file, edit, import from file).
+      observable: true
+      recommendation: a
+      rationale: YAML is multi-line; file path is the practical input method
+      stakes: low
+  - id: D37
+    scope:
+      - S6
+    question: Does the spider need to hold a module-level book handle for input-requests?
+    options:
+      a: "Yes — declare let inputRequestsBook: Book<InputRequestDoc> alongside rigsBook and initialize in start()"
+      b: No — tools and checker both use guild().apparatus<StacksApi>('stacks') inline; only needed if spider core logic accesses it
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The spider core (crawl operations) never directly reads/writes input-requests. The checker is a standalone module that gets the book via guild(). The CLI tools get it via guild(). No spider.ts function needs a closure reference to the book. Adding one would be dead code.
+      observable: false
+      recommendation: b
+      rationale: No spider.ts crawl function accesses input-requests; only the checker and tools do, and they use guild() inline
+      stakes: low
+  - id: D38
+    scope:
+      - S6
+    question: What import pattern should spider.ts use for the new block type?
+    options:
+      a: Import from block-types/index.ts barrel alongside existing block types
+      b: Import directly from block-types/patron-input.ts
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: spider.ts already imports { writStatusBlockType, scheduledTimeBlockType, bookUpdatedBlockType } from './block-types/index.ts'. Adding patronInputBlockType to this barrel import is consistent.
+      observable: false
+      recommendation: a
+      rationale: Spider already uses the block-types barrel; extend it
+      stakes: low
+  - id: D39
+    scope:
+      - S7
+    question: How should existing spider.test.ts tests be updated for the rigId addition?
+    options:
+      a: Add rigId to the EngineRunContext type only — existing test engine run() functions receive context from the Spider (which now includes rigId), so they don't need manual updates unless they construct context objects directly
+      b: Grep for every EngineRunContext construction and add rigId
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "Test engines define run(givens, ctx: EngineRunContext) — the Spider passes the context. Since the Spider now includes rigId, test engines receive it automatically. The only breakage is tests that construct EngineRunContext objects directly for other purposes (e.g. calling collect()). Those few sites need rigId added."
+      observable: false
+      recommendation: a
+      rationale: Most test engines receive context from Spider (which will include rigId); only direct constructions need updating
+      stakes: low
+  - id: D40
+    scope:
+      - S7
+    question: Where should new tests for the patron-input block type and tools live?
+    options:
+      a: In spider.test.ts alongside existing block type tests
+      b: In a new test file packages/plugins/spider/src/input-request.test.ts
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: spider.test.ts is already ~4300 lines. The patron-input tests cover a self-contained feature area (block type checker, five tool handlers, validation logic). A separate test file keeps spider.test.ts from growing further and makes the test suite for this feature findable.
+      observable: false
+      recommendation: b
+      rationale: spider.test.ts is already large; patron-input is a cohesive feature that merits its own test file
+      stakes: low
+  - id: D41
+    scope:
+      - S7
+    question: Should the validation module have its own test file?
+    options:
+      a: Yes — packages/plugins/spider/src/input-request-validation.test.ts
+      b: No — test validation indirectly through tool handler tests
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The validation logic has multiple edge cases (choice key validation, allowCustom enforcement, boolean parsing, missing questions). Direct unit tests are more thorough and maintainable than testing through tool handlers.
+      observable: false
+      recommendation: a
+      rationale: Validation edge cases (allowCustom, invalid keys, boolean parsing) are best tested directly
+      stakes: low
+  - id: D42
+    scope:
+      - S7
+    question: Should the input-requests book be ensured in the existing buildBlockingFixture() or in a new helper?
+    options:
+      a: Add it to buildBlockingFixture() — patron-input is a built-in block type, so the infrastructure should be present in the standard blocking test fixture
+      b: Create a separate helper just for patron-input tests
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: buildBlockingFixture() already sets up the standard test environment with Stacks, Clerk, Fabricator, and Spider. The spider now declares input-requests as a book in its supportKit. The memory backend's ensureBook should include it alongside the rigs book for all blocking tests.
+      observable: false
+      recommendation: a
+      rationale: patron-input is a built-in block type; its book belongs in the standard blocking fixture
+      stakes: low
