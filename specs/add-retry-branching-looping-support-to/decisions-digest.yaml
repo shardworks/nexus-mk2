@@ -1,0 +1,253 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What is the field name for the conditional activation property on RigTemplateEngine?
+    answer: "`when` — reads naturally in template context"
+    justification: "`when` reads naturally and is not a reserved word in any relevant context; `if` has reserved-word
+      associations; `condition` is verbose."
+  - id: D2
+    scope:
+      - S1
+    question: What shape is the `when` expression — how are conditions expressed?
+    answer: 'Single yield reference string with optional `!` negation prefix: `"$yields.review.passed"` or
+      `"!$yields.review.passed"`'
+    justification: Minimal syntax extension — reuses existing `$yields.*.*` pattern, adds only `!` prefix. Covers the
+      review-loop branching case completely. Structured objects and expression parsers are over-engineering for boolean
+      routing.
+  - id: D3
+    scope:
+      - S1
+    question: Should a new `skipped` EngineStatus be added, or should `cancelled` be reused for condition-false engines?
+    answer: Add new `skipped` status to EngineStatus union
+    justification: Distinct semantics warrant a distinct status. `cancelled` = forced abandonment; `skipped` = intentional
+      routing. Mixing them degrades observability.
+  - id: D4
+    scope:
+      - S1
+    question: When is the `when` condition evaluated — at spawn time or at runtime?
+    answer: At runtime in the crawl loop — evaluate when the engine's upstream is all done
+    justification: Yield references are inherently runtime values. Spawn-time evaluation is impossible.
+  - id: D5
+    scope:
+      - S1
+    question: Where in the crawl loop does condition evaluation happen?
+    answer: Integrated in `tryRun()` — when the next runnable engine has a false `when`, skip it there and return
+      `engine-skipped`
+    justification: A separate phase adds code surface without behavioral benefit. The engine is 'ready' — checking its
+      condition is part of deciding to run it. Consistent with the existing pattern where `tryRun` handles blocked
+      results inline.
+  - id: D6
+    scope:
+      - S1
+    question: Does a `skipped` upstream engine satisfy downstream `upstream` dependencies?
+    answer: Yes — `skipped` counts as 'done' for upstream satisfaction (alongside `completed`)
+    justification: Deadlock prevention. The `when` condition is the gating mechanism, not the upstream dependency. Engines
+      in dead branches are skipped by their own conditions, not by upstream propagation.
+  - id: D7
+    scope:
+      - S1
+    question: How does rig completion change to account for `skipped` engines?
+    answer: Rig completes when every engine is `completed` or `skipped`, and at least one is `completed`
+    justification: "Clean terminal semantics: all engines must reach a terminal state (completed or skipped), and the rig
+      must have done at least some work. Prevents degenerate all-skipped rigs from reporting success."
+  - id: D8
+    scope:
+      - S1
+    question: What CrawlResult variant is returned when an engine is skipped?
+    answer: "New `engine-skipped` action: `{ action: 'engine-skipped'; rigId: string; engineId: string }`"
+    justification: Distinct action for observability. Consistent with the existing pattern of fine-grained CrawlResult discrimination.
+  - id: D9
+    scope:
+      - S1
+    question: Should `engine-skipped` also trigger rig completion/blocked checks (same as engine-completed does)?
+    answer: Yes — after skipping, check if the rig is now fully complete or blocked
+    justification: Consistent with existing completion detection. Skipping the checks would delay rig completion by one
+      crawl cycle unnecessarily.
+  - id: D10
+    scope:
+      - S1
+    question: How is the `when` field persisted on EngineInstance (the runtime rig document)?
+    answer: "Add an optional `when?: string` field to `EngineInstance`, copied from the template at spawn time"
+    justification: "`when` is structural, not data. It belongs alongside `upstream` and `designId`, not buried in givensSpec."
+  - id: D11
+    scope:
+      - S1
+    question: How is the `when` expression evaluated at runtime?
+    answer: Resolve the yield reference to a value, then check JavaScript truthiness. `!`-prefixed means negate the truthiness.
+    justification: Truthiness is the established JavaScript convention and handles undefined/missing gracefully. Strict
+      comparison would require the referenced value to be exactly `true`/`false`, which is more fragile.
+  - id: D12
+    scope:
+      - S1
+    question: Template validation — what checks are applied to `when` at startup?
+    answer: Validate that the referenced engine ID exists in the template and is transitively upstream of the engine with
+      the `when` clause (same rules as `$yields.*.*` in givens)
+    justification: Follow existing precedent for `$yields.*.*` validation. Catches errors early. Same validation code can be reused.
+  - id: D13
+    scope:
+      - S1
+    question: What happens when `when` references an upstream engine that was `skipped` (no yields)?
+    answer: The referenced yield value is `undefined`, which is falsy — engine is skipped. With `!` prefix, the negated
+      value is truthy — engine runs.
+    justification: Natural consequence of existing yield resolution mechanics. No special handling needed — undefined is
+      falsy by design.
+  - id: D14
+    scope:
+      - S1
+    question: Does `buildFromTemplate()` need to copy the `when` field from `RigTemplateEngine` to `EngineInstance`?
+    answer: Yes — add `when` to the mapped EngineInstance in `buildFromTemplate()`
+    justification: Direct consequence of D4 (runtime evaluation) and D10 (persist on EngineInstance).
+  - id: D15
+    scope:
+      - S1
+    question: Does `findRunnableEngine()` need to change?
+    answer: Yes — upstream satisfaction check must accept `skipped` in addition to `completed`
+    justification: Direct consequence of D6 (skipped counts as done). Without this change, downstream engines deadlock.
+  - id: D16
+    scope:
+      - S1
+    question: Does `failEngine()` need to handle `skipped` engines?
+    answer: No — `failEngine()` cancels `pending` and `blocked` engines. `skipped` engines are already terminal and should
+      be left alone.
+    justification: "`skipped` is terminal. It should not be overwritten by cancellation."
+  - id: D17
+    scope:
+      - S1
+    question: Does the CDC handler (rig terminal state -> writ transition) need changes?
+    answer: No — the CDC handler fires on rig status change to `completed` or `failed`. The rig status is set correctly by
+      the updated completion logic (D7). The resolution yield lookup already falls back to 'last completed engine in
+      array order', which naturally skips `skipped` engines.
+    justification: Existing fallback chain naturally excludes skipped engines. No code change needed.
+  - id: D18
+    scope:
+      - S1
+    question: Does the `RigTemplateEngine` type need updating?
+    answer: "Yes — add `when?: string` field"
+    justification: The template is the authoring surface. `when` must be declarable there.
+  - id: D19
+    scope:
+      - S2
+    question: How does an engine signal that it wants to add engines to the rig?
+    answer: "Optional `graft` field on the existing `completed` EngineRunResult: `{ status: 'completed'; yields: unknown;
+      graft?: RigTemplateEngine[] }`"
+    justification: Minimal API change. The engine completes (yields flow downstream as normal) and the graft is a side
+      effect. No new status to handle — just an optional field on the existing completed path.
+  - id: D20
+    scope:
+      - S2
+    question: Where is the `graft` field defined — in the Fabricator's `EngineRunResult` type?
+    answer: No — define it only in the Spider's types. The Fabricator type stays unchanged; the Spider casts the result.
+    justification: Avoids circular package dependency. The Spider defines its own extended result type that includes
+      `graft`, and handles it during result processing.
+  - id: D21
+    scope:
+      - S2
+    question: What type does the Spider use for the graft field to avoid the Fabricator circular dependency?
+    answer: Define a `SpiderEngineRunResult` type in spider types that extends `EngineRunResult` with `graft`. Engines
+      importing from fabricator-apparatus return the base type; the Spider internally checks for the `graft` property.
+    justification: Type-safe without circular dependencies. Engines that don't graft use the base Fabricator type. Engines
+      that graft import the spider extension type.
+  - id: D22
+    scope:
+      - S2
+    question: What is the graft field's element type — full `RigTemplateEngine` or a simpler shape?
+    answer: "`RigTemplateEngine[]` — same shape as template engines, including id, designId, upstream, givens, when"
+    justification: Full feature parity. Grafted engines are indistinguishable from spawned engines after being added to the rig.
+  - id: D23
+    scope:
+      - S2
+    question: Who is responsible for ensuring grafted engine IDs are unique within the rig?
+    answer: The engine that produces the graft — it names the engines (e.g., `review-2`, `revise-2`)
+    justification: Engine controls naming. Spider validates. Consistent with template engine naming where the author chooses IDs.
+  - id: D24
+    scope:
+      - S2
+    question: What runtime validation is applied to grafted engines?
+    answer: "Full validation: designId exists in Fabricator, no duplicate IDs (against existing rig engines), no cycles,
+      valid `when` references, valid yield references in givens. Same rules as startup template validation, applied at
+      runtime."
+    justification: Same safety guarantees as startup validation. Malformed grafts fail the originating engine, not the entire guild.
+  - id: D25
+    scope:
+      - S2
+    question: What CrawlResult is returned when an engine completes with a graft?
+    answer: "New `engine-grafted` action: `{ action: 'engine-grafted'; rigId: string; engineId: string; graftedEngineIds:
+      string[] }`"
+    justification: Distinct action for observability. The operator polling via crawl-continual should see rig growth events.
+  - id: D26
+    scope:
+      - S2
+    question: Should there be a safety limit on the total number of engines per rig?
+    answer: Yes — configurable `maxEnginesPerRig` on SpiderConfig with a default (e.g., 50)
+    justification: Safety valve against runaway grafting. The default is generous enough to never hit in normal use.
+  - id: D27
+    scope:
+      - S2
+    question: What is the default value for `maxEnginesPerRig`?
+    answer: "50"
+    justification: 10x headroom over expected maximums. Generous but bounded.
+  - id: D28
+    scope:
+      - S2
+    question: Where in the crawl loop are grafts from quick engines (collected via tryCollect) processed?
+    answer: In a separate post-collect phase
+    justification: Co-locate graft processing with completion handling. Both tryCollect and tryRun handle the completed
+      result and should both check for graft.
+  - id: D29
+    scope:
+      - S2
+    question: Can grafted engines reference the grafting engine in their `upstream` array?
+    answer: Yes — grafted engines can reference any existing engine in the rig (the grafting engine is already completed)
+    justification: The grafting engine and all prior engines are completed. Grafted engines should be able to depend on any of them.
+  - id: D30
+    scope:
+      - S2
+    question: How does the Spider resolve givens for grafted engines — at graft time or at run time?
+    answer: At graft time — resolve `$writ` and `$vars.*` when appending (same as `buildFromTemplate` does at spawn).
+      `$yields.*.*` stays as strings for runtime resolution.
+    justification: Consistent with existing spawn-time behavior. `resolveGivens()` can be reused directly.
+  - id: D31
+    scope:
+      - S3
+    question: How does cascade skipping work — does a single crawl step skip multiple engines?
+    answer: Yes — same as (a) but return an array of all skipped engine IDs in the CrawlResult.
+    justification: Single-step resolution of dead branches avoids wasted crawl cycles. Returning all IDs preserves
+      observability. This requires modifying the `engine-skipped` CrawlResult to include an array.
+  - id: D32
+    scope:
+      - S3
+    question: What is the CrawlResult shape for cascaded skips?
+    answer: "`{ action: 'engine-skipped'; rigId: string; engineId: string; cascadeSkipped?: string[] }` — primary engine
+      plus optional list of cascade-skipped engines"
+    justification: Full observability without changing the primary field semantics. `engineId` is the engine that triggered
+      the cascade; `cascadeSkipped` shows propagation.
+  - id: D33
+    scope:
+      - S3
+    question: Does cascade skipping apply to engines without a `when` clause whose upstream is entirely skipped?
+    answer: No — engines without `when` are unconditional. If all their upstream is done (completed or skipped), they run.
+    justification: "`when` is the opt-in mechanism for conditional routing. No `when` = unconditional. The engine decides
+      what to do with missing upstream yields."
+  - id: D34
+    scope:
+      - S1
+      - S2
+    question: Does `EngineStatus` type need a new `skipped` value?
+    answer: Yes — `'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'skipped'`
+    justification: Direct consequence of D3.
+  - id: D35
+    scope:
+      - S1
+      - S2
+    question: Do the public type exports in `index.ts` need updating?
+    answer: Yes — export any new types (e.g., `SpiderEngineRunResult` if created) from spider-apparatus index
+    justification: Engine authors writing grafting engines need to import the extended result type.
+  - id: D36
+    scope:
+      - S1
+      - S2
+    question: Does `isRigBlocked()` need changes?
+    answer: No — `isRigBlocked()` checks for running, blocked, and pending engines. `skipped` engines are none of these, so
+      they're naturally excluded. The function works correctly without changes.
+    justification: The D15 change to `findRunnableEngine` is sufficient. `isRigBlocked` delegates to it.

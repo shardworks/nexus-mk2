@@ -1,0 +1,18 @@
+brief: "Add retry, branching, looping support to rigs"
+slug: "add-retry-branching-looping-support-to"
+
+scope:
+  - id: S1
+    description: "Conditional engine activation — add a `when` field to rig template engines that references an upstream yield value. Engines whose condition evaluates false are skipped. Includes new `skipped` engine status, upstream satisfaction change (skipped counts as done), rig completion change (skipped engines are terminal), template validation for `when` references, and a new `engine-skipped` CrawlResult variant. This enables branching (conditional routing based on upstream yields) and bounded retry (pre-seeded repeated engines with conditions)."
+    rationale: "The brief asks for branching and retry. Conditional engine activation is the core primitive that makes both expressible in rig templates. The review-loop.md design doc endorses this as the MVP approach."
+    included: true
+
+  - id: S2
+    description: "Engine-initiated grafting — add an optional `graft` field to the `completed` EngineRunResult so an engine can return additional engines to append to the running rig alongside its yields. Includes Spider-side graft processing (validate and append), runtime validation of grafted engines, a new `engine-grafted` CrawlResult variant, and a configurable `maxEngines` safety limit. This enables unbounded looping where engines dynamically extend the rig at runtime."
+    rationale: "The brief asks for looping support. While S1 enables pre-seeded loops of fixed depth, true looping (arbitrary iteration count determined at runtime) requires dynamic graph extension. The review-loop.md doc describes this as the future direction."
+    included: true
+
+  - id: S3
+    description: "Cascade skipping — when an engine is skipped, automatically evaluate and skip downstream engines whose `when` conditions can no longer be satisfied (because they depend on yields from the skipped engine that will never exist). Propagate skipping through the graph in a single crawl step rather than one-engine-per-crawl."
+    rationale: "Without cascade skipping, a branching template with depth-3 conditional chains requires 3 crawl cycles to skip through a dead branch. Cascade skipping resolves entire dead branches in one step. This is implied by branching support but is independently excludable — the one-per-crawl approach works correctly, just takes more cycles."
+    included: true

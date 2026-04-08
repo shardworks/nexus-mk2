@@ -1,0 +1,633 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What is the field name for the conditional activation property on RigTemplateEngine?
+    options:
+      a: "`when` — reads naturally in template context"
+      b: "`if` — more programmer-familiar"
+      c: "`condition` — more formal"
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: medium
+      context: 'This field name will appear in guild.json templates and kit contributions. It needs to read well in JSON context: `{ "when": "$yields.review.passed" }`.'
+      observable: true
+      recommendation: a
+      rationale: "`when` reads naturally and is not a reserved word in any relevant context; `if` has reserved-word associations; `condition` is verbose."
+      stakes: low
+  - id: D2
+    scope:
+      - S1
+    question: What shape is the `when` expression — how are conditions expressed?
+    options:
+      a: 'Single yield reference string with optional `!` negation prefix: `"$yields.review.passed"` or `"!$yields.review.passed"`'
+      b: 'Structured condition object: `{ ref: "$yields.review.passed", negate: true }`'
+      c: 'Full expression string with operators: `"$yields.review.passed == false"`'
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The primary use case is branching on a boolean yield (review.passed). The `$yields.*.*` reference syntax already exists in the givens system and is validated at startup. The only needed extension is truthiness evaluation and negation.
+      observable: true
+      recommendation: a
+      rationale: Minimal syntax extension — reuses existing `$yields.*.*` pattern, adds only `!` prefix. Covers the review-loop branching case completely. Structured objects and expression parsers are over-engineering for boolean routing.
+      stakes: high
+  - id: D3
+    scope:
+      - S1
+    question: Should a new `skipped` EngineStatus be added, or should `cancelled` be reused for condition-false engines?
+    options:
+      a: Add new `skipped` status to EngineStatus union
+      b: Reuse existing `cancelled` status
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: "Currently `cancelled` is used exclusively by `failEngine()` to mark downstream engines when an upstream engine fails. It means 'abandoned due to upstream failure'. A condition-false skip is semantically different: 'intentionally not needed on this execution path'. Operators inspecting rigs need to distinguish these cases."
+      observable: true
+      recommendation: a
+      rationale: Distinct semantics warrant a distinct status. `cancelled` = forced abandonment; `skipped` = intentional routing. Mixing them degrades observability.
+      stakes: high
+  - id: D4
+    scope:
+      - S1
+    question: When is the `when` condition evaluated — at spawn time or at runtime?
+    options:
+      a: At spawn time in `buildFromTemplate()` — pre-determine which engines are skipped
+      b: At runtime in the crawl loop — evaluate when the engine's upstream is all done
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "`when` references `$yields.*.*` values. Yields don't exist at spawn time — they're produced as engines complete. The condition `$yields.review.passed` has no value until the review engine has run."
+      observable: false
+      recommendation: b
+      rationale: Yield references are inherently runtime values. Spawn-time evaluation is impossible.
+      stakes: high
+  - id: D5
+    scope:
+      - S1
+    question: Where in the crawl loop does condition evaluation happen?
+    options:
+      a: Integrated in `tryRun()` — when the next runnable engine has a false `when`, skip it there and return `engine-skipped`
+      b: Separate crawl phase `tryEvaluateConditions()` between `checkBlocked` and `run`
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The crawl loop follows the pattern: each phase finds one unit of work and returns. `tryRun` already finds the next runnable engine. Adding a condition check is a small extension: if the engine's `when` is false, set it to `skipped` and return `engine-skipped` instead of running it."
+      observable: false
+      recommendation: a
+      rationale: A separate phase adds code surface without behavioral benefit. The engine is 'ready' — checking its condition is part of deciding to run it. Consistent with the existing pattern where `tryRun` handles blocked results inline.
+      stakes: low
+  - id: D6
+    scope:
+      - S1
+    question: Does a `skipped` upstream engine satisfy downstream `upstream` dependencies?
+    options:
+      a: Yes — `skipped` counts as 'done' for upstream satisfaction (alongside `completed`)
+      b: No — downstream engines that depend on a skipped engine are also skipped/cancelled
+    selected: a
+    analysis:
+      audience:
+        - author
+        - patron
+      confidence: high
+      context: In a branching template, engine A (conditional) may be upstream of engine B. If A is skipped, B should become runnable and evaluate its own `when` condition. Otherwise, a skipped branch would deadlock the rig. When B references `$yields.A.property` but A was skipped, the reference resolves to `undefined` — matching existing behavior for undefined yield references (the givens key is omitted).
+      observable: true
+      recommendation: a
+      rationale: Deadlock prevention. The `when` condition is the gating mechanism, not the upstream dependency. Engines in dead branches are skipped by their own conditions, not by upstream propagation.
+      stakes: high
+  - id: D7
+    scope:
+      - S1
+    question: How does rig completion change to account for `skipped` engines?
+    options:
+      a: Rig completes when every engine is `completed` or `skipped`, and at least one is `completed`
+      b: Rig completes when every engine is in any terminal status (`completed`, `skipped`, `cancelled`, `failed`)
+      c: No change — `skipped` is not a terminal status; skipped engines are excluded from the completion check
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: "Currently: `allCompleted = engines.every(e => e.status === 'completed')`. With branching, some engines will be `skipped`. A rig where ALL engines are skipped is degenerate (nothing ran) — it shouldn't succeed. At least one engine must have completed for the rig to be considered successful."
+      observable: true
+      recommendation: a
+      rationale: "Clean terminal semantics: all engines must reach a terminal state (completed or skipped), and the rig must have done at least some work. Prevents degenerate all-skipped rigs from reporting success."
+      stakes: high
+  - id: D8
+    scope:
+      - S1
+    question: What CrawlResult variant is returned when an engine is skipped?
+    options:
+      a: "New `engine-skipped` action: `{ action: 'engine-skipped'; rigId: string; engineId: string }`"
+      b: Reuse `engine-completed` — skipping is a form of completion
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: The existing CrawlResult discriminates between engine-completed, engine-started, engine-blocked, etc. Each represents a distinct observable action. Skipping is a new observable action — the operator should be able to distinguish 'engine ran and completed' from 'engine was skipped due to condition'.
+      observable: true
+      recommendation: a
+      rationale: Distinct action for observability. Consistent with the existing pattern of fine-grained CrawlResult discrimination.
+      stakes: low
+  - id: D9
+    scope:
+      - S1
+    question: Should `engine-skipped` also trigger rig completion/blocked checks (same as engine-completed does)?
+    options:
+      a: Yes — after skipping, check if the rig is now fully complete or blocked
+      b: No — just skip and return; the next crawl will pick up any downstream effects
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The existing `tryRun` and `tryCollect` both check for rig completion after completing an engine. Skipping an engine can make the rig complete (all remaining engines done) or blocked. The same post-action checks should apply.
+      observable: false
+      recommendation: a
+      rationale: Consistent with existing completion detection. Skipping the checks would delay rig completion by one crawl cycle unnecessarily.
+      stakes: low
+  - id: D10
+    scope:
+      - S1
+    question: How is the `when` field persisted on EngineInstance (the runtime rig document)?
+    options:
+      a: "Add an optional `when?: string` field to `EngineInstance`, copied from the template at spawn time"
+      b: Don't persist — store it only in givensSpec as a special key
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "`when` is a structural property of the engine slot, like `upstream` and `designId`. It's not a given (input to the engine's run method) — it's a graph-routing instruction evaluated by the Spider. It belongs on EngineInstance as a distinct field."
+      observable: true
+      recommendation: a
+      rationale: "`when` is structural, not data. It belongs alongside `upstream` and `designId`, not buried in givensSpec."
+      stakes: low
+  - id: D11
+    scope:
+      - S1
+    question: How is the `when` expression evaluated at runtime?
+    options:
+      a: Resolve the yield reference to a value, then check JavaScript truthiness. `!`-prefixed means negate the truthiness.
+      b: Resolve the yield reference, then strict-compare to `true`/`false`.
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "The primary use case is `$yields.review.passed` where `passed` is a boolean. Truthiness covers this. It also naturally handles edge cases: if the referenced yield property doesn't exist (engine was skipped), `undefined` is falsy — the condition fails, and the engine is skipped. This is correct behavior."
+      observable: true
+      recommendation: a
+      rationale: Truthiness is the established JavaScript convention and handles undefined/missing gracefully. Strict comparison would require the referenced value to be exactly `true`/`false`, which is more fragile.
+      stakes: low
+  - id: D12
+    scope:
+      - S1
+    question: Template validation — what checks are applied to `when` at startup?
+    options:
+      a: Validate that the referenced engine ID exists in the template and is transitively upstream of the engine with the `when` clause (same rules as `$yields.*.*` in givens)
+      b: Validate only that the engine ID exists (not upstream reachability)
+      c: No validation — runtime errors on bad references
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The existing validation for `$yields.*.*` in givens already checks both existence and upstream reachability. The `when` field uses the same `$yields.*.*` syntax. Applying the same rules is consistent and catches template authoring errors at startup rather than runtime.
+      observable: false
+      recommendation: a
+      rationale: Follow existing precedent for `$yields.*.*` validation. Catches errors early. Same validation code can be reused.
+      stakes: low
+  - id: D13
+    scope:
+      - S1
+    question: What happens when `when` references an upstream engine that was `skipped` (no yields)?
+    options:
+      a: The referenced yield value is `undefined`, which is falsy — engine is skipped. With `!` prefix, the negated value is truthy — engine runs.
+      b: The engine fails with an error about missing upstream yields
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "A skipped engine has no yields. `buildUpstreamMap()` only includes engines with `status === 'completed'` and defined yields. So `$yields.skipped-engine.anything` naturally resolves to `undefined`. This is the correct behavior for the review-loop pattern: if review-1 was skipped (because a prior review passed and skipped to seal), revise-1 should also be skipped."
+      observable: true
+      recommendation: a
+      rationale: Natural consequence of existing yield resolution mechanics. No special handling needed — undefined is falsy by design.
+      stakes: low
+  - id: D14
+    scope:
+      - S1
+    question: Does `buildFromTemplate()` need to copy the `when` field from `RigTemplateEngine` to `EngineInstance`?
+    options:
+      a: Yes — add `when` to the mapped EngineInstance in `buildFromTemplate()`
+      b: No — resolve `when` at spawn time (impossible, per D4)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "`buildFromTemplate()` currently maps template engines to EngineInstances, copying id, designId, upstream, and givensSpec. The `when` field must be added to this mapping."
+      observable: false
+      recommendation: a
+      rationale: Direct consequence of D4 (runtime evaluation) and D10 (persist on EngineInstance).
+      stakes: low
+  - id: D15
+    scope:
+      - S1
+    question: Does `findRunnableEngine()` need to change?
+    options:
+      a: Yes — upstream satisfaction check must accept `skipped` in addition to `completed`
+      b: No — keep it checking only `completed` and handle skipped upstream elsewhere
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "Currently: `dep?.status === 'completed'`. Must change to `dep?.status === 'completed' || dep?.status === 'skipped'`. Otherwise an engine downstream of a skipped engine would never become runnable."
+      observable: false
+      recommendation: a
+      rationale: Direct consequence of D6 (skipped counts as done). Without this change, downstream engines deadlock.
+      stakes: high
+  - id: D16
+    scope:
+      - S1
+    question: Does `failEngine()` need to handle `skipped` engines?
+    options:
+      a: No — `failEngine()` cancels `pending` and `blocked` engines. `skipped` engines are already terminal and should be left alone.
+      b: Yes — also cancel `skipped` engines on failure
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Currently `failEngine` cancels engines with `status === 'pending' || status === 'blocked'`. Skipped engines are already terminal — they made their routing decision and should not be reverted.
+      observable: false
+      recommendation: a
+      rationale: "`skipped` is terminal. It should not be overwritten by cancellation."
+      stakes: low
+  - id: D17
+    scope:
+      - S1
+    question: Does the CDC handler (rig terminal state -> writ transition) need changes?
+    options:
+      a: No — the CDC handler fires on rig status change to `completed` or `failed`. The rig status is set correctly by the updated completion logic (D7). The resolution yield lookup already falls back to 'last completed engine in array order', which naturally skips `skipped` engines.
+      b: Yes — explicitly filter out `skipped` engines in the resolution yield lookup
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The CDC handler's resolution yield fallback: (1) declared resolutionEngineId, (2) seal engine, (3) last completed engine in reverse array order. Step 3 already filters by `e.status === 'completed' && e.yields !== undefined`. Skipped engines have no yields and status `skipped`, so they're naturally excluded."
+      observable: false
+      recommendation: a
+      rationale: Existing fallback chain naturally excludes skipped engines. No code change needed.
+      stakes: low
+  - id: D18
+    scope:
+      - S1
+    question: Does the `RigTemplateEngine` type need updating?
+    options:
+      a: "Yes — add `when?: string` field"
+      b: No — `when` only exists on EngineInstance at runtime
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "`when` is authored in templates (guild.json or kit contributions). It must be part of the template type."
+      observable: true
+      recommendation: a
+      rationale: The template is the authoring surface. `when` must be declarable there.
+      stakes: low
+  - id: D19
+    scope:
+      - S2
+    question: How does an engine signal that it wants to add engines to the rig?
+    options:
+      a: "Optional `graft` field on the existing `completed` EngineRunResult: `{ status: 'completed'; yields: unknown; graft?: RigTemplateEngine[] }`"
+      b: "New `EngineRunResult` variant: `{ status: 'graft'; yields: unknown; append: RigTemplateEngine[] }`"
+      c: "Context method: `context.graft(engines)` called during run()"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The engine completes normally (yields are produced) and additionally requests new engines. This is naturally an optional field on the completed result — the engine did its work AND wants more work added. A separate status would require new handling in tryCollect/tryRun. A context method introduces side effects during engine execution.
+      observable: true
+      recommendation: a
+      rationale: Minimal API change. The engine completes (yields flow downstream as normal) and the graft is a side effect. No new status to handle — just an optional field on the existing completed path.
+      stakes: high
+  - id: D20
+    scope:
+      - S2
+    question: Where is the `graft` field defined — in the Fabricator's `EngineRunResult` type?
+    options:
+      a: "Yes — add `graft?: RigTemplateEngine[]` to the `completed` variant of `EngineRunResult` in `fabricator.ts`. Import `RigTemplateEngine` from spider-apparatus."
+      b: No — define it only in the Spider's types. The Fabricator type stays unchanged; the Spider casts the result.
+    selected: b
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: The Fabricator package (`@shardworks/fabricator-apparatus`) is a minimal type/registry package. `RigTemplateEngine` is owned by the Spider package. Making the Fabricator import Spider types would create a circular dependency (Spider already depends on Fabricator). The graft field should be defined as a Spider-side extension.
+      observable: true
+      recommendation: b
+      rationale: Avoids circular package dependency. The Spider defines its own extended result type that includes `graft`, and handles it during result processing.
+      stakes: high
+  - id: D21
+    scope:
+      - S2
+    question: What type does the Spider use for the graft field to avoid the Fabricator circular dependency?
+    options:
+      a: Define a `SpiderEngineRunResult` type in spider types that extends `EngineRunResult` with `graft`. Engines importing from fabricator-apparatus return the base type; the Spider internally checks for the `graft` property.
+      b: Define the graft field inline in the Spider's result processing — just check for `(engineResult as any).graft` at the handling site.
+      c: Define a standalone `GraftRequest` interface in spider types. The completed EngineRunResult gets an additional optional field via a spider-specific type that wraps it.
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: "Engines that want to graft need to know the graft field exists. They import `EngineRunResult` from the Fabricator. The Spider needs to check for it. The cleanest approach: the Spider defines an extended result type. Engines that want to graft can import it from spider-apparatus (optional dependency)."
+      observable: true
+      recommendation: a
+      rationale: Type-safe without circular dependencies. Engines that don't graft use the base Fabricator type. Engines that graft import the spider extension type.
+      stakes: low
+  - id: D22
+    scope:
+      - S2
+    question: What is the graft field's element type — full `RigTemplateEngine` or a simpler shape?
+    options:
+      a: "`RigTemplateEngine[]` — same shape as template engines, including id, designId, upstream, givens, when"
+      b: A simpler shape without `when` support for grafted engines
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Grafted engines should support all the same features as template engines, including conditional activation. A review engine grafting a `revise + review` pair should be able to set `when` conditions on the grafted review engine.
+      observable: true
+      recommendation: a
+      rationale: Full feature parity. Grafted engines are indistinguishable from spawned engines after being added to the rig.
+      stakes: low
+  - id: D23
+    scope:
+      - S2
+    question: Who is responsible for ensuring grafted engine IDs are unique within the rig?
+    options:
+      a: The engine that produces the graft — it names the engines (e.g., `review-2`, `revise-2`)
+      b: The Spider auto-prefixes grafted engine IDs with a generation counter (e.g., `g1.review`, `g2.revise`)
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: The engine knows its own context (which iteration it is, what naming scheme to use). Auto-prefixing would change the IDs that downstream `$yields.*.*` references use, making template authoring harder. The Spider validates uniqueness and fails if violated.
+      observable: true
+      recommendation: a
+      rationale: Engine controls naming. Spider validates. Consistent with template engine naming where the author chooses IDs.
+      stakes: low
+  - id: D24
+    scope:
+      - S2
+    question: What runtime validation is applied to grafted engines?
+    options:
+      a: "Full validation: designId exists in Fabricator, no duplicate IDs (against existing rig engines), no cycles, valid `when` references, valid yield references in givens. Same rules as startup template validation, applied at runtime."
+      b: "Minimal validation: just check for duplicate IDs and designId existence"
+      c: No validation — trust the engine
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "A malformed graft would corrupt the rig state. The existing template validation logic (designId check, duplicate IDs, upstream references, cycle detection, yield reference validation) should apply to grafted engines. The difference: startup validation throws and prevents startup; graft validation fails the engine that produced the invalid graft."
+      observable: false
+      recommendation: a
+      rationale: Same safety guarantees as startup validation. Malformed grafts fail the originating engine, not the entire guild.
+      stakes: high
+  - id: D25
+    scope:
+      - S2
+    question: What CrawlResult is returned when an engine completes with a graft?
+    options:
+      a: "New `engine-grafted` action: `{ action: 'engine-grafted'; rigId: string; engineId: string; graftedEngineIds: string[] }`"
+      b: Return `engine-completed` — the graft is a side effect, not a distinct action
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: Dynamic rig growth is a significant observable event. Operators need to know the rig grew. The grafted engine IDs are useful for debugging.
+      observable: true
+      recommendation: a
+      rationale: Distinct action for observability. The operator polling via crawl-continual should see rig growth events.
+      stakes: low
+  - id: D26
+    scope:
+      - S2
+    question: Should there be a safety limit on the total number of engines per rig?
+    options:
+      a: Yes — configurable `maxEnginesPerRig` on SpiderConfig with a default (e.g., 50)
+      b: No limit — trust engines to be well-behaved
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: Without a bound, a buggy engine could graft infinitely, consuming resources. A safety valve is essential for production use. Default 50 is generous — the standard pipeline is 5 engines.
+      observable: true
+      recommendation: a
+      rationale: Safety valve against runaway grafting. The default is generous enough to never hit in normal use.
+      stakes: high
+  - id: D27
+    scope:
+      - S2
+    question: What is the default value for `maxEnginesPerRig`?
+    options:
+      a: "50"
+      b: "100"
+      c: "25"
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: Standard pipeline is 5 engines. A review loop with maxRetries=5 would be ~15 engines. 50 gives 10x headroom over the most complex expected templates. Higher values are wasteful; lower values risk hitting the limit on legitimate templates.
+      observable: true
+      recommendation: a
+      rationale: 10x headroom over expected maximums. Generous but bounded.
+      stakes: low
+  - id: D28
+    scope:
+      - S2
+    question: Where in the crawl loop are grafts from quick engines (collected via tryCollect) processed?
+    options:
+      a: In `tryCollect` — when collecting yields, also check for `graft` and append engines before returning
+      b: In a separate post-collect phase
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Both `tryCollect` (quick engines) and `tryRun` (clockwork engines) handle the `completed` result. Both paths must check for the optional `graft` field. Processing inline keeps the logic co-located with completion handling.
+      observable: false
+      recommendation: a
+      rationale: Co-locate graft processing with completion handling. Both tryCollect and tryRun handle the completed result and should both check for graft.
+      stakes: low
+  - id: D29
+    scope:
+      - S2
+    question: Can grafted engines reference the grafting engine in their `upstream` array?
+    options:
+      a: Yes — grafted engines can reference any existing engine in the rig (the grafting engine is already completed)
+      b: No — grafted engines can only reference each other or other grafted engines in the same batch
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The grafting engine is already completed when graft processing happens. Grafted engines naturally depend on it. They may also need to reference earlier engines (e.g., `draft` for worktree path). Restricting references would be unnecessarily limiting.
+      observable: true
+      recommendation: a
+      rationale: The grafting engine and all prior engines are completed. Grafted engines should be able to depend on any of them.
+      stakes: low
+  - id: D30
+    scope:
+      - S2
+    question: How does the Spider resolve givens for grafted engines — at graft time or at run time?
+    options:
+      a: At graft time — resolve `$writ` and `$vars.*` when appending (same as `buildFromTemplate` does at spawn). `$yields.*.*` stays as strings for runtime resolution.
+      b: At run time — store raw givens strings, resolve everything at run time
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "This mirrors what `buildFromTemplate` does at spawn time: `$writ` and `$vars.*` are resolved eagerly (they don't change), while `$yields.*.*` are left as strings for runtime resolution via `resolveYieldRefs()`. Grafted engines should follow the same pattern."
+      observable: false
+      recommendation: a
+      rationale: Consistent with existing spawn-time behavior. `resolveGivens()` can be reused directly.
+      stakes: low
+  - id: D31
+    scope:
+      - S3
+    question: How does cascade skipping work — does a single crawl step skip multiple engines?
+    options:
+      a: Yes — after skipping an engine, immediately evaluate all pending engines whose upstream is now all done and whose `when` is false. Skip them in the same crawl step. Return `engine-skipped` with only the first engine ID (cascaded skips are a side effect).
+      b: Yes — same as (a) but return an array of all skipped engine IDs in the CrawlResult.
+      c: No cascade — each crawl skips one engine. Dead branches clear over multiple crawl cycles.
+    selected: b
+    analysis:
+      audience:
+        - operator
+        - implementer
+      confidence: medium
+      context: Without cascade skipping, a branching template with depth-3 conditional chains (e.g., review-1 passes → skip revise-1, review-2, revise-2, review-3) requires multiple crawl cycles to clear the dead branch. Cascade skipping resolves this in one step. Returning all skipped IDs preserves observability.
+      observable: true
+      recommendation: b
+      rationale: Single-step resolution of dead branches avoids wasted crawl cycles. Returning all IDs preserves observability. This requires modifying the `engine-skipped` CrawlResult to include an array.
+      stakes: low
+  - id: D32
+    scope:
+      - S3
+    question: What is the CrawlResult shape for cascaded skips?
+    options:
+      a: "`{ action: 'engine-skipped'; rigId: string; engineId: string }` — return only the first skipped engine; cascaded skips are implicit"
+      b: "`{ action: 'engine-skipped'; rigId: string; engineId: string; cascadeSkipped?: string[] }` — primary engine plus optional list of cascade-skipped engines"
+    selected: b
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: The operator needs to know which engines were skipped. With cascade skipping, multiple engines may be skipped in one crawl step. The `engineId` field stays as the trigger engine; `cascadeSkipped` lists any additional engines skipped as a consequence.
+      observable: true
+      recommendation: b
+      rationale: Full observability without changing the primary field semantics. `engineId` is the engine that triggered the cascade; `cascadeSkipped` shows propagation.
+      stakes: low
+  - id: D33
+    scope:
+      - S3
+    question: Does cascade skipping apply to engines without a `when` clause whose upstream is entirely skipped?
+    options:
+      a: No — engines without `when` are unconditional. If all their upstream is done (completed or skipped), they run.
+      b: Yes — engines without `when` whose ALL upstream engines are `skipped` (none completed) are themselves skipped, since they have no meaningful upstream data to work with.
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: An engine without a `when` clause is unconditional — it always runs when its upstream is satisfied. If its upstream happens to be all skipped, it still runs. The engine may or may not need upstream yields; that's the engine's concern, not the Spider's routing concern. Template authors use `when` to express routing; absence of `when` means 'always run'.
+      observable: true
+      recommendation: a
+      rationale: "`when` is the opt-in mechanism for conditional routing. No `when` = unconditional. The engine decides what to do with missing upstream yields."
+      stakes: high
+  - id: D34
+    scope:
+      - S1
+      - S2
+    question: Does `EngineStatus` type need a new `skipped` value?
+    options:
+      a: Yes — `'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'skipped'`
+      b: No — reuse `cancelled`
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: This is the type-level consequence of D3. The `EngineStatus` union must include `skipped`.
+      observable: true
+      recommendation: a
+      rationale: Direct consequence of D3.
+      stakes: high
+  - id: D35
+    scope:
+      - S1
+      - S2
+    question: Do the public type exports in `index.ts` need updating?
+    options:
+      a: Yes — export any new types (e.g., `SpiderEngineRunResult` if created) from spider-apparatus index
+      b: No — all changes are to existing types
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: If D21 introduces a `SpiderEngineRunResult` type, it must be exported for engine authors who want to return grafts. The `EngineStatus` change (adding `skipped`) is on an already-exported type.
+      observable: true
+      recommendation: a
+      rationale: Engine authors writing grafting engines need to import the extended result type.
+      stakes: low
+  - id: D36
+    scope:
+      - S1
+      - S2
+    question: Does `isRigBlocked()` need changes?
+    options:
+      a: No — `isRigBlocked()` checks for running, blocked, and pending engines. `skipped` engines are none of these, so they're naturally excluded. The function works correctly without changes.
+      b: Yes — explicitly account for `skipped` in the logic
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "`isRigBlocked` returns true when: no running, some blocked, no runnable. `skipped` engines are not running, not blocked, not pending. `findRunnableEngine` (which `isRigBlocked` calls) already needs to accept `skipped` as upstream-done (D15). So `isRigBlocked` works correctly because `findRunnableEngine` with the D15 change will correctly identify runnable engines past skipped ones."
+      observable: false
+      recommendation: a
+      rationale: The D15 change to `findRunnableEngine` is sufficient. `isRigBlocked` delegates to it.
+      stakes: low
