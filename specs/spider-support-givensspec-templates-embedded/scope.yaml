@@ -1,0 +1,48 @@
+brief: |
+  # Spider: Support GivensSpec templates embedded in strings
+
+  ## Current State
+
+  Full-value replacement only. The regex YIELD_REF_RE matches the entire string (^...$), and resolveGivens checks value.startsWith('$') — if the whole value isn't a reference, it's passed through as a literal. A string like "Here it is: ${yields.foo.bar}" would not match any pattern and would be passed through unchanged.
+
+  ## Desired State
+
+  Support inline interpolation — specify givesn such as "Write a spec. Decisions: ${yields.decision-review.decisionSummary}" — we'd need to add string interpolation to both resolveGivens (for $writ/$vars.*) and   resolveYieldRefs (for $yields.*). The current implementation treats each givens value as either entirely-a-reference or entirely-a-literal.
+
+  ## Other
+
+  - Use this opportunity to provide any general cleanup and tech debt fixes which have developed in how givens and yields are passed between engines
+  - Consider introducing a real templating library at this point instead of rolling our own. Prefer one with minimal and low-weight transitive dependencies. If a suitable library exists, but would require changing our templating syntax raise it as a decision for the patron -- a breaking change may be acceptable in this case.
+
+slug: spider-support-givensspec-templates-embedded
+
+scope:
+  - id: S1
+    description: "Inline string interpolation for givens values — support ${yields.*.*}, ${vars.*}, and ${writ.*} expressions embedded within larger strings, in addition to the existing whole-value replacement"
+    rationale: "This is the primary ask of the brief: 'Write a spec. Decisions: ${yields.decision-review.decisionSummary}' style strings"
+    included: true
+
+  - id: S2
+    description: "Startup validation of inline template expressions — scan all string givens values for embedded ${...} patterns and validate that yield engine refs exist and are upstream, just as whole-value refs are validated today"
+    rationale: "Current validation only checks strings starting with '$'. Inline templates in strings not starting with '$' are silently ignored. Without this, invalid inline refs would fail silently at run time."
+    included: true
+
+  - id: S3
+    description: "Writ sub-property access via ${writ.<field>} — support accessing individual fields of the WritDoc (id, title, body, codex, etc.) in both whole-value and inline contexts"
+    rationale: "Currently $writ resolves to the whole WritDoc object. For inline interpolation, you need ${writ.body} to embed a specific field in a string. Without this, inline writ references are impossible."
+    included: true
+
+  - id: S4
+    description: "Extract shared variable-reference validation into a common helper to eliminate the duplication between validateTemplates and validateKitTemplate"
+    rationale: "Brief says 'general cleanup and tech debt fixes'. These two functions have ~35 lines of near-identical validation logic differing only in error emission strategy (throw vs return string)."
+    included: true
+
+  - id: S5
+    description: "Minor cleanup of unnecessary object spreads in resolveYieldRefs call sites (tryRun, tryCollect)"
+    rationale: "Brief says 'general cleanup and tech debt fixes'. Both call sites do { ...engine.givensSpec } before passing to resolveYieldRefs, which already creates a new result object."
+    included: true
+
+  - id: S6
+    description: "Update JSDoc on RigTemplateEngine.givens and EngineInstance.givensSpec to document inline interpolation syntax"
+    rationale: "Implied by any code change — documentation must match behavior"
+    included: true

@@ -1,0 +1,484 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: Should we introduce an external templating library or extend the hand-rolled regex system?
+    options:
+      a: Extend hand-rolled regex — add inline ${...} scanning to existing resolveGivens/resolveYieldRefs with no new dependency
+      b: Adopt mustache (zero-dep, ~14KB) — use {{...}} syntax, breaking change to all existing $-prefixed references
+      c: Adopt a configurable library (e.g. eta) — configure to use ${...} syntax, new dependency but no syntax break
+    selected: custom
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: medium
+      context: |
+        The interpolation needed is simple property-path substitution — no loops, conditionals, or filters. The codebase has zero templating library usage today. The expressions are always `${namespace.path}` with at most two dot segments. A regex-based replacer is ~20 lines of code. A library adds a dependency for marginal benefit (battle-tested escaping, error messages) but the edge-case surface is small (no user-supplied templates — only guild authors write these).
+      observable: true
+      recommendation: a
+      rationale: The feature is simple property substitution; a library adds dependency weight with minimal benefit for this use case
+      stakes: high
+    patron_override: Extend hand-rolled regex — add inline ${...} scanning to existing resolveGivens/resolveYieldRefs with no new dependency. HOWEVER, extract templating code to an isolated module so it can be replaced with a library later if needed
+  - id: D2
+    scope:
+      - S1
+    question: Should the existing whole-value bare-$ syntax ($writ, $vars.role, $yields.draft.path) remain supported alongside the new inline ${...} syntax?
+    options:
+      a: Keep both — whole-value bare-$ continues to work, inline uses ${...} exclusively
+      b: Deprecate bare-$ — migrate everything to ${...} syntax, remove bare-$ in a future release
+      c: Remove bare-$ now — breaking change, only ${...} supported going forward
+    selected: c
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: |
+        Every existing rig template in the codebase and in guild configs uses bare-$ syntax (e.g., `$writ`, `$vars.role`). The standard template in tests uses it throughout. Breaking this would require migrating all existing configurations.
+      observable: true
+      recommendation: a
+      rationale: No reason to break existing configs; both syntaxes coexist naturally — bare-$ is whole-value, ${...} is inline
+      stakes: high
+  - id: D3
+    scope:
+      - S1
+    question: For inline interpolation, should only ${...} (curly-brace) syntax be supported, or also bare $refs.in.strings?
+    options:
+      a: Only ${...} for inline — bare $refs are ambiguous about where the reference ends within a larger string
+      b: Support both — bare $yields.draft.path inline, with greedy matching to the end of the known pattern
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        Bare `$yields.draft.path` inline is ambiguous — does `$vars.role-suffix` mean `${vars.role}-suffix` or `${vars.role-suffix}`? The `${...}` delimiters unambiguously mark reference boundaries. JS template literal syntax is familiar to all TS/JS developers in this codebase.
+      observable: true
+      recommendation: a
+      rationale: Curly braces are necessary to delimit reference boundaries within a larger string; bare-$ inline would be ambiguous
+      stakes: low
+  - id: D4
+    scope:
+      - S1
+    question: What regex pattern should be used to find inline template expressions?
+    options:
+      a: /\$\{([^}]+)\}/g — match ${...} where the body is any non-} characters
+      b: /\$\{((?:yields\.[a-zA-Z][a-zA-Z0-9-]*|vars|writ)\.[a-zA-Z_][a-zA-Z0-9_]*)\}/g — only match known namespaces
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        Option (a) is simpler and catches all ${...} patterns for validation. Unknown expressions inside ${...} are caught by the expression parser (not the regex). Option (b) bakes namespace knowledge into the regex, making it harder to extend. The validation layer handles unknown expressions regardless.
+      observable: false
+      recommendation: a
+      rationale: Keep the regex simple; let the expression evaluator/validator handle namespace recognition
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+      - S3
+    question: What expression syntax is supported inside ${...}?
+    options:
+      a: "Three namespaces only: yields.<engineId>.<prop>, vars.<key>, writ.<field> — single-level property access"
+      b: "Arbitrary dot-path traversal: yields.<engineId>.<path.to.nested.prop>, writ.<nested.field> — deep property access"
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        Current yields are flat Record<string, unknown> values (DraftYields, SealYields, etc. all have flat top-level fields). WritDoc fields are all top-level (id, title, body, codex, status, etc.). Config variables are flat. Deep traversal adds complexity (null checks at each level, array indexing) with no current use case. Can be added later if needed.
+      observable: true
+      recommendation: a
+      rationale: All current yield shapes, WritDoc fields, and config variables are flat — deep traversal has no use case today
+      stakes: low
+  - id: D6
+    scope:
+      - S1
+    question: When an inline ${...} expression resolves to undefined (missing property), what should happen?
+    options:
+      a: Replace with empty string — the interpolated result omits the missing value silently
+      b: Leave the ${...} literal in place — visible in the output that something didn't resolve
+      c: Throw an error at resolution time — fail the engine
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: medium
+      context: |
+        For whole-value refs, undefined causes the key to be omitted entirely. For inline refs, key omission doesn't make sense (the string has other content). Empty string is the closest analogue — the ref disappears. Leaving the literal (b) risks confusing downstream consumers who see raw ${...} in their input. Throwing (c) is too aggressive — optional context in prompts (e.g. "Codex: ${writ.codex}") should gracefully handle undefined.
+      observable: true
+      recommendation: a
+      rationale: Empty string is the inline analogue of whole-value key omission — graceful degradation for optional fields
+      stakes: high
+  - id: D7
+    scope:
+      - S1
+    question: When an inline ${...} expression resolves to a non-string value (number, boolean, object, array), how is it stringified?
+    options:
+      a: Use String(value) — numbers/booleans become their string representation; objects become '[object Object]'
+      b: Use JSON.stringify(value) — objects/arrays become JSON text; primitives get quoted
+      c: Use String(value) for primitives, JSON.stringify(value) for objects/arrays
+    selected: c
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        Inline interpolation inherently produces strings. Numbers and booleans should stringify naturally (42 → '42', true → 'true'). Objects and arrays would be gibberish with String() ('[object Object]'). JSON.stringify for complex values gives a usable representation. Whole-value refs that resolve to objects/arrays are NOT affected — they still pass through as-is (non-string values bypass interpolation entirely).
+      observable: true
+      recommendation: c
+      rationale: String() for primitives is natural; JSON.stringify for complex values avoids '[object Object]'
+      stakes: low
+  - id: D8
+    scope:
+      - S1
+    question: When a string contains ONLY a single ${...} expression with no surrounding text (e.g., '${yields.draft.path}'), should the result be the raw value (preserving type) or always a string?
+    options:
+      a: Preserve type — a string that is entirely one ${...} expression resolves to the raw value (same as bare-$ whole-value behavior)
+      b: Always stringify — ${yields.draft.path} in a string always produces a string result
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        This maintains behavioral consistency with the existing bare-$ syntax. `$yields.draft.path` and `${yields.draft.path}` (the latter being a whole-value curly-brace form) both resolve to the raw value today. Changing this would break the existing `normalizeVarRef` equivalence. When a string has surrounding text, it's obviously a string result. When it's just the expression, preserving the type is both backward-compatible and useful (allows passing objects/numbers through ${...} syntax).
+      observable: true
+      recommendation: a
+      rationale: Backward-compatible with existing ${...} whole-value behavior; avoids surprising type coercion
+      stakes: high
+  - id: D9
+    scope:
+      - S1
+    question: "How should strings with mixed spawn-time and run-time references be handled? E.g., 'Writ: ${writ.title}, Path: ${yields.draft.path}'"
+    options:
+      a: Partial resolution at spawn time — resolve ${writ.*} and ${vars.*}, leave ${yields.*.*} literals in place; complete resolution at run time
+      b: Defer everything to run time — store all inline templates as-is in givensSpec, resolve all refs (writ, vars, yields) when the engine runs
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        The existing architecture has a clear two-phase model: resolveGivens at spawn (writ/vars available), resolveYieldRefs at run (upstream yields available). Deferring writ/vars to run time would require storing the WritDoc and SpiderConfig on the rig (they're not persisted today). The partial-resolution approach maintains the existing architecture — spawn-time refs are resolved, yield refs remain as literals until run time.
+      observable: false
+      recommendation: a
+      rationale: Maintains existing two-phase architecture; avoids storing WritDoc/SpiderConfig in the rig document
+      stakes: low
+  - id: D10
+    scope:
+      - S1
+    question: "In a partially-resolved string, what form do unresolved yield refs take in givensSpec? E.g., original 'Title: ${writ.title}, Path: ${yields.draft.path}' after spawn-time resolution"
+    options:
+      a: "Yield refs remain as ${yields.*.*} literals in the resolved string — 'Title: My Writ, Path: ${yields.draft.path}'"
+      b: Use a sentinel marker to distinguish unresolved refs from literal text that happens to look like ${...}
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        The current system already stores yield ref strings as-is in givensSpec (tests verify this). Using the same ${yields.*.*} pattern in partially-resolved strings is consistent. Sentinel markers add complexity. The risk of false matches (literal text containing '${yields.') is negligible — these are guild config values, not arbitrary user input.
+      observable: false
+      recommendation: a
+      rationale: Consistent with existing pass-through behavior; no realistic false-match risk in guild config
+      stakes: low
+  - id: D11
+    scope:
+      - S3
+    question: Should ${writ.<field>} work only as inline (embedded in a string), or also as a new whole-value syntax replacing the current $writ?
+    options:
+      a: Both — ${writ.body} works inline AND as a whole-value ref (resolves to the string value of the field)
+      b: Inline only — ${writ.body} works embedded in strings; $writ or ${writ} still gives the whole WritDoc object
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        Engines like implement and draft use `givens.writ as WritDoc` to access the full object. Breaking $writ → WritDoc would require refactoring all engine implementations. The new ${writ.body} syntax serves inline interpolation. For whole-value single-field extraction, authors can use '${writ.body}' as the entire value — D8 preserves the raw type for single-expression strings, so this would resolve to the string value of the field.
+      observable: true
+      recommendation: b
+      rationale: Preserves existing $writ → WritDoc behavior; engines depend on it
+      stakes: low
+  - id: D12
+    scope:
+      - S3
+    question: Which WritDoc fields should be accessible via ${writ.<field>}?
+    options:
+      a: "All known WritDoc fields: id, type, status, title, body, codex, createdAt, updatedAt, acceptedAt, resolvedAt, resolution"
+      b: "Only commonly useful fields: id, type, title, body, codex"
+      c: Any field — use generic property access on the WritDoc object without restricting to known fields
+    selected: c
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        WritDoc has an index signature `[key: string]: unknown`, meaning it can hold arbitrary fields. Restricting to known fields would require maintaining an allowlist that tracks WritDoc evolution. Generic property access is simpler and forward-compatible. Validation at startup can only verify the field name is syntactically valid (identifier characters), not that the field exists — same as $vars.* today.
+      observable: false
+      recommendation: c
+      rationale: WritDoc has an index signature; restricting fields requires an allowlist that tracks type evolution — generic access is simpler
+      stakes: low
+  - id: D13
+    scope:
+      - S2
+    question: Should startup validation scan ALL string values for ${...} patterns, or only strings that contain at least one ${...}?
+    options:
+      a: Scan all string values — extract ${...} patterns from any string, validate each expression
+      b: Only scan strings that contain at least one '${' substring — skip pure literals for performance
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        A string like 'reviewer' (no ${) has nothing to validate. Checking for '${' first is a trivial optimization that avoids regex overhead on the majority of givens values. The indexOf('${') check is essentially free.
+      observable: false
+      recommendation: b
+      rationale: Trivial optimization; no point running regex on strings without ${}
+      stakes: low
+  - id: D14
+    scope:
+      - S2
+    question: For inline ${yields.*.*} refs, should validation check upstream reachability the same way whole-value refs do?
+    options:
+      a: "Yes — same validation: engine id must exist in template AND be transitively upstream"
+      b: Only check engine id existence — skip upstream reachability for inline refs
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: |
+        An inline yield ref to a non-upstream engine is just as wrong as a whole-value one. The computeUpstreamReachable function already exists and handles both cases. Relaxing validation for inline refs would allow a class of bugs through.
+      observable: true
+      recommendation: a
+      rationale: Same correctness requirement applies regardless of whether the ref is whole-value or inline
+      stakes: low
+  - id: D15
+    scope:
+      - S2
+    question: How should validation handle a string containing both valid and invalid inline refs?
+    options:
+      a: Fail on the first invalid ref — same as current behavior for any unrecognized variable
+      b: Collect all errors and report them together
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        Current validation fails on the first unrecognized variable with a specific error message. Collecting all errors would be a pattern change across both validateTemplates (throw) and validateKitTemplate (return string). The fail-fast pattern is established and sufficient.
+      observable: false
+      recommendation: a
+      rationale: Consistent with existing fail-fast pattern; no need for batch error reporting
+      stakes: low
+  - id: D16
+    scope:
+      - S2
+    question: Should a string containing ${...} patterns that are NOT known namespaces (e.g., '${unknown.foo}') trigger a validation error?
+    options:
+      a: Yes — any ${...} expression that doesn't match writ.*, vars.*, or yields.*.* is an error
+      b: No — unknown ${...} patterns pass through as literal text (for forward compatibility)
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: |
+        Current behavior rejects unrecognized $-prefixed whole-value refs. Inline refs should get the same treatment. Silently passing through unknown ${...} would hide typos (e.g. ${yeilds.draft.path}). Forward compatibility can be handled by adding new namespaces to the recognizer; silent pass-through hides real errors.
+      observable: true
+      recommendation: a
+      rationale: Consistent with existing unrecognized-variable rejection; catches typos at startup rather than silently at run time
+      stakes: low
+  - id: D17
+    scope:
+      - S4
+    question: How should the shared validation logic be structured?
+    options:
+      a: Extract a validateGivensRefs(givens, engineIds, engines, reportError) function where reportError is a callback that either throws or returns a string
+      b: Extract a validateGivensRefs function that returns an array of error strings; callers decide whether to throw or warn
+      c: Extract a validateGivensRefs function that always returns string | null (first error); config caller throws, kit caller returns
+    selected: c
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        validateKitTemplate already returns string | null. The config version throws on first error. A shared function returning string | null for the first error fits both call patterns: config caller throws if non-null, kit caller returns the string. This matches the existing error-emission pattern without introducing callbacks.
+      observable: false
+      recommendation: c
+      rationale: Matches the existing return-string-or-null pattern of validateKitTemplate; simplest integration
+      stakes: low
+  - id: D18
+    scope:
+      - S4
+    question: What should the extracted validation function's signature be?
+    options:
+      a: "validateGivensRefs(givens: Record<string, unknown>, engineId: string, engineIds: Set<string>, allEngines: RigTemplateEngine[]): string | null"
+      b: "validateGivensRefs(engines: RigTemplateEngine[], engineIds: Set<string>): string | null — validate all engines in one call"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        Per-engine granularity is needed because the error messages include the engine id and the callers format engine context differently. The outer loop (iterating engines) stays in the caller to control the error prefix format. The shared function validates one engine's givens.
+      observable: false
+      recommendation: a
+      rationale: Error messages need engine-specific context; per-engine granularity keeps the prefix formatting in the caller
+      stakes: low
+  - id: D19
+    scope:
+      - S5
+    question: Should the unnecessary { ...engine.givensSpec } spreads in tryRun and tryCollect be removed?
+    options:
+      a: Yes — pass givensSpec directly since resolveYieldRefs already creates a new result object
+      b: No — keep the defensive copy for safety
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        resolveYieldRefs builds a fresh `result` object and never mutates its input. The spread is pure overhead. Removing it is a one-line change in two places with no behavioral effect.
+      observable: false
+      recommendation: a
+      rationale: resolveYieldRefs never mutates its input; the spread is dead code
+      stakes: low
+  - id: D20
+    scope:
+      - S1
+    question: Should the inline interpolation logic be implemented as a shared helper used by both resolveGivens and resolveYieldRefs, or independently in each?
+    options:
+      a: Shared helper — a single interpolateString(template, context) function called by both resolution phases with different context objects
+      b: Independent — each function gets its own inline replacement loop
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        Both phases do the same work: find ${...} patterns, parse expression, look up value, substitute. The only difference is which namespaces are available (writ/vars at spawn time, yields at run time). A shared helper with a resolver callback or context object eliminates duplication — the exact kind of tech debt the brief asks to clean up.
+      observable: false
+      recommendation: a
+      rationale: Same interpolation logic needed in both phases; a shared helper avoids introducing the duplication the brief asks to clean
+      stakes: low
+  - id: D21
+    scope:
+      - S1
+    question: Should the shared interpolation helper also handle the whole-value case (full string is a single reference), or only inline?
+    options:
+      a: Handle both — the helper detects single-expression strings (no surrounding text) and returns the raw value, otherwise returns the interpolated string
+      b: Only handle inline — whole-value detection stays in the callers
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        Unifying whole-value and inline in one helper simplifies both resolveGivens and resolveYieldRefs to a single call per value. The helper checks: if the string is exactly one ${...} expression with nothing else, return the raw resolved value. Otherwise, stringify and interpolate. This also means resolveGivens can be simplified — $writ, $vars.role (bare-$ whole-value) are handled separately, then ${...} patterns go through the unified helper.
+      observable: false
+      recommendation: a
+      rationale: Unifies resolution logic; callers become simpler
+      stakes: low
+  - id: D22
+    scope:
+      - S1
+    question: What should the shared interpolation helper's name and signature be?
+    options:
+      a: "interpolateTemplate(value: string, resolve: (expr: string) => unknown | undefined): unknown — takes a resolver callback"
+      b: "interpolateTemplate(value: string, context: Record<string, unknown>): unknown — takes a flat context and uses dot-path traversal"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        A resolver callback is more flexible — the caller controls how expressions are parsed and what namespaces are available. The spawn-time caller resolves writ.* and vars.* (returning undefined for yields.*). The run-time caller resolves yields.* (passing through anything else). This avoids encoding namespace logic into the helper itself.
+      observable: false
+      recommendation: a
+      rationale: Callback pattern decouples the helper from namespace knowledge; each phase provides its own resolver
+      stakes: low
+  - id: D23
+    scope:
+      - S1
+    question: Should normalizeVarRef be preserved for backward compatibility with bare-$ whole-value refs?
+    options:
+      a: Preserve it — bare-$ refs ($writ, $vars.key, $yields.eng.prop) continue to use normalizeVarRef before matching
+      b: Remove it — convert all references to ${...} syntax internally
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        normalizeVarRef handles the existing `${writ}` → `$writ` normalization for whole-value refs. It's used in resolveGivens, resolveYieldRefs, and both validation functions. Removing it would change how whole-value ${...} forms are processed. Preserving it keeps the existing code path for bare-$ and whole-value-${} intact while the new inline ${...} interpolation is added alongside.
+      observable: false
+      recommendation: a
+      rationale: Minimal disruption to existing code paths; bare-$ handling is well-tested
+      stakes: low
+  - id: D24
+    scope:
+      - S1
+    question: In resolveGivens, how should the control flow work for strings that contain inline ${...} but also start with $?
+    options:
+      a: Check for bare-$ whole-value patterns first (existing logic); if no match, fall through to inline interpolation for any string containing ${}
+      b: Check for inline ${...} first; bare-$ patterns are handled as a special case after
+    selected: custom
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        The existing bare-$ handling must remain the primary path for backward compatibility. A string like '$writ' must still resolve to the whole WritDoc object — it should NOT be treated as an inline template. The flow is: (1) non-string → pass through, (2) starts with $ → try bare-$ patterns (existing), (3) contains ${ → inline interpolation, (4) else → literal pass-through.
+      observable: false
+      recommendation: a
+      rationale: Preserves backward compatibility; bare-$ patterns take precedence
+      stakes: low
+    patron_override: remove support for bare-$ patterns entirely
+  - id: D25
+    scope:
+      - S1
+    question: In resolveGivens, should a bare-$ string that fails whole-value matching but contains ${...} patterns fall through to inline interpolation?
+    options:
+      a: No — a string starting with $ that doesn't match any known whole-value pattern is still an error (caught at validation), same as today
+      b: Yes — e.g., '$prefix ${vars.key}' would be treated as inline interpolation
+    selected: custom
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        A string like '$prefix ${vars.key}' starts with $ but isn't a recognized bare-$ pattern. Current validation rejects this as an unrecognized variable. Allowing it as inline would be a subtle behavioral change — the $ at the start is ambiguous. Better to keep the rule: strings starting with $ are whole-value refs. Inline interpolation applies to strings that do NOT start with $ but contain ${...} patterns.
+      observable: true
+      recommendation: a
+      rationale: "Maintains clear separation: $-prefixed = whole-value ref, non-$-prefixed with ${...} = inline template"
+      stakes: low
+    patron_override: remove support for bare-$ patterns entirely
+  - id: D26
+    scope:
+      - S1
+    question: Should there be an escape mechanism for literal ${...} text in givens strings?
+    options:
+      a: No — guild config authors won't need literal ${...} in engine givens
+      b: Yes — support \${...} or $${...} to produce literal ${...} output
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        Givens values are consumed by engine run() methods as structured data for prompt assembly, file paths, etc. — not freeform text. The likelihood of needing a literal '${' in a givens value is negligible. If it arises, the value can be assembled in the engine code rather than declared in the template. Adding escape handling adds parsing complexity for a non-existent use case.
+      observable: true
+      recommendation: a
+      rationale: No realistic use case for literal ${...} in givens values; engine code can handle edge cases
+      stakes: low
