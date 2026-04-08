@@ -1,0 +1,880 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What is the npm package name?
+    options:
+      a: "@shardworks/astrolabe — per architecture spec (no -apparatus suffix)"
+      b: "@shardworks/astrolabe-apparatus — matching existing apparatus packages in the repo"
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: "The architecture spec explicitly says 'Package: @shardworks/astrolabe · Plugin id: astrolabe'. Every other apparatus in the repo uses the -apparatus suffix, but the spec is the authoritative source."
+      observable: true
+      recommendation: a
+      rationale: The architecture spec is explicit; follow it.
+      stakes: high
+  - id: D2
+    scope:
+      - S1
+    question: What dependencies go in the apparatus requires array?
+    options:
+      a: "['stacks', 'clerk', 'spider', 'loom', 'fabricator'] — per architecture spec"
+      b: "['stacks', 'clerk'] — minimum needed at start(); others as recommends"
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The architecture spec explicitly lists all five. While loom and fabricator aren't called in start(), the spec is authoritative. Kit contribution consumption doesn't require requires (Wire phase handles it), but the spec captures a design intent about what must be installed.
+      observable: false
+      recommendation: a
+      rationale: Architecture spec is explicit and reflects a considered design intent.
+      stakes: low
+  - id: D3
+    scope:
+      - S1
+    question: Should @shardworks/loom-apparatus be added as an npm dependency for type-safe role definitions?
+    options:
+      a: No — use plain object for roles contribution; no loom import
+      b: Yes — import KitRoleDefinition for type safety via satisfies
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: The supportKit roles field is an open record — no type import is required. Adding loom as an npm dep couples the packages. Other kits in the repo contribute roles without importing loom types. However, type safety is valuable.
+      observable: false
+      recommendation: a
+      rationale: Follows the pattern of loose coupling via open records; avoids unnecessary cross-package npm dependency.
+      stakes: low
+  - id: D4
+    scope:
+      - S1
+    question: Should the apparatus declare a consumes field?
+    options:
+      a: Omit entirely — Astrolabe doesn't consume kit contributions from others
+      b: "Declare consumes: [] explicitly for clarity"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Clerk omits consumes; Spider declares it because it actually consumes. Omitting is the codebase convention for apparatuses that don't consume.
+      observable: false
+      recommendation: a
+      rationale: Codebase convention — only declare consumes when actually consuming.
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: Should recommends include 'oculus' for dashboard support?
+    options:
+      a: "Yes — recommends: ['oculus'], matching Clerk and Spider patterns"
+      b: No — omit recommends entirely for MVP
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: Clerk and Spider both recommend oculus because they contribute pages. The Astrolabe MVP doesn't contribute pages. Adding oculus as recommends would be forward-looking but premature.
+      observable: false
+      recommendation: b
+      rationale: No pages contributed; recommends would be empty promise.
+      stakes: low
+  - id: D6
+    scope:
+      - S2
+    question: What is the exact shape of the PlanDoc type?
+    options:
+      a: Verbatim from architecture spec — all fields as documented
+      b: Modify to add additional fields for MVP convenience
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The architecture spec defines the PlanDoc precisely. The types are a contract for other plugins to import.
+      observable: true
+      recommendation: a
+      rationale: The architecture spec defines the canonical type; implement verbatim.
+      stakes: high
+  - id: D7
+    scope:
+      - S2
+    question: Should PlanDoc status include a 'reviewing' status for the decision-review phase?
+    options:
+      a: Yes — status union is 'reading' | 'analyzing' | 'reviewing' | 'writing' | 'completed' | 'failed' (as in spec)
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The architecture spec includes all six statuses. The decision-review engine transitions to 'reviewing' before blocking, and to 'writing' after patron answers are reconciled.
+      observable: true
+      recommendation: a
+      rationale: Spec defines the full status machine; no decision needed.
+      stakes: high
+  - id: D8
+    scope:
+      - S2
+    question: What should AstrolabeApi expose?
+    options:
+      a: Empty object — tools access Stacks directly, no inter-plugin API needed for MVP
+      b: Expose show/list/patch methods mirroring ClerkApi pattern
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: The Clerk exposes a full API because other plugins (Spider, engines) call it programmatically. The Astrolabe's tools and engines all access Stacks directly — no external caller needs an AstrolabeApi in MVP. Adding methods now would duplicate what tools already do. The provides field still exists (empty object) for future extension.
+      observable: true
+      recommendation: a
+      rationale: No external caller needs the API; engines use Stacks directly. provides field exists as empty object for future extension.
+      stakes: low
+  - id: D9
+    scope:
+      - S2
+    question: Where should the PlanStatus type alias be defined?
+    options:
+      a: Inline union on the PlanDoc.status field
+      b: Separate exported type alias PlanStatus
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The status values are referenced by plan-list filter params (z.enum needs the values), by engines for transitions, and potentially by external consumers. A named type makes this reusable.
+      observable: false
+      recommendation: b
+      rationale: Reusable across tools (plan-list filter) and engines (status transitions).
+      stakes: low
+  - id: D10
+    scope:
+      - S3
+    question: What indexes should the plans book declare?
+    options:
+      a: "['status', 'codex', 'createdAt'] — per architecture spec"
+      b: Add compound indexes like ['status', 'codex'] for common queries
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The architecture spec declares exactly these three indexes. The Spider uses compound indexes for high-traffic queries, but the plans book will have low volume (one doc per planning run). Single-field indexes are sufficient.
+      observable: false
+      recommendation: a
+      rationale: Spec is explicit; low-volume book doesn't need compound index optimization.
+      stakes: low
+  - id: D11
+    scope:
+      - S4
+    question: Should write tools validate that the plan exists before patching?
+    options:
+      a: Yes — get the plan first, throw if null, then patch
+      b: No — let stacks.patch throw its own error if the doc doesn't exist
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The Stacks Book.patch() already throws if the document doesn't exist ('Throws if the document does not exist' per types.ts). Adding a get-then-patch adds a redundant round-trip. The error message from Stacks is clear enough.
+      observable: false
+      recommendation: b
+      rationale: Stacks.patch already throws on missing doc; no need for redundant get.
+      stakes: low
+  - id: D12
+    scope:
+      - S4
+    question: Should scope-write and decisions-write validate the structure of their array params beyond Zod?
+    options:
+      a: No — Zod schema validation is sufficient at the tool boundary
+      b: Yes — add semantic validation (unique IDs, valid scope references in decisions, etc.)
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: medium
+      context: The Clerk's tools rely on Zod for input validation without additional semantic checks. These tools are called by planning animas — the risk of malformed input is low, and semantic issues would be caught during decision-review. Adding validation increases complexity without clear value for MVP.
+      observable: false
+      recommendation: a
+      rationale: Zod suffices at the boundary; anima callers produce well-formed data. Semantic validation can be added later if needed.
+      stakes: low
+  - id: D13
+    scope:
+      - S4
+    question: Should write tools also update the PlanDoc status (e.g. inventory-write sets status to 'analyzing')?
+    options:
+      a: No — tools only write their artifact field + updatedAt; status transitions are engine concerns
+      b: Yes — tools advance the status machine automatically
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: The architecture spec assigns status transitions to specific engines (plan-init sets 'reading', decision-review sets 'reviewing'/'writing'). Tools are pure data writers — mixing status machine logic into tools would create competing state managers. The engines own the lifecycle.
+      observable: true
+      recommendation: a
+      rationale: Status transitions belong to engines per the architecture spec; tools are pure data writers.
+      stakes: high
+  - id: D14
+    scope:
+      - S4
+    question: What Zod schema shape should scope-write use for ScopeItem[]?
+    options:
+      a: "z.array(z.object({ id: z.string(), description: z.string(), rationale: z.string(), included: z.boolean() }))"
+      b: z.array(z.any()) — trust the caller
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Every tool in the codebase validates its params via Zod. ScopeItem has a clear, stable schema. Type-safe validation catches errors at the tool boundary.
+      observable: false
+      recommendation: a
+      rationale: "Codebase convention: all tool params are validated via Zod schemas."
+      stakes: low
+  - id: D15
+    scope:
+      - S4
+    question: What Zod schema shape should decisions-write use for Decision[]?
+    options:
+      a: "Full schema with all Decision fields: id, scope (string[]), question, context?, options (record), recommendation?, rationale?, selected?, patronOverride?"
+      b: "Minimal required fields only: id, scope, question, options"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The analyst writes the full Decision shape including recommendation and rationale. Optional fields should be validated when present but not required. This matches the interface definition.
+      observable: false
+      recommendation: a
+      rationale: Full schema with optional fields matches the Decision interface exactly.
+      stakes: low
+  - id: D16
+    scope:
+      - S4
+    question: What permission namespace should the tools use?
+    options:
+      a: astrolabe:read for read tools, astrolabe:write for write tools
+      b: A single astrolabe:* permission for all tools
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The architecture spec explicitly states 'astrolabe:read' and 'astrolabe:write' permission namespaces. This matches the Clerk pattern (clerk:read, clerk:write).
+      observable: true
+      recommendation: a
+      rationale: Architecture spec is explicit; matches Clerk's read/write permission split.
+      stakes: low
+  - id: D17
+    scope:
+      - S4
+    question: Should plan-show return links (like writ-show returns writ + links)?
+    options:
+      a: No — return the PlanDoc only; plans don't have links
+      b: Yes — include the associated writ info
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: PlanDocs don't have a link concept. The planId IS the writ ID, so the caller can look up the writ separately via writ-show. Adding writ data would couple the tool to the Clerk API unnecessarily.
+      observable: true
+      recommendation: a
+      rationale: Plans have no links; planId == writId enables separate writ lookup.
+      stakes: low
+  - id: D18
+    scope:
+      - S4
+    question: Should plan-list support orderBy customization?
+    options:
+      a: No — always order by createdAt desc (matching writ-list convention)
+      b: Yes — add an optional orderBy param
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "writ-list hardcodes orderBy: ['createdAt', 'desc']. plan-list is a simpler query with low volume. No use case for alternative orderings."
+      observable: false
+      recommendation: a
+      rationale: Matches writ-list convention; no use case for alternative orderings.
+      stakes: low
+  - id: D19
+    scope:
+      - S4
+    question: Should plan-list include an offset param for pagination?
+    options:
+      a: Yes — include optional offset, matching writ-list
+      b: No — limit only is sufficient for MVP
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: writ-list includes offset for pagination. Consistent API surface.
+      observable: true
+      recommendation: a
+      rationale: Matches writ-list convention for consistent API.
+      stakes: low
+  - id: D20
+    scope:
+      - S4
+    question: Should tools have instructions text for anima context?
+    options:
+      a: Yes — brief instructions string on each tool (matching writ-show, writ-list patterns)
+      b: No — description only for MVP
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Clerk tools include instructions strings that guide animas on when/how to use the tool. These are injected into the system prompt by the Loom. Planning animas will benefit from clear tool instructions.
+      observable: true
+      recommendation: a
+      rationale: Codebase convention for tools used by animas; aids planning session quality.
+      stakes: low
+  - id: D21
+    scope:
+      - S5
+    question: What description should the brief writ type carry?
+    options:
+      a: "'A patron brief triggering the planning pipeline'"
+      b: No description (name only)
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: WritTypeEntry supports an optional description. The writ-types tool surfaces it. A description helps patrons understand what the type does.
+      observable: true
+      recommendation: a
+      rationale: Low cost, meaningful for patron comprehension via writ-types tool.
+      stakes: low
+  - id: D22
+    scope:
+      - S6
+    question: What permissions should the astrolabe.sage role grant?
+    options:
+      a: "['astrolabe:read', 'astrolabe:write', 'clerk:read', 'clerk:write'] — read/write plans + read writs + post final mandate"
+      b: "['astrolabe:read', 'astrolabe:write', 'clerk:read', 'clerk:write', 'stacks:read'] — also grant stacks read for book introspection"
+      c: "['astrolabe:read', 'astrolabe:write'] — minimal; spec-writer posts writs via a separate mechanism"
+    selected: custom
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: medium
+      context: |
+        The sage role is shared across reader, analyst, and spec-writer stages. The reader/analyst need astrolabe:read + astrolabe:write to call plan-show and the write tools. The spec-writer needs clerk:write to post the generated mandate writ, and clerk:read for writ-show/writ-link. The Loom validates that permissions reference plugins in the apparatus's requires — clerk is in requires, so clerk:read/write are valid. stacks:read is not needed because the anima doesn't call stacks tools directly.
+      observable: true
+      recommendation: a
+      rationale: Covers all tool permissions needed across all three planning stages; clerk:write needed for final mandate posting.
+      stakes: high
+    patron_override: "['astrolabe:read', 'astrolabe:write', 'clerk:read'] — read/write plans + read writs; posting of final mandate is done by an engine"
+  - id: D23
+    scope:
+      - S6
+    question: Should the sage role carry inline instructions or an instructionsFile?
+    options:
+      a: Inline instructions — short text describing the sage's purpose
+      b: instructionsFile — point to a markdown file in the package
+      c: Neither — no instructions for MVP
+    selected: custom
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: The sage role's behavior is differentiated by the per-engine prompt, not by the role instructions. Role instructions go into the system prompt for ALL stages. For MVP, the per-engine prompt (delivered via the rig template givens) is sufficient. Full role instructions can be added when the planning pipeline's prompt engineering is refined in a later commission.
+      observable: true
+      recommendation: c
+      rationale: Per-engine prompts differentiate stages; role instructions can be added later when prompt engineering is refined.
+      stakes: low
+    patron_override: instructionsFile — point to a markdown file in the package; include minimal placeholder for content now, which will be added to later
+  - id: D24
+    scope:
+      - S6
+    question: Should the sage role be strict (exclude permissionless tools)?
+    options:
+      a: "No — default (false): permissionless tools are included"
+      b: "Yes — strict: only explicitly granted tools are available"
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "No existing kit role in the codebase sets strict: true. Planning animas benefit from broad tool access (e.g. permissionless introspection tools). Strict mode would reduce capability unnecessarily."
+      observable: true
+      recommendation: a
+      rationale: No precedent for strict mode in kit roles; broad tool access benefits planning animas.
+      stakes: low
+  - id: D25
+    scope:
+      - S7
+    question: How should engine design IDs be namespaced?
+    options:
+      a: "'astrolabe.plan-init', 'astrolabe.inventory-check', 'astrolabe.decision-review' — dotted namespace"
+      b: "'plan-init', 'inventory-check', 'decision-review' — bare names"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Engine IDs must be globally unique in the Fabricator registry. Bare names risk collision with future engines from other kits. The architecture spec uses the dotted form ('astrolabe.plan-init'). The Fabricator stores by value.id, not by the supportKit engines key.
+      observable: true
+      recommendation: a
+      rationale: Architecture spec uses dotted form; prevents global ID collision in Fabricator registry.
+      stakes: high
+  - id: D26
+    scope:
+      - S7
+    question: Should plan-init validate that the writ has a codex field?
+    options:
+      a: Yes — throw if writ.codex is undefined (planning requires a codex)
+      b: No — allow codex-less plans; store codex as empty string or undefined
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The PlanDoc.codex field is non-optional (string, not string?). Planning always targets a codex — the draft engine downstream will also fail without one. Failing early in plan-init with a clear error is better than failing later in draft with a confusing error.
+      observable: true
+      recommendation: a
+      rationale: PlanDoc.codex is required; fail early with clear error rather than late with confusing one.
+      stakes: low
+  - id: D27
+    scope:
+      - S7
+    question: Should plan-init check for an existing plan with the same ID before creating?
+    options:
+      a: No — use stacks.book.put() which upserts; a duplicate brief writ ID means the plan is reset
+      b: Yes — throw if a plan with this writ ID already exists
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: Each brief writ should produce exactly one planning run. If a plan already exists for this writ ID, something is wrong (duplicate rig spawn, stale data). Throwing early surfaces the issue. However, the Spider already prevents duplicate rigs for the same writ, so this shouldn't happen in practice.
+      observable: true
+      recommendation: b
+      rationale: Defensive — surfaces duplicate planning runs rather than silently resetting.
+      stakes: low
+  - id: D28
+    scope:
+      - S7
+    question: What should inventory-check validate beyond inventory existence?
+    options:
+      a: Only check plan.inventory !== undefined (non-null/non-undefined)
+      b: Also check that inventory is a non-empty string
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: An empty string inventory is functionally absent. The checkpoint exists to ensure the reader actually produced content. A non-empty check is a marginally better validation at zero cost.
+      observable: false
+      recommendation: b
+      rationale: Empty string is functionally absent; non-empty check is cheap and more meaningful.
+      stakes: low
+  - id: D29
+    scope:
+      - S7
+    question: How should decision-review detect first-run vs re-run?
+    options:
+      a: Check context.priorBlock presence — present means re-run after block cleared
+      b: Check PlanDoc.status — 'analyzing' means first run, 'reviewing' means re-run
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The EngineRunContext.priorBlock field exists precisely for this purpose. It is set by the Spider when an engine is restarted after its block clears. The architecture spec describes the two-pass behavior using priorBlock. Checking PlanDoc status would work but couples the engine to status machine details unnecessarily.
+      observable: false
+      recommendation: a
+      rationale: priorBlock exists for this purpose; architecture spec describes this pattern explicitly.
+      stakes: low
+  - id: D30
+    scope:
+      - S7
+    question: How should decision-review compose the details field for each ChoiceQuestionSpec?
+    options:
+      a: "Concatenate context and rationale with a separator: context + '\\n\\nRecommendation rationale: ' + rationale"
+      b: Use context only; omit rationale from details
+      c: Use rationale only; omit context from details
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: "The architecture spec's mapping table shows 'context + rationale → questions[id].details'. Both pieces are useful for the patron: context explains the situation, rationale explains why the analyst recommends a particular option. Concatenation with a clear separator is natural."
+      observable: true
+      recommendation: a
+      rationale: Architecture spec maps both fields to details; patron benefits from seeing both context and recommendation rationale.
+      stakes: low
+  - id: D31
+    scope:
+      - S7
+    question: How should decision-review handle a plan with no decisions (empty array or undefined)?
+    options:
+      a: Complete immediately with empty decisionSummary — no questions to ask
+      b: Throw an error — analyst should always produce at least one decision
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: A plan with no decisions is valid — the brief might be simple enough that no choices are needed. Creating an InputRequestDoc with zero questions and then blocking would be pointless. Completing immediately allows the spec-writer to proceed.
+      observable: true
+      recommendation: a
+      rationale: A plan with no decisions is valid; blocking for zero questions is pointless.
+      stakes: low
+  - id: D32
+    scope:
+      - S7
+    question: How should decision-review build the decisionSummary yield string?
+    options:
+      a: Human-readable markdown listing each decision with question, selected option, and patronOverride if present
+      b: JSON string of the reconciled decisions array
+      c: "One-line summary: 'N decisions resolved, M patron overrides'"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: The architecture spec says decisionSummary is 'a human-readable string summarizing all decisions and the patron's selections, for injection into the spec-writer's prompt'. Markdown is the natural format for AI consumption. JSON would work but is harder to read in a prompt. A one-liner loses essential detail.
+      observable: true
+      recommendation: a
+      rationale: Architecture spec says 'human-readable string'; markdown is natural for AI prompt consumption.
+      stakes: low
+  - id: D33
+    scope:
+      - S7
+    question: How should decision-review compose the InputRequestDoc.message field?
+    options:
+      a: Include brief title, codex, and a summary of included scope items
+      b: Include only the brief title
+      c: Omit message entirely (field is optional)
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The architecture spec says 'The InputRequestDoc.message field carries a summary of the brief and scope context so the patron has orientation when reviewing decisions outside the planning conversation.' Title + codex + scope items gives the patron enough context.
+      observable: true
+      recommendation: a
+      rationale: Architecture spec prescribes brief + scope context for patron orientation.
+      stakes: low
+  - id: D34
+    scope:
+      - S7
+    question: Should decision-review update PlanDoc.status on first run and re-run?
+    options:
+      a: Yes — first run sets 'reviewing', re-run sets 'writing' (per architecture spec)
+      b: No — leave status transitions to a separate mechanism
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "The architecture spec describes the status machine: decision-review transitions from analyzing→reviewing on first run, reviewing→writing on re-run. The engine is the natural owner of these transitions."
+      observable: true
+      recommendation: a
+      rationale: Architecture spec prescribes these transitions; engine is the natural owner.
+      stakes: low
+  - id: D35
+    scope:
+      - S7
+    question: Should decision-review reconcile scope item inclusion changes from the InputRequestDoc?
+    options:
+      a: No — MVP only reconciles decision answers (selected/patronOverride); scope changes are future
+      b: Yes — include scope items as boolean questions in the InputRequestDoc
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: medium
+      context: The architecture spec's mapping table shows only Decision → ChoiceQuestionSpec mapping. ScopeItem inclusion is set by the analyst and confirmed by the patron, but the spec doesn't describe a mechanism for scope changes via InputRequestDoc. Adding scope as boolean questions is a reasonable future enhancement but not prescribed by the spec for MVP.
+      observable: true
+      recommendation: a
+      rationale: Architecture spec only maps decisions to questions; scope inclusion changes are not prescribed for MVP.
+      stakes: low
+  - id: D36
+    scope:
+      - S8
+    question: How should the planId be delivered to anima-session engines, given that inline string interpolation is not yet available in the Spider?
+    options:
+      a: plan-init yields composed prompt strings (readerPrompt, analystPrompt, writerPrompt) with planId baked in; template uses $yields.plan-init.<stage>Prompt as the prompt given
+      b: Prompts instruct the anima to call plan-list to discover the active plan
+      c: Static prompts with no planId; anima discovers it from the writ context
+    selected: custom
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: |
+        The architecture doc lists 'givens inline string interpolation' as a prerequisite that has NOT yet landed. The Spider currently only resolves whole-value yield references ($yields.engineId.prop as the entire string value). The anima-session engine only passes role, prompt, cwd, conversationId, and writ to the Animator — extra givens like planId are ignored.
+        Option (a) is the cleanest workaround: plan-init composes full prompt strings with the planId embedded, yielding them alongside planId. The template uses $yields.plan-init.readerPrompt etc. as whole-value yield refs for the prompt given. This is architecturally clean (one engine owns prompt composition) and works within current Spider capabilities.
+        Option (b) is fragile — multiple concurrent plans could exist. Option (c) doesn't work — anima-session doesn't surface givens.writ to the AI.
+      observable: true
+      recommendation: a
+      rationale: Only approach that reliably delivers planId to animas without inline string interpolation.
+      stakes: high
+    patron_override: use inline string interpolation -- it has been developed in the most recent version
+  - id: D37
+    scope:
+      - S8
+    question: What content should the reader, analyst, and spec-writer prompts contain for MVP?
+    options:
+      a: Minimal functional prompts — instruct each stage to call plan-show, perform its task, and write results via the appropriate tool
+      b: Detailed multi-paragraph prompts with full pipeline instructions
+      c: Placeholder strings — non-empty to pass anima-session validation, refined in a later commission
+    selected: c
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: medium
+      context: The prompts must be non-empty (anima-session validates this). Placeholders would make the pipeline non-functional. Detailed prompts are premature for MVP — prompt engineering is iterative. Minimal functional prompts make the pipeline actually work end-to-end while leaving room for refinement.
+      observable: true
+      recommendation: a
+      rationale: Makes the pipeline functional end-to-end; detailed prompt engineering is iterative and belongs in a later commission.
+      stakes: high
+  - id: D38
+    scope:
+      - S8
+    question: What should the rig template name be?
+    options:
+      a: "'planning' — registered as 'astrolabe.planning'"
+      b: "'astrolabe-planning' — more explicit"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: Kit template names are unqualified in the contribution; the Spider qualifies them as pluginId.templateName. So 'planning' becomes 'astrolabe.planning'. The 'astrolabe-' prefix would be redundant (resulting in 'astrolabe.astrolabe-planning').
+      observable: true
+      recommendation: a
+      rationale: Spider auto-qualifies with pluginId; 'planning' yields clean 'astrolabe.planning' name.
+      stakes: low
+  - id: D39
+    scope:
+      - S8
+    question: Should the rig template declare a resolutionEngine?
+    options:
+      a: No — omit; Spider falls back to seal engine or last completed engine
+      b: Yes — set resolutionEngine to 'spec-writer' since that's where the meaningful output is
+    selected: b
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: "The seal engine yields { abandoned: true } which is not a meaningful resolution summary. The spec-writer's yields (sessionId, conversationId, output) contain the actual result. Setting resolutionEngine makes the rig's completion summary meaningful for operators."
+      observable: true
+      recommendation: b
+      rationale: "spec-writer produces meaningful output; seal yields { abandoned: true } which is uninformative."
+      stakes: low
+  - id: D40
+    scope:
+      - S8
+    question: How should the spec-writer receive the decisionSummary?
+    options:
+      a: "As a separate given: decisionSummary: '$yields.decision-review.decisionSummary' — anima-session ignores extra givens, but the prompt (composed by plan-init) can reference plan-show instead"
+      b: Bake it into the prompt — plan-init can't know decisionSummary (it runs before decisions exist); the prompt just instructs the anima to call plan-show
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The plan-init engine runs at step 1 — long before decisions exist. It can't compose a spec-writer prompt that includes the decisionSummary. The spec-writer's prompt should instruct the anima to call plan-show to read the full plan state including reconciled decisions. The decision-review engine also updates the PlanDoc with reconciled decisions, so plan-show returns everything the spec-writer needs.
+      observable: true
+      recommendation: b
+      rationale: plan-init runs before decisions exist; spec-writer prompt instructs anima to call plan-show for current state.
+      stakes: low
+  - id: D41
+    scope:
+      - S7
+      - S8
+    question: Should the analyst prompt differ from the reader prompt in how conversation context is used?
+    options:
+      a: Yes — analyst prompt states it is continuing the reader's conversation and should build on that context
+      b: No — treat all prompts identically
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The architecture spec says 'resumes reader's conversation' for the analyst and 'resumes the analyst's conversation' for the spec-writer. The prompts should acknowledge the conversation continuation so the anima understands it has prior context to build on.
+      observable: true
+      recommendation: a
+      rationale: Architecture spec describes conversation chaining; prompts should acknowledge continuation.
+      stakes: low
+  - id: D42
+    scope:
+      - S8
+    question: What writ given should be passed to anima-session engines in the template?
+    options:
+      a: "writ: '$writ' — passed to all anima-session engines (reader, analyst, spec-writer)"
+      b: Omit writ from anima-session givens — only plan-init and draft need it
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: anima-session uses writ for GIT_AUTHOR_EMAIL and metadata.writId. Passing the writ to all three sessions ensures consistent metadata tracking and git identity across the pipeline.
+      observable: false
+      recommendation: a
+      rationale: Ensures consistent metadata tracking and git identity across all three sessions.
+      stakes: low
+  - id: D43
+    scope:
+      - S8
+    question: Should plan-init yield prompt strings for all three stages, or should prompts be static in the template?
+    options:
+      a: plan-init yields readerPrompt, analystPrompt, writerPrompt — template uses yield refs
+      b: Prompts are static strings in the template; planId is passed as a separate given
+    selected: custom
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: As established in D36, inline string interpolation is not available. The anima-session engine ignores extra givens (like planId). The only way to deliver planId to the anima is via the prompt string. plan-init is the engine that has the planId at yield time, so it must compose the prompts.
+      observable: false
+      recommendation: a
+      rationale: Directly follows from D36 — plan-init is the only engine that can compose prompts with planId.
+      stakes: low
+    patron_override: prompts are defined as templates on each engine, using the `${yields.plan-init.<id>}` syntax to get the plan id
+  - id: D44
+    scope:
+      - S9
+    question: Where should generatedWritType be resolved — in the apparatus start() or lazily in engine/tool handlers?
+    options:
+      a: Lazily at handler invocation time via guild().guildConfig().astrolabe?.generatedWritType ?? 'mandate'
+      b: At start() — read and cache the value
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The Loom reads its config at start() and caches it. The Clerk resolves config lazily in helpers. The generatedWritType is only used by the spec-writer (the anima that posts the final writ). Since the anima calls clerk tools directly (commission-post with a type param), the config value needs to be accessible to the anima's tool call or prompt — not cached in the apparatus. In practice, the prompt will instruct the anima to read the config or use a hardcoded default.
+      observable: false
+      recommendation: a
+      rationale: Config value is used lazily by the spec-writer anima's tool calls; caching at start() provides no benefit.
+      stakes: low
+  - id: D45
+    scope:
+      - S10
+    question: What test file structure should be used?
+    options:
+      a: Single test file astrolabe.test.ts covering tools and engines — matching clerk.test.ts pattern
+      b: "Separate test files per concern: tools.test.ts, engines.test.ts"
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: clerk.test.ts and fabricator.test.ts use a single file. The spider splits into spider.test.ts, input-request.test.ts, etc. because it's much larger. The astrolabe is moderate size — a single file with describe blocks per concern is appropriate.
+      observable: false
+      recommendation: a
+      rationale: Moderate-sized plugin; single file with describe blocks matches clerk/fabricator pattern.
+      stakes: low
+  - id: D46
+    scope:
+      - S10
+    question: What should tests cover?
+    options:
+      a: Tools (CRUD operations, error cases), engines (plan-init, inventory-check, decision-review two-pass), supportKit shape validation
+      b: Tools only — engines are integration-tested via spider
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Spider tests its own engines (draft, seal, review) in spider.test.ts. The astrolabe's clockwork engines have meaningful logic (decision-review's two-pass flow) that should be unit-tested independently. The in-memory Stacks pattern makes this straightforward.
+      observable: false
+      recommendation: a
+      rationale: decision-review has complex two-pass logic that warrants direct testing; in-memory Stacks makes it easy.
+      stakes: low
+  - id: D47
+    scope:
+      - S1
+      - S4
+      - S7
+    question: How should the apparatus access the plans book — via a module-level closure variable set in start(), or by calling guild().apparatus('stacks').book() in each handler?
+    options:
+      a: "Module-level closure variable set in start() — matching Clerk pattern (let writs: Book<WritDoc>)"
+      b: Each handler calls guild().apparatus<StacksApi>('stacks').book<PlanDoc>('astrolabe', 'plans')
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The Clerk (clerk.ts) uses closure variables: 'let writs: Book<WritDoc>; let links: Book<WritLinkDoc>;' assigned in start(). This avoids repeated apparatus lookup and book initialization on every tool call."
+      observable: false
+      recommendation: a
+      rationale: Matches Clerk pattern; avoids repeated guild().apparatus() lookups.
+      stakes: low
+  - id: D48
+    scope:
+      - S4
+      - S7
+    question: How should tools and engines access the plans book — through the same closure, or independently?
+    options:
+      a: Tools reference the closure variable; engines call guild().apparatus('stacks').book() independently
+      b: Both use the closure variable from the apparatus factory
+      c: Both call guild().apparatus('stacks').book() independently
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The Clerk's tools reference the closure writs/links variables directly. The engines are defined inside the createAstrolabe() factory function and have access to the same closure scope. This keeps book access consistent.
+      observable: false
+      recommendation: b
+      rationale: Engines defined inside factory function share closure scope; consistent with how Clerk tools access books.
+      stakes: low
+  - id: D49
+    scope:
+      - S7
+    question: Should clockwork engines be defined inline in the apparatus factory or in separate files under src/engines/?
+    options:
+      a: Separate files under src/engines/ — matching Spider's engine organization
+      b: Inline in astrolabe.ts — simpler for a small plugin
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The Spider organizes engines in src/engines/ with an index.ts barrel. The decision-review engine has significant logic (InputRequestDoc creation, answer reconciliation, summary building) that warrants its own file. Consistency with Spider conventions aids navigation.
+      observable: false
+      recommendation: a
+      rationale: decision-review is complex enough to warrant its own file; matches Spider organization.
+      stakes: low
+  - id: D50
+    scope:
+      - S7
+      - S4
+    question: If engines are in separate files, how do they access the plans book closure variable?
+    options:
+      a: Engines receive a book accessor function from the factory; engine files export factory functions not bare EngineDesign objects
+      b: Engines call guild().apparatus('stacks').book() directly — no closure dependency
+      c: Engines are defined inline in astrolabe.ts despite separate file structure in inventory
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Spider's engines (draft, seal, review) all call guild().apparatus() at runtime inside their run() methods. They are defined as standalone EngineDesign objects in separate files with no factory pattern. This is the established convention. The closure optimization from D47/D48 applies to tools within the factory, but engines should follow Spider's pattern of direct guild() access.
+      observable: false
+      recommendation: b
+      rationale: Spider's engines call guild() directly at runtime; engines in separate files can't access the factory closure.
+      stakes: low
