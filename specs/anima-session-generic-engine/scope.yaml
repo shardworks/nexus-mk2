@@ -1,0 +1,54 @@
+brief: |
+  # anima-session generic engine
+
+  We ned something like the following.. ideally, givenSpec tempalte variables can be part of the prompt
+
+  ### `anima-session` (quick)
+
+  A generic engine that summons an anima session. Unlike the other quick engines which embed prompt logic, `anima-session` is a reusable building block — the prompt, role, and conversation context are supplied entirely through givens.
+
+  ```typescript
+  async run(givens: Record<string, unknown>, context: EngineRunContext): Promise<EngineRunResult> {
+    const animator = guild().apparatus<AnimatorApi>('animator')
+    const writ = givens.writ as WritDoc | undefined
+    const draft = context.upstream['draft'] as DraftYields | undefined
+
+    const handle = animator.summon({
+      role: givens.role as string,
+      prompt: givens.prompt as string,
+      cwd: givens.cwd as string ?? draft?.path,
+      ...(givens.conversationId ? { conversationId: givens.conversationId as string } : {}),
+      environment: writ ? { GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local` } : {},
+      metadata: { engineId: context.engineId, ...(writ ? { writId: writ.id } : {}) },
+    })
+
+    return { status: 'launched', sessionId: handle.sessionId }
+  }
+  ```
+
+  **Givens:**
+  - `role` *(required)* — the Loom role to summon
+  - `prompt` *(required)* — the work prompt for this session
+  - `cwd` *(optional)* — working directory; falls back to `upstream.draft.path` if available
+  - `conversationId` *(optional)* — conversation to resume (typically wired from an upstream engine's yields via `${yields.<engineId>.conversationId}`)
+  - `writ` *(optional)* — the writ, if the engine needs it for git identity or metadata
+
+  **Yields:** The default quick-engine yields: `{ sessionId, sessionStatus, output?, conversationId }`. The `conversationId` in yields enables downstream engines to resume the same conversation by referencing `${yields.<engineId>.conversationId}` in their givens.
+
+  **Collect step:** No custom `collect` — uses the Spider's generic default.
+
+  This engine is contributed by the Spider's support kit alongside the five existing engines. Kit-contributed rig templates and guild-configured templates can both reference `anima-session` as a `designId`.
+slug: anima-session-generic-engine
+scope:
+  - id: S1
+    description: "The anima-session engine design: implementation, Spider registration, and tests"
+    rationale: The core deliverable of the brief — the new EngineDesign, its supportKit entry, builtinEngineIds updates, and test coverage
+    included: true
+  - id: S2
+    description: Extend the Spider's generic default collect to include conversationId from the session document
+    rationale: The brief says yields include conversationId and explicitly says 'no custom collect — uses the Spider's generic default'. The current generic default omits conversationId, so it must be extended.
+    included: true
+  - id: S3
+    description: Add $yields.<engineId>.<field> late-resolution template variables to the Spider's givens system
+    rationale: The brief says conversationId is 'typically wired from an upstream engine's yields via ${yields.<engineId>.conversationId}'. The current variable system only supports $writ and $vars.* at spawn time. Without this, upstream yields cannot be wired into givens via templates — the engine still works with literal givens but the conversationId chaining pattern described in the brief cannot be expressed in rig templates.
+    included: false

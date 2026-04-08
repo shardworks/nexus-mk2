@@ -1,0 +1,419 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What is the engine design id?
+    options:
+      a: "'anima-session' (hyphenated, matches the brief verbatim)"
+      b: "'animaSession' (camelCase, no existing engine uses multi-word ids)"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: Existing engine ids are single words (draft, implement, review, revise, seal) so there is no multi-word precedent. However the brief explicitly uses 'anima-session' and the codebase uses kebab-case for other multi-word identifiers (block types like 'writ-status', 'scheduled-time', 'book-updated').
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit; kebab-case matches other multi-word identifiers in the Spider ecosystem (block types, tool names).
+      stakes: high
+  - id: D2
+    scope:
+      - S1
+    question: What is the source file name for the engine?
+    options:
+      a: anima-session.ts (kebab-case, matching the engine id)
+      b: animaSession.ts (no existing engine file is multi-word, but TS convention is camelCase)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Existing engine files are single-word (draft.ts, implement.ts, etc.). Adjacent multi-word files in the codebase use kebab-case (e.g. block-types/, input-request.test.ts, spider-oculus.test.ts).
+      observable: false
+      recommendation: a
+      rationale: Kebab-case for multi-word filenames is the dominant pattern in this codebase.
+      stakes: low
+  - id: D3
+    scope:
+      - S1
+    question: What is the export name from engines/index.ts?
+    options:
+      a: animaSessionEngine (camelCase, matching pattern of implementEngine, reviewEngine, etc.)
+      b: animaSession (shorter, drops the 'Engine' suffix)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "All five existing engines use the pattern: draftEngine, implementEngine, reviewEngine, reviseEngine, sealEngine."
+      observable: false
+      recommendation: a
+      rationale: Exact match to existing convention.
+      stakes: low
+  - id: D4
+    scope:
+      - S1
+    question: What key is used in the supportKit.engines dict?
+    options:
+      a: "'anima-session' (matching the engine id)"
+      b: "'animaSession' (camelCase object key)"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The Fabricator scans values (not keys) of kit.engines. The key is only for the dict itself — it has no functional effect. Existing keys match their engine ids (draft, implement, etc.). Since the engine id is 'anima-session', the key should match.
+      observable: false
+      recommendation: a
+      rationale: Key should match engine id for readability; Fabricator ignores the key.
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: Should the engine validate that required givens (role, prompt) are present and throw on missing?
+    options:
+      a: Yes — throw a descriptive Error if role or prompt is missing/not-a-string
+      b: No — cast blindly as the brief's code shows (role as string, prompt as string), let downstream errors surface naturally
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: medium
+      context: Existing engines (implement, revise) do NOT validate givens — they cast directly (e.g. `givens.writ as WritDoc`). However, those engines are only used in the Spider's own standard template where givens are known-correct. anima-session is explicitly a 'reusable building block' for arbitrary templates, making misconfiguration more likely. A clear error message is more valuable than a cryptic 'Cannot read properties of undefined' from the Animator.
+      observable: true
+      recommendation: a
+      rationale: Generic reusable engine will be configured by template authors who need clear errors on misconfiguration.
+      stakes: high
+  - id: D6
+    scope:
+      - S1
+    question: What is the cwd resolution chain when givens.cwd is missing?
+    options:
+      a: Fall back to context.upstream['draft']?.path if available; throw if neither exists (cwd is required by SummonRequest)
+      b: Fall back to context.upstream['draft']?.path; pass undefined to summon and let the Animator handle it
+      c: Fall back to context.upstream['draft']?.path; fall back to process.cwd() as final default
+    selected: custom
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: "SummonRequest.cwd is typed as `cwd: string` (required). Passing undefined would be a type violation that may crash the session provider. The brief's code uses `givens.cwd as string ?? draft?.path` which would be undefined if both are missing. Better to fail early with a clear message."
+      observable: true
+      recommendation: a
+      rationale: SummonRequest.cwd is required; failing early with a descriptive error is better than letting undefined propagate.
+      stakes: high
+    patron_override: Do not provide a fallback. Throw if givens.cwd is undefined or missing.
+  - id: D7
+    scope:
+      - S1
+    question: How is the environment field assembled?
+    options:
+      a: "When writ is present: { GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local` }. When writ is absent: omit environment entirely (undefined)."
+      b: "When writ is present: { GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local` }. When writ is absent: pass empty object {}."
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The brief's code explicitly passes `environment: writ ? { GIT_AUTHOR_EMAIL: ... } : {}`. SummonRequest.environment is optional (Record<string, string> | undefined). Either works; the brief uses empty object."
+      observable: false
+      recommendation: b
+      rationale: Matches the brief's code verbatim.
+      stakes: low
+  - id: D8
+    scope:
+      - S1
+    question: How is the metadata field assembled?
+    options:
+      a: Always includes engineId from context.engineId; conditionally includes writId when writ is present
+      b: Always includes both engineId and writId (writId as undefined when no writ)
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: "Brief's code: `metadata: { engineId: context.engineId, ...(writ ? { writId: writ.id } : {}) }`. Existing engines (implement, revise) always include both because writ is required for them. For anima-session, writ is optional, so writId should only appear when meaningful."
+      observable: true
+      recommendation: a
+      rationale: Matches brief; avoids polluting metadata with undefined values.
+      stakes: low
+  - id: D9
+    scope:
+      - S1
+    question: Should a typed yields interface be defined for anima-session?
+    options:
+      a: No — the engine uses the generic default collect, so yields are whatever the generic default produces. No engine-specific type needed.
+      b: Yes — define AnimaSessionYields in types.ts for documentation and downstream consumers who type-assert upstream yields.
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: The generic default produce shape is { sessionId, sessionStatus, output?, conversationId? } (after S2). ReviseYields exists but is actually inaccurate (missing output field). The anima-session engine is generic — different templates may use different subsets of yields. A named type could be misleading since the shape comes from the Spider's collect, not the engine.
+      observable: false
+      recommendation: a
+      rationale: Yields are owned by the generic collect, not the engine. A type for generic default yields belongs on the Spider's collect documentation, not on a specific engine.
+      stakes: low
+  - id: D10
+    scope:
+      - S1
+    question: Where in the builtinEngineIds registrations does anima-session go?
+    options:
+      a: Add to both the builtinEngineIds Set in validateTemplates AND the builtinIds array in buildDesignSourceMap
+      b: Only add to builtinIds in buildDesignSourceMap (validateTemplates can look up the Fabricator)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "Both validateTemplates (for config templates, line ~222) and buildDesignSourceMap (for kit template provenance, line ~404) maintain hardcoded lists of Spider-builtin engine ids. They serve different purposes: validateTemplates checks designId validity; buildDesignSourceMap tracks which plugin owns each designId. Both must know about the new engine."
+      observable: false
+      recommendation: a
+      rationale: Both sites enumerate the same set for different reasons; both need updating.
+      stakes: low
+  - id: D11
+    scope:
+      - S1
+    question: Does the engine import DraftYields for the cwd fallback?
+    options:
+      a: Yes — import DraftYields from ../types.ts and cast context.upstream['draft'] as DraftYields | undefined
+      b: "No — use inline property access: (context.upstream['draft'] as { path?: string } | undefined)?.path"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The brief's code explicitly uses `const draft = context.upstream['draft'] as DraftYields | undefined`. All existing quick engines import DraftYields. The type import makes the intent clear and matches precedent.
+      observable: false
+      recommendation: a
+      rationale: Matches brief and existing engine import patterns.
+      stakes: low
+  - id: D12
+    scope:
+      - S2
+    question: How should conversationId be added to the generic default yields?
+    options:
+      a: "Conditional spread: ...(session.conversationId !== undefined ? { conversationId: session.conversationId } : {})"
+      b: "Always include: conversationId: session.conversationId (may be undefined)"
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: "The existing generic default uses conditional spread for output: `...(session.output !== undefined ? { output: session.output } : {})`. The conversationId field on SessionDoc is optional. Following the same pattern keeps yields clean — fields only present when they have values."
+      observable: true
+      recommendation: a
+      rationale: Matches the existing conditional-spread pattern used for output.
+      stakes: low
+  - id: D13
+    scope:
+      - S2
+    question: Should ReviseYields type be updated to reflect the new generic default shape?
+    options:
+      a: No — ReviseYields is already inaccurate (missing output) and the type is barely used. Leave it; note the discrepancy.
+      b: "Yes — add conversationId?: string and output?: string to ReviseYields to match reality."
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: ReviseYields = { sessionId, sessionStatus } but the actual runtime shape from generic collect includes output when present. Adding conversationId to the type while output is already missing would be inconsistent. Fixing all yield types to match the generic default is a separate cleanup.
+      observable: false
+      recommendation: a
+      rationale: Fixing ReviseYields is a separate cleanup; the type is already inaccurate. The new conversationId field is an additive, non-breaking runtime change.
+      stakes: low
+  - id: D14
+    scope:
+      - S2
+    question: Does the existing test mock need to be updated for conversationId in yields?
+    options:
+      a: Yes — add a test-specific mock variant that populates conversationId in SessionDoc, used by anima-session tests
+      b: No — existing tests pass unchanged (conversationId absent from mock sessions means the field is simply omitted from yields)
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The conditional spread means when session.conversationId is undefined, no field is added. Existing tests using the mock (which doesn't set conversationId) will produce identical yields as before. New anima-session-specific tests (S1) will set conversationId on the mock to verify it flows through.
+      observable: false
+      recommendation: b
+      rationale: Conditional spread is a no-op when the field is absent; existing tests are unaffected.
+      stakes: low
+  - id: D15
+    scope:
+      - S3
+    question: What is the variable syntax for yield references?
+    options:
+      a: "'$yields.<engineId>.<field>' and '${yields.<engineId>.<field>}' (matching existing $writ / ${writ} normalization)"
+      b: "'$upstream.<engineId>.<field>' (matches the EngineRunContext property name 'upstream')"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: medium
+      context: The brief uses '${yields.<engineId>.conversationId}'. The spider.md doc's future-work note uses '${draft.worktreePath}' as an example. The runtime EngineRunContext calls it 'upstream'. The brief's syntax is most explicit and self-documenting — 'yields' communicates that you're referencing a completed engine's yields.
+      observable: true
+      recommendation: a
+      rationale: Matches the brief's syntax verbatim; 'yields' is more descriptive than 'upstream' for template authors.
+      stakes: high
+  - id: D16
+    scope:
+      - S3
+    question: When should $yields.* references be resolved — at spawn time or at run time?
+    options:
+      a: Run time (in tryRun, after upstream yields are available)
+      b: Spawn time with deferred markers (store unresolved refs in givensSpec, resolve in tryRun)
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: At spawn time (resolveGivens), upstream yields don't exist yet — engines haven't run. The givensSpec must store the unresolved $yields.* string reference as-is. At run time in tryRun, the Spider already has the upstream map via buildUpstreamMap(rig). A second resolution pass on the shallow-copied givens can resolve $yields.* refs against the upstream map before calling design.run().
+      observable: false
+      recommendation: b
+      rationale: This is the only viable option — yields don't exist at spawn time. Storing unresolved refs preserves the rig document as a self-contained template that can be inspected/debugged.
+      stakes: low
+  - id: D17
+    scope:
+      - S3
+    question: How should resolveGivens handle $yields.* references at spawn time?
+    options:
+      a: Pass them through as literal strings (keep the '$yields...' string in givensSpec for later resolution)
+      b: Strip them and set to a sentinel value (e.g. null) that tryRun recognizes
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: resolveGivens currently passes through non-$ values literally and resolves $writ/$vars at spawn time. For $yields.*, the unresolved string reference should be stored as-is in givensSpec so the rig document is inspectable. tryRun can detect strings starting with '$yields.' and resolve them.
+      observable: false
+      recommendation: a
+      rationale: Storing the ref string in the rig document is debuggable and consistent with how templates work elsewhere.
+      stakes: low
+  - id: D18
+    scope:
+      - S3
+    question: What depth of path traversal should $yields.* support?
+    options:
+      a: "Single level only: $yields.<engineId>.<field> — one property access on the yields object"
+      b: "Arbitrary depth: $yields.<engineId>.<field>.<subfield>.* — dot-path traversal"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: "The brief's example uses one-level access: ${yields.<engineId>.conversationId}. The spider.md future-work note uses ${draft.worktreePath} (also one level). Yields are typically flat objects ({ sessionId, sessionStatus, output, conversationId }). DraftYields is also flat. Deep nesting is uncommon. Single level is simpler to implement and validate."
+      observable: true
+      recommendation: a
+      rationale: Covers the brief's use case; yields are flat objects; single level is simpler to validate and less error-prone.
+      stakes: low
+  - id: D19
+    scope:
+      - S3
+    question: What happens when a $yields.* reference cannot be resolved (engine not completed or field missing)?
+    options:
+      a: Omit the key from givens (same behavior as $vars.* when the variable is undefined)
+      b: Throw an error — the upstream should be completed since the engine declared it as upstream
+      c: Set to undefined and let the engine decide
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: "The existing convention for $vars.* is that unresolvable references cause the key to be omitted from givens. This is documented: 'Variables resolving to undefined cause the key to be omitted.' Following the same convention for $yields.* is consistent and safe — the engine already handles optional givens like conversationId."
+      observable: true
+      recommendation: a
+      rationale: Matches existing $vars.* omit-on-undefined convention; engine already handles optional givens.
+      stakes: low
+  - id: D20
+    scope:
+      - S3
+    question: Where does the late-resolution step go in tryRun?
+    options:
+      a: After `const givens = { ...pending.givensSpec }` and before `design.run(givens, context)` — a new function resolveYieldRefs(givens, upstream)
+      b: Inline in tryRun — iterate givens entries and resolve in-place
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "A named function is testable, readable, and consistent with resolveGivens being its own function. The logic: iterate givens, find string values starting with '$yields.', look up upstream[engineId][field], omit if not found."
+      observable: false
+      recommendation: a
+      rationale: Consistent with resolveGivens being its own named function; keeps tryRun readable.
+      stakes: low
+  - id: D21
+    scope:
+      - S3
+    question: How should validation accept $yields.* references in templates?
+    options:
+      a: Add $yields.* to the valid variable regex in both validateTemplates and validateKitTemplate
+      b: Replace the exact-match validation with a more general allowlist approach
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "Both validateTemplates (config templates) and validateKitTemplate (kit templates) have the same regex check: `normalized === '$writ' || /^\\$vars\\.[a-zA-Z_].../.test(normalized)`. Adding a third pattern `|| /^\\$yields\\.[a-zA-Z_][a-zA-Z0-9_-]*\\.[a-zA-Z_][a-zA-Z0-9_]*$/.test(normalized)` fits the existing structure."
+      observable: false
+      recommendation: a
+      rationale: Minimal change; adds one more pattern to the existing allowlist.
+      stakes: low
+  - id: D22
+    scope:
+      - S3
+    question: Should $yields.* validation check that the referenced engineId exists in the same template?
+    options:
+      a: Yes — validate that the engineId in $yields.<engineId>.field matches an engine id declared in the template, and that it's in the referencing engine's upstream (transitive)
+      b: Yes — validate that the engineId exists in the template, but don't check upstream transitivity
+      c: No — just validate the syntax pattern; runtime resolution handles missing refs by omitting the key
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: medium
+      context: Existing validation already checks upstream references for the DAG (cycle detection, unknown upstream). Checking that $yields.<engineId> references a valid engine in the template catches typos at startup. Checking transitive upstream would require computing the full dependency graph for each variable reference — more complex and not done for $writ or $vars either.
+      observable: true
+      recommendation: b
+      rationale: Catches typos at startup without over-engineering the validation; the runtime omit-on-undefined handles the edge case where an engine completes without the expected field.
+      stakes: low
+  - id: D23
+    scope:
+      - S3
+    question: Should $yields.* references be supported in string interpolation within givens values (e.g. embedding in the middle of a prompt string)?
+    options:
+      a: No — whole-value replacement only. A given value that is '$yields.x.y' gets replaced entirely. Embedded references in longer strings are not supported.
+      b: Yes — support ${yields.x.y} embedded in arbitrary strings, enabling prompt templates like 'Review the work from session ${yields.impl.sessionId}'
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: medium
+      context: The brief intro says 'ideally, givenSpec template variables can be part of the prompt' which suggests embedded interpolation. However, existing variable resolution ($writ, $vars.*) only supports whole-value replacement — a value is either a variable reference or a literal. Adding string interpolation is a significant complexity increase (parsing ${...} within arbitrary strings, handling escaping, mixed literal/variable content). The brief's 'ideally' framing suggests this is aspirational. Whole-value replacement covers the conversationId use case. Prompt content can be assembled by the template author using multiple givens or by the engine.
+      observable: true
+      recommendation: a
+      rationale: Whole-value replacement covers the brief's core use case (conversationId wiring). String interpolation is a larger feature that changes the variable system's fundamentals; better as a separate commission if needed.
+      stakes: high
+  - id: D24
+    scope:
+      - S3
+    question: Should the $yields.* late-resolution also apply to existing engines, or only new templates using anima-session?
+    options:
+      a: Apply universally — any engine's givensSpec can use $yields.* references
+      b: Only enabled for anima-session
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: The late-resolution step runs in tryRun before design.run(givens, context) for ALL engines. There's no reason to limit it — $yields.* is a general-purpose template variable mechanism. Existing templates don't use $yields.* so there's no backward compatibility concern.
+      observable: true
+      recommendation: a
+      rationale: The variable system is engine-agnostic; no reason to restrict a general mechanism to one engine.
+      stakes: low

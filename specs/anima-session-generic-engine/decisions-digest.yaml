@@ -1,0 +1,91 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: What is the engine design id?
+    answer: "'anima-session' (hyphenated, matches the brief verbatim)"
+    justification: Brief is explicit; kebab-case matches other multi-word identifiers in the Spider ecosystem (block types,
+      tool names).
+  - id: D2
+    scope:
+      - S1
+    question: What is the source file name for the engine?
+    answer: anima-session.ts (kebab-case, matching the engine id)
+    justification: Kebab-case for multi-word filenames is the dominant pattern in this codebase.
+  - id: D3
+    scope:
+      - S1
+    question: What is the export name from engines/index.ts?
+    answer: animaSessionEngine (camelCase, matching pattern of implementEngine, reviewEngine, etc.)
+    justification: Exact match to existing convention.
+  - id: D4
+    scope:
+      - S1
+    question: What key is used in the supportKit.engines dict?
+    answer: "'anima-session' (matching the engine id)"
+    justification: Key should match engine id for readability; Fabricator ignores the key.
+  - id: D5
+    scope:
+      - S1
+    question: Should the engine validate that required givens (role, prompt) are present and throw on missing?
+    answer: Yes — throw a descriptive Error if role or prompt is missing/not-a-string
+    justification: Generic reusable engine will be configured by template authors who need clear errors on misconfiguration.
+  - id: D6
+    scope:
+      - S1
+    question: What is the cwd resolution chain when givens.cwd is missing?
+    answer: Do not provide a fallback. Throw if givens.cwd is undefined or missing.
+    justification: patron specified
+  - id: D7
+    scope:
+      - S1
+    question: How is the environment field assembled?
+    answer: "When writ is present: { GIT_AUTHOR_EMAIL: `${writ.id}@nexus.local` }. When writ is absent: pass empty object {}."
+    justification: Matches the brief's code verbatim.
+  - id: D8
+    scope:
+      - S1
+    question: How is the metadata field assembled?
+    answer: Always includes engineId from context.engineId; conditionally includes writId when writ is present
+    justification: Matches brief; avoids polluting metadata with undefined values.
+  - id: D9
+    scope:
+      - S1
+    question: Should a typed yields interface be defined for anima-session?
+    answer: No — the engine uses the generic default collect, so yields are whatever the generic default produces. No
+      engine-specific type needed.
+    justification: Yields are owned by the generic collect, not the engine. A type for generic default yields belongs on the
+      Spider's collect documentation, not on a specific engine.
+  - id: D10
+    scope:
+      - S1
+    question: Where in the builtinEngineIds registrations does anima-session go?
+    answer: Add to both the builtinEngineIds Set in validateTemplates AND the builtinIds array in buildDesignSourceMap
+    justification: Both sites enumerate the same set for different reasons; both need updating.
+  - id: D11
+    scope:
+      - S1
+    question: Does the engine import DraftYields for the cwd fallback?
+    answer: Yes — import DraftYields from ../types.ts and cast context.upstream['draft'] as DraftYields | undefined
+    justification: Matches brief and existing engine import patterns.
+  - id: D12
+    scope:
+      - S2
+    question: How should conversationId be added to the generic default yields?
+    answer: "Conditional spread: ...(session.conversationId !== undefined ? { conversationId: session.conversationId } : {})"
+    justification: Matches the existing conditional-spread pattern used for output.
+  - id: D13
+    scope:
+      - S2
+    question: Should ReviseYields type be updated to reflect the new generic default shape?
+    answer: No — ReviseYields is already inaccurate (missing output) and the type is barely used. Leave it; note the
+      discrepancy.
+    justification: Fixing ReviseYields is a separate cleanup; the type is already inaccurate. The new conversationId field
+      is an additive, non-breaking runtime change.
+  - id: D14
+    scope:
+      - S2
+    question: Does the existing test mock need to be updated for conversationId in yields?
+    answer: No — existing tests pass unchanged (conversationId absent from mock sessions means the field is simply omitted
+      from yields)
+    justification: Conditional spread is a no-op when the field is absent; existing tests are unaffected.
