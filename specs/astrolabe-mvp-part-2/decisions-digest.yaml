@@ -1,0 +1,158 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+    question: Where does writ posting + linking happen?
+    answer: New clockwork engine astrolabe.spec-publish inserted between spec-writer and seal in the rig template
+    justification: A clockwork engine is deterministic and guaranteed; follows the established seal-engine pattern for
+      post-session work.
+  - id: D2
+    scope:
+      - S1
+    question: What is the engine design ID for the new engine?
+    answer: astrolabe.spec-publish
+    justification: "Follows the astrolabe.{verb-noun} pattern and describes the action precisely: publishing the spec."
+  - id: D3
+    scope:
+      - S1
+    question: Where in the rig template does the new engine go?
+    answer: "Between spec-writer and seal (position 8 of 9, upstream: ['spec-writer'])"
+    justification: Keeps useful-work-then-cleanup ordering; no dependency on seal.
+  - id: D4
+    scope:
+      - S1
+    question: What rig template engine ID (not design ID) should the new engine use?
+    answer: spec-publish
+    justification: Consistent with design ID naming; clear about what the engine step does.
+  - id: D5
+    scope:
+      - S1
+    question: What givens does the spec-publish engine receive?
+    answer: planId via ${yields.plan-init.planId} only
+    justification: planId is sufficient — the engine reads the brief writ via clerk.show(planId). Consistent with
+      decision-review and inventory-check patterns.
+  - id: D6
+    scope:
+      - S1
+    question: What writ type does the generated mandate use?
+    answer: Read from AstrolabeConfig.generatedWritType with default 'mandate'
+    justification: The config field already exists for this exact purpose; using it fulfills the design intent.
+  - id: D7
+    scope:
+      - S1
+    question: What is the generated writ's title?
+    answer: "Same as the brief writ title (e.g. 'Astrolabe MVP: Part 2')"
+    justification: Same title maintains continuity; the writ type + refines link provide differentiation.
+  - id: D8
+    scope:
+      - S1
+    question: What is the generated writ's body content?
+    answer: plan.spec — the full specification markdown
+    justification: The spec IS the mandate body — the implementation rig reads it directly from the writ.
+  - id: D9
+    scope:
+      - S1
+    question: What codex does the generated writ target?
+    answer: plan.codex (same codex as the brief)
+    justification: The mandate targets the same codebase as the brief; the implementation rig needs it for drafting.
+  - id: D10
+    scope:
+      - S1
+    question: Link direction and type for the refines relationship?
+    answer: mandate (source) → brief (target), type 'refines'
+    justification: Matches the design doc. The mandate refines the brief — source→target direction makes outbound queries
+      from the mandate efficient.
+  - id: D11
+    scope:
+      - S1
+    question: Should the engine validate plan.status === 'writing' before proceeding?
+    answer: Yes — throw if status is not 'writing'
+    justification: Consistent with decision-review's status checking pattern; clear error on misconfiguration.
+  - id: D12
+    scope:
+      - S1
+    question: Should the engine validate plan.spec is non-empty before posting?
+    answer: Yes — throw if spec is missing or empty string
+    justification: Parallel to inventory-check's validation pattern; prevents posting an empty mandate.
+  - id: D13
+    scope:
+      - S1
+    question: What does the spec-publish engine yield?
+    answer: "{ generatedWritId: string } — the ID of the posted mandate writ"
+    justification: The generated writ ID is the key output; link ID is derivable and not independently useful.
+  - id: D14
+    scope:
+      - S1
+    question: Does the sage role need clerk:write permission?
+    answer: No — the clockwork engine calls ClerkApi directly via guild().apparatus(), bypassing tool permission gates
+    justification: Clockwork engines bypass tool permissions; the sage role doesn't need clerk:write.
+  - id: D15
+    scope:
+      - S1
+    question: How does the engine access resolveAstrolabeConfig?
+    answer: "Inline the config resolution: guild().guildConfig().astrolabe?.generatedWritType ?? 'mandate'"
+    justification: Keeps the engine self-contained; avoids coupling to the parent module. One line of inline config access.
+  - id: D16
+    scope:
+      - S1
+    question: Should the new engine be created via a factory function (like the other three) or as a bare EngineDesign
+      object (like seal)?
+    answer: "Factory function createSpecPublishEngine(getPlansBook: () => Book<PlanDoc>): EngineDesign"
+    justification: Consistent with the three existing astrolabe engine factories; enables test injection of the plans book.
+  - id: D17
+    scope:
+      - S2
+    question: How is decisionSummary injected into the spec-writer prompt?
+    answer: "Appended to the prompt string: '...then write the specification using spec-write.\\n\\nDecision
+      summary:\\n${yields.decision-review.decisionSummary}'"
+    justification: anima-session only reads specific given keys; embedding in prompt is the only mechanism that works
+      without modifying anima-session.
+  - id: D18
+    scope:
+      - S2
+    question: "What happens when decisionSummary is empty (fast-path: no decisions/scope)?"
+    answer: The prompt includes an empty 'Decision summary:' section — benign, anima ignores it
+    justification: No conditional interpolation mechanism exists in rig templates; empty section is benign.
+  - id: D19
+    scope:
+      - S3
+    question: What consistency validation should decision-review perform after reconciliation?
+    answer: Validate every decision has selected or patronOverride set; throw if any lack both
+    justification: Brief explicitly requires consistency validation. Defense-in-depth catch for upstream failures.
+  - id: D20
+    scope:
+      - S3
+    question: Where in the decision-review re-run path does validation happen?
+    answer: After reconciliation, before building the decisionSummary
+    justification: Fail before building summary or patching PlanDoc; keeps plan in 'reviewing' status for retry.
+  - id: D21
+    scope:
+      - S3
+    question: What is the error message format for unresolved decisions?
+    answer: "List the unresolved decision IDs: 'Unresolved decisions after patron review: D2, D5'"
+    justification: Specific IDs aid debugging; consistent with specific error messages elsewhere.
+  - id: D22
+    scope:
+      - S1
+    question: How is the new engine registered in the supportKit?
+    answer: "Add to engines map in astrolabe.ts: 'astrolabe.spec-publish': specPublishEngine"
+    justification: Follows the existing registration pattern in supportKit.engines.
+  - id: D23
+    scope:
+      - S1
+    question: Does the supportKit test need updating?
+    answer: Yes — update engine count from 3 to 4, rig template engine count from 8 to 9, add spec-publish to engine ID list
+    justification: The test has explicit count and ID assertions that must be updated.
+  - id: D24
+    scope:
+      - S1
+      - S3
+    question: What mock extensions does engines.test.ts need?
+    answer: Extend mockClerkApi.post to return a WritDoc with a generated ID, and mockClerkApi.link to return a WritLinkDoc
+    justification: Extend existing mockClerkApi stubs; keep all engine tests in the shared harness.
+  - id: D25
+    scope:
+      - S1
+    question: Should the engines barrel export (engines/index.ts) be updated?
+    answer: Yes — add export { createSpecPublishEngine } from './spec-publish.ts'
+    justification: Consistent with the barrel pattern; test file imports from the barrel.

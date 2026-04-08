@@ -1,0 +1,23 @@
+brief: |
+  B — Astrolabe Clockwork Engines (complexity ~8)
+    - plan-init — creates PlanDoc, sets status, yields planId. (Simple)
+    - inventory-check — validates inventory exists in plans book. (Simple)
+    - decision-review — the big one: reads decisions → maps to InputRequestDoc → blocks on patron-input → reconciles answers back → validates consistency → yields decisionSummary. (Substantial)
+    - Writ linking: the refines link from generated mandate back to brief. (This is really spec-writer behavior, but the linking mechanics need to be wired somewhere — likely in the decision-review or as a utility the anima-session prompt can reference)
+slug: astrolabe-mvp-part-2
+
+scope:
+  - id: S1
+    description: "spec-publish clockwork engine: posts the generated mandate writ to the Clerk, creates a refines link from the mandate back to the brief, records generatedWritId on PlanDoc, and transitions PlanDoc to completed status"
+    rationale: "The brief explicitly calls for writ linking (mandate→brief refines link). This is the only fully unimplemented piece — the other three engines already exist. A new clockwork engine is the cleanest place to house this deterministic post-session work."
+    included: true
+
+  - id: S2
+    description: "Wire decisionSummary into the spec-writer prompt via yield interpolation"
+    rationale: "The decision-review engine already yields decisionSummary but the spec-writer prompt doesn't reference it. The astrolabe.md design doc explicitly describes this wiring. Without it, the spec-writer has to parse the full decisions array from plan-show instead of receiving a concise summary."
+    included: true
+
+  - id: S3
+    description: "Add consistency validation to decision-review re-run: verify every decision has selected or patronOverride after reconciliation"
+    rationale: "The brief describes decision-review as 'validates consistency' but the current implementation reconciles answers without checking completeness. The Spider's input-request-complete tool already validates all questions are answered, so this is a defense-in-depth check."
+    included: true
