@@ -1,0 +1,568 @@
+decisions:
+  - id: D1
+    scope:
+      - S1
+      - S4
+    question: What new status values to add to the session status unions (SessionDoc, SessionResult, SessionProviderResult)?
+    options:
+      a: Add 'cancelled' only — a single terminal status
+      b: Add 'cancelled' (terminal) and 'cancelling' (transient, between cancel-requested and process-dead)
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+        - operator
+      confidence: medium
+      context: |
+        The writ status model uses terminal-only states for cancellation ('cancelled', not 'cancelling'). A 'cancelling' state requires timeout management and stuck-state cleanup — substantial complexity for an edge case (the window between SIGTERM and process death is typically <1 second).
+      observable: true
+      recommendation: a
+      rationale: "'cancelled' only — matches the writ pattern, avoids dual-phase complexity. A 'cancelling' state can be added later if UIs need it."
+      stakes: high
+  - id: D2
+    scope:
+      - S1
+    question: Where does 'cancelled' get added in the type hierarchy — SessionDoc only, or also SessionResult and SessionProviderResult?
+    options:
+      a: Add to SessionDoc.status and SessionResult.status — but NOT SessionProviderResult.status (provider doesn't know about cancellation; it just sees process death)
+      b: "Add to all three types: SessionDoc, SessionResult, and SessionProviderResult"
+      c: Add to SessionDoc.status only — SessionResult stays terminal-from-provider only
+    selected: b
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        SessionProviderResult is what the provider returns when the process exits. The provider doesn't initiate cancellation — the Animator does. When a process is killed by SIGTERM, the provider sees a non-zero exit and returns 'failed'. The Animator overrides this to 'cancelled' when it knows the kill was intentional. SessionResult is what callers of animate()/summon() receive — they should see 'cancelled' when that's what happened.
+      observable: true
+      recommendation: a
+      rationale: The provider doesn't know about cancellation semantics; the Animator owns the status override. Callers need to see 'cancelled' in SessionResult.
+      stakes: high
+  - id: D3
+    scope:
+      - S1
+    question: What field name and type for persisting process metadata on SessionDoc?
+    options:
+      a: "pid?: number — simple, OS-specific"
+      b: "processInfo?: Record<string, unknown> — opaque, provider-owned blob"
+      c: "cancelHandle?: Record<string, unknown> — named for its purpose"
+    selected: custom
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: |
+        The brief explicitly asks to consider future docker containers and remote VMs. A PID is meaningless for those environments. The provider should own the shape of its process metadata (PID for local, container ID for docker, job ID for remote). The Animator passes it through without interpretation — same pattern as how caller metadata works.
+      observable: true
+      recommendation: b
+      rationale: Provider-owned opaque metadata is the only approach that generalizes across execution environments. 'processInfo' describes what it is, not what it's for.
+      stakes: high
+    patron_override: "cancelMetadata?: Record<string, unknown> - opaque, provider-owned blob"
+  - id: D4
+    scope:
+      - S1
+    question: How does processInfo get from the provider to the SessionDoc? The PID isn't available synchronously from launch() because claude-code's prepareSession() is async (MCP server start must complete before spawn).
+    options:
+      a: "Add processInfo as a Promise on the launch() return type: processInfo?: Promise<Record<string, unknown>>"
+      b: Restructure claude-code to separate MCP prep from the spawn, making the PID available synchronously
+      c: Have launch() accept a callback that the provider calls when processInfo is ready
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        The current launch() already returns two async things (chunks iterable, result promise). Adding a third async value (processInfo promise) is consistent. The Animator awaits it and patches the SessionDoc. The promise resolves as soon as the process spawns — typically milliseconds after launch() returns. Option b would require substantial refactoring of claude-code's launch flow.
+      observable: false
+      recommendation: a
+      rationale: Consistent with existing async return pattern. Minimal refactoring. The Animator patches SessionDoc when the promise resolves.
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: When to write processInfo to the SessionDoc?
+    options:
+      a: Await the processInfo promise and include it in the initial recordRunning() call
+      b: Let recordRunning() fire immediately (as today), then patch processInfo when the promise resolves
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        The current recordRunning() is fire-and-forget to avoid blocking streaming. Waiting for processInfo would delay the initial record. A separate patch() call (also fire-and-forget) keeps the existing non-blocking pattern. There's a brief window where the SessionDoc exists without processInfo — but cancel() handles this gracefully (see D18).
+      observable: false
+      recommendation: b
+      rationale: Preserves the non-blocking launch pattern. Uses Stacks patch() which already exists for partial updates.
+      stakes: low
+  - id: D6
+    scope:
+      - S1
+    question: How should the AnimatorSessionProvider interface support cancellation?
+    options:
+      a: "Add optional cancel?(processInfo: Record<string, unknown>): Promise<void> method to the provider interface"
+      b: No provider cancel method — the Animator does process.kill() directly using PID from processInfo
+      c: Add both a cancel() method on the provider AND a kill() closure on the launch return
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        The provider owns the execution environment semantics. The Animator is provider-agnostic — it doesn't know if the session is a local process, a docker container, or a remote VM. The provider's cancel() receives its own processInfo back and uses it to kill. For claude-code, this is process.kill(pid, 'SIGTERM'). For docker, it would be container.stop(). The Animator never interprets processInfo.
+      observable: true
+      recommendation: a
+      rationale: Provider owns kill semantics — Animator stays provider-agnostic. Generalizes to docker/remote.
+      stakes: high
+  - id: D7
+    scope:
+      - S1
+    question: What should the full launch() return type look like with processInfo?
+    options:
+      a: "{ chunks, result, processInfo?: Promise<Record<string, unknown>> }"
+      b: "{ chunks, result, processInfo?: Promise<Record<string, unknown>>, kill?: () => void }"
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        Option b adds an in-process kill closure as an optimization. But with provider.cancel() in place, the Animator always goes through the provider. The kill closure adds a second code path for the same operation. Keeping one path (provider.cancel) is simpler and more testable.
+      observable: false
+      recommendation: a
+      rationale: One cancel path (provider.cancel) is simpler than two. The processInfo promise is sufficient.
+      stakes: low
+  - id: D8
+    scope:
+      - S1
+    question: What should the AnimatorApi.cancel() method signature be?
+    options:
+      a: "cancel(sessionId: string): Promise<SessionDoc>"
+      b: "cancel(sessionId: string, options?: { reason?: string }): Promise<SessionDoc>"
+      c: "cancel(sessionId: string): Promise<void>"
+    selected: b
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: |
+        The writ-cancel tool supports an optional reason (resolution). Session cancel should too — it's useful for audit trails ('cancelled: runaway cost', 'cancelled: wrong branch'). Returning the updated SessionDoc matches the clerk transition pattern and gives callers confirmation of the final state.
+      observable: true
+      recommendation: b
+      rationale: Optional reason for audit. Return SessionDoc for confirmation. Matches writ-cancel pattern.
+      stakes: low
+  - id: D9
+    scope:
+      - S1
+    question: Should cancel() be synchronous (send signal + patch, return immediately) or wait for the process to actually die?
+    options:
+      a: Send signal, patch SessionDoc to 'cancelled', return immediately — don't wait for process death
+      b: Send signal, wait for the process to exit, then return the final SessionDoc
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: |
+        Waiting for process death would require the cancel() caller to hold a reference to the provider result promise — which it doesn't have in the cross-process case. The cancel operation is best modeled as 'cancel requested and acknowledged' not 'cancel completed'. The process will die shortly after SIGTERM. The SessionDoc is the source of truth for the final state.
+      observable: true
+      recommendation: a
+      rationale: Cross-process cancel can't wait for the process to die — it doesn't own the result promise. Fire-and-forget kill is the only viable model.
+      stakes: high
+  - id: D10
+    scope:
+      - S1
+    question: How should cancel() handle sessions that are already in a terminal state (completed, failed, timeout, cancelled)?
+    options:
+      a: Throw an error ('session is not running')
+      b: Return the existing SessionDoc without modification (idempotent no-op)
+    selected: b
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: high
+      context: |
+        Idempotent operations are easier to work with in distributed/multi-process scenarios. If two processes both try to cancel the same session, the second call should succeed silently rather than throwing. Matches REST-style convention for idempotent operations.
+      observable: true
+      recommendation: b
+      rationale: Idempotent cancel is safer for multi-process scenarios. Second cancel is a no-op.
+      stakes: low
+  - id: D11
+    scope:
+      - S1
+    question: How should cancel() handle a session ID that doesn't exist?
+    options:
+      a: Throw an error ('session not found')
+      b: Return null
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        Matches session-show, which throws for missing IDs. Returning null would be ambiguous (did it not exist, or was it already cancelled?).
+      observable: true
+      recommendation: a
+      rationale: Throw on missing ID — same pattern as session-show.
+      stakes: low
+  - id: D12
+    scope:
+      - S1
+    question: How does the animate() result handler (Process A) detect that a session was cancelled (possibly by Process B) so it records 'cancelled' instead of 'failed'?
+    options:
+      a: Read the current SessionDoc from Stacks before writing — if status is already 'cancelled', skip the write and resolve with 'cancelled'
+      b: Keep an in-memory Set<string> of cancelled session IDs — the result handler checks it
+      c: Always overwrite — accept that cross-process cancel may be overwritten with 'failed'
+    selected: a
+    analysis:
+      audience:
+        - author
+        - implementer
+      confidence: high
+      context: |
+        Cross-process cancel writes 'cancelled' to the SessionDoc before killing the process. Process A's result handler then fires when the process dies. If it blindly writes 'failed', it overwrites the correct 'cancelled' status. A Stacks read before write (primary key lookup, microseconds) detects this. Works for both in-process and cross-process cancel. An in-memory set (option b) only works in-process — doesn't help when Process B cancelled.
+      observable: false
+      recommendation: a
+      rationale: Stacks read-before-write is correct for both in-process and cross-process. Cheap operation (PK lookup). No in-memory coordination needed.
+      stakes: high
+  - id: D13
+    scope:
+      - S1
+    question: When the result handler detects cancellation, should AnimateHandle.result resolve or reject?
+    options:
+      a: "Resolve with a SessionResult that has status: 'cancelled' — cancellation is not an error"
+      b: Reject with a CancelledError — caller must catch it
+    selected: a
+    analysis:
+      audience:
+        - author
+      confidence: high
+      context: |
+        Cancellation is an intentional action, not an error condition. Callers that await handle.result should receive a normal SessionResult with status 'cancelled'. This lets them distinguish between cancellation and actual failures without try/catch. The existing code already has 'timeout' resolving (not rejecting) — 'cancelled' follows the same pattern.
+      observable: true
+      recommendation: a
+      rationale: Cancellation is intentional — resolve, don't reject. Matches how 'timeout' is handled.
+      stakes: high
+  - id: D14
+    scope:
+      - S1
+    question: When the result handler detects cancellation, should it still write the transcript?
+    options:
+      a: Yes — write the partial transcript captured before the kill
+      b: No — skip transcript for cancelled sessions
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: |
+        A cancelled session may have done significant work before being killed. The partial transcript is valuable for debugging (why was it taking so long? what was it doing when killed?). The existing write-transcript logic handles partial transcripts fine.
+      observable: false
+      recommendation: a
+      rationale: Partial transcripts are useful for post-mortem. Write them.
+      stakes: low
+  - id: D15
+    scope:
+      - S1
+    question: What signal to use when killing a local process?
+    options:
+      a: SIGTERM only — let the process clean up
+      b: SIGTERM first, then SIGKILL after a timeout (e.g. 5s)
+      c: SIGKILL immediately — guaranteed kill
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: medium
+      context: |
+        SIGTERM gives the claude process a chance to clean up (flush output, close connections). Claude Code typically exits within 1-2 seconds of SIGTERM. SIGKILL is harsher and can leave orphaned child processes. Escalation (option b) adds complexity — the Animator would need a timer and a second check. For MVP, SIGTERM is sufficient. If sessions don't die, the operator can kill -9 manually.
+      observable: true
+      recommendation: a
+      rationale: SIGTERM is sufficient for MVP. Claude Code exits promptly on SIGTERM. Escalation to SIGKILL can be added later.
+      stakes: low
+  - id: D16
+    scope:
+      - S1
+    question: How should the claude-code provider handle stale PIDs (process already dead, PID possibly reused by another process)?
+    options:
+      a: Catch ESRCH (no such process) silently — it's already dead. Let EPERM and other errors propagate.
+      b: Validate PID is alive before sending signal
+      c: Always send the signal, ignore all errors
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        process.kill(pid, 'SIGTERM') throws ESRCH if the PID doesn't exist. This is the expected case when the session finished between the Stacks read and the kill call. EPERM means a different user owns the PID — this is a genuine error (PID reuse by another user's process) and should propagate.
+      observable: false
+      recommendation: a
+      rationale: ESRCH is expected (already dead) — swallow it. EPERM is unexpected — propagate.
+      stakes: low
+  - id: D17
+    scope:
+      - S1
+    question: Where should the cancellation reason be stored on the SessionDoc?
+    options:
+      a: Use the existing error field — when status is 'cancelled', error contains the reason
+      b: Add a new cancelReason field
+      c: Store it in metadata
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: medium
+      context: |
+        The error field is optional and already serves as a human-readable explanation of why a session ended abnormally. 'Cancelled' is abnormal (not completed), so the reason fits naturally in error. Adding a new field creates a parallel explanation system. The session-show tool already displays the error field.
+      observable: true
+      recommendation: a
+      rationale: Reuse the existing error field. Avoids a new field. session-show already displays it.
+      stakes: low
+  - id: D18
+    scope:
+      - S1
+    question: How should cancel() handle the case where processInfo hasn't been written to the SessionDoc yet (the process hasn't spawned — still in prepareSession)?
+    options:
+      a: Patch status to 'cancelled' anyway — the result handler will see it and not overwrite. The process may run briefly but the session is recorded as cancelled.
+      b: Return an error ('session not yet ready for cancellation, retry later')
+    selected: a
+    analysis:
+      audience:
+        - author
+        - operator
+      confidence: medium
+      context: |
+        The window where processInfo is absent is very brief (MCP server startup, ~50ms). But it exists. Option a is graceful — the cancel is recorded and the result handler defers to it. The process may spawn and run briefly before its result handler reads the 'cancelled' status, but it won't be recorded as 'completed' or 'failed'. Option b forces the caller to retry, which is awkward.
+      observable: true
+      recommendation: a
+      rationale: Cancel the record even without processInfo. The result handler defers to the stored status. Brief process run is acceptable.
+      stakes: low
+  - id: D19
+    scope:
+      - S1
+    question: What processInfo does the claude-code provider return?
+    options:
+      a: "{ pid: number } — just the OS process ID"
+      b: "{ pid: number, tmpDir: string } — PID + temp dir path"
+      c: "{ pid: number, tmpDir: string, mcpPort?: number } — PID + all resources"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        When the process is killed by SIGTERM, the existing cleanup chain in claude-code's launch() still runs (process close event → cleanup function → rmSync tmpDir, mcpHandle.close()). The cross-process canceller only needs the PID to send the signal. Temp dir and MCP server cleanup happen automatically via the original process's result handler.
+      observable: false
+      recommendation: a
+      rationale: PID is sufficient. Cleanup of temp dir and MCP server happens via the normal close handler in the spawning process.
+      stakes: low
+  - id: D20
+    scope:
+      - S1
+    question: What exitCode should a cancelled session record?
+    options:
+      a: Whatever the OS reports (typically 143 for SIGTERM on Linux, null on some platforms)
+      b: A fixed sentinel value (e.g. -1 or 130)
+      c: 0 — treat cancellation as clean exit
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: |
+        The exit code is an OS-level fact. The Animator should record it accurately. The status field ('cancelled') already conveys the semantic meaning. Callers should use status, not exitCode, to determine what happened. Fabricating an exit code would be misleading.
+      observable: true
+      recommendation: a
+      rationale: Record the real exit code. Use status to determine cancellation, not exitCode.
+      stakes: low
+  - id: D21
+    scope:
+      - S2
+    question: What permission level for the session-cancel tool?
+    options:
+      a: "permission: 'animate' — same as summon (if you can start sessions, you can stop them)"
+      b: "permission: 'admin' — higher privilege for a destructive operation"
+      c: "permission: 'write'"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: |
+        Cancelling a session is the inverse of starting one. Requiring a higher permission level would mean a role that can launch sessions can't clean them up — an operational footgun. The summon tool uses permission: 'animate'. session-cancel should match.
+      observable: true
+      recommendation: a
+      rationale: Same permission as summon. Can start ↔ can stop.
+      stakes: low
+  - id: D22
+    scope:
+      - S2
+    question: Who can call the session-cancel tool?
+    options:
+      a: "callableBy: 'patron' — patron only, like summon"
+      b: No callableBy restriction — available to all callers including animas
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - author
+      confidence: high
+      context: |
+        Animas should not be able to kill other animas' sessions. Session cancellation is an operator/patron action. The summon tool is patron-only for the same reason — session lifecycle management is a human concern. If an anima needs to cancel a child session, it should be done through a dedicated engine, not a general-purpose cancel tool.
+      observable: true
+      recommendation: a
+      rationale: Patron-only. Animas should not kill each other's sessions.
+      stakes: low
+  - id: D23
+    scope:
+      - S2
+    question: What parameters does the session-cancel tool accept?
+    options:
+      a: "{ id: string } — just the session ID"
+      b: "{ id: string, reason?: string } — with optional reason"
+      c: "{ id: string, reason?: string, force?: boolean } — with force flag for SIGKILL"
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: |
+        Writ-cancel accepts an optional resolution string. Session-cancel should follow the same pattern with an optional reason. A force flag (SIGKILL) is premature — SIGTERM is the only signal for MVP (see D15). Can be added later.
+      observable: true
+      recommendation: b
+      rationale: Optional reason for audit trail. No force flag for MVP.
+      stakes: low
+  - id: D24
+    scope:
+      - S2
+    question: Should the session-cancel tool call AnimatorApi.cancel() or operate directly on Stacks + process.kill()?
+    options:
+      a: Call AnimatorApi.cancel() — delegate to the apparatus
+      b: Operate directly on Stacks and kill the process — bypass the apparatus
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        Tools should delegate to apparatus APIs — same pattern as writ-cancel (delegates to ClerkApi.transition) and summon (delegates to AnimatorApi.summon). The apparatus owns the business logic; the tool is a thin parameter adapter.
+      observable: false
+      recommendation: a
+      rationale: Follow the established tool → apparatus delegation pattern.
+      stakes: low
+  - id: D25
+    scope:
+      - S3
+    question: How to update the session-list tool to support the new 'cancelled' status?
+    options:
+      a: Add 'cancelled' to the z.enum in the status parameter
+      b: Switch to z.string() to avoid maintaining the enum as statuses are added
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: |
+        The enum provides validation and documentation. z.string() would accept any value, including typos. The status set changes rarely — maintaining the enum is minimal effort.
+      observable: true
+      recommendation: a
+      rationale: Maintain the typed enum. Status set changes rarely.
+      stakes: low
+  - id: D26
+    scope:
+      - S1
+    question: How does AnimatorApi.cancel() resolve the provider for cross-process cancel?
+    options:
+      a: Call resolveProvider(config) — same as animate() does. The provider is stateless; any Animator instance can resolve it.
+      b: Store the provider name on SessionDoc and look it up dynamically
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        The provider name is already on SessionDoc (the 'provider' field). But resolveProvider() uses guild config to find the apparatus, not the stored provider name. For now there's only one provider per guild. Using the same resolution as animate() is consistent and simple. If multiple providers are supported in the future, cancel() would need to look up by the stored provider name — but that's a future concern.
+      observable: false
+      recommendation: a
+      rationale: Same provider resolution as animate(). One provider per guild for now.
+      stakes: low
+  - id: D27
+    scope:
+      - S1
+    question: What fields does cancel() set when patching the SessionDoc?
+    options:
+      a: status, endedAt, durationMs, error (reason)
+      b: status and error only — let the result handler fill in endedAt and durationMs
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        For cross-process cancel, the result handler in Process A may overwrite with a different endedAt/durationMs. But per D12, the result handler skips the write if status is already terminal. So cancel() must set all terminal fields — it's the authoritative write. endedAt is when cancel was requested (close enough to actual death). durationMs is computed from startedAt in the existing doc.
+      observable: false
+      recommendation: a
+      rationale: cancel() is the authoritative terminal write for cancelled sessions. Must include all terminal fields.
+      stakes: low
+  - id: D28
+    scope:
+      - S1
+    question: Does cancel() need to close the broadcaster for in-process cancel?
+    options:
+      a: Yes — check activeSessions map and close the broadcaster so streaming consumers complete
+      b: No — the broadcaster closes automatically when the process exits and the chunk consumer finishes
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        When the process is killed, the provider chunk iterable completes, the background consumer finishes, and broadcaster.close() is called in the finally block of the chunk consumer. This happens automatically through the existing flow. cancel() doesn't need to touch the broadcaster directly.
+      observable: false
+      recommendation: b
+      rationale: The existing chunk consumer already closes the broadcaster when the provider stream ends.
+      stakes: low
+  - id: D29
+    scope:
+      - S1
+    question: Should new types be exported from the animator barrel (index.ts)?
+    options:
+      a: No new types needed — cancel() is added to existing AnimatorApi interface
+      b: Export a CancelOptions type if one is created
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: |
+        The cancel method's options parameter is simple enough to be inline: { reason?: string }. No need for a named type export. The AnimatorApi interface already includes the cancel method signature.
+      observable: false
+      recommendation: a
+      rationale: Inline options type. No new export needed.
+      stakes: low
+  - id: D30
+    scope:
+      - S2
+    question: What should the session-cancel tool return?
+    options:
+      a: The full updated SessionDoc (same as session-show returns)
+      b: A summary projection (id, status, error) — lighter response
+    selected: a
+    analysis:
+      audience:
+        - operator
+      confidence: high
+      context: |
+        Writ-cancel returns the full updated writ. Session-cancel should follow the same pattern. The full SessionDoc gives the caller all the information they need without a follow-up session-show call.
+      observable: true
+      recommendation: a
+      rationale: Return the full SessionDoc. Matches writ-cancel pattern.
+      stakes: low
