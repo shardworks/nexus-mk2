@@ -1,0 +1,44 @@
+brief: |
+  Today, writs support arbitrary relationships between each other via 'links'. We would like to add a more structured, explicit relationship as well between "parent" writs and "child" writs. Parent/Child relationships would form a DAG, with each child having zero or one parents, and parents having zero or more children. Parent and child writs can be of any type -- they do not have to be of the same type.
+
+  There is a natural relationship between the status of parents and children. The following list is illustrative and and not necessarily exhaustive--during planning, the full state machine of parent/child hierarchies should be explored and designed, and may contradict the explicit examples below if a better design is selected.
+
+  - Parent writs are in a 'pending' or 'waiting' state if they have any children in non-terminal states. (Use suitable existing state or introduce new one)
+  - If any child writs fail, then all siblings should be cancelled/abandoned/something, and the parent should be failed as well
+  - when all children for a parent are completed, the parent should transition from pending/waiting into the ready state
+  - etc
+
+  Wherever possible, the writ state transitions should use CDC so that parent/sibling transitions happen in the same transaction.
+
+slug: writ-parentchild-relationships
+
+scope:
+  - id: S1
+    description: "Parent/child data model: parentId field on WritDoc, ancestry validation, cycle prevention, creation via post() with parentId"
+    rationale: "Core data model enabling the entire feature — every other scope item depends on this"
+    included: true
+
+  - id: S2
+    description: "New 'waiting' status and state machine extensions: transitions to/from waiting, auto-transition when children are added to a non-waiting parent"
+    rationale: "Brief explicitly requires a parent-specific status ('pending' or 'waiting') for writs with non-terminal children"
+    included: true
+
+  - id: S3
+    description: "Child-to-parent CDC rollup: when all children complete the parent transitions to ready; when a child fails, non-terminal siblings are cancelled and parent is failed — all within the same transaction via Phase 1 CDC"
+    rationale: "Brief explicitly requires child completion rollup, failure cascade, and CDC-based transactional consistency"
+    included: true
+
+  - id: S4
+    description: "Parent-to-children cascade: cancelling or failing a parent auto-cancels all non-terminal children, recursively through the hierarchy"
+    rationale: "Implied by the brief's hierarchy semantics — orphaned children of a cancelled/failed parent should not continue executing"
+    included: true
+
+  - id: S5
+    description: "Tooling updates: parentId param on commission-post, new writ-children tool, writ-show includes parent/children context, writ-list adds 'waiting' to status filter and parentId filter"
+    rationale: "Agents and operators need tools to create hierarchies and inspect them"
+    included: true
+
+  - id: S6
+    description: "Documentation update: clerk.md Future sections replaced with actual design, status machine diagram updated"
+    rationale: "The 'Future: Writ Hierarchy' section in clerk.md describes speculative design that this commission replaces with real implementation"
+    included: true
