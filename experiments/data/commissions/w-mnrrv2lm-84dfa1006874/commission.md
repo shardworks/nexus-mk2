@@ -1,0 +1,5 @@
+The astrolabe adds a PlanDoc book to the stacks, which contains information about astrolabe planning operations. We should add a new page to the Oculus for viewing this data. A list/detail view (similar to Writs and Rigs) makes sense here. Include cross-links where appropriate to the 'brief' and 'mandate' writs (once created). It should be possible at a glance to view the status of planning for each brief. Additionally, AI agent cost information should be surfaced -- both per-planning-step, and for the overall process.
+
+## Cross-Link Notes
+
+There is not currently a well-known way to deep link to entities on other oculus pages. A system for this should be figured (possibly as a new kit contribution? or as some sort of convention perhaps? could be based on the tool namving convention, although thats brittle).
