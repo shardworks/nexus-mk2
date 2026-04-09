@@ -1,0 +1,805 @@
+decisions:
+  - id: D1
+    scope:
+      - S5
+    question: What page ID and title to register in supportKit.pages?
+    options:
+      a: "id: 'feedback', title: 'Feedback'"
+      b: "id: 'input-requests', title: 'Input Requests'"
+      c: "id: 'patron-review', title: 'Review'"
+    selected: a
+    analysis:
+      audience:
+        - patron
+        - operator
+      confidence: high
+      context: "The brief explicitly specifies { id: 'feedback', title: 'Feedback', dir: 'src/static/feedback' }. The URL becomes /pages/feedback/ and the nav label is 'Feedback'."
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit about this.
+      stakes: low
+  - id: D2
+    scope:
+      - S5
+    question: What directory path for the feedback page's static assets?
+    options:
+      a: "'src/static/feedback' — subdirectory of the existing spider static dir"
+      b: "'pages/feedback' — separate top-level pages directory like the Clerk's writs page"
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The brief explicitly specifies dir: 'src/static/feedback'. The Spider's existing page uses 'src/static'. The Clerk uses 'pages/writs' but this is a different package convention."
+      observable: false
+      recommendation: a
+      rationale: Brief is explicit. Also consistent with the Spider's existing pattern of using src/static/.
+      stakes: low
+  - id: D3
+    scope:
+      - S1
+    question: What are the correct REST endpoint URLs for the input-request tools?
+    options:
+      a: "Use URLs from the brief's table: /api/input-request/list, /api/input-request/show, etc."
+      b: "Use the actual URLs produced by toolNameToRoute: /api/input/request-list, /api/input/request-show, etc."
+    selected: b
+    analysis:
+      audience:
+        - patron
+        - implementer
+      confidence: high
+      context: "The Oculus toolNameToRoute function splits on the FIRST dash only: 'input-request-list' → '/api/input/request-list'. The brief's table shows '/api/input-request/list' which is incorrect. Verified against how spider.js calls '/api/rig/list' for tool 'rig-list'."
+      observable: true
+      recommendation: b
+      rationale: The code is ground truth. The brief's URL table is wrong — using it would produce 404s.
+      stakes: high
+  - id: D4
+    scope:
+      - S1
+    question: What default status filter to apply on page load?
+    options:
+      a: "'pending' — match the tool's default"
+      b: No filter (show all statuses)
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The brief says 'defaulting to pending status'. The input-request-list tool also defaults to 'pending'. Pending requests are what the patron needs to act on.
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit and matches the tool's default behavior.
+      stakes: low
+  - id: D5
+    scope:
+      - S1
+    question: How to implement the status filter UI?
+    options:
+      a: "A <select> dropdown with options: pending / completed / rejected"
+      b: Tab-style buttons for each status (like the spider page's tab bar)
+      c: A <select> dropdown with an additional 'All' option showing all statuses
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: The brief says 'filter by status (pending / completed / rejected)'. The spider page uses a <select> for its status filter. Adding 'All' is not mentioned in the brief but would add utility.
+      observable: true
+      recommendation: a
+      rationale: The brief lists exactly three statuses. Matches the spider page's <select> pattern without scope creep.
+      stakes: low
+  - id: D6
+    scope:
+      - S1
+    question: What limit to pass when fetching the list?
+    options:
+      a: Use the tool's default (20)
+      b: Pass a higher limit (e.g., 50 or 100) since the UI is a visual dashboard
+    selected: b
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: The tool defaults to 20. The spider page fetches rigs with limit=100. For a patron review dashboard, showing more items avoids pagination complexity. The number of active input requests is typically small.
+      observable: true
+      recommendation: b
+      rationale: Matches spider page convention of limit=100. Input requests are typically few; no pagination needed.
+      stakes: low
+  - id: D7
+    scope:
+      - S1
+    question: What polling interval for new pending requests on the list view?
+    options:
+      a: 10 seconds
+      b: 15 seconds
+      c: 12 seconds
+    selected: c
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: The brief says 'every 10-15s'. The patron-input block type polls at 10s. Picking the midpoint avoids being too aggressive while still feeling responsive.
+      observable: true
+      recommendation: c
+      rationale: Midpoint of the brief's 10-15s range. Not too aggressive on the server, responsive enough for the patron.
+      stakes: low
+  - id: D8
+    scope:
+      - S1
+    question: When polling refreshes the list, should it preserve the current status filter selection?
+    options:
+      a: Yes — re-fetch with the currently selected status filter
+      b: No — always poll for pending only, regardless of filter selection
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: If the patron has switched to 'completed' to review past responses, polling should respect that. Silently switching back to 'pending' would be disorienting.
+      observable: true
+      recommendation: a
+      rationale: Standard UX — polling should not change the user's filter state.
+      stakes: low
+  - id: D9
+    scope:
+      - S1
+    question: Should polling be active only on the list view, or also when the detail view is shown?
+    options:
+      a: List view only — stop polling when viewing a detail, resume on back
+      b: Always poll in background regardless of current view
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The brief says 'On the list view, poll periodically'. Polling while the patron is answering questions is unnecessary and could cause confusing state updates. The spider page similarly polls only in certain contexts.
+      observable: false
+      recommendation: a
+      rationale: Brief says 'on the list view'. Polling during detail view is unnecessary.
+      stakes: low
+  - id: D10
+    scope:
+      - S1
+    question: What information to show on each list card?
+    options:
+      a: Request ID, rig ID, engine ID, message, status badge, created timestamp
+      b: Same as (a) plus an answered-question count (e.g., '3/5 answered')
+    selected: b
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: "The brief explicitly lists: Request ID, rig ID, engine ID, message field, status badge, created timestamp. The list tool returns full InputRequestDoc so answer counts are available, but the brief doesn't mention showing them in the list view — only in the detail view."
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit about the list card fields. Answer progress is a detail-view concern.
+      stakes: low
+  - id: D11
+    scope:
+      - S1
+    question: What badge class mapping to use for input request statuses?
+    options:
+      a: pending → badge--warning, completed → badge--success, rejected → badge--error
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The brief explicitly specifies this mapping. It matches the shared Oculus badge classes.
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit.
+      stakes: low
+  - id: D12
+    scope:
+      - S1
+    question: What to show when the request list is empty?
+    options:
+      a: Use the shared .empty-state class with a message like 'No {status} requests.'
+      b: Show nothing — just an empty container
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: Both the spider page and the writs page use an empty state message. The Oculus stylesheet provides an .empty-state class.
+      observable: true
+      recommendation: a
+      rationale: Follows established codebase convention.
+      stakes: low
+  - id: D13
+    scope:
+      - S2
+    question: How to navigate from list to detail view?
+    options:
+      a: Click on a request card to fetch full request and show detail view (same as spider page list→detail)
+      b: Use the list data directly without re-fetching (the list already returns full InputRequestDoc)
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: The input-request-list tool returns full InputRequestDoc objects (not summaries). Re-fetching via input-request-show is unnecessary if we already have the data. However, the data could be stale if another patron answered questions between list fetch and card click.
+      observable: false
+      recommendation: b
+      rationale: Avoids an unnecessary network round trip. The list returns full docs. Staleness is minimal for the initial render; auto-save responses will update the server immediately.
+      stakes: low
+  - id: D14
+    scope:
+      - S2
+    question: How to order questions in the detail view?
+    options:
+      a: Iterate Object.keys(questions) in insertion order
+      b: Sort alphabetically by question key
+      c: Group by question type (choice first, then boolean, then text)
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: JavaScript preserves insertion order for string keys in objects. The decision-review engine adds decision questions first (D1, D2...), then scope questions (scope:S1, scope:S2...). This natural ordering groups decisions together, then scope items — which is a sensible review flow.
+      observable: true
+      recommendation: a
+      rationale: Preserves the engine's intentional ordering. Decision questions before scope toggles is a natural review flow.
+      stakes: low
+  - id: D15
+    scope:
+      - S2
+    question: Where to display the request's message field in the detail view?
+    options:
+      a: Prominently at the top, before the question list, as a heading or large text block
+      b: As a subtitle under the request ID heading
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: "The brief says: 'The request's message field should display prominently at the top of the detail view, providing context for what the patron is reviewing.' The message is set by the engine, e.g., 'Planning review for: Implement Clerk apparatus (codex: nexus)'."
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit — 'prominently at the top'.
+      stakes: low
+  - id: D16
+    scope:
+      - S2
+    question: How to render choice question options — showing option key, description, or both?
+    options:
+      a: Show option key as primary text, description as secondary/dim text
+      b: Show description only — the key is an internal identifier
+      c: "Show key and description side-by-side: 'key — description'"
+    selected: b
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: The brief says 'option key, and description text'. In ChoiceQuestionSpec, options is Record<string, string> where key is the option key and value is the display label. The decision-review engine uses option keys like 'a', 'b', 'c' with display labels like the option descriptions. The key identifies the choice for the patron.
+      observable: true
+      recommendation: a
+      rationale: Brief specifies 'option key, and description text'. Key as bold/primary, description as secondary.
+      stakes: low
+  - id: D17
+    scope:
+      - S2
+    question: How to render the expandable details/context for questions?
+    options:
+      a: A clickable text toggle ('Show details' / 'Hide details') that toggles visibility of a details block
+      b: A native <details>/<summary> HTML element
+    selected: b
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The brief provides explicit CSS for .details-toggle and .details-content with .visible class toggling. This is a custom toggle, not a native <details> element. The spider page uses a native <details> element in the config tab, but the brief's CSS specs prescribe the custom approach.
+      observable: true
+      recommendation: a
+      rationale: Brief provides explicit CSS for the custom toggle pattern.
+      stakes: low
+  - id: D18
+    scope:
+      - S2
+    question: Should boolean questions default to 'unanswered' (neither checked nor unchecked) when no pre-filled answer exists?
+    options:
+      a: Yes — show an indeterminate state (plain border, no check/X) until clicked
+      b: No — default to false (unchecked state with red X)
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: The brief shows CSS for .checked (green) and .unchecked (red X, line-through) states. An unanswered boolean has no entry in the answers map. If we default to false, we'd immediately show red X which may feel like an answer was already given. An indeterminate state makes it clear the patron hasn't decided yet.
+      observable: true
+      recommendation: a
+      rationale: Prevents confusion about whether a false answer was intentionally set vs. never answered.
+      stakes: high
+  - id: D19
+    scope:
+      - S2
+    question: Should read-only rendering be used for completed/rejected requests in the detail view?
+    options:
+      a: Yes — disable form controls and hide action buttons for non-pending requests
+      b: No — always show interactive controls (the API will reject mutations on non-pending requests anyway)
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The brief says the patron can 'filter by status' and 'click a card to drill in', implying viewing completed/rejected requests is possible. The API throws if you try to answer a non-pending request. Showing disabled controls is less confusing than showing active controls that silently fail.
+      observable: true
+      recommendation: a
+      rationale: Defensive UX — completed/rejected requests should look completed, not interactive.
+      stakes: low
+  - id: D20
+    scope:
+      - S3
+    question: How to construct the POST body for the input-request-answer endpoint for each question type?
+    options:
+      a: "Choice: {id, question, select: optionKey} or {id, question, custom: text}. Boolean: {id, question, value: 'true'/'false'}. Text: {id, question, value: text}."
+      b: Same as (a) but send boolean as native true/false in JSON
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The input-request-answer tool defines value as z.string().optional(). The tool handler passes rawAnswer as string for boolean/text. The validateAnswer function accepts 'true'/'false' as strings. Since POST sends JSON body, the Oculus does toolDef.params.parse(body) which will validate against z.string(). Sending native true would fail z.string() validation.
+      observable: false
+      recommendation: a
+      rationale: The tool param is z.string() — native boolean would fail Zod validation. Must send 'true'/'false' strings.
+      stakes: high
+  - id: D21
+    scope:
+      - S3
+    question: When should text answers auto-save?
+    options:
+      a: On blur (when the textarea loses focus)
+      b: On change (when the value changes and the field loses focus)
+      c: With a debounce timer (e.g., 500ms after last keystroke)
+    selected: custom
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The brief explicitly says 'text blur' as the auto-save trigger for text questions. The blur event fires when the patron clicks away or tabs to another element.
+      observable: true
+      recommendation: a
+      rationale: "Brief is explicit: 'text blur'."
+      stakes: low
+    patron_override: on change, and with a debounce timer
+  - id: D22
+    scope:
+      - S3
+    question: How to handle auto-save errors (e.g., network failure, request already completed by another patron)?
+    options:
+      a: Show a brief inline error message near the question that failed to save, auto-dismiss after a few seconds
+      b: Show a persistent error banner at the top of the detail view
+      c: Silently retry once, then show error on second failure
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: The brief doesn't specify error handling. The spider page silently catches fetch errors and logs to console. For a patron-facing form where answers are being saved, some visual feedback on failure is important — the patron needs to know their answer didn't persist.
+      observable: true
+      recommendation: a
+      rationale: Answers are critical data — silent failure would be confusing. Inline per-question errors are least disruptive.
+      stakes: low
+  - id: D23
+    scope:
+      - S3
+    question: Should auto-save track local state to avoid redundant POSTs?
+    options:
+      a: Yes — track local answer state and only POST when the answer actually changes
+      b: No — always POST on interaction, even if the answer hasn't changed
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The detail view initializes from the server's answers (including pre-filled ones). Without local tracking, clicking an already-selected radio option would trigger a redundant POST. Tracking local state prevents unnecessary requests.
+      observable: false
+      recommendation: a
+      rationale: Avoids redundant API calls and unnecessary updatedAt bumps.
+      stakes: low
+  - id: D24
+    scope:
+      - S3
+    question: When a custom text input is used for a choice question, what triggers the auto-save?
+    options:
+      a: On blur of the custom input field (same as text questions)
+      b: On enter keypress and on blur
+    selected: b
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The brief says auto-save on 'option click, toggle, text blur'. Custom input is a text field, so blur is the natural trigger consistent with text questions.
+      observable: true
+      recommendation: a
+      rationale: Consistent with the text blur pattern specified in the brief.
+      stakes: low
+  - id: D25
+    scope:
+      - S3
+    question: When a custom answer is typed into the custom input for a choice question, should the radio selection be cleared?
+    options:
+      a: "Yes — deselect any radio option and send {custom: text} as the answer"
+      b: No — keep the radio selected and only use custom if no radio is selected
+    selected: custom
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: "The ChoiceAnswer type is { selected: string } | { custom: string } — exactly one or the other. If the patron types a custom answer, it replaces the radio selection. The validate logic enforces 'exactly one of selected or custom'."
+      observable: true
+      recommendation: a
+      rationale: The type system mandates exactly one of selected or custom. Typing custom must clear the radio.
+      stakes: high
+    patron_override: include a radio for the custom selection, and to use custom the custom radio button must be selected
+  - id: D26
+    scope:
+      - S3
+    question: When a radio option is clicked for a choice question that has a custom answer, should the custom input be cleared?
+    options:
+      a: "Yes — clear the custom input text and send {select: optionKey}"
+      b: No — keep the custom text visible but send the radio selection
+    selected: b
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: Symmetrical with D25 — selecting a radio should clear custom. Keeping stale custom text visible while a radio is selected would confuse the patron about which answer is active.
+      observable: true
+      recommendation: a
+      rationale: Visual state must match persisted state. Stale custom text is confusing.
+      stakes: low
+  - id: D27
+    scope:
+      - S4
+    question: How to show the answered-question count indicator?
+    options:
+      a: Text near the Complete button, e.g., '3/5 answered'
+      b: Text in the page header area
+      c: As a badge on the Complete button itself
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The brief says 'Show a count indicator (e.g., "3/5 answered") near the button'. This positions the count right where the patron is looking when deciding whether to complete.
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit — 'near the button'.
+      stakes: low
+  - id: D28
+    scope:
+      - S4
+    question: How to implement the rejection reason prompt?
+    options:
+      a: Inline text input that appears when the Reject button is clicked, with a confirm button
+      b: A browser prompt() dialog
+      c: Always-visible text input near the Reject button
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The brief says 'Should prompt for a rejection reason via an inline text input'. A browser prompt() would break the dark-themed immersion. An always-visible input wastes space and implies rejection is the primary action.
+      observable: true
+      recommendation: a
+      rationale: Brief specifies 'inline text input'. Click Reject → expand input → type reason → confirm.
+      stakes: low
+  - id: D29
+    scope:
+      - S4
+    question: After successful completion, what success state to show before navigating back to the list?
+    options:
+      a: Flash a brief success message/badge on the detail view, then navigate back after ~1.5s
+      b: Navigate back immediately and show a success toast/badge on the list view
+      c: Navigate back immediately with no success indicator
+    selected: b
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: The brief says 'On success, show a success state and navigate back to the list.' This implies the success state is visible before navigation. A brief delay lets the patron register that submission succeeded.
+      observable: true
+      recommendation: a
+      rationale: Brief says 'show a success state and navigate back'. A brief delay makes the success visible.
+      stakes: low
+  - id: D30
+    scope:
+      - S4
+    question: Should the Complete button be fully disabled (grayed out) or visually enabled with validation on click?
+    options:
+      a: Disabled with opacity:0.4 and cursor:not-allowed until all questions answered
+      b: Always clickable, show validation error on click if unanswered questions remain
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The brief says 'The Complete button should be disabled until all questions have answers'. The brief provides CSS for .btn-complete:disabled with opacity 0.4 and not-allowed cursor.
+      observable: true
+      recommendation: a
+      rationale: Brief is explicit — disabled until all answered, with provided CSS.
+      stakes: low
+  - id: D31
+    scope:
+      - S4
+    question: Should the Reject button be available at any time (even with partial answers) or only when no answers exist?
+    options:
+      a: Always available for pending requests — rejection can happen at any point
+      b: Only available when zero answers have been provided
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The input-request-reject tool description says 'The request can be rejected even with partial answers.' The patron may start reviewing, disagree with the premise, and want to reject.
+      observable: true
+      recommendation: a
+      rationale: The tool explicitly supports rejection with partial answers.
+      stakes: low
+  - id: D32
+    scope:
+      - S6
+    question: Should the page-specific CSS use fallback values for custom properties (like spider.css does)?
+    options:
+      a: "Yes — use var(--border, #3b4261) with fallback values for defensive coding"
+      b: No — use bare var(--border) since the Oculus always injects style.css
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: "The spider.css uses fallbacks like var(--border, #333). However, the brief says 'do not redefine them in the page stylesheet' and the Oculus injects /static/style.css into all index.html pages. The fallbacks in spider.css appear to be an older convention."
+      observable: false
+      recommendation: b
+      rationale: The Oculus guarantees injection of style.css. Fallbacks add noise. The brief's CSS examples use bare var() without fallbacks.
+      stakes: low
+  - id: D33
+    scope:
+      - S6
+    question: Should the CSS use the exact class names and rules from the brief, or adapt them?
+    options:
+      a: Use the brief's CSS verbatim as the starting point — class names, rules, and values exactly as specified
+      b: Adapt class names and rules to match existing codebase conventions
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The brief provides detailed CSS specifications with specific class names (.request-card, .question-card, .option, .option-radio, .boolean-item, .boolean-toggle, .text-question, .btn-complete, .btn-reject, .back-link, .details-toggle, .details-content, .custom-row). These are all new page-specific classes that don't conflict with existing styles.
+      observable: true
+      recommendation: a
+      rationale: The brief's CSS is comprehensive and internally consistent. No reason to deviate.
+      stakes: low
+  - id: D34
+    scope:
+      - S6
+      - S2
+    question: How to style boolean questions that are in the indeterminate/unanswered state?
+    options:
+      a: Default border color (--border), empty interior, no check or X
+      b: Dashed border to indicate 'not yet answered'
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: "The brief provides CSS for .checked (green check) and .unchecked (red X) states. No indeterminate state is specified. The default .boolean-toggle style has border: 2px solid var(--border) with no fill, which naturally serves as indeterminate."
+      observable: true
+      recommendation: a
+      rationale: The base .boolean-toggle CSS already provides a clean unanswered state — solid border, no icon.
+      stakes: low
+  - id: D35
+    scope:
+      - S1
+      - S6
+    question: What page title to show in the <h1>?
+    options:
+      a: "'Feedback'"
+      b: "'Input Requests'"
+      c: "'Patron Review'"
+    selected: a
+    analysis:
+      audience:
+        - patron
+      confidence: high
+      context: The page title should match the nav title for consistency. D1 establishes the page title as 'Feedback'. The spider page uses 'Spider' as both its nav title and h1.
+      observable: true
+      recommendation: a
+      rationale: Consistent with the page's nav title.
+      stakes: low
+  - id: D36
+    scope:
+      - S1
+      - S2
+    question: How to implement list↔detail navigation?
+    options:
+      a: "Two div containers (#list-view, #detail-view) toggled with style.display — same as the spider page"
+      b: Single container with content replaced dynamically
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The spider page uses two sibling divs (#rig-list-view, #rig-detail-view) with display toggling. This is the established pattern."
+      observable: false
+      recommendation: a
+      rationale: Matches the spider page's established convention.
+      stakes: low
+  - id: D37
+    scope:
+      - S2
+    question: How to render question card HTML — string concatenation (spider pattern) or DOM API?
+    options:
+      a: String concatenation with innerHTML, matching spider.js pattern
+      b: DOM createElement/appendChild API calls
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The brief says 'Follow the Spider page's pattern: an IIFE, string-based HTML rendering, event delegation.' The spider.js uses string concatenation everywhere. The spider-ui.test.ts tests rely on regex-matching the template strings in the source."
+      observable: false
+      recommendation: a
+      rationale: Brief is explicit about string-based rendering. Also enables source-text regression tests.
+      stakes: low
+  - id: D38
+    scope:
+      - S2
+    question: Where to place event listeners for interactive question controls?
+    options:
+      a: Attach after rendering innerHTML, using querySelectorAll to find elements (spider page pattern)
+      b: Use event delegation on a parent container with data-* attributes
+    selected: b
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: The brief says 'event delegation'. The spider page uses a mixed approach — some event delegation, some direct attachment after rendering. For the feedback page, question cards are dynamically rendered and could be re-rendered; event delegation on a stable parent is more robust.
+      observable: false
+      recommendation: b
+      rationale: Brief mentions event delegation. More robust when content is re-rendered.
+      stakes: low
+  - id: D39
+    scope:
+      - S2
+    question: How to identify question elements in the DOM for event delegation?
+    options:
+      a: data-question-key attribute on question cards and interactive elements
+      b: data-key attribute (shorter)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Descriptive attribute names prevent collision. The spider page uses data-rig-id. Following the same convention with a descriptive prefix.
+      observable: false
+      recommendation: a
+      rationale: Descriptive, follows spider page's data-rig-id naming convention.
+      stakes: low
+  - id: D40
+    scope:
+      - S2
+    question: How to identify option elements within a choice question for event delegation?
+    options:
+      a: data-option-key attribute on each option row
+      b: data-value attribute
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: Matches the naming convention from D39. Each option row needs to identify both its question key (from parent) and its option key.
+      observable: false
+      recommendation: a
+      rationale: Descriptive and consistent with D39.
+      stakes: low
+  - id: D41
+    scope:
+      - S7
+    question: What test file name and location for the feedback page UI tests?
+    options:
+      a: packages/plugins/spider/src/static/feedback/feedback-ui.test.ts
+      b: packages/plugins/spider/src/static/feedback-ui.test.ts (outside the feedback dir, alongside spider-ui.test.ts)
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: spider-ui.test.ts lives at src/static/spider-ui.test.ts (same directory as spider.js). For the feedback page, the JS lives at src/static/feedback/feedback.js. Placing the test in the same directory follows the same colocation pattern.
+      observable: false
+      recommendation: a
+      rationale: Colocates test with the file it tests, following spider-ui.test.ts precedent.
+      stakes: low
+  - id: D42
+    scope:
+      - S7
+    question: What structural patterns should the source-text regression tests verify?
+    options:
+      a: IIFE wrapper, question-type branching (choice/boolean/text), answer POST body shapes, badge class mapping, event delegation on data-* attributes
+      b: Only the IIFE wrapper and question-type branching
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: "The spider-ui.test.ts verifies specific HTML template patterns (rig-link anchors). For the feedback page, the key structural invariants are: question rendering branches by type, answer payloads match the API contract, status badge mapping is correct."
+      observable: false
+      recommendation: a
+      rationale: Comprehensive regression coverage for the most critical invariants.
+      stakes: low
+  - id: D43
+    scope:
+      - S1
+      - S5
+      - S6
+    question: What file names for the three static assets?
+    options:
+      a: index.html, feedback.css, feedback.js
+      b: index.html, style.css, app.js
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: The spider page uses spider.css and spider.js. The brief mentions 'its own index.html, CSS, and JS files'. Following the spider convention of naming files after the page.
+      observable: false
+      recommendation: a
+      rationale: Matches spider page's naming convention (spider.css / spider.js → feedback.css / feedback.js).
+      stakes: low
+  - id: D44
+    scope:
+      - S1
+      - S2
+    question: What HTML structure for the page's index.html?
+    options:
+      a: "Standard HTML5 with <main style='padding: 24px'>, <h1>, list-view div, detail-view div (hidden), linking feedback.css and feedback.js"
+      b: Same as (a) but with inline styles instead of external CSS
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: high
+      context: "The brief says 'Same structure as the Spider page: a <main> with 24px padding, page title as <h1>'. The spider page uses index.html + spider.css + spider.js as separate files."
+      observable: false
+      recommendation: a
+      rationale: Matches spider page convention of separate HTML/CSS/JS files.
+      stakes: low
+  - id: D45
+    scope:
+      - S2
+      - S4
+    question: How to visually indicate read-only mode for completed/rejected requests?
+    options:
+      a: Hide the Complete/Reject buttons, add opacity:0.6 to question cards, disable click handlers
+      b: Show buttons as disabled, show a status banner at top ('This request has been completed/rejected')
+    selected: b
+    analysis:
+      audience:
+        - patron
+      confidence: medium
+      context: Showing disabled buttons and a clear status banner communicates state better than just hiding elements. The patron understands the request was acted upon and can review what was submitted.
+      observable: true
+      recommendation: b
+      rationale: More informative — the patron sees both the outcome and the responses.
+      stakes: low
+  - id: D46
+    scope:
+      - S1
+      - S2
+    question: Should clicking a request card on the list view re-fetch the request via input-request-show before rendering the detail?
+    options:
+      a: No — use the data from the list response (decided in D13 to use list data)
+      b: Yes — always re-fetch for freshest data
+    selected: a
+    analysis:
+      audience:
+        - implementer
+      confidence: medium
+      context: Consistent with D13. The list returns full InputRequestDoc. A re-fetch is unnecessary for the initial render. Subsequent answer auto-saves update the server; when the patron navigates back, the list poll will have fresh data.
+      observable: false
+      recommendation: a
+      rationale: Consistent with D13. Avoids redundant network call.
+      stakes: low
