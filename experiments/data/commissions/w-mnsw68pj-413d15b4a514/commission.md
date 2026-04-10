@@ -1,0 +1,1 @@
+We want plugins to be able to ship custom types of writs, and other components which use that writ type. This should be similar to how 'roles' can be configured in guild.json, or added by plugins. As with roles, guild.json definitions should take precedent over plugin contributions.
