@@ -529,3 +529,15 @@ entries:
     item: "Session wrap-up: ethnography session notes + transcripts."
     commissionable: false
     justification: sanctum
+
+  - session: ef034a7b-8aee-4529-ba78-f6ace6f7d35d
+    date: 2026-04-10
+    item: "Triaged rig-spawn outage reported as a 'rate limit bug'. Root cause: head-of-line blocking in spider's trySpawn() — 70988c1 made rig dispatch opt-in per writ type but left eligibility filtering inside the for-loop, after a fixed limit:10 query ordered by createdAt. With 30 ready quests (no template) shadowing 3 mandates at positions 13/26/32, the spawn page was always 100% non-dispatchable, trySpawn returned null every tick, throttle capacity sat unused. Also discovered two writs that had been accidentally transitioned active → ready with no rigs; no CLI affordance for that reversion, so flipped them via direct sqlite edit of books_clerk_writs (set status, removed acceptedAt, bumped updatedAt) after discussing options with Sean. Fixed the spawn query in /workspace/nexus: pull dispatchable types from rigTemplateRegistry.listTemplateMappings() and add an ['type', 'IN', types] constraint. 526/526 spider tests pass. Committed as Coco in the framework repo (commit 7e35dc0). Daemon restart required to pick up the change. Noted missing CLI affordances (writ status revert, multi-status filter) for future quest work."
+    commissionable: false
+    justification: sanctum
+
+  - session: 79376568-5376-4796-8421-b7a2d4bdec5e
+    date: 2026-04-10
+    item: "Writ-substrate cluster cleanup. Did a pass across all 13 live quests in the T1 (writ substrate / quest type) and T2 (writs-as-obligations / multi-rig) clusters. Found that T1.8 (file-canonical quest bodies, w-mnt0jin1) shipped today and explicitly dissolves three siblings by construction — T1.3 concurrent writes (git conflict semantics), T1.6 editing ergonomics (native Read/Edit/Write on files), T1.7 body edit history (git log -p + closure snapshot). Recommended closing all four to Sean; closures approved. Hit a status-model wall: all four were in 'waiting' status and the CLI has no waiting→completed transition (waiting only accepts fail/cancel). Sean directed direct DB patch rather than forking into a CLI fix. Patched statuses in books_clerk_writs content blobs (T1.8→completed, T1.3/T1.6/T1.7→cancelled), updated the three dissolved quests' files with closure notes + snapshotted into rows via nsg writ edit, deleted all four files, committed in vibers as Coco. The waiting→terminal papercut is additional evidence for quest w-mnsx90p1 (writ status model simplification). Net: writ-substrate cluster drops from 13 to 9 live, zero design thinking lost."
+    commissionable: false
+    justification: sanctum
