@@ -1,0 +1,1 @@
+The `nsg` CLI should check for a GUILD_ROOT environment variable. If this environment variable is set, it should be interpreted as the absolute path to a Nexus guild (the same as would be passed via the `--guild-root` cli parameter).
