@@ -1,0 +1,1 @@
+Same style and functionality as 'Status' filters. One button per known writ type. Start with 'mandate' selected by default if it is present. Otherwise, start with 'All' selected.
