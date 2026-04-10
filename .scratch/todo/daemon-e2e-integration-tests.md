@@ -53,6 +53,42 @@ Start with **Option C**:
 
 Dependencies on other TODOs: none, but this would benefit from the **oculus stop hook** TODO landing first so test 3 can verify oculus shutdown too.
 
+## Real-world bug that motivates this TODO
+
+On Sean's first real run of the daemon (2026-04-10), three regressions
+shipped because the unit tests didn't exercise the full launch → collect
+cycle:
+
+1. **`spider.ts:tryCollect` treated `'pending'` SessionDocs as terminal.**
+   The pre-write pending state crossed an apparatus boundary (claude-code
+   wrote it, spider read it) without spider knowing about the new state.
+   Every animator unit test passed; every spider unit test passed. The
+   bug only manifested when both packages ran in the same process against
+   a real sessions book.
+
+2. **`resolveBabysitterPath()` returned `babysitter.js`** even in source
+   mode (`.ts`), so the babysitter died with MODULE_NOT_FOUND immediately.
+   No unit test exercised the actual spawn from a source-mode daemon.
+
+3. **Spawn used bare `node` argv** without forwarding
+   `--experimental-transform-types`, so even with the right path the
+   `.ts` babysitter wouldn't load.
+
+All three would have been caught by a single end-to-end test that:
+
+  a. Boots the daemon in foreground from source mode
+  b. Posts a real commission
+  c. Asserts that within N seconds either the rig advances past pending
+     OR the session has actual transcript output OR (failing both) the
+     test fails loudly
+
+The integration test surface is where multi-apparatus state machines
+get exercised. **The boundary between "pending SessionDoc" and "spider
+collect" is exactly the kind of cross-cutting state that unit tests miss
+and integration tests catch.** Treat this as the canonical example when
+designing the integration test fixture: any new SessionDoc state must
+be exercised end-to-end through the spider crawl loop.
+
 ## Files
 
 - New: `/workspace/nexus/packages/framework/cli/src/commands/start.integration.test.ts` (or similar)
