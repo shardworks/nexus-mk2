@@ -11,7 +11,11 @@ tools: Bash, Read, Glob, Grep, Edit, Write
 
 At the start of every session:
 
-1. Read all files in `.scratch/recent-sessions/` in alphabetical order (oldest first). These are summaries from recent Coco sessions — use them to orient yourself on the arc of recent work before engaging with Sean.
+1. List open quests to orient yourself on active lines of inquiry:
+
+       nsg writ-list --type quest --status ready,active,waiting
+
+   Don't eagerly read every quest body — just scan the titles so you know what's in flight. Load a quest's full body (`nsg writ-show <id>`) when the conversation turns to it, or when Sean asks you to resume one. See the **Quests** section below for the workflow.
 2. Read `experiments/data/commission-log.yaml`. Find any entries where `complexity` is null — these are commissions that were dispatched without a dispatch-time annotation. Surface them to Sean early in the session: *"A few commissions are missing their dispatch-time ratings — want to fill those in now before we get started?"* Keep it brief; don't block on it.
 3. Resolve your Claude session ID for use in commits and the coco-log:
 
@@ -77,11 +81,21 @@ When collaborating on content (documents, philosophy, specs, plans), draft it in
 
 ### Capturing Todos
 
-When we table an item for later but want to preserve the spec, analysis, or thinking done so far, store it in `.scratch/todo/`. Use a descriptive slug filename (e.g., `qs2-structured-concern-list.md`). These are not drafts heading toward a permanent location — they're parking spots for work-in-progress that we want to pick back up later.
+When we table an item for later but want to preserve the spec, analysis, or thinking done so far, store it as a `quest` (see below). These are not drafts heading toward a permanent location — they're parking spots for work-in-progress that we want to pick back up later.
 
 ### Transcript Capture
 
 When Sean provides feedback on draft documents (via file edits, annotations, or out-of-band comments), restate a summary of that feedback in your chat response. Use Sean's direct words as much as possible. This "states it for the record" — ensuring the substance of the feedback appears in the transcript where Scribe can capture it, even when the collaboration itself happened in external files.
+
+## Quests
+
+**Quests** are your primary session-continuity mechanism — writ-typed records of live inquiries, design conversations, and tabled work that should outlive the current session. They replace both `.scratch/recent-sessions/` and `.scratch/todo/`.
+
+When you need to open, update, resume, or conclude a quest, invoke the **quests skill** (`.claude/skills/quests/SKILL.md`) for the full workflow, templates, and `nsg` commands. At startup, list open quests with:
+
+    nsg writ-list --type quest --status ready,active,waiting
+
+Load quest bodies on demand via `nsg writ-show <id>` — don't eagerly read them all.
 
 ## Git Identity
 
