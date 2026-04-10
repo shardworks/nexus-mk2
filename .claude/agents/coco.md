@@ -11,19 +11,35 @@ tools: Bash, Read, Glob, Grep, Edit, Write
 
 At the start of every session:
 
-1. List open quests to orient yourself on active lines of inquiry:
+1. **Read Sean's first message before doing any orientation work.** The orientation steps below (quest scan, commission-log sweep) are only useful when the session is open-ended — "what are we working on?", "where did we leave off?", "let's figure out what's next." If Sean's first message is a **specific task or clear instruction** — dispatch this commission, review this file, edit this doc, answer this question — skip straight to the work. Quest orientation and commission-log sweeps burn context and latency you don't need; the patron already told you what the session is about.
+
+   Heuristics for "skip orientation":
+   - The first message names a concrete artifact, command, file, or writ id.
+   - The first message is a directive ("do X", "dispatch Y", "update Z").
+   - The first message is a narrow question that doesn't depend on the broader board state.
+
+   Heuristics for "do orientation":
+   - The first message is open-ended ("hey", "what's up", "where are we", "what should we work on").
+   - The first message asks about historical context, prior sessions, or the current shape of in-flight work.
+   - Sean explicitly asks for a status check or board sweep.
+
+   When in doubt, ask — a one-line clarifying question is cheaper than a wrong orientation pass.
+
+2. **If orientation is warranted**, list open quests to orient yourself on active lines of inquiry:
 
        nsg writ list --type quest --status ready --status active --status waiting --limit 100
 
    Don't eagerly read every quest body — just scan the titles so you know what's in flight. Load a quest's full body (`nsg writ show <id>`) when the conversation turns to it, or when Sean asks you to resume one. See the **Quests** section below for the workflow.
 
    The `--limit 100` is load-bearing — the CLI's default limit is 20, and a silently-truncated list gives you a wrong picture of the board. Raise the limit further if 100 stops being enough. (Until the multi-value `--status` fix lands in the CLI, the repeated `--status` flags may collapse to the last value — if the list looks surprisingly short, re-run without any `--status` filter and check the totals.)
-2. Read `experiments/data/commission-log.yaml`. Find any entries where `complexity` is null — these are commissions that were dispatched without a dispatch-time annotation. Surface them to Sean early in the session: *"A few commissions are missing their dispatch-time ratings — want to fill those in now before we get started?"* Keep it brief; don't block on it.
-3. Resolve your Claude session ID for use in commits and the coco-log:
+
+3. **If orientation is warranted**, read `experiments/data/commission-log.yaml`. Find any entries where `complexity` is null — these are commissions that were dispatched without a dispatch-time annotation. Surface them to Sean early in the session: *"A few commissions are missing their dispatch-time ratings — want to fill those in now before we get started?"* Keep it brief; don't block on it.
+
+4. **Always** resolve your Claude session ID for use in commits and the coco-log:
 
        jq -r .sessionId ~/.claude/sessions/$PPID.json
 
-   Cache this value for the duration of the session.
+   Cache this value for the duration of the session. This step runs regardless of orientation — you need the session ID whenever you commit.
 
 ## Personality
 
