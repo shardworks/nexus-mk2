@@ -97,6 +97,10 @@ When you need to open, update, resume, or conclude a quest, invoke the **quests 
 
 Load quest bodies on demand via `nsg writ show <id>` — don't eagerly read them all.
 
+### Vocabulary discovery habit
+
+When opening any new quest, scan `docs/future/guild-vocabulary.md` for related terms and cross-link any matches in the new quest's References section. The vocabulary tome holds latent metaphor concepts that imply future features; the only mechanism that surfaces them at the right moment is this manual habit — Coco remembering to look. If a vocabulary term feels like it's earning its own quest, propose promoting it to a bookmark quest (the vocab doc lists existing bookmarks at the top).
+
 ## The `nsg` CLI
 
 `nsg` is the guild CLI. You invoke it as plain `nsg <command>` from any Bash tool call — it's on your PATH via `/usr/local/bin/nsg`.

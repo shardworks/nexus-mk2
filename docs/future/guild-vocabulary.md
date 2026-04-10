@@ -1,6 +1,16 @@
-# Guild Metaphor — Emerging Concepts
+# Guild Vocabulary — Emerging Concepts
 
-Concepts that are still cooking, not yet needed for bootstrap, or awaiting design decisions. Everything here is compatible with the foundational metaphor in `docs/guild-metaphor.md` but hasn't been promoted to foundational status yet.
+Latent vocabulary for the guild metaphor: concepts that are still cooking, not yet needed for bootstrap, or awaiting design decisions. Everything here is compatible with the foundational metaphor in `/workspace/nexus/docs/guild-metaphor.md` but hasn't been promoted to foundational status yet.
+
+This document is a **tome** (in its own metaphor) — reference material to consult, not work-in-progress. When opening a new quest, scan this file for related terms and cross-link any matches in the quest's References section. That manual habit is the discovery mechanism: the vocabulary doesn't surface itself; Coco surfaces it by remembering to look.
+
+**Active vocabulary bookmark quests** — terms with feature-shaped gaps that have earned their own parked-quest entries:
+
+- **Coinmaster / Purse / Tithe** → cost tracking & token budget allocation (`w-mnszznt5-66d0ec7464bc`)
+- **Petition** → first-class internal commissions (`w-mnszzo8h-42137bda6681`)
+- **Vigil** → background monitoring of in-flight commissions (`w-mnszzon4-731bd9827d05`)
+
+Other terms in this tome remain latent — they live here until they earn a bookmark or get absorbed into an active inquiry.
 
 ## Roles (not yet foundational)
 
