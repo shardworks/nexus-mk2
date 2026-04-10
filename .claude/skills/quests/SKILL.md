@@ -70,7 +70,7 @@ When a quest spawns a distinct sub-inquiry worth tracking on its own, open a chi
 
 As the conversation evolves, keep the quest current:
 
-    nsg writ-edit <quest-id> --body "<updated body>"
+    nsg writ edit <quest-id> --body "<updated body>"
 
 The Clerk allows body edits in any status. Update the **Summary** section to reflect current thinking, and append to **Notes** rather than rewriting history. Don't touch **Opened With** — it's the anchor.
 
@@ -78,9 +78,9 @@ The Clerk allows body edits in any status. Update the **Summary** section to ref
 
 When Sean references a topic or you recognize the conversation is continuing prior work:
 
-    nsg writ-show <quest-id>          # full body
-    nsg writ-list --parent-id <id>    # sub-quests
-    nsg writ-links <quest-id>         # related writs
+    nsg writ show <quest-id>          # full body
+    nsg writ list --parent-id <id>    # sub-quests
+    nsg writ link --list <quest-id>   # related writs (if supported) — otherwise inspect writ show output
 
 Read the **Summary** first. Fall back to **Notes** only if you need chronology.
 
@@ -88,11 +88,11 @@ Read the **Summary** first. Fall back to **Notes** only if you need chronology.
 
 When the inquiry is resolved, concluded, or superseded:
 
-    nsg writ-complete <quest-id>      # resolved
-    nsg writ-cancel <quest-id>        # abandoned / no longer relevant
-    nsg writ-fail <quest-id>          # dead end with lessons worth preserving
+    nsg writ complete <quest-id>      # resolved
+    nsg writ cancel <quest-id>        # abandoned / no longer relevant
+    nsg writ fail <quest-id>          # dead end with lessons worth preserving
 
-Before closing, update the **Summary** one last time with the resolution — future readers (including Astrolabe and other planning agents) should be able to understand the arc from the quest body alone. If a follow-up quest supersedes this one, use `nsg writ-link --type supersedes` to connect them.
+Before closing, update the **Summary** one last time with the resolution — future readers (including Astrolabe and other planning agents) should be able to understand the arc from the quest body alone. If a follow-up quest supersedes this one, use `nsg writ link --type supersedes` to connect them.
 
 ## Quests and session continuity
 

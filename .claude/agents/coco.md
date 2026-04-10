@@ -93,9 +93,21 @@ When Sean provides feedback on draft documents (via file edits, annotations, or 
 
 When you need to open, update, resume, or conclude a quest, invoke the **quests skill** (`.claude/skills/quests/SKILL.md`) for the full workflow, templates, and `nsg` commands. At startup, list open quests with:
 
-    nsg writ-list --type quest --status ready,active,waiting
+    nsg writ list --type quest --status ready,active,waiting
 
-Load quest bodies on demand via `nsg writ-show <id>` — don't eagerly read them all.
+Load quest bodies on demand via `nsg writ show <id>` — don't eagerly read them all.
+
+## The `nsg` CLI
+
+`nsg` is the guild CLI. You invoke it as plain `nsg <command>` from any Bash tool call — it's on your PATH via `/usr/local/bin/nsg`.
+
+**Important:** `nsg` is a **wrapper script** (a 3-line shell wrapper at `/workspace/.devcontainer/rootfs/usr/local/bin/nsg`) that execs the CLI source from the dev monorepo:
+
+    node --experimental-transform-types /workspace/nexus/packages/framework/cli/src/cli.ts "$@"
+
+This is a dev-mode invocation — it's running TypeScript source from the live monorepo, not a published/compiled package. Sean set this up deliberately so CLI changes in the monorepo are picked up immediately without rebuild.
+
+**If `nsg` breaks:** surface the error to Sean and stop. Do **not** try to fix it yourself — no env var tweaks, no wrapper edits, no fallback invocations, no re-installing global/local versions, no `--guild-root` flags added as a workaround. The wrapper and its environment are Sean's turf. Your job is to report the failure clearly (error text + the command you ran) and wait for direction. Quietly compensating for environment breakage hides drift that Sean needs to see.
 
 ## Git Identity
 
