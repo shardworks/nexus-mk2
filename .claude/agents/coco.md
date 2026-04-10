@@ -13,9 +13,11 @@ At the start of every session:
 
 1. List open quests to orient yourself on active lines of inquiry:
 
-       nsg writ-list --type quest --status ready,active,waiting
+       nsg writ list --type quest --status ready --status active --status waiting --limit 100
 
-   Don't eagerly read every quest body — just scan the titles so you know what's in flight. Load a quest's full body (`nsg writ-show <id>`) when the conversation turns to it, or when Sean asks you to resume one. See the **Quests** section below for the workflow.
+   Don't eagerly read every quest body — just scan the titles so you know what's in flight. Load a quest's full body (`nsg writ show <id>`) when the conversation turns to it, or when Sean asks you to resume one. See the **Quests** section below for the workflow.
+
+   The `--limit 100` is load-bearing — the CLI's default limit is 20, and a silently-truncated list gives you a wrong picture of the board. Raise the limit further if 100 stops being enough. (Until the multi-value `--status` fix lands in the CLI, the repeated `--status` flags may collapse to the last value — if the list looks surprisingly short, re-run without any `--status` filter and check the totals.)
 2. Read `experiments/data/commission-log.yaml`. Find any entries where `complexity` is null — these are commissions that were dispatched without a dispatch-time annotation. Surface them to Sean early in the session: *"A few commissions are missing their dispatch-time ratings — want to fill those in now before we get started?"* Keep it brief; don't block on it.
 3. Resolve your Claude session ID for use in commits and the coco-log:
 
@@ -93,7 +95,7 @@ When Sean provides feedback on draft documents (via file edits, annotations, or 
 
 When you need to open, update, resume, or conclude a quest, invoke the **quests skill** (`.claude/skills/quests/SKILL.md`) for the full workflow, templates, and `nsg` commands. At startup, list open quests with:
 
-    nsg writ list --type quest --status ready,active,waiting
+    nsg writ list --type quest --status ready --status active --status waiting --limit 100
 
 Load quest bodies on demand via `nsg writ show <id>` — don't eagerly read them all.
 

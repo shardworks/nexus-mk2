@@ -232,7 +232,7 @@ If you need to reopen a closed quest, extract the row body back into a fresh fil
 
 Quests provide continuity across sessions. The flow is:
 
-- **Startup** — scan open quest titles with `nsg writ list --type quest --status ready --status active --status waiting`; load bodies on demand by reading `/workspace/vibers/writs/quests/<writ-id>.md` for the quest Sean references.
+- **Startup** — scan open quest titles with `nsg writ list --type quest --status ready --status active --status waiting --limit 100`; load bodies on demand by reading `/workspace/vibers/writs/quests/<writ-id>.md` for the quest Sean references. The `--limit 100` is load-bearing: the CLI's default limit is 20, and a silently-truncated list will give you a wrong picture of the board. Raise the limit further if 100 stops being enough.
 - **During the session** — open new quests for substantial inquiries; update existing ones as thinking evolves. Keep Notes as a running scratchpad.
 - **Wrap-up** — for any quest touched this session: drain Notes into Context, refresh Status, refresh Next Steps. The next session should be able to resume cold by reading Goal / Status / Next Steps without needing the transcript.
 
