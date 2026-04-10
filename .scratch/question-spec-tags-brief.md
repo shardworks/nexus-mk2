@@ -1,4 +1,4 @@
-# Brief: Add Tags to QuestionSpec + Feedback UI Filters
+# Add Tags to QuestionSpec + Feedback UI Filters
 
 ## Summary
 

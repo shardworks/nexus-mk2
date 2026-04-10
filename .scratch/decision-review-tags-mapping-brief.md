@@ -1,4 +1,4 @@
-# Brief: Map Decision Analysis Metadata to QuestionSpec Tags
+# Map Decision Analysis Metadata to QuestionSpec Tags
 
 ## Summary
 
