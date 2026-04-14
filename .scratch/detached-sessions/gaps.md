@@ -17,7 +17,7 @@ The current implementation lives in:
 
 ## Part 1: Gaps
 
-### G1. `pending` is invisible to reconciliation; no heartbeat mechanism exists
+### G1. `pending` is invisible to reconciliation; no heartbeat mechanism exists — CLOSED (nexus@063c8b8, 2026-04-14)
 
 **Spec:** The reconciler scans records in both `pending` and `running` states. Liveness is tracked via an explicit heartbeat from the session host that updates `last_activity_at` on a fixed interval. The reconciler transitions any session whose heartbeat is older than a staleness threshold (minus guild-downtime credit) to `failed`.
 
@@ -39,7 +39,7 @@ The current implementation lives in:
 
 ---
 
-### G3. Reconciler runs only at guild startup; no guild self-heartbeat
+### G3. Reconciler runs only at guild startup; no guild self-heartbeat — CLOSED (nexus@063c8b8, 2026-04-14)
 
 **Spec:** The reconciler runs at startup *and* periodically during uptime (cadence comparable to the heartbeat interval). The guild maintains a `guild_alive_at` timestamp, updated on a timer, so the startup reconciler can compute a downtime credit and avoid unfairly reconciling sessions that went silent while the guild itself was down.
 
@@ -49,7 +49,7 @@ The current implementation lives in:
 
 ---
 
-### G4. Liveness is checked by PID instead of heartbeat
+### G4. Liveness is checked by PID instead of heartbeat — CLOSED (nexus@063c8b8, 2026-04-14)
 
 **Spec:** Reconciliation is heartbeat-based. The reconciler does not probe the host's platform directly — no PID checks, no container queries, no network pings. A session that has not heartbeated within the staleness threshold is treated as dead, uniformly across all host types.
 
@@ -64,7 +64,7 @@ The current implementation lives in:
 
 ---
 
-### G5. Cancellation targets the claude PID, not the process group
+### G5. Cancellation targets the claude PID, not the process group — CLOSED (nexus@063c8b8, 2026-04-14)
 
 **Spec:** Cancellation uses an opaque handle carried by the ready report. For a local-process host the handle is the session host's **process group identifier**, and cancellation signals the group so that both the host and the anima process receive the signal. This is robust against broken signal handling in the host.
 
@@ -122,7 +122,13 @@ The current implementation lives in:
 
 ---
 
-### G10. No idempotency guarantee on lifecycle reports
+### G10. No idempotency guarantee on lifecycle reports — PARTIAL (nexus@063c8b8, 2026-04-14)
+
+Terminal-state immutability is now enforced by the `session-record` handler, and duplicate terminal reports return `ok` with the existing status. Still remaining: `session-running` idempotency (ready report against an already-running session) and an explicit test for DLQ-drain-before-reconciler ordering.
+
+---
+
+#### Original analysis
 
 **Spec:** Lifecycle reports are at-least-once delivered. Terminal states are immutable to make duplicates safe. Ready reports are idempotent against `running` (rewriting `running` is a no-op).
 
@@ -134,7 +140,7 @@ The current implementation lives in:
 
 ---
 
-### G11. System-prompt temp directory leaks
+### G11. System-prompt temp directory leaks — CLOSED (nexus@063c8b8, 2026-04-14)
 
 **Spec:** This is not a spec concern per se, but cleanup is. Any per-session temp resources must be cleaned up deterministically.
 
@@ -260,9 +266,20 @@ Changes:
 
 All 32 detached tests + 25 session lifecycle tests pass.
 
-### Phase 2: Heartbeat-based reconciliation (G1, G3, G4)
+### Phase 2: Heartbeat-based reconciliation (G1, G3, G4) — DONE
 
-**Rationale:** Replaces the PID-based liveness check with the spec's heartbeat model. Closes the zombie-session class of failures uniformly across `pending` and `running`, with a periodic sweep and correct handling of guild downtime. Also obsoletes the `process.kill(pid, 0)` check, which was targeting the wrong PID anyway.
+Completed 2026-04-14 by Artificer in nexus@063c8b8. All eight work items landed:
+
+1. `SessionDoc.lastActivityAt` added (Phase 1 seeded it; Phase 2 now refreshes it on every heartbeat / ready / terminal report).
+2. New `session-heartbeat` tool endpoint — payload is `{ sessionId }`, handler stamps guild wall-clock time.
+3. Babysitter heartbeat loop — `setTimeout` chain kicks off after the ready report and stops before the terminal report. Heartbeat failures are dropped (no replay).
+4. Guild self-heartbeat — `guild_alive_at` maintained in the state book on a timer.
+5. Downtime credit — computed at startup from the previous `guild_alive_at` and applied to the first reconciler pass.
+6. Reconciler rewritten — `process.kill(pid, 0)` deleted; rule is `now − lastActivityAt − downtime_credit > staleness_threshold` (90s, 3× interval). Scans `pending` and `running`.
+7. Periodic reconciler — runs at startup *and* every 30s. Single-flight guard in place.
+8. Legacy records — sessions without `lastActivityAt` are backfilled and skipped for one pass, then become eligible.
+
+The entire G1/G3/G4 cluster is closed. The zombie-session failure mode — babysitter crashes during init, record stays in `pending` across restarts — is now resolved within ~90s of the heartbeat going silent, without a guild restart.
 
 **Work:**
 
@@ -277,9 +294,15 @@ All 32 detached tests + 25 session lifecycle tests pass.
 
 **Exit criteria:** A killed babysitter is reflected in the session book within ~90s (one missed heartbeat + one reconciler tick), with no guild restart required. A guild restart that takes 10 minutes does not mark any previously-healthy session as failed. The reconciler contains no `process.kill` call.
 
-### Phase 3: Cancel via process group (G5)
+### Phase 3: Cancel via process group (G5) — DONE
 
-**Rationale:** Fixes cancellation correctness. Under the new reconciliation model, Phase 2 already obsoletes the PID-based liveness path — this phase handles only the cancellation half of the old dual-use PID.
+Completed 2026-04-14 by Artificer in nexus@063c8b8.
+
+- `SessionDoc.cancelMetadata` renamed to `cancelHandle` with a tagged discriminated union — currently `{ kind: 'local-pgid'; pgid: number }`, ready to accept `{ kind: 'container'; containerId: string }` without schema churn.
+- Babysitter spawned under `detached: true` so its PID equals its PGID; it writes `process.pid` as `pgid` in the ready report.
+- `provider.cancel()` dispatches on `cancelHandle.kind` and signals the process group via `process.kill(-pgid, 'SIGTERM')`, reliably catching both the host and the anima process.
+- Babysitter SIGTERM handler added — sets a cancelled flag, stops the heartbeat loop, propagates SIGTERM to claude, and reports terminal status `cancelled`.
+- Provider interface parameter name is still `cancelMetadata` (noted in commit for a future rename per R16).
 
 **Work:**
 
@@ -299,15 +322,14 @@ Completed 2026-04-14 by Coco. Deleted `mcp-server.ts`, `mcp-server.test.ts`, `la
 - Item 4: Move `callableBy` filtering into the provider's tool-manifest computation step (single source of truth). Currently the babysitter's MCP proxy in `babysitter.ts` trusts its config blindly, while the deleted `mcp-server.ts` had a `callableBy` filter. The filter should move to the provider's `serializeTools()` in `detached.ts`.
 - Item 5: Include infrastructure tools (`session-running`, `session-record`) at manifest-computation time rather than as a post-hoc addition in `detached.ts`.
 
-### Phase 5: Idempotency and DLQ ordering (G10)
+### Phase 5: Idempotency and DLQ ordering (G10) — PARTIAL
 
-**Rationale:** Hardens the reconciliation/DLQ interaction. Cheap relative to its value.
+Item 1 landed 2026-04-14 in nexus@063c8b8: the `session-record` handler now rejects writes against *any* terminal state (previously only `cancelled`), and duplicate reports return `ok` with the existing status while still persisting transcripts. Terminal-state immutability is now enforced at the handler boundary.
 
-**Work:**
+**Still to do:**
 
-1. Update the `session-record` handler to reject writes against sessions already in a terminal state. Log and drop the duplicate — don't error, because the client is (legitimately) retrying.
-2. Update the `session-running` handler to be idempotent against `running`: if the session is already in `running`, re-apply the payload (PID update, metadata) but do not regress from terminal states.
-3. Explicitly document the DLQ-drain-before-reconciler ordering in `startup.ts`, and add a test that exercises: DLQ contains a result for a session the reconciler would mark failed. Verify the DLQ result wins.
+2. `session-running` handler idempotency against `running` — re-applying the same payload should be a no-op, and a `running` write must never regress a terminal state.
+3. Explicit documentation + test for DLQ-drain-before-reconciler ordering in `startup.ts`: DLQ contains a terminal report for a session the reconciler would otherwise mark failed; the DLQ result must win.
 
 **Exit criteria:** Duplicate delivery is safe. DLQ and reconciliation cannot race to produce inconsistent state.
 
@@ -338,11 +360,9 @@ Completed 2026-04-14 by Coco. Deleted `mcp-server.ts`, `mcp-server.test.ts`, `la
 
 **Exit criteria:** The babysitter does not mention SQLite. Transcript storage is behind an interface that could be swapped out for a remote implementation.
 
-### Phase 8: Temp directory cleanup (G11)
+### Phase 8: Temp directory cleanup (G11) — DONE
 
-**Rationale:** Trivial. Bundle into whichever phase is convenient.
-
-**Work:** Pass the system-prompt temp-dir path through `BabysitterConfig` and clean it up in the host's `finally` block alongside the MCP tmpDir.
+Completed 2026-04-14 by Artificer in nexus@063c8b8. `BabysitterConfig` gained a `systemPromptTmpDir` field, `buildBabysitterConfig` passes it through, and the babysitter's `finally` block deletes it alongside its own `tmpDir`.
 
 ---
 
@@ -352,11 +372,15 @@ These phases map to the following commission plan:
 
 | Commission | Phases | Scope |
 |---|---|---|
-| **C1. Astrolabe tool resolution fix** | Phase 0 | Standalone investigation + fix of the upstream role resolution chain. Does not touch the claude-code provider. |
-| **C2. Pre-write race + heartbeat-based reconciliation** | Phases 1, 2, 5, 8 | Phase 1 **DONE** (2026-04-14): pre-write race fixed, `lastActivityAt` field added + seeded. Remaining: heartbeat endpoint, host heartbeat timer, guild self-heartbeat, downtime credit, reconciler rewrite, periodic reconciler, legacy record handling, idempotency (Phase 5), temp cleanup (Phase 8). |
-| **C3. Cancellation correctness** | Phase 3 | Depends on C2 for the session-record schema split (cancelHandle vs heartbeat fields) so the two changes don't stomp on each other. |
+| **C1. Astrolabe tool resolution fix** | Phase 0 | Standalone investigation + fix of the upstream role resolution chain. Does not touch the claude-code provider. Superseded / reframed by quest `w-mny2ltvy` (engine-level MCP tool precondition checks). |
+| **C2. Pre-write race + heartbeat-based reconciliation** | Phases 1, 2, 5, 8 | **DONE** (2026-04-14). Phase 1 landed earlier the same day; Phases 2, 3, 8 and Phase 5 item 1 landed in nexus@063c8b8. Only Phase 5 items 2–3 remain (session-running idempotency + DLQ ordering test). |
+| **C3. Cancellation correctness** | Phase 3 | **DONE** (2026-04-14) — landed together with C2 in nexus@063c8b8. |
 | **C4. Delete attached mode** | Phase 4 | **DONE** (2026-04-14). Remaining: `callableBy` filter move and infrastructure tool manifest cleanup. |
-| **C5. Host logging independence** | Phase 6 | Independent of the above; can land any time. |
+| **C5. Host logging independence** | Phase 6 | Independent of the above; can land any time. Still open. |
 | **C6. Transcript store abstraction** | Phase 7 | Deferred. Needed for Docker extension, not urgent. |
 
-C1 is now fully independent of the session-provider work — it's a different bug in a different layer. C2, C4, and C5 can proceed in parallel with C1 and with each other. C3 waits on C2. C6 can be deferred indefinitely until the container extension is in scope.
+**What's left:**
+- A small cleanup commission to finish Phase 5 (items 2–3) and the Phase 4 residue (`callableBy` filter + infrastructure tool manifest).
+- C5 (Phase 6) — host logging independence; still the biggest remaining risk item for silent babysitter deaths.
+- C6 (Phase 7) — transcript store abstraction; deferred until the container extension path is in scope.
+- Phase 0 upstream work has been rolled into the broader quest `w-mny2ltvy` about engines declaring and verifying MCP tool preconditions.
