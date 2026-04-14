@@ -289,20 +289,13 @@ The chain is: astrolabe engine → `animator.summon({ role: 'astrolabe.sage' })`
 
 **Exit criteria:** Cancellation reliably kills both the host and the anima process. The cancellation mechanism is dispatch-on-handle-kind, ready to accept a container variant without a second schema change.
 
-### Phase 4: Delete attached mode; single tool pipeline (G6, G7, G8)
+### Phase 4: Delete attached mode; single tool pipeline (G6, G7, G8) — DONE
 
-**Rationale:** Deletes ~140 lines of load-bearing complexity and forces one authoritative tool-serialization path. No longer a prerequisite for fixing the astrolabe-tools symptom (that turned out to be upstream), but still worth doing for maintenance reasons: the two pipelines will drift silently otherwise, and the contradictory comments in `launchAttached` ("Not currently wired into the provider" while simultaneously being reachable via a config flag) are a maintenance hazard on their own.
+Completed 2026-04-14 by Coco. Deleted `mcp-server.ts`, `mcp-server.test.ts`, `launchAttached()`, `prepareSession()`, `spawnClaudeStreamJson()`, `spawnClaudeStreamingJson()`, `buildResult()`, the `animator.detached` config flag routing, and MCP server re-exports. The babysitter is now the only MCP server and tool serialization path. README updated. All remaining tests pass.
 
-**Work:**
-
-1. Pick the winning serialization approach. Prior: use the attached-mode approach (`.shape` directly with the MCP SDK) because it's what historically worked and what the SDK is designed for. Move the logic into the provider so it runs once before host launch.
-2. Delete `launchAttached` from `index.ts`. Delete the `animator.detached` config flag and its handling.
-3. Delete `mcp-server.ts`. The babysitter becomes the only MCP server.
-4. Move any surviving helpers (e.g., `callableBy` filtering) into the provider's tool-manifest computation step, which is now the single source of truth.
-5. Update the manifest to include the infrastructure tools (`session-running`, `session-record`) at manifest-computation time, not as a post-hoc addition in `detached.ts` line 310-314.
-6. Update all tests that exercised attached mode to exercise detached mode instead, or delete them if they were attached-only.
-
-**Exit criteria:** `mcp-server.ts` does not exist. `launchAttached` does not exist. There is exactly one function in the codebase that turns a Zod-schema tool definition into the JSON Schema sent to claude. The MCP tools regression is either fixed or has a clear next step from Phase 0 findings.
+**Remaining from this phase (not done):**
+- Item 4: Move `callableBy` filtering into the provider's tool-manifest computation step (single source of truth). Currently the babysitter's MCP proxy in `babysitter.ts` trusts its config blindly, while the deleted `mcp-server.ts` had a `callableBy` filter. The filter should move to the provider's `serializeTools()` in `detached.ts`.
+- Item 5: Include infrastructure tools (`session-running`, `session-record`) at manifest-computation time rather than as a post-hoc addition in `detached.ts`.
 
 ### Phase 5: Idempotency and DLQ ordering (G10)
 
@@ -360,7 +353,7 @@ These phases map to the following commission plan:
 | **C1. Astrolabe tool resolution fix** | Phase 0 | Standalone investigation + fix of the upstream role resolution chain. Does not touch the claude-code provider. |
 | **C2. Pre-write race + heartbeat-based reconciliation** | Phases 1, 2, 5, 8 | Cohesive "fix the zombies" work. Introduces `last_activity_at`, `guild_alive_at`, host heartbeat timer, downtime credit, and the new one-line reconciler rule. Lands behind tests. |
 | **C3. Cancellation correctness** | Phase 3 | Depends on C2 for the session-record schema split (cancelHandle vs heartbeat fields) so the two changes don't stomp on each other. |
-| **C4. Delete attached mode** | Phase 4 | Independent. Can proceed any time. |
+| **C4. Delete attached mode** | Phase 4 | **DONE** (2026-04-14). Remaining: `callableBy` filter move and infrastructure tool manifest cleanup. |
 | **C5. Host logging independence** | Phase 6 | Independent of the above; can land any time. |
 | **C6. Transcript store abstraction** | Phase 7 | Deferred. Needed for Docker extension, not urgent. |
 
