@@ -1991,8 +1991,29 @@ commissions:
     codex: nexus
     complexity: null
     spec_quality_pre: null
-    outcome: success
+    outcome: partial
+    revision_required: true
     spec_quality_post: null
+    failure_mode: incomplete
+    reviewed_at: 2026-04-14
+    note: >-
+      Renamed SessionDoc.cancelMetadata → cancelHandle (tagged union, e.g.
+      { kind: 'local-pgid', pgid }) and updated producer sites in animator
+      and claude-code, but did not update the spider zombie reaper — both
+      the periodic tryReapZombies path and the startup recovery path in
+      packages/plugins/spider/src/spider.ts still read cancelMetadata.pid,
+      which is now always undefined. Net effect: every running engine
+      session looked like a zombie after the 5-minute threshold and got
+      reaped with "Engine session has no process ID after threshold
+      (zombie reaped)", cascading its rig to failed. Caught when astrolabe
+      planning rigs (rig-mny48to8-7fdc9dec, rig-mny49p49-b62dc071) kept
+      dying at the reader stage ~5 minutes in despite live heartbeats.
+      Revision applied out-of-band by Coco (bootstrap: commissioning the
+      fix would itself have been reaped by the bug): spider now reads
+      cancelHandle with a legacy fallback via an extractLocalPid helper,
+      plus regression tests for live-pgid / dead-pgid / non-local handle
+      shapes. The brief should have required a consumer audit (grep for
+      cancelMetadata.pid across all plugins) before being marked success.
 
   - id: w-mny2ltvy-e7016f61f768
     title: "Engines should declare and verify MCP tool preconditions before starting sessions"
