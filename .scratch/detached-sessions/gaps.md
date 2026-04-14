@@ -246,17 +246,19 @@ The chain is: astrolabe engine → `animator.summon({ role: 'astrolabe.sage' })`
 
 **What this phase is NOT:** This is not a session-provider fix. The provider code is fine (modulo the other gaps in this doc). Whatever fix this phase produces will live in the astrolabe plugin, the Loom, or the Instrumentarium — not in `claude-code/`.
 
-### Phase 1: Fix the pre-write race (G2)
+### Phase 1: Fix the pre-write race (G2) — DONE
 
-**Rationale:** One-line fix, high-impact. Eliminates a failure mode. Safe to land without the rest of the rewrite.
+Completed 2026-04-14 by Coco. Replaced the fire-and-forget async IIFE with a shared `init` promise that awaits the pre-write before spawning the babysitter. If the write fails, both `result` and `processInfo` resolve with failure/empty immediately — no babysitter is spawned.
 
-**Work:**
+Changes:
+- `SessionDoc` gains `lastActivityAt?: string` field (types.ts)
+- `detached.ts`: pre-write is now awaited via shared `init` promise; seeds `lastActivityAt`; `authorizedTools` includes `session-heartbeat`; added `writableSessionsBook` test option
+- `session-running.ts`: refreshes `lastActivityAt` on ready report (guild wall-clock)
+- `session-record-handler.ts`: refreshes `lastActivityAt` on terminal report
+- `detached.test.ts`: new tests for pre-write behavior and failure case; all existing tests updated for writable book injection
+- `AnimatorConfig.detached` field removed (attached mode no longer exists)
 
-1. In `detached.ts`, replace the fire-and-forget async IIFE (lines 327-343) with an `await` before the spawn. The pre-write must commit before the babysitter is spawned, because the tool API's authorization reads this record.
-2. If the put fails, do not spawn. Return a failed result to the caller.
-3. The pre-written `pending` record also seeds `last_activity_at` with the wall-clock time at pre-write; this gives the reconciler a fair starting point for the staleness calculation (see Phase 2).
-
-**Exit criteria:** No more silent auth-errors from pending records not being committed. Every pending record has a `last_activity_at` timestamp by the time the provider returns control.
+All 32 detached tests + 25 session lifecycle tests pass.
 
 ### Phase 2: Heartbeat-based reconciliation (G1, G3, G4)
 
@@ -351,7 +353,7 @@ These phases map to the following commission plan:
 | Commission | Phases | Scope |
 |---|---|---|
 | **C1. Astrolabe tool resolution fix** | Phase 0 | Standalone investigation + fix of the upstream role resolution chain. Does not touch the claude-code provider. |
-| **C2. Pre-write race + heartbeat-based reconciliation** | Phases 1, 2, 5, 8 | Cohesive "fix the zombies" work. Introduces `last_activity_at`, `guild_alive_at`, host heartbeat timer, downtime credit, and the new one-line reconciler rule. Lands behind tests. |
+| **C2. Pre-write race + heartbeat-based reconciliation** | Phases 1, 2, 5, 8 | Phase 1 **DONE** (2026-04-14): pre-write race fixed, `lastActivityAt` field added + seeded. Remaining: heartbeat endpoint, host heartbeat timer, guild self-heartbeat, downtime credit, reconciler rewrite, periodic reconciler, legacy record handling, idempotency (Phase 5), temp cleanup (Phase 8). |
 | **C3. Cancellation correctness** | Phase 3 | Depends on C2 for the session-record schema split (cancelHandle vs heartbeat fields) so the two changes don't stomp on each other. |
 | **C4. Delete attached mode** | Phase 4 | **DONE** (2026-04-14). Remaining: `callableBy` filter move and infrastructure tool manifest cleanup. |
 | **C5. Host logging independence** | Phase 6 | Independent of the above; can land any time. |
