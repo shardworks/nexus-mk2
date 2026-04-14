@@ -1,0 +1,6 @@
+<!-- Live body for this quest is a file in the vibers guild. See .claude/skills/quests/SKILL.md. -->
+<!-- Do not edit this row body while the quest is live. -->
+
+## Goal
+
+Decide and ship the staleness model for the Astrolabe atlas: how we detect drift, when we trigger refreshes, and how expensive refresh costs get amortized or avoided. Covers incremental structural-fact updates on file change, periodic full prose re-maps, git-SHA-based drift detection, and — most importantly — the design where "a fresh atlas map for workspace X" becomes a **declared engine precondition** that the multi-rig scheduler can satisfy by auto-prepending a mapper rig before the planning rig runs. This is where the atlas stops being a manually-maintained artifact and becomes a scheduled dependency of planning work. Outcome is (a) a drift-detection strategy (what counts as "stale enough to matter"), (b) a refresh policy per atlas layer (prose layer and deterministic layer refresh on different cadences), (c) a design for engine-declared atlas preconditions that couples into the multi-rig template-generation work, and (d) a clear story for how this interacts with the workspace model.
