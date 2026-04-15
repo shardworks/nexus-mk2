@@ -6,9 +6,9 @@ This document is a **tome** (in its own metaphor) — reference material to cons
 
 **Active vocabulary bookmark quests** — terms with feature-shaped gaps that have earned their own parked-quest entries:
 
-- **Coinmaster / Purse / Tithe** → cost tracking & token budget allocation (`w-mnszznt5-66d0ec7464bc`)
-- **Petition** → first-class internal commissions (`w-mnszzo8h-42137bda6681`)
-- **Vigil** → background monitoring of in-flight commissions (`w-mnszzon4-731bd9827d05`)
+- **Coinmaster / Purse / Tithe** → cost tracking & token budget allocation (`w-mnszznt5-66d0ec7464bc`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*
+- **Petition** → first-class internal commissions (`w-mnszzo8h-42137bda6681`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*
+- **Vigil** → background monitoring of in-flight commissions (`w-mnszzon4-731bd9827d05`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*
 
 Other terms in this tome remain latent — they live here until they earn a bookmark or get absorbed into an active inquiry.
 
