@@ -1,0 +1,1 @@
+Stub body — full body lives in the file at /workspace/vibers/writs/quests/<writ-id>.md per the quests skill.
