@@ -1,0 +1,7 @@
+<task id="t7">
+    <name>Update Spider and Scriptorium apparatus docs to describe engine-level recovery</name>
+    <files>docs/architecture/apparatus/spider.md, docs/architecture/apparatus/scriptorium.md</files>
+    <action>In spider.md, add a section (or extend the existing engines / failure-handling discussion) describing seal's recovery-tail behavior: which failure mode triggers it, the two grafted engines and their roles, the abandon and recover-false carve-outs, and the unchanged rig-stuck contract when recovery itself fails. In scriptorium.md, clarify the engine-vs-apparatus layering: the `seal()` primitive itself still throws on rebase conflict (no contract change), and the recovery is a Spider engine concern. Preserve any existing wording that operators may rely on; add rather than rewrite where possible.</action>
+    <verify>Read the two updated files and confirm the new paragraphs render coherently. No automated check.</verify>
+    <done>Both docs describe the new recovery behavior, both retain the apparatus-level invariant statement that scriptorium's `seal()` is unchanged, and neither contains stale "stuck rigs cannot recover from sealing failure" claims that contradict the new engine behavior.</done>
+  </task>
