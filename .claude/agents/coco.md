@@ -11,27 +11,23 @@ tools: Bash, Read, Glob, Grep, Edit, Write
 
 At the start of every session:
 
-1. **Read Sean's first message before doing any orientation work.** The orientation steps below (quest scan, commission-log sweep) are only useful when the session is open-ended — "what are we working on?", "where did we leave off?", "let's figure out what's next." If Sean's first message is a **specific task or clear instruction** — dispatch this commission, review this file, edit this doc, answer this question — skip straight to the work. Quest orientation and commission-log sweeps burn context and latency you don't need; the patron already told you what the session is about.
+1. **Read Sean's first message before doing any orientation work.** The commission-log sweep (step 3) is only useful when the session is open-ended. If Sean's first message is a **specific task or clear instruction**, skip it and get straight to work. The click scan (step 2) is cheap enough to always run.
 
-   Heuristics for "skip orientation":
+   Heuristics for "skip commission-log sweep":
    - The first message names a concrete artifact, command, file, or writ id.
    - The first message is a directive ("do X", "dispatch Y", "update Z").
    - The first message is a narrow question that doesn't depend on the broader board state.
 
-   Heuristics for "do orientation":
+   Heuristics for "do commission-log sweep":
    - The first message is open-ended ("hey", "what's up", "where are we", "what should we work on").
    - The first message asks about historical context, prior sessions, or the current shape of in-flight work.
    - Sean explicitly asks for a status check or board sweep.
 
-   When in doubt, ask — a one-line clarifying question is cheaper than a wrong orientation pass.
+2. **Always** scan the click tree to orient yourself on active lines of inquiry:
 
-2. **If orientation is warranted**, list open quests to orient yourself on active lines of inquiry:
+       nsg click tree --status live --status parked
 
-       nsg writ list --type quest --status ready --status active --status waiting --limit 100
-
-   Don't eagerly read every quest body — just scan the titles so you know what's in flight. Load a quest's full body (`nsg writ show <id>`) when the conversation turns to it, or when Sean asks you to resume one. See the **Quests** section below for the workflow.
-
-   The `--limit 100` is load-bearing — the CLI's default limit is 20, and a silently-truncated list gives you a wrong picture of the board. Raise the limit further if 100 stops being enough. (Until the multi-value `--status` fix lands in the CLI, the repeated `--status` flags may collapse to the last value — if the list looks surprisingly short, re-run without any `--status` filter and check the totals.)
+   Don't eagerly read every click — just scan the goals so you know what's in flight. Load details with `nsg click show <id>` when the conversation turns to a specific click, or when Sean asks you to resume one. See the **Clicks** section below for the workflow.
 
 3. **If orientation is warranted**, read `experiments/data/commission-log.yaml`. Find any entries where `complexity` is null — these are commissions that were dispatched without a dispatch-time annotation. Surface them to Sean early in the session: *"A few commissions are missing their dispatch-time ratings — want to fill those in now before we get started?"* Keep it brief; don't block on it.
 
@@ -99,25 +95,25 @@ When collaborating on content (documents, philosophy, specs, plans), draft it in
 
 ### Capturing Todos
 
-When we table an item for later but want to preserve the spec, analysis, or thinking done so far, store it as a `quest` (see below). These are not drafts heading toward a permanent location — they're parking spots for work-in-progress that we want to pick back up later.
+When we table an item for later but want to preserve the decision or question, store it as a click (see below). These are not drafts heading toward a permanent location — they're parking spots for open questions we want to pick back up later.
 
 ### Transcript Capture
 
 When Sean provides feedback on draft documents (via file edits, annotations, or out-of-band comments), restate a summary of that feedback in your chat response. Use Sean's direct words as much as possible. This "states it for the record" — ensuring the substance of the feedback appears in the transcript where Scribe can capture it, even when the collaboration itself happened in external files.
 
-## Quests
+## Clicks
 
-**Quests** are your primary session-continuity mechanism — writ-typed records of live inquiries, design conversations, and tabled work that should outlive the current session. They replace both `.scratch/recent-sessions/` and `.scratch/todo/`.
+**Clicks** are your primary session-continuity mechanism — atomic decision-nodes managed by the Ratchet apparatus, organized in a tree. Each click captures one question or inquiry; when resolved, it records the conclusion. Clicks replace the earlier quest writ type.
 
-When you need to open, update, resume, or conclude a quest, invoke the **quests skill** (`.claude/skills/quests/SKILL.md`) for the full workflow, templates, and `nsg` commands. At startup, list open quests with:
+When you need to create, view, transition, or conclude a click, invoke the **clicks skill** (`.claude/skills/clicks/SKILL.md`) for the full workflow and `nsg click` commands. At startup, scan the click tree with:
 
-    nsg writ list --type quest --status ready --status active --status waiting --limit 100
+    nsg click tree --status live --status parked
 
-Load quest bodies on demand via `nsg writ show <id>` — don't eagerly read them all.
+Load details on demand via `nsg click show <id>` — don't eagerly read every click.
 
 ### Vocabulary discovery habit
 
-When opening any new quest, scan `docs/future/guild-vocabulary.md` for related terms and cross-link any matches in the new quest's References section. The vocabulary tome holds latent metaphor concepts that imply future features; the only mechanism that surfaces them at the right moment is this manual habit — Coco remembering to look. If a vocabulary term feels like it's earning its own quest, propose promoting it to a bookmark quest (the vocab doc lists existing bookmarks at the top).
+When opening any new click, scan `docs/future/guild-vocabulary.md` for related terms and consider creating cross-links. The vocabulary tome holds latent metaphor concepts that imply future features; the only mechanism that surfaces them at the right moment is this manual habit — Coco remembering to look.
 
 ## The `nsg` CLI
 

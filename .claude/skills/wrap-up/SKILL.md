@@ -11,7 +11,7 @@ Generate a structured summary of the current session. This summary serves one au
 
 **The Scribe** — as input for session notes and published material.
 
-Session-to-session continuity is now carried by **quests** (see Coco's agent file). Before generating the wrap-up summary, make sure any quest you touched this session has an up-to-date **Summary** section in its body — that's what the next Coco session will read, not this wrap-up file.
+Session-to-session continuity is now carried by **clicks** (see Coco's agent file and the clicks skill). Before generating the wrap-up summary, conclude or park any clicks touched this session — the click tree is what the next Coco session will read for orientation, not this wrap-up file.
 
 <expected-format>
 # Session Summary
@@ -61,7 +61,6 @@ Check for things Sean should be nudged about:
 
 - Keep the whole summary under ~500 words. Brevity is a feature.
 - Do not editorialize beyond the "why it's notable" flags.
-- Write the summary to `.scratch/recent-sessions/<timestamp>.md`, where `<timestamp>` is the current date and time formatted as `YYYY-MM-DDTHHMMSS.md` (use the actual current time — don't round to the nearest hour). Each session gets its own file — never overwrite a previous one.
 - Write the summary to `experiments/ethnography/session-notes/new/<timestamp>.md`. where `<timestamp>` is the current date and time formatted as `YYYY-MM-DDTHHMMSS.md` (use the actual current time — don't round to the nearest hour). Each session gets its own file — never overwrite a previous one. This file is for the ethnographer and must NOT be auto-deleted — it accumulates until the ethnographer reviews it.
 - Commit all `session-notes`, and `experiments/data/transcripts/` changes to git and push those changes. The transcripts directory may contain files from concurrent sessions — commit whatever is there.
 - In addition to writing the summary, share it in the chat for review and inclusion in session transcripts

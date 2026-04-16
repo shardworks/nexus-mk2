@@ -47,7 +47,8 @@ nexus-mk2/  (the sanctum)
 - **Guild** — an instantiated workspace where animas operate. Created via `nsg init`.
 - **Anima** — an AI identity with a name, role, curriculum, and temperament.
 - **Commission** — a posted unit of work from the patron. Creates a `mandate` writ.
-- **Writ** — a typed, tree-structured record kept in the guild's books with a lifecycle (`ready → active → pending → completed/failed/cancelled`). The type names the kind of record: `mandate` for an obligation, `quest` for an area of inquiry, etc. Dispatch to a rig is opt-in per writ type.
+- **Writ** — a typed, tree-structured record kept in the guild's books with a lifecycle (`new → open → stuck → completed/failed/cancelled`). The type names the kind of record: `mandate` for an obligation. Dispatch to a rig is opt-in per writ type.
+- **Click** — an atomic decision-node managed by the Ratchet apparatus. Tracks questions and inquiries (the reasoning domain), organized in a tree. Lifecycle: `live → parked → concluded/dropped`. Clicks are the session-continuity mechanism for interactive work; writs track obligations.
 - **Clockworks** — the event-driven dispatch layer. Standing orders bind event patterns to handlers (engines or summons).
 - **Session** — a single agent invocation through the session funnel (manifest → launch → record).
 - **Conversation** — multi-turn interaction grouping multiple sessions via `--resume`.

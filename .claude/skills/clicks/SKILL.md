@@ -1,6 +1,5 @@
 ---
 description: Work with clicks — Coco's session-continuity mechanism. Invoke when opening, updating, resuming, or concluding a line of inquiry that should outlive the current session.
-disable-model-invocation: true
 ---
 
 # Clicks — Session-Continuity Workflow
