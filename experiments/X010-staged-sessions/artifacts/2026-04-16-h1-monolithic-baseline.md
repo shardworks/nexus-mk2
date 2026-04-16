@@ -54,6 +54,16 @@ outcome (review passed cleanly). My projection predicted a hard ceiling at
 turn ~100 causing failure or truncation; actual behavior is that
 **auto-compaction is a graceful soft ceiling.**
 
+> **Correction (post-H2 audit, 2026-04-16):** a second-pass audit found that
+> the session actually had *two* compaction events, not one. An earlier
+> compaction at **turn 11** (cache_read 56,900 → 14,533) preceded the
+> turn-63 event. It fires during the early exploration phase — before any
+> file edits had happened — so it doesn't affect any of this artifact's
+> conclusions, but the "one compaction" framing here is inaccurate. See
+> click `c-mo1y846y-5ce86d5155f2` for the full three-phase breakdown
+> (Phase A: turns 1–10 exploration; Phase B: 11–62 main work; Phase C:
+> 63–77 test authoring) and the post-compaction-2 quality audit.
+
 ## Why The Cheap-Mining Projection Was Wrong
 
 The projection's fatal assumption: *same turn count, compounding cache-read.*
