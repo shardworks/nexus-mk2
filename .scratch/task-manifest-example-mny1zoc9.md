@@ -12,7 +12,7 @@ Companion to the intent brief example. This is the GSD-style decomposition of th
     See implementation brief for full intent, decisions, and blast radius.
   </brief>
 
-  <task id="t1" type="implement">
+  <task id="t1">
     <name>Session heartbeat endpoint</name>
     <files>
       packages/plugins/animator/src/tools/session-heartbeat.ts (new)
@@ -29,7 +29,7 @@ Companion to the intent brief example. This is the GSD-style decomposition of th
     <done>Animator exposes a session-heartbeat tool that refreshes lastActivityAt for non-terminal sessions.</done>
   </task>
 
-  <task id="t2" type="implement">
+  <task id="t2">
     <name>Babysitter heartbeat emission</name>
     <files>
       packages/plugins/claude-code/src/babysitter.ts
@@ -45,7 +45,7 @@ Companion to the intent brief example. This is the GSD-style decomposition of th
     <done>Running babysitters emit heartbeats every 30s. Timer is cleaned up on all exit paths.</done>
   </task>
 
-  <task id="t3" type="implement">
+  <task id="t3">
     <name>Guild self-heartbeat and downtime credit</name>
     <files>
       packages/plugins/animator/src/types.ts
@@ -62,7 +62,7 @@ Companion to the intent brief example. This is the GSD-style decomposition of th
     <done>Guild tracks its own liveness. Downtime credit is available for reconciler startup pass.</done>
   </task>
 
-  <task id="t4" type="implement">
+  <task id="t4">
     <name>Heartbeat-based reconciler</name>
     <files>
       packages/plugins/animator/src/startup.ts
@@ -80,7 +80,7 @@ Companion to the intent brief example. This is the GSD-style decomposition of th
     <done>Dead sessions detected within ~120s via heartbeat staleness. No PID-based detection remains.</done>
   </task>
 
-  <task id="t5" type="implement">
+  <task id="t5">
     <name>Cancel handle migration</name>
     <files>
       packages/plugins/animator/src/types.ts
@@ -107,7 +107,7 @@ Companion to the intent brief example. This is the GSD-style decomposition of th
     <done>All cancel metadata uses the tagged cancelHandle shape. No residual cancelMetadata consumers remain anywhere.</done>
   </task>
 
-  <task id="t6" type="implement">
+  <task id="t6">
     <name>Babysitter SIGTERM handler and terminal-state immutability</name>
     <files>
       packages/plugins/claude-code/src/babysitter.ts
@@ -126,27 +126,15 @@ Companion to the intent brief example. This is the GSD-style decomposition of th
     <done>SIGTERM → cancelled (not failed). Terminal sessions can't be overwritten. Temp dirs cleaned up.</done>
   </task>
 
-  <task id="t7" type="verify">
-    <name>Final verification</name>
-    <files>packages/</files>
-    <action>
-      Run full test suite. Run grep audit for any residual cancelMetadata.
-      Verify all new code has tests (heartbeat endpoint, reconciler,
-      cancel handle validation, SIGTERM handler, terminal-state guard).
-      Add any missing tests.
-    </action>
-    <verify>pnpm -w lint && pnpm -w test passes clean.</verify>
-    <done>All tests pass. No residual cancelMetadata. Test coverage for all new behavior.</done>
-  </task>
 </mandate>
 ```
 
 ## Notes on this decomposition
 
-**7 tasks instead of 20 requirements.** Each task is a coherent unit of work, not a single requirement. Tasks group related changes that must be consistent with each other (e.g., t5 groups the entire cancel handle migration because splitting it would leave the codebase in an inconsistent state between tasks).
+**6 tasks instead of 20 requirements.** Each task is a coherent unit of work, not a single requirement. Tasks group related changes that must be consistent with each other (e.g., t5 groups the entire cancel handle migration because splitting it would leave the codebase in an inconsistent state between tasks).
 
-**Task 5 is the critical one.** This is where the original commission failed. Note the explicit instruction: "the file list above is the planner's best guess but DO YOUR OWN AUDIT." The GSD format lets us declare files for scheduling purposes while still telling the implementer to verify independently.
+**Task 5 is the critical one.** This is where the original commission failed. The `files` list is the planner's predicted blast radius, but it is NOT exhaustive — `files` is never exhaustive. The implementer must verify scope independently. The task's `action` reinforces this: "DO YOUR OWN AUDIT: grep for cancelMetadata across the entire monorepo."
 
-**Task 7 is a verification-only pass.** In the original spec, verification was scattered across 13 checks. Here it's a single final task that runs the audit. If this were a separate session, it would have fresh eyes on the whole mandate.
+**No terminal verify task.** Final verification is a property of the engine loop, not a manifest task. The task list must be freely appendable — the anima may discover additional work and add tasks to the end. A hardcoded verify task at the end would block that.
 
-**Ordering matters for some, not all.** t1 must precede t2 (endpoint must exist before babysitter can call it). t3 must precede t4 (downtime credit feeds reconciler). t5 is independent of t1-t4. t6 is independent. t7 must be last. A scheduler could parallelize {t1→t2, t3→t4, t5, t6} then run t7.
+**Ordering matters for some, not all.** t1 must precede t2 (endpoint must exist before babysitter can call it). t3 must precede t4 (downtime credit feeds reconciler). t5 is independent of t1-t4. t6 is independent. A scheduler could parallelize {t1→t2, t3→t4, t5, t6}.
