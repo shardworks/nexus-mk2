@@ -1,0 +1,2 @@
+short ID resolution doesn't work on --parent-id during create. The create handler passes parentId straight through to the API's create() method without calling resolveId() first. That's a
+  tool-level bug.
