@@ -1,0 +1,27 @@
+{
+  "id": "w-mnxqv448-d63c8233b735",
+  "type": "quest",
+  "status": "open",
+  "title": "Session consult — enter an existing autonomous session interactively",
+  "body": "# Session consult — enter an existing autonomous session interactively\n\n## Goal\n\nDesign and ship the ability for the patron to \"enter\" a completed (or in-progress) autonomous session as an interactive multi-turn conversation — resuming the anima's full context window so the patron can ask questions, give corrections, or extend the work without starting from scratch. The outcome is a working `nsg consult --session <id>` (or equivalent) command backed by the Parlour apparatus.\n\n## Status\n\nReady — captured from design conversation (2026-04-07 and 2026-04-13). No implementation started.\n\n## Next Steps\n\n1. Decide the CLI surface: `nsg consult --session <id>`, `nsg consult --writ <id>`, or both.\n2. Design the Parlour API addition: `providerSessionId` seeding on `ParticipantDeclaration` for resuming into existing sessions.\n3. Decide on the interactive turn loop — who builds it (CLI command? dedicated tool?), streaming vs blocking.\n4. Assess workspace-persistence constraint: what's the worktree lifecycle for sealed commissions, and does session data survive?\n5. Prototype the happy path: look up session → create seeded Parlour conversation → take turns.\n\n## Context\n\n### The plumbing exists\n\nThe Animator already supports `--resume` via `conversationId` on `AnimateRequest`. The Claude Code provider maps this directly to `claude --resume <id>`. Every session's `providerSessionId` is stored in the Stacks `sessions` book. The Parlour already manages multi-turn conversations (consult and convene) and round-trips `providerSessionId` across turns.\n\n### The gap\n\nThe Parlour's `create()` doesn't accept a `providerSessionId` on `ParticipantDeclaration` — declarations are just `{ kind, name }`. To \"enter\" an existing session, we need to seed the anima participant's `providerSessionId` at conversation creation time so the first `takeTurn()` resumes the existing session rather than starting fresh.\n\nThis is a small API addition. The downstream plumbing (`takeTurn` → Animator → Claude Code → `--resume`) already works.\n\n### Workspace persistence constraint\n\n`--resume` depends on Claude Code's `.claude/` session data existing in the `cwd`. If the artificer ran in a worktree that's been cleaned up, the session data is gone. Current Spider behavior: worktrees persist after commission seal (not auto-cleaned). So there's a window where this works, but it's fragile. Long-term, this interacts with the container isolation work (quest `w-mnszh806-d78fcf13383d`).\n\n### No CLI surface yet\n\nThe Parlour has no CLI command at all — no `nsg consult`, no interactive turn loop. The conversation management tools (list, show, end) are exposed as anima tools, not patron-facing CLI commands. Building the interactive loop is the bulk of the CLI work.\n\n### Relationship to other quests\n\n- **Conversational analyst mode** (`w-mnsxdi0d-02fe46deeefd`) — adjacent but distinct. That quest is about multi-turn chat with the plan workshop's analyst stage specifically. This quest is about entering *any* existing session.\n- **Session directory isolation** (`w-mnszh806-d78fcf13383d`) — the container isolation work affects workspace persistence, which is a constraint here.\n- **Cross-rig data flow and workspace persistence** (`w-mnsxbn8m-b3b9c9bc7c17`) — related: workspace lifecycle decisions affect whether session data survives for consult.\n\n## References\n\n- Parlour implementation: `/workspace/nexus/packages/plugins/parlour/src/parlour.ts`\n- Parlour architecture doc: `/workspace/nexus/docs/architecture/apparatus/parlour.md`\n- Parlour implementation tracker: `/workspace/nexus/docs/in-progress/parlour-implementation-tracker.md`\n- Animator types (SessionDoc, providerSessionId): `/workspace/nexus/packages/plugins/animator/src/types.ts`\n- Claude Code provider (--resume): `/workspace/nexus/packages/plugins/claude-code/src/index.ts`\n- Design conversation: Coco session 2026-04-07 (session `6540790b-cd44-4eab-9cdf-e70e58bcc0b0`)\n\n## Notes\n\n- The anima would come back with its full context window — every tool call, every file read, every decision. It's genuinely resuming, not starting fresh with a summary. Very powerful for \"hey, why did you do X?\" interactions.\n- Convene mode has a separate gap (anima responses show as `[response not available]` in inter-turn context) but that doesn't affect consult at all.\n- Could also support entering in-progress sessions, not just completed ones — useful for \"the agent seems stuck, let me help\" scenarios. Would need careful coordination with the Spider's rig lifecycle.",
+  "createdAt": "2026-04-13T22:08:29.336Z",
+  "updatedAt": "2026-04-13T22:08:29.336Z",
+  "links": {
+    "outbound": [],
+    "inbound": [
+      {
+        "id": "w-mo0f2led-99ffa42ab4e5:w-mnxqv448-d63c8233b735:relates-to",
+        "sourceId": "w-mo0f2led-99ffa42ab4e5",
+        "targetId": "w-mnxqv448-d63c8233b735",
+        "type": "relates-to",
+        "createdAt": "2026-04-15T19:03:10.449Z"
+      }
+    ]
+  },
+  "parent": null,
+  "children": {
+    "summary": {},
+    "items": []
+  },
+  "bodySource": "file-canonical"
+}

@@ -1,0 +1,67 @@
+{
+  "id": "w-mo0e2m9q-299eb6cbaf22",
+  "type": "quest",
+  "status": "open",
+  "title": "Unlocking autonomous operation",
+  "body": "# Unlocking autonomous operation\n\n## Goal\n\nMove Nexus from the current piecemeal, high-touch dispatch model — where Sean manually sequences and queues almost every commission — to a model where the patron (and anima) can dump work into a hopper and the system runs autonomously until it exhausts its token purse or hits a decision that genuinely requires a human. This umbrella is the **single place to look for \"what's the next best thing to work on to get us there\"** — every precondition for autonomous operation lives here, even if it has independent value elsewhere in the system. Direct work beyond coordination is minimal; the value of the umbrella is the *ordering decision* it enables across its children.\n\n## Status\n\nActive (2026-04-16) — planner intent briefs and task manifests shipped. v2 (task-loop engine) brief dispatched to Astrolabe.\n\n## Next Steps\n\n**Next concrete unit of work:** Review v2 Astrolabe output when it completes, then dispatch.\n\n**After v2 ships:** run 5-10 commissions end-to-end with the new format and measure:\n- Patron-question frequency vs pre-redesign baseline\n- Per-task success rate (do individual pieces complete cleanly?)\n- Does the implement anima actually use the verify checkpoints?\nIf patron questions drop significantly, the core redesign is validated. Then: preference model (v3), concurrency control, and onward down the ordering list.\n\n## Ordering\n\nRough sequence (revisit when each ships):\n\n1. ~~**Decision-centric planner v1**~~ — ✅ Intent briefs + task manifests shipped. Sage instructions updated directly; task manifest format via commission w-mo0ypqs4. **v2 (task-loop engine) brief dispatched.**\n2. **(In parallel) Multi-rig refactor** — the longer-runway substrate work. Can start anytime; doesn't serialize with planner.\n3. **Concurrency control v1** — dead-simple HEAD-moved-since-read-time check. Cheap correctness floor that unblocks dropping work into the hopper.\n4. **Task decomposition** — structured acceptance criteria. Can ship on 1:1 substrate. Wants planner v1 for better spec format but doesn't strictly block.\n5. **Decision-centric planner v2** — preference model. Requires v1 data (patron corrections) to design meaningfully. Lands after v1 has run enough commissions to have correction data.\n6. **Coinmaster / Purse / Tithe** — wants multi-rig for purse-per-rig accounting.\n7. **Petition** — can ship early on current substrate; minor reshaping later under multi-rig.\n8. **Vigil** — wants multi-rig for cleanest \"watch rigs, not writs\" semantics.\n9. **Reviewer rarely rejects** — downstream of planner redesign. If specs become intent-based, the reviewer's job changes from \"did you follow instructions\" to \"does this satisfy intent and constraints.\" Reassess after planner v1 ships.\n\n## Context\n\nThe core bottleneck is Sean-as-scheduler. Today every new idea costs a scheduling decision — *can this run now? will it be invalidated? what does it depend on? who reviews it?* — and that per-intake cost caps how fast the hopper fills. The target operating model:\n\n- Sean (or anima) dumps work into a backlog tier with minimal ceremony.\n- A triage step (human or agent) moves items backlog → ready.\n- Autodispatch pulls from the ready pool on its own, running rigs in parallel where safe.\n- The system runs until its token purse is exhausted or a decision genuinely requires a human.\n- Progress is legible without babysitting — the patron can walk away and come back to artifacts plus a trail.\n\nFor Sean to trust that model, five things have to be true:\n\n1. **Zero-blocking planning.** The planner closes all decisions and proceeds. Patron input is ratification after the fact, not approval before. Requiring patron input is an incident, not a workflow step. (Decision-centric planner quest.)\n2. **Trusted intake tiers.** At least *backlog* (not dispatchable) and *ready pool* (dispatchable). Autodispatch only pulls from ready, and that rule is inviolable. (Concurrency sub-quest.)\n3. **Safe parallelism.** Running multiple rigs at once can't produce confidently-wrong plans. Observed read-set OCC, plan-vs-plan conflict handling. (Concurrency sub-quest.)\n4. **Trustworthy completion.** Autonomous operation is impossible if every sealed mandate requires human review to catch correlated failures. Structured task decomposition with planner-written acceptance breaks that loop. (Task decomposition quest.)\n5. **A termination condition with teeth.** \"Runs until out of tokens\" requires a real purse. (Coinmaster/Purse quest.)\n\nAnd three supporting layers:\n\n6. **Internal work generation.** Anima need a first-class way to file petitions, not just patron-originated commissions, or the hopper depends on Sean alone. (Petition quest.)\n7. **Foundational writ substrate.** The current 1:1 writ-to-rig coupling forces recovery, revision, mid-execution decomposition, and stuck recovery into awkward workarounds. A multi-rig substrate dissolves a whole class of pain points that an autonomous system must handle without human rescue. (Multi-rig refactor quest.)\n8. **Self-supervision.** The autonomous system watches for trouble — staleness, failure, runaway behavior — without requiring the patron to babysit. (Vigil quest.)\n\n### Ordering pivot (2026-04-16): planner-first\n\nPrevious ordering decision (2026-04-15) was atlas-first, reasoning that planning efficiency improvements compound through everything. That reasoning still holds for *agility* — but the atlas work was reparented to the agility umbrella (w-mo0v5wpc) because it addresses cost/speed, not autonomy.\n\nThe sharpened autonomy definition — \"requiring patron input is an incident\" — makes the decision-centric planner the clear highest-leverage next step. The current planner's failure mode is precisely that it *requires* patron input as a normal part of its workflow (blocking questions during MRA). The planner redesign directly eliminates that by:\n- Closing decisions instead of punting them\n- Tiering decisions so most just proceed\n- Surfacing only genuine Tier 4 value-laden choices, after the fact, as ratification not approval\n\nZero substrate dependencies. Testable immediately against real commissions. And the atlas work (under agility) will make the new planner *better* once it lands — better codebase context → better decision closure — but isn't a prerequisite.\n\n### The three patterns hiding in \"depends on\"\n\nFrom the design conversation that opened this umbrella:\n\n1. **Blocks** — hard prerequisite. \"Don't start B until A completes.\" Classic `depends_on`. Fits a load-bearing link.\n2. **Invalidates** — the astrolabe case. Not a discrete blocker; a *period of upstream churn* during which running a plan is wasteful. Fits a `park`/`release` mechanism where a human flips a state when churn settles.\n3. **Hopper / backlog** — no dependency at all, just \"recorded, not yet triaged.\" Fits a backlog tier that autodispatch ignores.\n\nBundling (2) into (1) is the design error to avoid — you cannot enumerate every upstream writ that might invalidate an analysis. Park/release is the escape hatch.\n\n## References\n\n### Direct children\n\n**Zero-blocking planning (the \"no patron questions\" layer):**\n\n- `w-mo0v636y-41c8aeff857f` — **Decision-centric planner: intent specs, tiered decisions, preference model**. Redesign the planner to produce intent+constraints specs with a tiered decision model. Most decisions proceed without patron input; only Tier 4 choices surface for after-the-fact ratification. The single highest-leverage autonomy enabler. Next concrete work.\n\n**Concurrency safety (the parallelism layer):**\n\n- `w-mo0e31ca-5f4b84a19bd6` — **Concurrency control for parallel planning**. OCC over observed read sets, plan-vs-plan conflicts, backlog/ready/parked tiers, park/release for upstream-churn windows, load-bearing `blocked_by` links.\n\n**Trustworthy completion (the quality-without-review layer):**\n\n- `w-mnsxcp2m-816fb7b5b156` — **Astrolabe: structured task decomposition & acceptance verification**. Structured task units with planner-written acceptance criteria and verify commands.\n  - `w-mnsxe2fo-cb784ab3f978` — Verify-command quality.\n  - `w-mnsxdi0d-02fe46deeefd` — Conversational analyst mode.\n\n**Reviewer calibration:**\n\n- `w-mo04b8hd-93723d6b6c13` — **Reviewer rarely rejects — are we over-specifying or is the reviewer uncritical?** Downstream of planner redesign: intent-based specs change what the reviewer checks.\n\n**Economics & termination (the \"runs until\" layer):**\n\n- `w-mnszznt5-66d0ec7464bc` — **Coinmaster / Purse / Tithe**: cost tracking & token budget allocation.\n\n**Work generation (the \"anima dumps into hopper\" layer):**\n\n- `w-mnszzo8h-42137bda6681` — **Petition**: first-class internal commissions.\n\n**Background monitoring (the \"watch for trouble\" layer):**\n\n- `w-mnszzon4-731bd9827d05` — **Vigil**: background monitoring of in-flight commissions.\n\n**Foundational writ substrate (the \"what a writ even is\" layer):**\n\n- `w-mnsx8cz2-63bdd1d4a2d3` — **Multi-rig refactor: writs as obligations, rigs as attempts**.\n  - `w-mnsx90p1-76dc4a15808c` — T2.1 status model simplification (**completed**).\n  - `w-mnsx9lbz-23af127d6773` — T2.2 parent-child relationship semantics.\n  - `w-mnsxa94f-d95699ee5f37` — T2.3 brief → mandate collapse under multi-rig.\n  - `w-mnsxawnd-5f868b6491d9` — T2.4 rig template generation beyond \"one template per writ type.\"\n  - `w-mnsxbn8m-b3b9c9bc7c17` — T2.5 cross-rig data flow and workspace persistence.\n\n**Recovery:**\n\n- `w-mo04dq6j-d7daa897c906` — **Automated recovery strategy for seal-engine rebase conflicts**.\n\n### Cross-references (not children, but load-bearing context)\n\n- `w-mo0v5wpc-5bf770389406` — **Astrolabe agility** (sibling umbrella). Atlas and reader efficiency work lives here. Feeds the planner better inputs, making decision closure higher quality — but isn't a prerequisite for planner v1.\n- `/workspace/nexus-mk2/docs/future/guild-vocabulary.md` — vocabulary tome. Terms relevant to autonomous operation:\n  - **Muster** — pre-dispatch validation phase. Natural home for scheduler precondition checks.\n  - **Bounty** — commission priority/tier system affecting dispatch decisions.\n  - **Levy** — resource allocation policy ensuring patron work takes priority over petition work.\n\n## Notes\n\n- Transcript: design conversation with Sean on 2026-04-15 session `0f586d06-87cd-46e1-b9ff-a2e28a52618a` covering load-bearing links → hopper mode → OCC → preamble → atlas connection → absorption of multi-rig and task-decomposition quests into the umbrella. The conversation spine is: *how do we offload scheduling cost from Sean?*\n- Transcript: planner redesign conversation on 2026-04-16 session `860f69d7-6b13-4f55-8d40-a4e31d67c92b` — Sean proposed decision-centric specs with tiered decisions. Key quote: \"requiring input should be akin to an incident in other systems, a real failure.\" Seam contracts/policy registry were discussed and discarded as low-value overhead. Preference model retained as v2 aspiration.\n- Sean's operating-model framing (2026-04-15): the umbrella should be a single place to look and pick the next best thing to work on. The filter for inclusion: *is this a necessary or sufficient condition for Sean to stop manually scheduling?*\n- Risk to watch: as the umbrella absorbs more preconditions, the filter starts looking like \"is this substrate work?\" — the antidote is the sharper question (*necessary* or *sufficient*, not *helpful*) and willingness to prune.",
+  "createdAt": "2026-04-15T18:33:42.974Z",
+  "updatedAt": "2026-04-15T18:33:42.974Z",
+  "links": {
+    "outbound": [],
+    "inbound": []
+  },
+  "parent": null,
+  "children": {
+    "summary": {
+      "open": 9
+    },
+    "items": [
+      {
+        "id": "w-mo0v636y-41c8aeff857f",
+        "title": "Decision-centric planner: intent specs, tiered decisions, preference model",
+        "status": "open"
+      },
+      {
+        "id": "w-mo0e31ca-5f4b84a19bd6",
+        "title": "Concurrency control for parallel planning: OCC, plan-vs-plan, hopper tiers",
+        "status": "open"
+      },
+      {
+        "id": "w-mo04dq6j-d7daa897c906",
+        "title": "Automated recovery strategy for seal-engine rebase conflicts",
+        "status": "open"
+      },
+      {
+        "id": "w-mo04b8hd-93723d6b6c13",
+        "title": "Reviewer rarely rejects — are we over-specifying or is the reviewer uncritical?",
+        "status": "open"
+      },
+      {
+        "id": "w-mnszzon4-731bd9827d05",
+        "title": "Background monitoring of in-flight commissions (Vigil)",
+        "status": "open"
+      },
+      {
+        "id": "w-mnszzo8h-42137bda6681",
+        "title": "First-class internal commissions (Petition flow)",
+        "status": "open"
+      },
+      {
+        "id": "w-mnszznt5-66d0ec7464bc",
+        "title": "Cost tracking & token budget allocation (Coinmaster/Purse/Tithe)",
+        "status": "open"
+      },
+      {
+        "id": "w-mnsxcp2m-816fb7b5b156",
+        "title": "Astrolabe: structured task decomposition & acceptance verification",
+        "status": "open"
+      },
+      {
+        "id": "w-mnsx8cz2-63bdd1d4a2d3",
+        "title": "Writs as obligations, rigs as attempts — the multi-rig refactor",
+        "status": "open"
+      }
+    ]
+  },
+  "bodySource": "file-canonical"
+}

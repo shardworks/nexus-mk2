@@ -1,0 +1,24 @@
+{
+  "id": "w-mnsxdi0d-02fe46deeefd",
+  "type": "quest",
+  "status": "open",
+  "title": "Conversational analyst mode — multi-turn plan refinement",
+  "body": "# Conversational analyst mode — multi-turn plan refinement\n\n_Imported from `.scratch/todo/plan-workshop-conversational-analyst.md` (2026-04-10)._\n\n## Goal\n\nAdd a multi-turn conversational mode to the plan workshop's analyst stage, so the patron can probe the analyst's reasoning, ask \"what if we did X instead,\" and iteratively steer the analysis. Builds on the already-shipped one-shot amendment mode and the proven session-resume + system-prompt-override pattern.\n\n## Status\n\nProposed feature, not yet implemented. Complexity ~5 (Fibonacci) — backend straightforward, UI work is the bulk and several design decisions unresolved.\n\n## Next Steps\n\nResolve the chat-transport question first (per-message `--print` vs persistent process), since it determines the rest of the architecture. Then prototype the inline chat panel against the simpler transport. Settle session forking vs mutating before exposing the feature to non-Sean users — the \"later re-runs include chat history\" footgun matters more for scaled usage than for personal use.\n\n## Context\n\nAmendment mode (shipped) handles the common case: analyst's framing is wrong and you can articulate the correction in one shot. But sometimes you need to **explore** — multi-turn conversation, not one-shot amendments.\n\n**Proposed shape:**\n\nA \"Chat with Analyst\" button on the Decisions tab. Opens an inline chat panel:\n\n- **Message input** — textarea + send button at the bottom\n- **Response area** — scrollable conversation panel\n- **Done button** — closes the panel, refreshes scope/decisions from disk\n\nThe chat panel replaces (or overlays) the decisions list while open.\n\n**Backend:** each message is a `claude --print -` invocation that resumes the analyst's session:\n\n```\nclaude --print - \\\n  --resume <analyst-session-id> \\\n  --system-prompt-file bin/plan-prompts/analyst-revise.md \\\n  --tools Read,Glob,Grep,Write \\\n  --setting-sources user \\\n  --permission-mode acceptEdits \\\n  --add-dir specs/ \\\n  --max-budget-usd 3\n```\n\nThe analyst has full context from its original analysis (codebase inventory, previous scope/decisions) via session history. Each response may rewrite `scope.yaml`/`decisions.yaml`.\n\n**API:** `POST /api/specs/:slug/analyst-chat` — `{ message: string }` → `{ response: string }`, sync or SSE-streamed.\n\n**Session management:** the analyst session ID is already in `.meta.yml` as `sessionId`. `--resume` reloads context; each chat message is a new turn. `--system-prompt-file` keeps the analyst in role on resume.\n\n**Open:**\n\n1. **Chat transport — `--print` per message, or persistent process?** `--print` with `--resume` gives multi-turn via session history, fresh process per call. True streaming needs persistent — architecturally different from current pipeline.\n2. **Session forking — fork or mutate?** If patron chats then re-runs analyst from scratch, the resumed session includes chat history. Forking avoids this but means chat turns don't benefit from previous chat turns.\n3. **Mid-conversation file rewrites.** Decisions tab should refresh, but timing is tricky if chat panel is open. Probably: refresh on Done, not every message.\n4. **Cost tracking.** Each chat turn is a separate `--print` invocation. Transcript capture currently happens on process close in `runPipelineStep`. Chat messages won't go through that path — need separate transcript capture or accumulate usage from `--output-format json` envelope.\n5. **Clone directory lifecycle.** `runPipelineStep` clones the codex to a temp dir. For chat, need a persistent clone (or re-clone each time, which is wasteful). Probably: keep clone alive for chat session duration.\n\n## References\n\n- Parent quest: T3 (`w-mnsxcp2m-816fb7b5b156`)\n- Source doc: `.scratch/todo/plan-workshop-conversational-analyst.md`\n- Shipped dependency: amendment mode + `bin/plan-prompts/analyst-revise.md`\n- Session metadata: `.meta.yml` → `sessionId`\n\n## Notes\n\n- Adjacent to but distinct from the main task-decomposition work (parent quest). Task decomposition is about the *output shape* of the planner; conversational mode is about the *interaction loop*. Both can ship independently.\n- Session-resume + `--system-prompt-file` override confirmed working in earlier sessions.\n- 2026-04-10: opened as child of T3.",
+  "parentId": "w-mnsxcp2m-816fb7b5b156",
+  "createdAt": "2026-04-10T13:11:53.965Z",
+  "updatedAt": "2026-04-13T21:36:06.957Z",
+  "links": {
+    "outbound": [],
+    "inbound": []
+  },
+  "parent": {
+    "id": "w-mnsxcp2m-816fb7b5b156",
+    "title": "Astrolabe: structured task decomposition & acceptance verification",
+    "status": "open"
+  },
+  "children": {
+    "summary": {},
+    "items": []
+  },
+  "bodySource": "file-canonical"
+}

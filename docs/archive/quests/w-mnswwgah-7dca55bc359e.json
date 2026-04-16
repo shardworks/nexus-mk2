@@ -1,0 +1,23 @@
+{
+  "id": "w-mnswwgah-7dca55bc359e",
+  "type": "quest",
+  "status": "cancelled",
+  "title": "Concurrent session writes to the same quest body",
+  "body": "# Concurrent session writes to the same quest body\n\n_Imported from `.scratch/conversation-topics-as-writs.md` § \"Concurrent session writes\" (2026-04-10)._\n\n## Goal\n\nPrevent silent data loss when two sessions simultaneously update the same quest body. Decide whether to ship a mitigation preemptively (optimistic concurrency, append-only journal) or accept the risk until a real incident forces the design.\n\n## Status\n\ncancelled (2026-04-10) — **dissolved by construction** when T1.8 (file-canonical quest bodies, `w-mnt0jin1`) shipped. Quest bodies now live as files in the vibers git repo, so concurrent writes fall under normal git conflict semantics (commit early, merge normally). No mtime checks, no lockfiles, no optimistic concurrency plumbing needed. The \"single mutable cell\" substrate that created this risk no longer exists for quest writs.\n\n## Next Steps\n\nConcluded — dissolved. If concurrent writes become a problem for *non-quest* writ types (mandates, standing orders, etc.), open a fresh quest scoped to that surface; the reasoning in Context below transfers.\n\n## Context\n\nFailure mode is quiet: session A reads, session B reads+writes, session A writes over B. No error surfaces; B's edit is simply gone.\n\nThree mitigations sketched:\n\n1. **Optimistic concurrency** — version-stamped writes; reject stale writes and force the caller to re-read and retry. Strongest, but requires version/etag plumbing in the Clerk.\n2. **Append-only session journal** — a structured sub-section (e.g. `## Session Notes`) each session appends to rather than rewriting. Summary stays mutable last-write-wins, but the append channel prevents data loss. Degrades gracefully.\n3. **Accept the risk** — concurrent-session quest work is rare; revisit when it bites. *(Current stance.)*\n\nThe append-only journal is attractive because it degrades gracefully — even in a race, both entries land and a human can reconcile. Optimistic concurrency is the stronger answer but demands more plumbing.\n\nThe trigger for moving off Option 3 is most likely Astrolabe becoming a quest writer (see T1.4 decisions & ratification) — at that point Coco and Astrolabe both touch quests routinely and the single-writer assumption breaks.\n\n## References\n\n- Parent quest: `w-mnswvmj7-2112b86f710a`\n- Related: T1.4 decisions & ratification (`w-mnswwzdv-88c29d29f84b`) — likely trigger for Astrolabe to become a quest writer\n\n## Notes\n\n- 2026-04-10: opened as child of writ substrate quest.\n- 2026-04-10: cancelled. Dissolved by T1.8 file-canonical bodies — git conflict semantics replace any need for concurrency mitigation on quest bodies. Closed during the post-T1.8 cluster cleanup session.",
+  "parentId": "w-mnswvmj7-2112b86f710a",
+  "createdAt": "2026-04-10T12:58:38.585Z",
+  "updatedAt": "2026-04-10T15:38:55.677Z",
+  "links": {
+    "outbound": [],
+    "inbound": []
+  },
+  "parent": {
+    "id": "w-mnswvmj7-2112b86f710a",
+    "title": "Initial implementation and MVP",
+    "status": "open"
+  },
+  "children": {
+    "summary": {},
+    "items": []
+  }
+}

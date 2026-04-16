@@ -1,0 +1,34 @@
+{
+  "id": "w-mnszh7kz-f6193fbbdc29",
+  "type": "quest",
+  "status": "completed",
+  "title": "Race-safe pending session recovery in animator startup",
+  "body": "# Race-safe pending session recovery in animator startup\n\n_Imported from `.scratch/todo/animator-pending-session-recovery.md` (2026-04-10)._\n\n## Goal\n\nReap stale `'pending'` SessionDocs in the Animator's startup recovery sweep, the same way `'running'` docs are already handled, without breaking the existing animator test that depends on tight startup timing. The naive sweep broke a `cancelMetadata` test by introducing async-tick races between the running and pending sweeps; the right fix is age-gated + sweep-ordered.\n\n## Status\n\n**Resolved (2026-04-14) — subsumed by heartbeat-based reconciliation in nexus@063c8b8.**\n\nThe commit replaces PID-based orphan recovery with heartbeat-based liveness: `SessionDoc.lastActivityAt` is refreshed on every heartbeat/ready/terminal report, and the reconciler now scans both `pending` and `running` on the same rule (`now − lastActivityAt − downtime_credit > staleness_threshold`, staleness_threshold = 90s). It also runs periodically (every 30s), not just at startup, and uses a guild `guild_alive_at` timestamp for downtime credit so restarts don't unfairly reconcile healthy sessions.\n\nThe age-gated + sweep-ordered approach this quest proposed is obsolete — the new protocol handles pending docs uniformly via the same staleness rule, and the original racing test no longer exists because the PID check was deleted outright.\n\nSee `/workspace/nexus-mk2/.scratch/detached-sessions/gaps.md` (G1, G3, G4) for the full gap-closure record.\n\n## Next Steps\n\nImplement the age-gated + reordered sweep: run the `running` sweep first and `await` it fully, then run the `pending` sweep filtered to docs whose `startedAt` is more than 30s old. Add two tests — \"skips fresh pending docs (younger than threshold)\" and \"marks stale pending docs as failed\" — and ensure the existing `calls provider.cancel() when cancelMetadata is available` test continues to pass. The 30s threshold is forgiving enough for slow babysitter spawns without leaking docs forever.\n\n## Context\n\n**Background.** When `nsg start --foreground` boots, the Animator's `start()` hook runs `recoverOrphans()` to mark sessions stuck in `'running'` whose PID is dead as `'failed'`. With the new `'pending'` lifecycle state added by the daemon-mode patch, there's a parallel hole: a session can also be stuck in `'pending'` if `launchDetached` pre-wrote the doc but the babysitter never started (host crash, OOM, spawn failure).\n\nToday nothing reaps stale `pending` docs. The `authorize` callback rejects them after long enough since `doc.status === 'pending'` is allowed only briefly in normal flow, but they accumulate in the sessions book and look misleading in `session-list`.\n\n**What was tried and reverted.** Naive sweep in `recoverOrphans()` adding `pending` alongside `running`:\n\n- New `sessions.find({ where: [['status', '=', 'pending']] })` call added latency to startup.\n- That delayed the running sweep into the same async tick as the test's `animate()` call.\n- The running sweep then found the test's session (pid 99 — fake), `process.kill(99, 0)` returned ESRCH, marked the doc `failed`.\n- `animator.cancel()` saw a terminal status and skipped `prov.cancel()`.\n- Test asserted `cancelCalledWith` but got `null`. 5/5 pass without the change, 3/3 fail with it.\n\nReverted in the same patch session (nexus@e16cd02 area).\n\n**Options considered:**\n\n1. **Age-gated sweep.** Only mark pending docs older than N seconds (e.g., 30s) as failed. Test sessions run in milliseconds so they'd never be touched. Cleanest fix; introduces a \"magic number\" knob.\n2. **Reorder sweeps.** Running sweep first, await fully, then pending sweep. Test was racing the running sweep — making it deterministic-first should isolate the test from any pending-sweep changes.\n3. **Make startup fully synchronous (and sequenced).** Today `recoverOrphans` runs in a fire-and-forget IIFE inside `animator.start()`. The race exists because the test doesn't wait for recovery to finish before calling `animate()`. `await`ing recovery in `start()` would fix the race but delay guild boot for everyone.\n4. **Move pending recovery out of `recoverOrphans` entirely.** Run as a separate periodic task in the daemon loop. Costs: requires a tick scheduler in the daemon; doesn't catch pending docs left from a crash before the daemon next boots.\n\n**Recommendation: 1 + 2 together.** Age-gated (30s) inside the pending sweep, executed *after* the running sweep awaits. Cheap, no scheduling infra, no test surgery.\n\n## References\n\n- Parent quest: T5 (`daemon-e2e-integration-tests`)\n- Source doc: `.scratch/todo/animator-pending-session-recovery.md`\n- Daemon mode patch: nexus@e16cd02\n- Files:\n  - `/workspace/nexus/packages/plugins/animator/src/startup.ts` — `recoverOrphans()`\n  - `/workspace/nexus/packages/plugins/animator/src/animator.test.ts` — find the failing fixture; mirror its setup for the new pending tests\n\n## Notes\n\n- 2026-04-10: opened as child of T5.",
+  "parentId": "w-mnszh3ry-514c1073034b",
+  "createdAt": "2026-04-10T14:10:46.307Z",
+  "updatedAt": "2026-04-14T03:50:12.523Z",
+  "resolvedAt": "2026-04-14T03:50:12.523Z",
+  "resolution": "Subsumed by heartbeat-based reconciliation in nexus@063c8b8 — reconciler now scans pending and running uniformly via lastActivityAt staleness rule. Age-gated sweep no longer needed.",
+  "links": {
+    "outbound": [],
+    "inbound": [
+      {
+        "id": "w-mo0f2led-99ffa42ab4e5:w-mnszh7kz-f6193fbbdc29:builds-on",
+        "sourceId": "w-mo0f2led-99ffa42ab4e5",
+        "targetId": "w-mnszh7kz-f6193fbbdc29",
+        "type": "builds-on",
+        "createdAt": "2026-04-15T19:03:11.215Z"
+      }
+    ]
+  },
+  "parent": {
+    "id": "w-mnszh3ry-514c1073034b",
+    "title": "Daemon end-to-end integration tests — multi-apparatus boundaries",
+    "status": "open"
+  },
+  "children": {
+    "summary": {},
+    "items": []
+  },
+  "bodySource": "file-canonical"
+}

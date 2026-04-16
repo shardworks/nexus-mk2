@@ -1,0 +1,53 @@
+{
+  "id": "w-mnsx8cz2-63bdd1d4a2d3",
+  "type": "quest",
+  "status": "open",
+  "title": "Writs as obligations, rigs as attempts — the multi-rig refactor",
+  "body": "# Writs as obligations, rigs as attempts — the multi-rig refactor\n\n_Imported from `.scratch/todo/multi-rig-architectural-exploration.md` (2026-04-10)._\n\n## Goal\n\nRefactor the writ data model so a writ is a long-lived **obligation** record and rigs are **ephemeral execution attempts** against that obligation. A writ can accumulate multiple rigs over its lifetime. This dissolves a whole class of pain points (recovery from failure, mid-rig decomposition, patron-requested revision, stuck recovery, amendments) that the current 1:1 writ-to-rig coupling forces into awkward workarounds.\n\n## Status\n\nParked. Not scheduled. Complexity estimate: **21** (possibly **34** if workspace persistence is as involved as suspected). Foundational refactor touching Clerk, Spider, Fabricator, Scriptorium, Clockworks, Oculus, and every consumer that assumes 1:1.\n\n## Next Steps\n\nDon't patch the 1:1 model further. Stop bolting on engine retry, pause primitives, and clever status schemes — they're all compensating for the 1:1 coupling and will keep piling up. If recoverability escalation becomes urgent before a real refactor, add a `stuck` signal as an honest bridge — but don't pretend it's a fix. When the refactor does become priority, decompose into its child quests (T2.1–T2.5) and tackle the workspace-persistence question first since it's the complexity wildcard.\n\n## Context\n\nThe starting question was small: \"I'd like to retry failed engines in a rig.\" A rebase conflict at the seal step wipes 100 hours of upstream work, and the only recourse today is reposting the commission. We wanted a retry primitive.\n\nWhat surfaced instead: **the 1:1 coupling is the root cause of several separate pain points**, and no amount of engine-level retry will fix the underlying shape.\n\nUnder the multi-rig reframe, a class of problems dissolves:\n\n- **Recovery from failure** → spawn a new rig with just the failed step. Retry lives at the rig level.\n- **Mid-rig decomposition → resume** → rig A ends naturally when it spawns children; children run; rig B spawns on the parent for the remaining phases.\n- **Patron-requested revision** → spawn a revision rig on the same writ. No \"repost as new commission\" ceremony.\n- **Stuck recovery** → previous rig is done; spawn a new one. Writ stays open.\n- **Amendments and scope changes** → cancel current rig, spawn a new one with updated spec. Lifecycle preserved.\n\nThis matches how patrons actually think: *\"I asked for X\"* is durable; *\"here's the 3rd attempt at delivering X\"* is transient.\n\nIt also strengthens the planning/execution boundary. Under 1:1, writ status leaked execution detail (`active` meant \"a rig is running\" — an execution fact). Under multi-rig, writ status tracks obligation lifecycle; rig status tracks execution. The two layers stop conflating.\n\n**Refined boundary rule:** *most* rigs execute work and produce artifacts; *some* rigs execute **planning** and produce writ structure. Both legitimate. What's prohibited is a non-planning rig reaching sideways to modify writ structure during execution. If an implementation rig discovers decomposition is needed, it escalates (\"needs replanning\") and a separate planning rig handles the modification.\n\n**Open lines tracked as child quests:**\n\n- **T2.1** — Status model simplification (6 honest statuses; `waiting` demoted to query predicate; `open` replaces `ready`/`active`)\n- **T2.2** — Parent-child relationship semantics — three meanings, one primitive\n- **T2.3** — Brief → mandate collapse, and the implications for the in-flight Astrolabe design\n- **T2.4** — Rig template generation beyond \"one template per writ type\"\n- **T2.5** — Cross-rig data flow and workspace persistence\n\n**Smaller open questions** not promoted to child quests:\n\n- Who decides writ completion — automatic on any rig seal + reopen capability, or explicit seal-writ step, or rig-declared intent at spawn time? (Leaning: automatic + reopen.)\n- Rig-level events in Clockworks (`rig.spawned`, `rig.completed`, `rig.failed`) distinct from writ-level — probably yes.\n- \"Stuck\" → recovery flow trigger — patron action, auto via standing order, or configurable per guild? (Leaning: configurable.)\n- How many rigs can a writ accumulate? (Probably fine — index on `(writId, status)` and `(writId, spawnedAt desc)`.)\n\n## References\n\n- Source doc: `.scratch/todo/multi-rig-architectural-exploration.md`\n- Child quests: T2.1 `w-mnsx90p1-76dc4a15808c`, T2.2 `w-mnsx9lbz-23af127d6773`, T2.3 `w-mnsxa94f-d95699ee5f37`, T2.4 `w-mnsxawnd-5f868b6491d9`, T2.5 `w-mnsxbn8m-b3b9c9bc7c17`\n- Cross-link: T1.4 decisions & ratification (`w-mnswwzdv-88c29d29f84b`) — multi-rig produces more cross-rig decisions that benefit from structured ratification\n- Cross-link: T3 Astrolabe (`w-mnsxcp2m-816fb7b5b156`) — T2.3 is the tightest interleaving point\n- The Fabricator (`packages/framework/fabricator/`) — natural home for rig construction under multi-rig\n\n## Notes\n\n- **Boundary smells worth watching** if/when we build multi-rig: cross-rig data flow as writ-level state; writ-level draft persistence; rig outputs stored inside the writ document.\n- **Cross-codex writs** are a natural fit for the \"planning rig generates children\" pattern — and the case where per-target first-class tracking matters most. See \"Cross-Codex Writs Under Multi-Rig\" in source doc.\n- **Status as single-concern field** — the current 8-value vocabulary encodes five orthogonal concerns in one axis (visibility, work state, structural, trouble, outcome). Any future status design should pick one concern (obligation lifecycle) and push the rest to separate fields or queries.\n- 2026-04-10: opened from .scratch import.\n- 2026-04-10: the \"honest bridge\" `stuck` signal this quest's Next Steps anticipated is now actually being shipped — as draft mandate `w-mnt6gxfr-832b3cd409d0` (child-of-concept T2.1), blocked on the status-collapse brief `w-mnt63huy`. `stuck` lives on both the rig table and the writ table, with engine failure cascading as `stuck` rather than `failed`. Retry mechanism explicitly out of scope — this is just the non-terminal substrate a future retry path can build on. It's a deliberate down-payment on the multi-rig idea: rig-level `stuck` pre-figures the writ/rig execution-state split even before rigs become ephemeral attempts.\n- 2026-04-13: major design advancement on T2.5 (workspace persistence). Sean probed how engines access cross-rig artifacts like PlanDoc — pushed back on the \"grab bag\" approach. Led to a typed workspace artifact contract model: engines declare `consumes`/`produces` with registered artifact types, Fabricator validates contracts at rig assembly time, templates reference via `${workspace.artifactName.field}` checked against declarations. This is arguably the hardest open question in multi-rig and it now has a concrete shape. Also unlocks Fabricator backward-chaining for rig composition (T2.4). Astrolabe confirmed as shipped on 1:1 (T2.3 status updated).",
+  "createdAt": "2026-04-10T13:07:54.158Z",
+  "updatedAt": "2026-04-15T18:55:00.000Z",
+  "parentId": "w-mo0e2m9q-299eb6cbaf22",
+  "links": {
+    "outbound": [],
+    "inbound": []
+  },
+  "parent": {
+    "id": "w-mo0e2m9q-299eb6cbaf22",
+    "title": "Unlocking autonomous operation",
+    "status": "open"
+  },
+  "children": {
+    "summary": {
+      "open": 4,
+      "completed": 1
+    },
+    "items": [
+      {
+        "id": "w-mnsxbn8m-b3b9c9bc7c17",
+        "title": "Cross-rig data flow and workspace persistence",
+        "status": "open"
+      },
+      {
+        "id": "w-mnsxawnd-5f868b6491d9",
+        "title": "Rig template generation beyond 'one template per writ type'",
+        "status": "open"
+      },
+      {
+        "id": "w-mnsxa94f-d95699ee5f37",
+        "title": "Brief → mandate collapse under multi-rig",
+        "status": "open"
+      },
+      {
+        "id": "w-mnsx9lbz-23af127d6773",
+        "title": "Parent-child relationship semantics — three meanings, one primitive",
+        "status": "open"
+      },
+      {
+        "id": "w-mnsx90p1-76dc4a15808c",
+        "title": "Writ status model simplification",
+        "status": "completed"
+      }
+    ]
+  },
+  "bodySource": "file-canonical"
+}

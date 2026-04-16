@@ -1,0 +1,45 @@
+{
+  "id": "w-mnsxcp2m-816fb7b5b156",
+  "type": "quest",
+  "status": "open",
+  "title": "Astrolabe: structured task decomposition & acceptance verification",
+  "body": "# Astrolabe: structured task decomposition & acceptance verification\n\n_Imported from `.scratch/astrolabe-task-decomposition-proposal.md` (2026-04-10)._\n\n## Goal\n\nReplace Astrolabe's narrative-blob spec with **structured task units** that carry explicit file associations and a planner-written acceptance criterion (and optional runnable `verify` command). Add an acceptance step to the implementation rig that runs each task's verification before sealing. The 1:1 task→verification binding, with the planner defining \"done\" separately from the implementing agent, breaks the correlated-failure loop where the same agent writes both code and tests.\n\n## Status\n\nActive proposal, not yet implemented. Design substantially worked out; remaining work is resolving the open questions and building against them.\n\n## Next Steps\n\nHand off to a planning rig (or commission spec) that lands Phase 1 (file metadata on existing mandates) first, since it's an independent prerequisite and is independently valuable for Loom incident prevention. Before committing to Phase 2 implementation, resolve T3.2 (verify-command quality guidance) — without it, the decomposition mechanism ships but delivers weak verification, which is arguably worse than nothing because it creates the appearance of a safety net. Design Phase 2 with an eye on T2.3 (brief→mandate collapse) so the PlanDoc shape survives the multi-rig topology change.\n\n## Context\n\nTwo gaps with the current single-narrative spec:\n\n1. **Correlated failures.** The implementing anima writes the code *and* the tests. Its blind spots are the same in both. Green CI does not imply behavioral correctness. Reference case: the Oculus landing page runtime `ReferenceError` that passed all tests.\n2. **Unstructured work.** The spec is narrative. The agent has to parse intent, infer build order, and decide what \"done\" means per sub-unit. All judgment calls happen inside a single context window.\n\nThe proposal: spec-writer produces structured task units; the narrative becomes *design notes* (context for the implementor, not the actionable content); the implementation rig gains an **acceptance step** between implementation and seal that runs each task's `verify`.\n\n**Schema:**\n\n```typescript\ninterface TaskUnit {\n  id: string;              // slug unique within plan\n  title: string;\n  action: string;          // what to do, concretely\n  filesChanged: string[];  // files this task creates/modifies\n  filesRead: string[];     // read-only context files\n  dependsOn: string[];     // other task IDs (DAG)\n  acceptance: string;      // planner-written \"what done means\"\n  verify?: string;         // runnable command (nullable for structural tasks)\n}\n```\n\nThe spec-writer emits `tasks: TaskUnit[]` via a new `tasks-write` tool, and the design narrative via `design-notes-write`. A new `astrolabe.task-validate` engine runs after the spec-writer stage, checking file existence, DAG validity, scope coverage, overlap surfacing, and acceptance presence.\n\n**Phased context:** this is Phase 2 of a three-phase path.\n\n- **Phase 1** — file metadata on existing mandates for cross-commission conflict detection (Loom incident prevention). Independent prerequisite.\n- **Phase 2** — task decomposition + acceptance step. *This proposal.*\n- **Phase 3** — parallel task dispatch. The speedup multiplier, contingent on Phase 2 proving decomposition quality.\n\nPhase 2 is the highest-value, lowest-risk middle step.\n\n**Big caveats:**\n\n- **T2.3 (brief→mandate collapse)** says the current `brief → planning rig → mandate → execution rig` shape is a 1:1 artifact. The PlanDoc shape (tasks + design notes) doesn't change between models — only the topology does. Design Astrolabe on 1:1 with the PlanDoc designed to survive the transition.\n- **T3.2 (verify-command quality)** is where this lives or dies. Bad verify commands give false confidence.\n\n**Open:**\n\n1. Where does the implementation rig documentation live? This proposal needs a companion for the consumer side.\n2. How should the generated mandate carry tasks — inline metadata on the writ, or reference-by-plan-id?\n3. Should `task-validate` be a separate engine or folded into `inventory-check` with a mode parameter?\n4. Should Astrolabe loop back to the spec-writer on `task-validate` failure? (MVP fails hard; revision loop is future work.)\n5. How does `spec-write` deprecate without breaking in-flight plans? (Probably dual-write for a release, then remove.)\n6. Should `filesChanged` overlaps be hard error or warning? (Current: warning.)\n\n## References\n\n- Source doc: `.scratch/astrolabe-task-decomposition-proposal.md`\n- Child quests: T3.1 conversational analyst (`w-mnsxdi0d-02fe46deeefd`), T3.2 verify-command quality (`w-mnsxe2fo-cb784ab3f978`)\n- Cross-link: T2.3 brief→mandate collapse (`w-mnsxa94f-d95699ee5f37`) — tightest interleaving\n- Cross-link: T2.2 parent-child semantics (`w-mnsx9lbz-23af127d6773`) — `tasks[]` is in-rig structure that sidesteps parent-child entirely\n- Cross-link: T1.4 decisions & ratification (`w-mnswwzdv-88c29d29f84b`) — Astrolabe is the proposed owner\n- X013 (commission outcomes) — measurable signal for whether decomposition catches bugs\n\n## Notes\n\n- **`verify` nullable rationale:** some tasks resist concrete behavioral verification (type definitions, scaffolding, renames). For those, the seal engine's build+test catches structural correctness. The planner still writes `acceptance` (human-readable) even when `verify` is null — the 1:1 binding is maintained.\n- **Future enhancement:** enforce non-null `verify` for tasks whose `filesChanged` includes runtime files, allowing null only for `.d.ts`/config/scaffolding. Not for MVP.\n- **File metadata (Phase 1)** is independently valuable and a prerequisite for both Phase 2 and Phase 3. Worth pulling out as its own small effort before Phase 2 lands.\n- 2026-04-10: opened from .scratch import.",
+  "createdAt": "2026-04-10T13:11:16.462Z",
+  "updatedAt": "2026-04-15T18:55:00.000Z",
+  "parentId": "w-mo0e2m9q-299eb6cbaf22",
+  "links": {
+    "outbound": [
+      {
+        "id": "w-mnsxcp2m-816fb7b5b156:w-mnszc0r5-0b0bbb797412:instance_of",
+        "sourceId": "w-mnsxcp2m-816fb7b5b156",
+        "targetId": "w-mnszc0r5-0b0bbb797412",
+        "type": "instance_of",
+        "createdAt": "2026-04-10T14:06:52.720Z"
+      }
+    ],
+    "inbound": []
+  },
+  "parent": {
+    "id": "w-mo0e2m9q-299eb6cbaf22",
+    "title": "Unlocking autonomous operation",
+    "status": "open"
+  },
+  "children": {
+    "summary": {
+      "open": 2
+    },
+    "items": [
+      {
+        "id": "w-mnsxe2fo-cb784ab3f978",
+        "title": "Verify-command quality — where task decomposition lives or dies",
+        "status": "open"
+      },
+      {
+        "id": "w-mnsxdi0d-02fe46deeefd",
+        "title": "Conversational analyst mode — multi-turn plan refinement",
+        "status": "open"
+      }
+    ]
+  },
+  "bodySource": "file-canonical"
+}

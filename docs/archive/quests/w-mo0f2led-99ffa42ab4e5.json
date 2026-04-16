@@ -1,0 +1,83 @@
+{
+  "id": "w-mo0f2led-99ffa42ab4e5",
+  "type": "quest",
+  "status": "open",
+  "title": "Containerized anima sessions — isolation and parallel-safe workspaces",
+  "body": "# Containerized anima sessions — isolation and parallel-safe workspaces\n\n## Goal\n\nRun every anima session inside its own container with only its worktree mounted, so sessions get both (a) a deterministic filesystem boundary — an agent literally cannot see sibling worktrees, the sanctum, or other codexes — and (b) collision-free parallel execution, since independent rigs live in independent filesystems and cannot stomp on each other's work. Deliverables: a Docker image with the full anima toolchain, a mount strategy that hands each session its worktree as working directory, credential and MCP bridging from host to container, and a session lifecycle that builds/runs/cleans up containers in step with the existing detached-session plumbing.\n\n## Status\n\nnew — opened 2026-04-15 as the top-level umbrella for the container work. Design not yet started; substrate (detached sessions cluster) already shipped.\n\n## Next Steps\n\n1. **Settle the seal-engine push boundary.** Verify whether the current seal engine pushes from a host-side bare clone or from the session workspace. This determines whether the container needs git SSH key forwarding at all, and defines the host ↔ container boundary for workspace writes. Cross-link: `w-mnsxbn8m`.\n2. **Specify the Docker image.** Base image, tool versions (claude CLI, Node, pnpm, git — must match host toolchain), build process, where it lives, refresh cadence when host updates.\n3. **Specify the mount strategy.** Worktree as container working directory; `.nexus/` visibility (probably not — verify); MCP config injection; env var propagation.\n4. **Specify credential forwarding.** `ANTHROPIC_API_KEY` (or OAuth), git SSH keys if #1 says yes, any other host secrets.\n5. **Specify MCP bridging.** Container talks to host tool server (currently on `127.0.0.1`). Options: host networking, explicit port forwarding, UNIX socket mount. Decide based on security vs ergonomics.\n6. **Prototype.** One session running in a container end-to-end, talking to the host guild's tool server, committing to its worktree, sealing successfully.\n7. **Migration plan.** Cut over from host-spawned sessions to container-spawned sessions without breaking in-flight rigs.\n\n## Context\n\nTwo motives converge on the same engineering work.\n\n### Motive 1 — Isolation\n\nToday's anima sessions run on the host with `--dangerously-skip-permissions`, which bypasses all directory scoping. This led to one real contamination incident (commission `w-mnonwi2y`, block-checker-failure-signal): a revise session's subagent ran `find /workspace -type d -name spider`, discovered Sean's personal `/workspace/nexus/` clone, and the main session followed those paths into it — committing to Sean's clone instead of its worktree. Forensic chain preserved in child quest `w-mnszh806` (T5.2).\n\nEmpirical testing on 2026-04-07 (captured in the T5.2 body) confirmed that flag-based hardening is a probabilistic fence, not a wall:\n\n- `--permission-mode auto` + `--allowedTools` still lets `Edit`/`Write` bypass directory scope, because `allowedTools` intentionally pre-approves regardless of location.\n- The auto-mode classifier is non-deterministic on compound Bash commands like `cd /workspace/nexus && git status` — sometimes blocked, sometimes allowed.\n- `acceptEdits` mode has the opposite profile: clean Write/Edit scoping but no Bash arg classifier.\n\nContainer isolation is the only deterministic answer: if the agent's filesystem doesn't contain sibling clones or the sanctum, it can't wander into them regardless of classifier behavior.\n\nSince the incident, **prompt improvements have largely mitigated the problem in practice**, so the urgency is lower than it was in early April. But the structural fix remains open, and prompt mitigations don't provide the parallelization half of the motive — see below.\n\nA related concern on the read side was tracked as T6 `w-mnszhc6` (codex boundaries and agent permissions): an anima reading a sanctum futures doc and treating it as canonical architecture. Same underlying problem viewed from the read side. T6 was cancelled 2026-04-15 and reparented under this quest for lineage — containers close both the read and write sides at once because the foreign files simply aren't in the container's filesystem.\n\n### Motive 2 — Parallelization\n\nThe second motive is safe parallel rig execution. Running multiple sibling rigs against the same codex today risks worktree collisions and implicit shared state. Containers make this collision-free *by construction*: each rig's worktree lives inside its own container, and there is no shared filesystem for collisions to arise in.\n\nThis is complementary to the atlas + concurrency-control work under the autonomous-operation umbrella (`w-mo0e2m9q`), not a substitute for it. That cluster addresses *semantic* parallelism safety — OCC over observed read sets, plan-vs-plan conflict handling, atlas-freshness as an engine precondition. The atlas work makes parallel planning cheap and safe at the data level; containers make parallel execution safe at the filesystem level. Both are needed for safe autonomous parallelism, but they're orthogonal engineering work.\n\n### Substrate already in place\n\nThe detached-sessions cluster shipped over 2026-04-10 through 2026-04-14 gives us the plumbing containers need:\n\n- Sessions that survive daemon restarts\n- A tool server with session-scoped auth (`X-Session-Id` header)\n- Babysitter processes that stream transcripts directly to the Stacks DB, bypassing the guild\n- Orphan recovery on startup\n- DLQ for the guild-down-at-session-end case\n- Engine completion predicated on tool-call traces rather than process exit\n\nContainers are detached-by-definition — a babysitter in a container is already \"the babysitter survives its guild\" model we shipped. That cluster is this quest's foundation, not its competitor. Several of those sub-quests are listed in References below as `builds-on` links.\n\n### Open integration surface\n\n- **Seal engine push path.** Does it push from a host-side bare clone or from the session workspace? Determines container-side git credential needs. Cross-link: `w-mnsxbn8m`.\n- **Session consult lifecycle.** `nsg consult --session <id>` (quest `w-mnxqv448`) depends on session data being recoverable after the session ends. Containers change the data lifecycle: does the worktree survive container teardown? Does Claude Code's `.claude/` session data inside the container survive? Cross-link: `w-mnxqv448`.\n- **MCP server bridging.** Host tool server currently listens on `127.0.0.1`. Networking options for containers: host networking (simplest; leaks host loopback), explicit port forwarding (more ceremony; tighter boundary), UNIX socket mount (tightest; most container-image complexity).\n- **Image refresh cadence.** When the host toolchain updates, the container image must match. Automated rebuild hook? Version-pinned base with manual refresh?\n\n### Complexity estimate\n\nT5.2 estimated 8–10 for Option A (container isolation) before the detached-sessions substrate shipped. Post-substrate, most of the babysitter-survival surface is already handled; the remaining work is image + mounts + credentials + MCP bridging. Worth re-estimating when design work starts — probably smaller than the original estimate.\n\n## References\n\n**Children:**\n\n- `w-mnszh806` — T5.2 session directory isolation. Holds the incident forensics (commission `w-mnonwi2y`, forensic chain through `/workspace/nexus/` contamination), the Option B empirical testing (auto mode + allowedTools findings), and the original Option A container sketch.\n- `w-mnszhc6` — T6 codex boundaries & agent permissions. Cancelled 2026-04-15 (superseded by this quest); reparented as child for lineage. Holds the read-side framing of the same problem.\n\n**Cross-links (related but not absorbed):**\n\n- `w-mnxqv448` — Session consult. Worktree and session-data lifecycle constraint.\n- `w-mnsxbn8m` — Cross-rig data flow and workspace persistence. Seal-engine push-from-host question is the shared integration surface.\n\n**Substrate (detached-sessions cluster — already shipped or in flight):**\n\n- `w-mnszh7kz` — Race-safe pending session recovery in animator startup\n- `w-mnt3di0m` — Daemon restart mid-summon strands engines in running state\n- `w-mny2ltvy` — Engines should declare and verify MCP tool preconditions before starting sessions\n- `w-mnt3r8al` — Engine completion should be predicated on tool-call trace, not session exit\n- `w-mnyp279g` — Tool-server MCP 500s drop mid-session on baseline astrolabe reader\n\n**Related infrastructure:**\n\n- Incident commission: `w-mnonwi2y` (block-checker-failure-signal)\n- Code path: `packages/plugins/claude-code/src/index.ts` — current session spawn args (`--dangerously-skip-permissions`, `--setting-sources user`)\n- Code path: `packages/plugins/spider/src/engines/seal.ts` — seal engine push path (answers open question #1)\n- Autonomous-operation umbrella: `w-mo0e2m9q` — containers are one enabler of its \"safe parallelism\" pillar; this quest is deliberately *not* parented under it because containerization serves concerns beyond autonomous operation.\n\n## Notes\n\n- 2026-04-15: opened as top-level quest. Sean's framing: *\"I think the real 'top-level' quest I want is the ability to run in containers — both for increasing parallelization and also for isolation.\"* Deliberately kept top-level, not parented under autonomous operation, because containerization cuts across multiple concerns (isolation, parallelization, session consult lifecycle, cross-rig workspace persistence) and shouldn't be captured under any one of them.\n- 2026-04-15: T5.2 (`w-mnszh806`) reparented as child via direct DB patch (`nsg writ edit` has no `--parent-id` option).\n- 2026-04-15: T6 (`w-mnszhc6`, already cancelled) reparented as child via direct DB patch for lineage — so the closed quest's role as the read-side version of the same problem is visible on the board.\n- 2026-04-15: Sean's note on the current state: *\"We largely fixed [the contamination] issues we were seeing here through prompt improvements.\"* The urgency is lower than it was pre-mitigation, but prompt mitigations don't address the parallelization motive, so the structural work remains worth doing when parallelization becomes pressing.",
+  "createdAt": "2026-04-15T19:01:41.461Z",
+  "updatedAt": "2026-04-15T19:01:41.461Z",
+  "links": {
+    "outbound": [
+      {
+        "id": "w-mo0f2led-99ffa42ab4e5:w-mnszh7kz-f6193fbbdc29:builds-on",
+        "sourceId": "w-mo0f2led-99ffa42ab4e5",
+        "targetId": "w-mnszh7kz-f6193fbbdc29",
+        "type": "builds-on",
+        "createdAt": "2026-04-15T19:03:11.215Z"
+      },
+      {
+        "id": "w-mo0f2led-99ffa42ab4e5:w-mnt3di0m-22b4a5dac36a:builds-on",
+        "sourceId": "w-mo0f2led-99ffa42ab4e5",
+        "targetId": "w-mnt3di0m-22b4a5dac36a",
+        "type": "builds-on",
+        "createdAt": "2026-04-15T19:03:11.597Z"
+      },
+      {
+        "id": "w-mo0f2led-99ffa42ab4e5:w-mny2ltvy-e7016f61f768:builds-on",
+        "sourceId": "w-mo0f2led-99ffa42ab4e5",
+        "targetId": "w-mny2ltvy-e7016f61f768",
+        "type": "builds-on",
+        "createdAt": "2026-04-15T19:03:11.974Z"
+      },
+      {
+        "id": "w-mo0f2led-99ffa42ab4e5:w-mnt3r8al-b36b42b253b2:builds-on",
+        "sourceId": "w-mo0f2led-99ffa42ab4e5",
+        "targetId": "w-mnt3r8al-b36b42b253b2",
+        "type": "builds-on",
+        "createdAt": "2026-04-15T19:03:12.346Z"
+      },
+      {
+        "id": "w-mo0f2led-99ffa42ab4e5:w-mnyp279g-f565be10b053:builds-on",
+        "sourceId": "w-mo0f2led-99ffa42ab4e5",
+        "targetId": "w-mnyp279g-f565be10b053",
+        "type": "builds-on",
+        "createdAt": "2026-04-15T19:03:12.720Z"
+      },
+      {
+        "id": "w-mo0f2led-99ffa42ab4e5:w-mnxqv448-d63c8233b735:relates-to",
+        "sourceId": "w-mo0f2led-99ffa42ab4e5",
+        "targetId": "w-mnxqv448-d63c8233b735",
+        "type": "relates-to",
+        "createdAt": "2026-04-15T19:03:10.449Z"
+      },
+      {
+        "id": "w-mo0f2led-99ffa42ab4e5:w-mnsxbn8m-b3b9c9bc7c17:relates-to",
+        "sourceId": "w-mo0f2led-99ffa42ab4e5",
+        "targetId": "w-mnsxbn8m-b3b9c9bc7c17",
+        "type": "relates-to",
+        "createdAt": "2026-04-15T19:03:10.829Z"
+      }
+    ],
+    "inbound": []
+  },
+  "parent": null,
+  "children": {
+    "summary": {
+      "cancelled": 1,
+      "open": 1
+    },
+    "items": [
+      {
+        "id": "w-mnszhc65-8ac8f9c03593",
+        "title": "Codex boundaries & agent permissions",
+        "status": "cancelled"
+      },
+      {
+        "id": "w-mnszh806-d78fcf13383d",
+        "title": "Session directory isolation — container vs flag hardening",
+        "status": "open"
+      }
+    ]
+  },
+  "bodySource": "file-canonical"
+}

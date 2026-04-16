@@ -1,0 +1,24 @@
+{
+  "id": "w-mnswwzdv-88c29d29f84b",
+  "type": "quest",
+  "status": "open",
+  "title": "Decisions & ratification (v2 of the writ-substrate design)",
+  "body": "# Decisions & ratification (v2 of the writ-substrate design)\n\n_Imported from `.scratch/conversation-topics-as-writs.md` § \"v2 sketch: decisions and ratification\" (2026-04-10)._\n\n## Goal\n\nMake decisions — the conclusions reached inside quests and other inquiries — first-class, queryable records with attribution, timestamps, links, and a ratification flow. Today decisions live as prose inside quest bodies and are only discoverable by grep. The target: a decisions book owned by Astrolabe holding standalone `ProjectDecisionDoc` records that reference writs by id, with ratification routed through Spider's existing `InputRequestDoc` + `patron-input` machinery.\n\n## Status\n\nParked. Deferred from v1 of the writ-substrate work as explicitly additive. The absence is analytical, not operational — no one has hit \"I can't find what we decided about X\" yet.\n\n## Next Steps\n\nHold until the signal hits. The signal is Sean or Coco trying to answer \"what did we decide about X?\" and finding prose-grep insufficient. When it does, start with InputRequest schema relaxation (Phase 1 below) since that's the smallest independent slice and unlocks standalone ratification requests regardless of whether the full decisions book gets built.\n\n## Context\n\n**Schema sketch** (extends Astrolabe's existing `Decision` type):\n\n```typescript\ninterface ProjectDecisionDoc extends Decision {\n  // Inherited: id, scope, question, context, options, recommendation,\n  //            rationale, selected, patronOverride, analysis\n  status: 'draft' | 'proposed' | 'ratified' | 'superseded' | 'withdrawn';\n  made_at: string;\n  related_writs: string[];\n  tags?: string[];\n  supersedes?: string;\n  patron?: string;\n  coco_session?: string;\n  drafted_by?: string;\n  ratified_via?: string;  // InputRequest id\n}\n```\n\n**Ratification reuses Spider's InputRequest machinery.** Coco drafts a decision, creates an `InputRequestDoc` asking \"Ratify this decision?\" with options `{ratify, amend, reject}` and `allowCustom: true`. On answer: `ratify` → status `ratified` with `selected` from recommendation; `amend` → `patronOverride` filled, status `ratified`; `reject` → status `withdrawn`.\n\n**Schema relaxation needed.** `InputRequestDoc.rigId` and `engineId` are currently required. Standalone decisions have no rig — those fields need to become optional, or gain a discriminator for \"standalone\" vs \"engine-initiated\" requests.\n\n**Decision → quest linking is many-to-many for free** via `decision.related_writs`. One decision can touch multiple quests; one quest can accumulate multiple decisions.\n\n**Phased build (if/when taken on):**\n\n1. InputRequest schema relaxation (standalone requests without `rigId`/`engineId`).\n2. `ProjectDecisionDoc` type + decisions book.\n3. Astrolabe ownership wiring.\n4. Oculus surface for ratified decisions.\n\n**Open:**\n\n- Does extending the existing in-plan `Decision` type actually fit, or does sharing schema between \"in-plan decision\" and \"standalone project decision\" create friction?\n- Where do ratified decisions surface in Oculus — dedicated page, subsection of quest view, or global decisions log?\n- Migration: leave existing prose decisions alone, or promote important ones retroactively into records?\n\n## References\n\n- Parent quest: `w-mnswvmj7-2112b86f710a`\n- Astrolabe `Decision` / `DecisionAnalysis` types — `astrolabe/types.ts`\n- Spider `InputRequestDoc` + `patron-input` block type\n- Astrolabe decision-review engine\n- Related: T3 Astrolabe root (`w-mnsxcp2m-816fb7b5b156`) — proposed owner for decisions book\n- Related: T1.3 concurrent writes (`w-mnswwgah-7dca55bc359e`) — Astrolabe becoming a quest writer is the likely trigger there too\n\n## Notes\n\n- 2026-04-10: opened as child of writ substrate quest.",
+  "parentId": "w-mnswvmj7-2112b86f710a",
+  "createdAt": "2026-04-10T12:59:03.331Z",
+  "updatedAt": "2026-04-13T21:36:06.956Z",
+  "links": {
+    "outbound": [],
+    "inbound": []
+  },
+  "parent": {
+    "id": "w-mnswvmj7-2112b86f710a",
+    "title": "Initial implementation and MVP",
+    "status": "open"
+  },
+  "children": {
+    "summary": {},
+    "items": []
+  },
+  "bodySource": "file-canonical"
+}

@@ -1,0 +1,36 @@
+{
+  "id": "w-mnsidnza-d65bde46dffb",
+  "type": "quest",
+  "status": "completed",
+  "title": "Patron input block type",
+  "body": "## Opened With\n\nHistorical scratch file preserved for the record. Originally drafted in `.scratch/patron-input-block-type-brief.md`:\n\n---\n\n# Patron Input Block Type — Commission Brief\n\n## Problem\n\nEngines sometimes need patron decisions before they can proceed. But currently, engines can't block on patron input, the Spider can't track whether answers are pending, and there's no tooling to submit responses.\n\nThe engine blocking infrastructure (block types, checkers, `rig-resume`) provides the mechanism. What's missing is a block type purpose-built for structured patron input — with a typed question format, answer validation, and CLI tools for the patron to respond.\n\n## Goal\n\nAn engine can pose a structured set of questions to the patron, block until all questions are answered and the patron marks the request complete, then resume with the answers available.\n\n## Design Decisions\n\nThese decisions were made during design and should be treated as constraints, not suggestions.\n\n### Question types\n\nThree question types: **choice**, **boolean**, and **text**.\n\nChoice questions have a `Record<string, string>` options map (key → display label) and an `allowCustom` flag. When `allowCustom` is true, the patron can supply a freeform answer instead of selecting from the options.\n\n### Choice answer discrimination\n\nChoice answers use a discriminated object — `{ selected: string } | { custom: string }` — not a bare string. This prevents ambiguity between a typo'd option key and an intentional custom answer. The CLI tool should use explicit flags (`--select` vs `--custom`) to determine which variant to produce. `selected` is validated against the options map; `custom` is only accepted when `allowCustom` is true.\n\n### Request lifecycle: pending → completed | rejected\n\nInput requests have three statuses: `pending`, `completed`, and `rejected`.\n\nCompletion is two-phase: answering individual questions does not unblock the engine. The patron explicitly marks the request complete (after all questions are answered) or rejects it. Rejection triggers checker failure (`{ status: 'failed', reason: '...' }` via `CheckResult`), which fails the engine and cascades to rig/writ failure through the standard path.\n\n### Engine resume via book query, not priorBlock\n\nOn resume, engines query the `input-requests` book by `rigId` + `engineId` + `status: 'completed'` (most recent) rather than relying on `priorBlock.condition.requestId`. This is deliberate: `priorBlock` is in-memory only and doesn't survive process restarts. The query approach also handles multi-block naturally — an engine that blocks for input multiple times creates a fresh request each time, and the query always returns the latest completed one.\n\nRequest IDs use the system's standard ULID format.\n\n### `rigId` on `EngineRunContext`\n\n`EngineRunContext` (in `@shardworks/fabricator-apparatus`) currently only has `engineId`, `upstream`, and `priorBlock`. This commission must add `rigId: string` — the Spider already has it when assembling context, it just needs to pass it through. This is generally useful for any engine, not just patron-input.\n\n### Storage\n\nInput requests live in a Spider-owned Stacks book (`spider/input-requests`). The engine writes the request document before returning blocked; the patron fills in answers via CLI tools; the engine reads the completed document on resume.\n\n### Checker\n\nBlock type ID: `patron-input`. Condition: `{ requestId: string }`. Poll interval: 10s. Returns `cleared` when request is completed, `failed` (with reason) when rejected, `pending` otherwise.\n\n### CLI tools\n\nThe patron interface is CLI tools — no TUI, no interactive prompts. The tools:\n\n- **List** pending input requests\n- **Show** a single request with all questions and current answers\n- **Answer** a single question (with type-appropriate validation)\n- **Complete** a request (rejects if any questions unanswered)\n- **Reject** a request (with optional reason)\n- **Export/import** as YAML (stretch — include if low cost)\n\n## Out of Scope\n\n- UI or advanced UX beyond CLI tools\n- Push notifications when input is needed\n- Partial completion (answer some, unblock, ask more later)\n- Multi-patron (access control, assignment, approval chains)\n- Input request templates (engines build requests programmatically)\n- Coco integration (Coco could surface pending requests — that's Coco-side, not Spider infrastructure)\n\n## Dependencies\n\n- Engine blocking infrastructure — already implemented\n- Block checker failure signal (`CheckResult` with `'failed'` status) — already implemented\n- Stacks book registration, CLI tool registration via kit — existing patterns\n\n---\n\n## Summary\n\nWork shipped via writ w-mnorflpz-01ea4bc92b61. This quest exists as a historical record of the design thinking that fed the commission.\n\n## Notes\n\n- 2026-04-10: migrated from scratch file .scratch/patron-input-block-type-brief.md to quest for historical preservation.\n- 2026-04-10: marked complete and linked (fulfilled_by) to w-mnorflpz-01ea4bc92b61.",
+  "createdAt": "2026-04-10T06:12:07.462Z",
+  "updatedAt": "2026-04-10T12:33:37.608Z",
+  "resolvedAt": "2026-04-10T06:12:08.027Z",
+  "resolution": "Historical quest: work shipped as w-mnorflpz-01ea4bc92b61",
+  "links": {
+    "outbound": [
+      {
+        "id": "w-mnsidnza-d65bde46dffb:w-mnorflpz-01ea4bc92b61:fulfilled_by",
+        "sourceId": "w-mnsidnza-d65bde46dffb",
+        "targetId": "w-mnorflpz-01ea4bc92b61",
+        "type": "fulfilled_by",
+        "createdAt": "2026-04-10T06:12:08.549Z"
+      }
+    ],
+    "inbound": []
+  },
+  "parent": null,
+  "children": {
+    "summary": {
+      "completed": 1
+    },
+    "items": [
+      {
+        "id": "w-mnsierwe-cdbf1c85b08d",
+        "title": "Patron input block type — early spec",
+        "status": "completed"
+      }
+    ]
+  }
+}

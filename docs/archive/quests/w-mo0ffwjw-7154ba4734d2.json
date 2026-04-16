@@ -1,0 +1,24 @@
+{
+  "id": "w-mo0ffwjw-7154ba4734d2",
+  "type": "quest",
+  "status": "open",
+  "title": "CLI: filter for top-level writs directly",
+  "body": "# CLI: filter for top-level writs directly\n\n## Goal\n\nGive `nsg writ list` a native way to return only top-level writs (those with no parent). The focusing-tool workflow depends on a cheap way to say \"show me the roots\"; today the only option is listing everything and client-side filtering, or maintaining the top-level list outside the writ substrate. Neither is acceptable as a startup-orientation primitive. Prereq for `w-mo0ffnhw` (use top-level quests as focusing tool).\n\n## Status\n\nNot started. Design question is simple; implementation should be small; scheduling is the only real question. Probably dispatchable as a commission once `w-mo0ffnhw` design questions resolve — no reason to build the CLI change before the workflow that consumes it is decided.\n\n## Next Steps\n\n1. Wait for `w-mo0ffnhw` to resolve its open questions — specifically whether the curated list is replacing the startup scan or layering on top. The answer shapes what the CLI should return.\n2. Dispatch as a framework commission with a short spec:\n   - Add a flag to `nsg writ list`: likely `--roots-only` (boolean) or `--parent-id none` (sentinel value). Spec decision for the implementer.\n   - Semantics: return writs where `content.parentId` is null or absent.\n   - Filter composes with existing `--type`, `--status`, `--limit` flags.\n   - Index already exists: `idx_books_clerk_writs_parentId` supports the query efficiently.\n3. Update `.claude/skills/quests/SKILL.md` examples to use the new flag once shipped.\n\n## Context\n\n### What exists today\n\n`nsg writ list` supports:\n- `--status` (repeatable)\n- `--type`\n- `--parent-id <value>` — filter to *children of* a given parent\n- `--limit` / `--offset`\n\nThere is no symmetric primitive for \"filter to top-level only.\" The existing `--parent-id` flag can specify a value but can't express the absence of a parent.\n\n### Why it matters\n\nWithout this flag, the \"read-curated-top-level-quests-at-startup\" pattern has two fallback paths:\n\n1. **File-based curated list** (`experiments/data/curated-quests.yaml`) — works today, doesn't depend on CLI changes, but the list is maintained by hand and can drift from reality. It's an editorial act, not a query.\n2. **Client-side filter** — `nsg writ list --type quest --limit 200` and then pipe through `jq 'map(select(.parentId == null))'`. Works but ugly, and the 200-limit is a papercut for future growth.\n\nThe `--roots-only` flag replaces the client-side filter with a first-class primitive and gives the file-based curated list a natural *query-based alternative*. If the query always returns a small-enough list (because the board is genuinely well-structured with clear parent/child shape), the curated file might become unnecessary — \"top-level\" is just \"parent-less.\"\n\n### Design notes for the implementer\n\n- **Flag spelling.** Options: `--roots-only`, `--no-parent`, `--parent-id none`, `--root`. Coco's instinct: `--roots-only` — reads naturally in a listing context, doesn't overload `--parent-id` semantics.\n- **Semantics for `parentId: null` vs `parentId: undefined`.** Writs with no parent may have either shape depending on how they were created. The query should match both (`WHERE json_extract(content, '$.parentId') IS NULL`). The existing `idx_books_clerk_writs_parentId` index handles this.\n- **Composes with other filters.** `nsg writ list --type quest --status open --roots-only` should return all open top-level quests.\n- **No change to `--parent-id <value>`.** The new flag is additive; the existing flag's semantics stay the same.\n\n## References\n\n- Parent: `w-mo0ffnhw` Use top-level quests as focusing tool.\n- Grandparent: `w-mo0ffbff` Improvements to the quest system.\n- Underlying index: `idx_books_clerk_writs_parentId` on `books_clerk_writs` (confirmed present in schema).\n- Related prereq sibling: `w-mo0ffwwc` CLI: re-parent writs in any status. Together these two prereqs make the curation-based workflow cheap.\n\n## Notes\n\n- 2026-04-15: opened as prereq for the focusing-tool workflow. Reason for opening as its own quest rather than folding into the workflow quest: implementation is scoped to the CLI and should be dispatchable as an independent commission once the workflow design resolves.",
+  "parentId": "w-mo0ffnhw-b2d0d3f7e3fc",
+  "createdAt": "2026-04-15T19:12:02.444Z",
+  "updatedAt": "2026-04-15T19:12:02.444Z",
+  "links": {
+    "outbound": [],
+    "inbound": []
+  },
+  "parent": {
+    "id": "w-mo0ffnhw-b2d0d3f7e3fc",
+    "title": "Use top-level quests as focusing tool",
+    "status": "open"
+  },
+  "children": {
+    "summary": {},
+    "items": []
+  },
+  "bodySource": "file-canonical"
+}
