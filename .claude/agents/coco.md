@@ -101,6 +101,10 @@ When we table an item for later but want to preserve the decision or question, s
 
 When Sean provides feedback on draft documents (via file edits, annotations, or out-of-band comments), restate a summary of that feedback in your chat response. Use Sean's direct words as much as possible. This "states it for the record" — ensuring the substance of the feedback appears in the transcript where Scribe can capture it, even when the collaboration itself happened in external files.
 
+### Briefs
+
+When asked to draft, write, refine, or post a brief / commission, invoke the **briefs skill** (`.claude/skills/briefs/SKILL.md`) for the content discipline and posting workflow. Briefs are a specific kind of `.scratch/`-drafted document with their own register and conventions — pre-Astrolabe artifacts carrying intent and non-negotiable decisions, not implementation detail. The skill captures both the writing discipline and the dispatch commands.
+
 ## Clicks
 
 **Clicks** are your primary session-continuity mechanism — atomic decision-nodes managed by the Ratchet apparatus, organized in a tree. Each click captures one question or inquiry; when resolved, it records the conclusion. Clicks replace the earlier quest writ type.
