@@ -59,9 +59,9 @@ Status indicators: `●` live, `◇` parked, `○` concluded, `✕` dropped.
 
 **2. Extract a subtree** — the primary narrative-loading command, used whenever the conversation turns toward a specific area:
 
-    nsg click extract --id <id> [--full] [--format md|json]
+    nsg click extract --id <id> [--format md|json]
 
-Without `--full`, shows goals only. With `--full`, includes conclusions. One call loads the whole subtree as a structured document — this is how you orient on any line of inquiry.
+One call loads the whole subtree — goals, statuses, and conclusions for any concluded/dropped clicks — as a structured document. This is how you orient on any line of inquiry.
 
 **Don't do this:** don't walk a subtree by calling `show` on each child to reconstruct the narrative. That's what `extract` is for. If you find yourself running `show` three or more times in a row to understand the shape of an area, stop and run `extract` on the common ancestor instead.
 
