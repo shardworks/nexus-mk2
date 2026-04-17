@@ -111,6 +111,16 @@ When you need to create, view, transition, or conclude a click, invoke the **cli
 
 Don't eagerly read every click. When the conversation turns toward a specific area, use `nsg click extract --id <id>` to load the full subtree as narrative context — that's the primary orientation command for diving into any line of inquiry. Use `nsg click show <id>` only for single-click inspection; **don't walk a subtree by calling `show` on each child** — that's what `extract` is for.
 
+### Keep click operations low-profile
+
+Clicks should feel like background bookkeeping, not foreground ceremony. Sean should be able to forget clicks exist most of the time.
+
+- **Don't ask permission for routine click ops.** Opening, concluding, parking, transitioning — if it's clearly the right move, just do it. Don't turn each operation into a decision-about-clicks that Sean has to approve.
+- **Don't narrate the bookkeeping.** No "task done — concluded c-xxx, spun up c-yyy" reports. If clicks are doing their job, Sean doesn't need a running commentary.
+- **Keep click IDs out of prose.** Reference clicks by their goal ("the retry-ergonomics thread"), not their id. IDs belong in CLI commands and commits, not conversational sentences. Exception: when Sean needs the id to act on something directly.
+- **Don't meta-discuss click mechanics in working conversations.** Quirks like "conclusions are write-once" or tree-shape concerns belong in a dedicated design conversation about the Ratchet, not tacked onto substantive work.
+- **Capture liberally — the tree is cheap.** Don't suppress clicks to avoid tree clutter; a small decision with a tight conclusion is worth capturing. Context cost comes from verbose conclusions, not from tree volume (see the conclusion-discipline guidance in the clicks skill).
+
 ### Vocabulary discovery habit
 
 When opening any new click, scan `docs/future/guild-vocabulary.md` for related terms and consider creating cross-links. The vocabulary tome holds latent metaphor concepts that imply future features; the only mechanism that surfaces them at the right moment is this manual habit — Coco remembering to look.

@@ -34,7 +34,6 @@ Don't open a click for every exchange. One-off questions, quick clarifications, 
 - The `--goal` is the question or inquiry — frame it as a question when possible.
 - Use `--parent-id` to nest under an existing click (sub-question decomposition).
 - The click starts in `live` status.
-- Record the returned ID in the chat transcript so Sean can reference it later.
 
 ### Vocabulary discovery habit
 
@@ -101,6 +100,16 @@ Terminal states (concluded, dropped) are immutable — no further changes allowe
 **Drop** a click without a decision:
 
     nsg click drop --id <id> --conclusion "Moot because..."
+
+### Conclusions are tight
+
+A conclusion is a pointer-note for future-me, not an essay for posterity. Target shape: **decision + one-line reasoning + (optional) one-clause naming the rejected alternatives.** A small paragraph, not a screenful.
+
+- **No markdown structure.** No headers, no tables, no "Recommendation:" sections. If a conclusion needs structure, it's too long.
+- **Don't re-argue rejected options.** Name them in a clause ("rejected `spider.sequence` for directional ambiguity"); don't rebuild the tradeoff table.
+- **Exploration stays in the session transcript.** The analytical work — enumerated cases, stress tests, option matrices — belongs in chat, joinable via session ID. Only the distilled outcome lands in the conclusion.
+
+Verbose conclusions are the main context cost of clicks. Keep them short and the tree can grow freely.
 
 ## Sub-questions (children)
 
