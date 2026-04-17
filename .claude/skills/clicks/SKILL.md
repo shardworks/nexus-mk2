@@ -42,7 +42,9 @@ When opening any new click, scan `docs/future/guild-vocabulary.md` for related t
 
 ## Viewing clicks
 
-**Tree view** (primary orientation command):
+Two commands do the orientation work. Reach for them in this order:
+
+**1. Tree view** — board-level scan, the first thing you run at startup:
 
     nsg click tree [--root-id <id>] [--status live] [--depth N]
 
@@ -55,19 +57,21 @@ Renders the click forest with box-drawing connectors and status indicators:
 ```
 Status indicators: `●` live, `◇` parked, `○` concluded, `✕` dropped.
 
-**Show a single click** with links, parent, and children:
+**2. Extract a subtree** — the primary narrative-loading command, used whenever the conversation turns toward a specific area:
+
+    nsg click extract --id <id> [--full] [--format md|json]
+
+Without `--full`, shows goals only. With `--full`, includes conclusions. One call loads the whole subtree as a structured document — this is how you orient on any line of inquiry.
+
+**Don't do this:** don't walk a subtree by calling `show` on each child to reconstruct the narrative. That's what `extract` is for. If you find yourself running `show` three or more times in a row to understand the shape of an area, stop and run `extract` on the common ancestor instead.
+
+**Show a single click** — use only for single-click inspection (checking one click's links, parent, status, or conclusion):
 
     nsg click show <id>
 
 **List with filters:**
 
     nsg click list [--status live] [--status parked] [--limit 50]
-
-**Extract a subtree** as a structured document (the continuity mechanism — one call to load a full subtree's context):
-
-    nsg click extract --id <id> [--full] [--format md|json]
-
-Without `--full`, shows goals only. With `--full`, includes conclusions.
 
 ## Status transitions
 
@@ -141,7 +145,7 @@ All ID parameters accept short prefixes (e.g., `c-mo1ee` instead of the full ID)
 
 Clicks provide continuity across sessions. The flow is:
 
-- **Startup** — scan the click tree with `nsg click tree --status live --status parked` to see what's in flight. Load details on demand with `nsg click show <id>`. Don't eagerly read every click.
+- **Startup** — scan the click tree with `nsg click tree --status live --status parked` to see what's in flight. When the conversation turns toward a specific area, use `nsg click extract --id <id>` to load the full subtree as narrative context. Reserve `nsg click show <id>` for single-click inspection. Don't eagerly read every click.
 - **During the session** — open new clicks for substantial inquiries; create child clicks for sub-questions. Conclude or drop clicks as decisions are reached.
 - **Wrap-up** — park any live clicks that won't be continued immediately. Conclude clicks where decisions were reached this session. The click tree itself is the session's durable record of what was explored and decided.
 

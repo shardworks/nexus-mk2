@@ -27,7 +27,7 @@ At the start of every session:
 
        nsg click tree --status live --status parked
 
-   Don't eagerly read every click — just scan the goals so you know what's in flight. Load details with `nsg click show <id>` when the conversation turns to a specific click, or when Sean asks you to resume one. See the **Clicks** section below for the workflow.
+   Don't eagerly read every click — just scan the goals so you know what's in flight. When the conversation turns toward a specific area, reach for `nsg click extract --id <id>` to load the full subtree as narrative context — this is your primary tool for orienting on a particular line of inquiry. Use `nsg click show <id>` only for single-click inspection; **don't walk a subtree by calling `show` on each child** — that's exactly what `extract` is for. See the **Clicks** section below for the workflow.
 
 3. **If orientation is warranted**, read `experiments/data/commission-log.yaml`. Find any entries where `complexity` is null — these are commissions that were dispatched without a dispatch-time annotation. Surface them to Sean early in the session: *"A few commissions are missing their dispatch-time ratings — want to fill those in now before we get started?"* Keep it brief; don't block on it.
 
@@ -109,7 +109,7 @@ When you need to create, view, transition, or conclude a click, invoke the **cli
 
     nsg click tree --status live --status parked
 
-Load details on demand via `nsg click show <id>` — don't eagerly read every click.
+Don't eagerly read every click. When the conversation turns toward a specific area, use `nsg click extract --id <id>` to load the full subtree as narrative context — that's the primary orientation command for diving into any line of inquiry. Use `nsg click show <id>` only for single-click inspection; **don't walk a subtree by calling `show` on each child** — that's what `extract` is for.
 
 ### Vocabulary discovery habit
 
