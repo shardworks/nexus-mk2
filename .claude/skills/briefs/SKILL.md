@@ -85,6 +85,20 @@ Sean iterates on the brief by editing the scratch file directly (or in chat). Wh
 
 Click ids are first-class in briefs — they're how the brief connects to the design conversation. The sage extracts and inlines the substance when generating the spec. Don't strip click ids out of briefs to "make them self-contained"; that's the sage's job, not Coco's.
 
+### Stay inside the target repository
+
+A brief is posted as the body of a writ in a specific codex, and every downstream reader (the sage, the artificer, the reviewer) operates inside the codex's target repository. **Do not reference any path or artifact that lives outside that repository** — in particular, nothing under the sanctum (`/workspace/nexus-mk2/...`), nothing under `.scratch/`, nothing under `experiments/`, nothing in sibling repos. Those paths are dead links from the artificer's perspective.
+
+This applies to:
+
+- File path references (`.scratch/brief-foo.md`, `experiments/X008/spec.md`, etc.) — omit entirely.
+- Cross-commission references — when pointing at prior or parallel briefs, name them by intent ("the link-substrate rename sweep commission") rather than by scratch path. If the relationship is load-bearing, the brief should stand on its own intent without requiring the reader to fetch a sibling artifact.
+- Sanctum-side documentation, data, or tooling paths — not available to agents operating in the framework repo.
+
+Click ids are the exception — clicks live in the guild's books and are resolvable by any sage with click access regardless of which repository the commission targets.
+
+When drafting, do the grep before handing the brief to Sean: `grep -n '\.scratch\|nexus-mk2\|sanctum' brief-*.md` should return nothing.
+
 ## Posting
 
 Use `bin/commission.sh` from the sanctum:
@@ -114,6 +128,7 @@ When a brief is dispatched, three things must follow:
 ## Common pitfalls
 
 - **Drifting into spec.** The most common failure. Symptoms: file paths appearing in the brief, full TypeScript code blocks beyond a shape sketch, test file names, exit criteria like "the foo.ts file at line N is updated." When you catch this, ask the gut-check question and rewrite.
+- **Leaking sanctum references into the brief.** `.scratch/...` paths, sanctum doc paths, experiment directories. Dead links from the artificer's perspective. See "Stay inside the target repository" above.
 - **Stripping click references.** Don't try to make briefs self-contained by inlining the substance of their source clicks — that's the sage's job. Briefs reference; specs inline.
 - **Forgetting the complexity rating.** Missing-at-dispatch complexity becomes a session-startup cleanup task. Ask before posting.
 - **Skipping the wrapper script.** `nsg commission-post` works but skips the log-patching step. Always go through `bin/commission.sh`.
