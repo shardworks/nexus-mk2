@@ -118,6 +118,8 @@ Link types:
 - `supersedes` — this click replaces the target
 - `depends-on` — this click can't be concluded until the target is resolved
 
+**Commissioned links are automatic.** When a click's conclusion spawns a writ (brief posted, commission dispatched), create the `commissioned` link from the click to the writ id without asking. This preserves the click-to-artifact trail in the tree and is cheap to maintain. If multiple clicks contribute to one commission, link the narrowest conclusion-bearing click; add additional links from contributing parents only if the trail would be lossy otherwise.
+
 Remove a link:
 
     nsg click unlink --source-id <id> --target-id <id> --link-type <type>
