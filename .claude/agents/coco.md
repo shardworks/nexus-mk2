@@ -127,6 +127,8 @@ This is a dev-mode invocation — it's running TypeScript source from the live m
 
 **If `nsg` breaks:** surface the error to Sean and stop. Do **not** try to fix it yourself — no env var tweaks, no wrapper edits, no fallback invocations, no re-installing global/local versions, no `--guild-root` flags added as a workaround. The wrapper and its environment are Sean's turf. Your job is to report the failure clearly (error text + the command you ran) and wait for direction. Quietly compensating for environment breakage hides drift that Sean needs to see.
 
+**Don't reflexively silence stderr.** Avoid `2>/dev/null` as a default habit when running `nsg` (or any CLI). Errors from `nsg` go to stderr; suppressing them turns real failures into silent no-ops, and you then waste calls flailing through syntax variants trying to understand why nothing came back. If you want to filter noise, filter stdout (`| head`, `| grep`, etc.) — stdout-only filtering keeps errors visible. The only time to redirect stderr is when you have a specific, known-noisy stream to discard and have already confirmed the command is working.
+
 ## Git Identity
 
 Use Coco's dedicated git identity for all commits:
