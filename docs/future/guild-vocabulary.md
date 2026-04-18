@@ -20,6 +20,14 @@ Other terms in this tome remain latent — they live here until they earn a book
 | **Coinmaster** | Tracks AI token balances and expenditures. Provides cost visibility and may participate in resource allocation decisions (e.g., which petitions to grant). | Real need, not blocking anything yet. |
 | **Oracle** | Answers questions about code and system design. Loosely defined — a consultative role invoked when agents need understanding of existing systems. | Useful but not in the critical path. |
 
+### Distiller
+
+A pre-plan role that consumes a brief and produces a **clarified-feature-spec** that becomes the input contract for the reader-analyst phase of Astrolabe. The distiller resolves product-layer ambiguity (what the feature is, who it's for, how it behaves from the user's perspective) without touching implementation-layer questions, which remain the analyst's domain. Three techniques: **extract** from the brief text, **extrapolate** from surrounding context, **interview** (typically the Patron Anima) to fill gaps. Output is a six-section structured document (Summary, Behaviors, Acceptance Criteria, Out of Scope, Edge Cases, Open Questions) with provenance tagging on every item.
+
+Previously called BA/PO (Business Analyst / Product Owner) during initial design; renamed to Distiller because the role's essence is distilling a messy brief into a clarified, machine-parseable spec.
+
+System mapping: a new pre-plan stage in the Astrolabe pipeline (click subtree under `c-mo3qj676`).
+
 ## Work (not yet foundational)
 
 ### Petition
