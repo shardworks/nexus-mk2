@@ -119,6 +119,14 @@ When a click spawns distinct sub-inquiries, create child clicks:
 
 Children are the decomposition mechanism. Resolving a parent typically means resolving or dropping its children. But there's no automatic cascading — a parent can be concluded while children are still live (e.g., "we answered the main question; remaining sub-questions are moot").
 
+### Enumerated decisions → enumerated children
+
+When the analysis inside a click naturally enumerates N items with per-item evaluations (N sources → include/exclude each, N options → pick-one across them, N candidates → accept/reject each), those evaluations are latent sub-clicks. Lift them into children rather than collapsing them into the parent's conclusion.
+
+**Recognition trigger:** if you catch yourself writing a conclusion that contains a per-item list with individual rationale ("source A: yes because X; source B: no because Y; …"), stop — that list is telling you the decisions want their own clicks. The parent's conclusion should name the *principle* or *summary*; each child's conclusion carries one item's rationale.
+
+This aligns with conclusion-discipline (keeps each conclusion tight, no inline tables) and with capture-liberally (the tree is cheap; per-item decisions are durable structural references worth having).
+
 ## Links
 
 Typed links connect clicks to each other or to writs (cross-substrate):
