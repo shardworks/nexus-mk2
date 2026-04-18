@@ -7,7 +7,7 @@ This document is a **tome** (in its own metaphor) — reference material to cons
 **Active vocabulary bookmark quests** — terms with feature-shaped gaps that have earned their own parked-quest entries:
 
 - **Coinmaster / Purse / Tithe** → cost tracking & token budget allocation (`w-mnszznt5-66d0ec7464bc`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*
-- **Petition** → first-class internal commissions (`w-mnszzo8h-42137bda6681`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*
+- **Petition (internal-source variant)** → first-class internal commissions (`w-mnszzo8h-42137bda6681`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*. The petition concept itself is broader (any formally submitted request, patron or internal); this bookmark tracks the internal-source flow specifically.
 - **Vigil** → background monitoring of in-flight commissions (`w-mnszzon4-731bd9827d05`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*
 
 Other terms in this tome remain latent — they live here until they earn a bookmark or get absorbed into an active inquiry.
@@ -22,17 +22,35 @@ Other terms in this tome remain latent — they live here until they earn a book
 
 ### Distiller
 
-A pre-plan role that consumes a brief and produces a **clarified-feature-spec** that becomes the input contract for the reader-analyst phase of Astrolabe. The distiller resolves product-layer ambiguity (what the feature is, who it's for, how it behaves from the user's perspective) without touching implementation-layer questions, which remain the analyst's domain. Three techniques: **extract** from the brief text, **extrapolate** from surrounding context, **interview** (typically the Patron Anima) to fill gaps. Output is a six-section structured document (Summary, Behaviors, Acceptance Criteria, Out of Scope, Edge Cases, Open Questions) with provenance tagging on every item.
+A pre-plan role that consumes a **petition** (the patron's submitted request) and produces a **brief** — a structured, six-section working artifact (Summary, Behaviors, Acceptance Criteria, Out of Scope, Edge Cases, Open Questions) with provenance tagging on every item. The brief becomes the working contract for the **Sage** in the plan stage. The Distiller resolves product-layer ambiguity (what the feature is, who it's for, how it behaves from the user's perspective) without touching implementation-layer questions, which remain the Sage's domain. Three techniques: **extract** from the petition text, **extrapolate** from named anchors and methodological principles, **interview** (typically the Patron Anima) to fill gaps. Process discipline lives in `c-mo3qjbmw`; interview mechanics in `c-mo3qjcuw`.
 
-Previously called BA/PO (Business Analyst / Product Owner) during initial design; renamed to Distiller because the role's essence is distilling a messy brief into a clarified, machine-parseable spec.
+Previously called BA/PO (Business Analyst / Product Owner) during initial design; renamed to Distiller because the role's essence is distilling a messy petition into a clarified, machine-parseable brief.
 
 System mapping: a new pre-plan stage in the Astrolabe pipeline (click subtree under `c-mo3qj676`).
+
+### Sage
+
+The plan-stage role (formally `sage-reader-analyst`) that consumes a **brief** (Distiller's output) and produces a **spec** for the implementer. The Sage resolves implementation-layer ambiguity — APIs, schemas, workflows, structural choices — and may consult the petition as a secondary reference under disciplined conditions (see `c-mo3qsanr`). The Sage replaces what earlier design called the analyst / reader-analyst.
+
+Pipeline placement: petition → [Distiller] → brief → [Sage] → spec → [implementer] → code.
 
 ## Work (not yet foundational)
 
 ### Petition
 
-A commission originating from within the guild rather than from the patron. Petitions are requests to build or improve guild resources — paying tech debt, upgrading tooling, refactoring internal systems. The intent is that leadership evaluates petitions and decides which to grant, balancing cost against value. Petitions use the same commission infrastructure but are internally motivated.
+A formally submitted request to the guild for work to be performed. Petitions are the canonical input artifact at the front of the work pipeline — they're what the Distiller consumes to produce a brief, which the Sage then turns into a spec for implementation. The pipeline reads: petition → brief → spec → code.
+
+Petitions may originate from either side of the guild boundary:
+- **Patron-source petitions** — the patron submits a request from outside the guild (this is what the system formerly called "the brief"; renamed to clarify that the patron's submission is a request, while *brief* is reserved for the Distiller's refined output).
+- **Internal-source petitions** — a guild member submits a request from within the guild for work to build or improve guild resources (paying tech debt, upgrading tooling, refactoring internal systems). Leadership evaluates internal petitions and decides which to grant, balancing cost against value. Tracked as a distinct flow under bookmark click `c-mo1mqgqv` / writ `w-mnszzo8h-42137bda6681`.
+
+Both flavors flow through the same commission infrastructure; the originator is a `source` field on the petition, not a different artifact type. A future sub-term may distinguish the internal subset if usage warrants.
+
+### Brief
+
+The Distiller's output artifact — a structured, machine-parseable document derived from a petition through extract/extrapolate/interview, with provenance tagging on every item. Six sections: Summary, Behaviors, Acceptance Criteria, Out of Scope, Edge Cases, Open Questions (shape settled in `c-mo3qj9by`). The brief is the working contract for the Sage; the petition remains attached as a secondary reference (see `c-mo3qsanr`).
+
+**Vocabulary note:** earlier design conversations and many existing clicks/commits use "brief" to mean what is now called *petition* (the patron's submitted input). The naming was inverted on `2026-04-18`; the Distiller's output is the proper "brief" in the craft sense (a polished, structured artifact prepared for an audience to act on), while the patron's submission is the petition. Historical references to "brief" in the input sense are archival; the mapping is documented here.
 
 ## Communication
 
