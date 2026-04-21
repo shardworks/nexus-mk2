@@ -1,0 +1,2 @@
+Duplicated rig-meta markup
+spider.js writes the rig meta table markup identically in two places: showRigDetail (lines 507-513) and fetchCurrentRigQuiet (lines 352-358). D8 (stable-id skeleton for rig meta) eliminates the duplication as a side effect. If D8 is overridden to keep the rebuild approach, extract the markup into a helper (renderRigMetaInto(element, rig)) as a drive-by cleanup.
