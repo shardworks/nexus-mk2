@@ -1,0 +1,218 @@
+decisions:
+- id: D1
+  question: Which GitHub API surface should the copilot provider target?
+  options:
+    a: GitHub Models REST API — OpenAI-compatible chat completions endpoint at https://models.inference.ai.azure.com
+    b: gh copilot CLI — spawn the GitHub CLI extension
+    c: GitHub Copilot Chat API — internal API used by VS Code extensions
+- id: D2
+  question: What HTTP client should the provider use to call the API?
+  options:
+    a: Native Node.js fetch() — no additional dependency
+    b: OpenAI SDK npm package — type-safe client for OpenAI-compatible APIs
+- id: D3
+  question: What should the package name be?
+  options:
+    a: '@shardworks/copilot-apparatus'
+    b: '@shardworks/github-copilot-apparatus'
+- id: D4
+  question: What directory path should the package use?
+  options:
+    a: packages/plugins/copilot/
+    b: packages/plugins/github-copilot/
+- id: D5
+  question: What value should provider.name return?
+  options:
+    a: '''copilot'''
+    b: '''github-copilot'''
+    c: '''github-models'''
+- id: D6
+  question: How should the apparatus structure its dependencies (requires/recommends)?
+  options:
+    a: 'requires: [] — no apparatus dependencies, same as claude-code'
+    b: 'requires: [''tools''] — declare dependency on Instrumentarium for tool definition
+      access'
+- id: D7
+  question: How should the provider derive exitCode for SessionProviderResult?
+  options:
+    a: 0 for any successful API completion, 1 for any API error or network failure
+    b: 0 for successful completion, non-zero mapped from HTTP status codes (e.g. 429→2,
+      500→3)
+- id: D8
+  question: How should providerSessionId be generated?
+  options:
+    a: Generate a UUID/random id at session start — no API equivalent exists
+    b: Use the API's response id field (e.g. chatcmpl-xxx from OpenAI format)
+    c: Leave undefined — no native session concept in the API
+- id: D9
+  question: How should the transcript be structured?
+  options:
+    a: Store raw API request/response message arrays as TranscriptMessage[] — each
+      message object becomes one entry
+    b: Store the raw HTTP response bodies as TranscriptMessage[] — each API call becomes
+      one entry
+- id: D10
+  question: How should the provider extract the final output text?
+  options:
+    a: Return the content of the last assistant message that has no tool_calls — same
+      logic as extractFinalAssistantText but for OpenAI format
+    b: Always return the last assistant message's content regardless of tool_calls
+- id: D11
+  question: How should the provider handle config.cwd (working directory)?
+  options:
+    a: Ignore it — no subprocess to set cwd on; document that cwd has no effect for
+      this provider
+    b: 'Pass it as context in the system prompt (e.g. ''You are working in directory:
+      /path/to/guild'')'
+- id: D12
+  question: How should the provider handle config.environment?
+  options:
+    a: Ignore it — no subprocess to inject env vars into; the field is not applicable
+    b: Use it to override process.env for the API token lookup
+- id: D13
+  question: What should the provider's factory function be named?
+  options:
+    a: createCopilotProvider() — mirrors createClaudeCodeProvider()
+    b: createCopilot()
+- id: D14
+  question: Should the apparatus have a no-op start() or read config at start?
+  options:
+    a: Read copilot config from guild.json at start() — cache API endpoint, token
+      env var name
+    b: No-op start(), read config lazily at launch() time
+- id: D15
+  question: How should the provider handle config.conversationId when no agentic loop
+    state is persisted?
+  options:
+    a: Ignore conversationId — conversation resume is not supported in the MVP copilot
+      provider
+    b: Store message history in Stacks keyed by conversationId and replay it on resume
+- id: D16
+  question: How should ResolvedTool[] be converted to the API's function/tool format?
+  options:
+    a: 'Convert each ResolvedTool.definition to an OpenAI function tool: extract JSON
+      Schema from the Zod params schema using zod''s .toJSONSchema(), set name and
+      description'
+    b: Serialize Zod schemas manually to JSON Schema objects
+- id: D17
+  question: How should the agentic loop execute tool calls?
+  options:
+    a: Parse tool_calls from the API response, look up each tool by name in the ResolvedTool[]
+      array, call definition.handler(params), collect results, send back as tool role
+      messages, repeat until no more tool_calls
+    b: Start an MCP server like claude-code does, and somehow route API tool_calls
+      through it
+- id: D18
+  question: Should the agentic loop have a maximum iteration limit?
+  options:
+    a: Yes — hard limit of 50 iterations (tool-call rounds), then force-complete with
+      a timeout/failed status
+    b: Yes — configurable limit via CopilotConfig with a sensible default (e.g. 25)
+    c: No limit — run until the model stops issuing tool_calls or the session times
+      out
+- id: D19
+  question: How should tool call errors be handled within the agentic loop?
+  options:
+    a: Catch the error, return it as a tool result message with role 'tool' and content
+      describing the error, let the model decide what to do
+    b: Abort the session on any tool error
+- id: D20
+  question: Should callableBy filtering be applied to tools before sending to the
+    API?
+  options:
+    a: Yes — filter to tools where callableBy includes 'anima' or callableBy is undefined,
+      same as the MCP server does
+    b: No — trust that the Loom/Instrumentarium already resolved the correct tool
+      set
+- id: D21
+  question: How should the provider validate tool call arguments from the API before
+    passing them to the handler?
+  options:
+    a: Parse the arguments JSON string, then validate via definition.params.parse()
+      — same Zod validation the MCP server uses
+    b: Parse the arguments JSON string and pass directly to the handler without Zod
+      validation
+- id: D22
+  question: How should streaming be implemented for the OpenAI-compatible SSE API?
+  options:
+    a: 'Use fetch() with stream: true in the request body, read response.body as a
+      ReadableStream, parse SSE data: lines into chunks'
+    b: Use a third-party SSE client library (e.g. eventsource-parser)
+- id: D23
+  question: In non-streaming mode, should the provider still use the streaming API
+    internally, or use the non-streaming API?
+  options:
+    a: 'Use the non-streaming API (stream: false) — simpler response parsing, one
+      JSON body per call'
+    b: Always use the streaming API internally, only vary whether chunks are yielded
+      to the caller
+- id: D24
+  question: How should streaming interact with the agentic tool-call loop?
+  options:
+    a: Stream text chunks during each API call, then pause streaming while tool handlers
+      execute, resume streaming on the next API call
+    b: Only stream the final API response (after all tool calls are done)
+- id: D25
+  question: What config shape should the copilot apparatus use in guild.json?
+  options:
+    a: '{ apiEndpoint?: string, tokenEnvVar?: string, maxToolRounds?: number } — minimal
+      config with environment-based auth'
+    b: '{ apiEndpoint?: string, apiToken?: string, maxToolRounds?: number } — token
+      stored directly in guild.json'
+- id: D26
+  question: What should the default API endpoint be?
+  options:
+    a: https://models.inference.ai.azure.com — the GitHub Models endpoint
+    b: https://api.githubcopilot.com — the Copilot-specific endpoint
+- id: D27
+  question: What should the default token environment variable name be?
+  options:
+    a: GITHUB_TOKEN — standard GitHub authentication env var
+    b: COPILOT_TOKEN — copilot-specific env var
+- id: D28
+  question: How should config.model from SessionProviderConfig be mapped to the API
+    model parameter?
+  options:
+    a: Pass config.model directly as the model field in the API request — operators
+      set the actual model name in guild.json settings.model
+    b: Maintain a mapping table (e.g. 'sonnet' → 'gpt-4o') with a fallback to pass-through
+- id: D29
+  question: Should the copilot config use GuildConfig module augmentation?
+  options:
+    a: 'Yes — augment GuildConfig with copilot?: CopilotConfig, same pattern as AnimatorConfig'
+    b: No — read config via guild().config<CopilotConfig>('copilot') without augmentation
+- id: D30
+  question: What should the default maxToolRounds be?
+  options:
+    a: 25 — conservative default that prevents runaway loops while allowing complex
+      multi-step tasks
+    b: 50 — generous default for complex workflows
+    c: 10 — aggressive limit for cost control
+- id: D31
+  question: How should the provider report costUsd?
+  options:
+    a: Leave costUsd undefined — the GitHub Models API does not report cost
+    b: Estimate cost based on token usage and known per-token pricing
+- id: D32
+  question: How should token usage be accumulated across multiple API calls in a tool-calling
+    session?
+  options:
+    a: Sum inputTokens and outputTokens across all API calls in the session
+    b: Report only the last API call's token usage
+- id: D33
+  question: How should API-level errors (HTTP 4xx/5xx, network failures) be mapped
+    to SessionProviderResult?
+  options:
+    a: 'Set status: ''failed'', exitCode: 1, error: descriptive message with HTTP
+      status and response body'
+    b: Retry transient errors (429, 5xx) with backoff before failing
+- id: D34
+  question: How should the provider handle a missing API token at launch time?
+  options:
+    a: Throw immediately with a clear error message naming the expected env var
+    b: Return a failed SessionProviderResult
+- id: D35
+  question: Should the doc follow the apparatus template exactly?
+  options:
+    a: Yes — follow docs/architecture/apparatus/_template.md structure, same as claude-code.md
+    b: Abbreviated doc — just a README in the package directory

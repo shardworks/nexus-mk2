@@ -1,0 +1,236 @@
+decisions:
+  - id: D1
+    selected: a
+    confidence: high
+    principles: [3, 17]
+    reasoning: "Principle #3 (extend existing API over routing around) — WritDoc is the existing extension point; #17 routes the new distinction through the doc itself rather than minting a parallel relationship book."
+  - id: D2
+    selected: a
+    confidence: high
+    principles: [19]
+    reasoning: "Principle #19 (don't persist derived state) — childCount is recomputable from a parentId query; denormalizing it is a future reconciliation bug."
+  - id: D3
+    selected: a
+    confidence: medium
+    principles: [19, 21]
+    reasoning: "Per D2, childCount shouldn't exist; for parentId alone, optional/absent cleanly encodes 'no parent' without a sentinel. #19 rules out the denormalized count; #21 favors the simpler reading."
+  - id: D4
+    selected: a
+    confidence: high
+    principles: [3, 18, 23]
+    reasoning: "#3 extends PostCommissionRequest with parentId; #18 refuses a speculative batch decompose() without a second consumer; #23 keeps the MVP thinnest-slice."
+  - id: D5
+    selected: a
+    confidence: medium
+    principles: [2, 18]
+    reasoning: "#2 fail-loud favors the narrower allow-list; adding children to an 'active' parent mid-rig is exactly the drift that should throw. D39's error message ('expected: new, ready, waiting') reinforces this framing."
+  - id: D6
+    selected: a
+    confidence: high
+    principles: [18, 23]
+    reasoning: "#18 — no second consumer has earned setParent(); #23 — immutability is the thinnest slice and makes D7's cycle argument trivial."
+  - id: D7
+    selected: b
+    confidence: high
+    principles: [18]
+    reasoning: "Given D6 (immutable parentId), tree cycles are structurally impossible. #18 refuses speculative walk-the-chain code without a consumer that needs it."
+  - id: D8
+    selected: b
+    confidence: high
+    principles: [11, 2]
+    reasoning: "#11 — skip-when-unset over framework defaults for taste; silent codex inheritance is exactly the kind of implicit default Sean rejects. #2 — explicit is fail-loud."
+  - id: D9
+    selected: a
+    confidence: medium
+    principles: [18, 23]
+    reasoning: "#18 — compound ['parentId','status'] index is speculation until the query pattern proves hot; #23 — single-field index is the thinnest slice."
+  - id: D10
+    selected: a
+    confidence: medium
+    principles: [32, 33]
+    reasoning: "#32/#33 — 'waiting' reads cleanly in prose, logs, and identifiers ('writ is waiting for children'); 'pending' is overloaded across the industry (pending review, pending approval) and obscures the subject."
+  - id: D11
+    selected: a
+    confidence: medium
+    principles: [2]
+    reasoning: "Consistent with D5=a; #2 fail-loud — 'active' writs are owned by a rig, transitioning them to 'waiting' from outside that rig is the silent drift to prevent."
+  - id: D12
+    selected: a
+    confidence: medium
+    principles: [4, 2]
+    reasoning: "#4 single-pass — waiting → ready → (Spider) → active → completed is the one path; #2 — multiple paths to 'completed' create inconsistency. If a parent has no post-children work, the rig can complete it on pickup."
+  - id: D13
+    selected: a
+    confidence: high
+    principles: [2]
+    reasoning: "'waiting' has explicit transitions out (to ready/failed/cancelled), so by definition non-terminal; #2 — labeling it terminal would silently contradict the state machine."
+  - id: D14
+    selected: a
+    confidence: high
+    principles: [12, 2]
+    reasoning: "#12 — framework guarantee (auto-transition in post()) over instruction-level reminders; #2 — exposing 'waiting' as a transition() target lets a caller enter it without creating children, which is exactly the invalid state to preclude."
+  - id: D15
+    selected: a
+    confidence: high
+    principles: [4, 2]
+    reasoning: "#4 — atomic single transaction collapses the two-step pipeline; #2 — the split (create child then CDC transitions parent) creates a brief invalid state where a child exists under a non-waiting parent."
+  - id: D16
+    selected: a
+    confidence: high
+    principles: [2, 4]
+    reasoning: "#2 fail-loud — Phase 1 failOnError: true surfaces cascade failures; Phase 2 silent-swallow is the drift-hiding pattern Sean rejects. #4 — atomic cascade is single-pass."
+  - id: D17
+    selected: a
+    confidence: medium
+    principles: [4]
+    reasoning: "#4 — the more specific trigger (status-change on writs with parentId) collapses the filter-in-handler pipeline to a single declarative predicate."
+  - id: D18
+    selected: b
+    confidence: medium
+    principles: [4, 31]
+    reasoning: "#31 — one cascade rule (parent-failure → children cancelled, per D23) is the source; duplicating that logic in the child-failure handler is downstream compensation. #4 — composing through parent-failure is the single-pass story."
+  - id: D19
+    selected: a
+    confidence: high
+    principles: [31]
+    reasoning: "#31 — cancellation is a deliberate act with different semantics than failure; treating them identically conflates two concepts (see #30 on dimensional splits)."
+  - id: D20
+    selected: a
+    confidence: medium
+    principles: [2]
+    reasoning: "#2 fail-loud — if every child was cancelled and none completed, the parent has produced nothing; silently marking it 'ready' would paper over that. Requiring at least one completion is the honest signal."
+  - id: D21
+    selected: a
+    confidence: high
+    principles: [2, 12]
+    reasoning: "#12 — transition() is the framework-guaranteed path (validation, timestamps, CDC re-entry); #2 — direct patch() bypasses those guarantees silently."
+  - id: D22
+    selected: a
+    confidence: high
+    principles: [2]
+    reasoning: "#2 fail-loud — leaving children running under a cancelled parent wastes work and produces unowned completions; cascade cancellation is the honest semantic."
+  - id: D23
+    selected: a
+    confidence: high
+    principles: [2, 31]
+    reasoning: "#31 — one rule (parent non-continuation cancels children) at the source, symmetric with D22; #2 — leaving children running under a failed parent is silent drift."
+  - id: D24
+    selected: a
+    confidence: medium
+    principles: [12, 18]
+    reasoning: "#12 — Stacks cascade depth limit is an existing framework guarantee; #18 — a visited-set is new structure without a second consumer, and D19 already breaks the cancel-up-cancel-down loop."
+  - id: D25
+    selected: a
+    confidence: high
+    principles: [2, 12]
+    reasoning: "#12 — eager registration in start() is a framework guarantee; #2 — lazy registration leaves a silent gap where events fire before the handler is wired."
+  - id: D26
+    selected: a
+    confidence: high
+    principles: [3, 18]
+    reasoning: "#3 — extend commission-post with parentId; #18 — a separate writ-add-child tool duplicates an existing surface without a second consumer requiring it."
+  - id: D27
+    selected: b
+    confidence: high
+    principles: [3, 18, 26]
+    reasoning: "#3/#26 — extend writ-list (an existing surface touching the same data) with a parentId filter; #18 — a dedicated writ-children tool is speculation."
+  - id: D28
+    selected: a
+    confidence: medium
+    principles: [23, 24]
+    reasoning: "#24 — adequate-for-the-decision for someone inspecting a single writ is parent summary + children list; #23 — option c's count-by-status aggregation is gold-plating without a named reader. Option b forces another tool call."
+  - id: D29
+    selected: a
+    confidence: high
+    principles: [2, 31]
+    reasoning: "#31 — fix the source: if 'new' missing is a bug, fix it here rather than in downstream query contortions; #2 — silently missing enum values means silently-wrong queries."
+  - id: D30
+    selected: a
+    confidence: medium
+    principles: [18, 22]
+    reasoning: "#22 — no named reader for 'show me root writs' in these decisions; #18 — don't earn the null-branch type complexity on speculation."
+  - id: D31
+    selected: a
+    confidence: high
+    principles: [3, 31]
+    reasoning: "#3 — extend WritFilters (existing contract); #31 — fix at the source (ClerkApi.list) rather than handling it in the tool layer. Tool-layer filtering duplicates what the API already does."
+  - id: D32
+    selected: a
+    confidence: medium
+    principles: [4, 18]
+    reasoning: "#18 — sealing 'waiting' is new structure without a proven need; #4 — the simpler rule (CDC counts whatever children exist when it runs) is single-pass."
+  - id: D33
+    selected: a
+    confidence: high
+    principles: [2, 4]
+    reasoning: "#4 — 'cancel waiting parent → D22 cascades to children' is single-pass; requiring cancel-children-first is a multi-step pipeline. #2 — the direct path matches operator intent."
+  - id: D34
+    selected: a
+    confidence: high
+    principles: [2]
+    reasoning: "Consistent with D18+D23: parent can be failed from 'waiting' via child-failure cascade, so 'waiting' must appear in failed's ALLOWED_FROM. Option b would make the cascade throw."
+  - id: D35
+    selected: a
+    confidence: high
+    principles: [18, 13]
+    reasoning: "#13 — resolvedAt/resolution are the shape for terminal states; writing into them from a non-terminal transition sets a bad precedent. #18 — a new 'status note' field is speculation."
+  - id: D36
+    selected: a
+    confidence: high
+    principles: [13]
+    reasoning: "Consistent with D13. #13 — 'soft-terminal' is a new concept on an existing contract; the cleaner line is terminal/non-terminal as defined by the transition graph."
+  - id: D37
+    selected: a
+    confidence: high
+    principles: [3, 17, 18]
+    reasoning: "#3/#17 — the existing draft flag already encodes the distinction; #18 — restricting children to 'ready' is speculative rigidity without a consumer asking for it."
+  - id: D38
+    selected: a
+    confidence: high
+    principles: [2]
+    reasoning: "#2 fail-loud — silently dropping parentId on a non-existent parent hides operator error and produces an orphan; throw with a specific message."
+  - id: D39
+    selected: a
+    confidence: medium
+    principles: [23, 2]
+    reasoning: "#23 — single parameterized message is the thinnest slice; #2 — the message names the actual status and the allowed set, which is sufficient to debug without forking into variant errors."
+  - id: D40
+    selected: a
+    confidence: medium
+    principles: [12, 2]
+    reasoning: "#12 — use the framework-guaranteed path (transition()) so state-machine validation and CDC re-entry still fire; D14's 'not exposed' means tool-layer gating, not bypassing the internal transition mechanism."
+  - id: D41
+    selected: b
+    confidence: high
+    principles: [19]
+    reasoning: "Consistent with D2. #19 — childCount is derived; computing lazily is the right shape."
+  - id: D42
+    selected: a
+    confidence: high
+    principles: [19]
+    reasoning: "Consistent with D2/D41. #19 — no persisted counter; query siblings and check terminal-status-with-at-least-one-completed is the derived-on-read pattern."
+  - id: D43
+    selected: a
+    confidence: medium
+    principles: [2, 20]
+    reasoning: "#20 — resolution is structured state, not log spew; specific sibling id makes it queryable/debuggable. #2 — generic text loses the signal about which sibling triggered the cascade."
+  - id: D44
+    selected: a
+    confidence: medium
+    principles: [2, 20]
+    reasoning: "#20 — name the specific child and carry its resolution; #2 — generic 'child writ failed' is log-level vagueness for what is structured state."
+  - id: D45
+    selected: a
+    confidence: high
+    principles: [13, 18]
+    reasoning: "Consistent with D35/D36 — resolution belongs to terminal states. #18 — a 'temporary note that clears later' is a new state-machine concept without a second consumer."
+  - id: D46
+    selected: a
+    confidence: high
+    principles: [18, 4]
+    reasoning: "Per D2, childCount doesn't exist, so option b isn't available. #4 — Spider's 'status=ready' query naturally excludes 'waiting'; no defensive layer earned."
+  - id: D47
+    selected: a
+    confidence: high
+    principles: []
+    reasoning: "Consistent with D13 — 'waiting' is non-terminal, so leaving the block type as 'pending' is correct behavior by definition. Adding to TERMINAL_STATUSES would contradict the state machine."

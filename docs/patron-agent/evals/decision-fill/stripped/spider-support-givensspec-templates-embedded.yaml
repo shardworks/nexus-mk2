@@ -1,0 +1,201 @@
+decisions:
+- id: D1
+  question: Should we introduce an external templating library or extend the hand-rolled
+    regex system?
+  options:
+    a: Extend hand-rolled regex — add inline ${...} scanning to existing resolveGivens/resolveYieldRefs
+      with no new dependency
+    b: Adopt mustache (zero-dep, ~14KB) — use {{...}} syntax, breaking change to all
+      existing $-prefixed references
+    c: Adopt a configurable library (e.g. eta) — configure to use ${...} syntax, new
+      dependency but no syntax break
+- id: D2
+  question: Should the existing whole-value bare-$ syntax ($writ, $vars.role, $yields.draft.path)
+    remain supported alongside the new inline ${...} syntax?
+  options:
+    a: Keep both — whole-value bare-$ continues to work, inline uses ${...} exclusively
+    b: Deprecate bare-$ — migrate everything to ${...} syntax, remove bare-$ in a
+      future release
+    c: Remove bare-$ now — breaking change, only ${...} supported going forward
+- id: D3
+  question: For inline interpolation, should only ${...} (curly-brace) syntax be supported,
+    or also bare $refs.in.strings?
+  options:
+    a: Only ${...} for inline — bare $refs are ambiguous about where the reference
+      ends within a larger string
+    b: Support both — bare $yields.draft.path inline, with greedy matching to the
+      end of the known pattern
+- id: D4
+  question: What regex pattern should be used to find inline template expressions?
+  options:
+    a: /\$\{([^}]+)\}/g — match ${...} where the body is any non-} characters
+    b: /\$\{((?:yields\.[a-zA-Z][a-zA-Z0-9-]*|vars|writ)\.[a-zA-Z_][a-zA-Z0-9_]*)\}/g
+      — only match known namespaces
+- id: D5
+  question: What expression syntax is supported inside ${...}?
+  options:
+    a: 'Three namespaces only: yields.<engineId>.<prop>, vars.<key>, writ.<field>
+      — single-level property access'
+    b: 'Arbitrary dot-path traversal: yields.<engineId>.<path.to.nested.prop>, writ.<nested.field>
+      — deep property access'
+- id: D6
+  question: When an inline ${...} expression resolves to undefined (missing property),
+    what should happen?
+  options:
+    a: Replace with empty string — the interpolated result omits the missing value
+      silently
+    b: Leave the ${...} literal in place — visible in the output that something didn't
+      resolve
+    c: Throw an error at resolution time — fail the engine
+- id: D7
+  question: When an inline ${...} expression resolves to a non-string value (number,
+    boolean, object, array), how is it stringified?
+  options:
+    a: Use String(value) — numbers/booleans become their string representation; objects
+      become '[object Object]'
+    b: Use JSON.stringify(value) — objects/arrays become JSON text; primitives get
+      quoted
+    c: Use String(value) for primitives, JSON.stringify(value) for objects/arrays
+- id: D8
+  question: When a string contains ONLY a single ${...} expression with no surrounding
+    text (e.g., '${yields.draft.path}'), should the result be the raw value (preserving
+    type) or always a string?
+  options:
+    a: Preserve type — a string that is entirely one ${...} expression resolves to
+      the raw value (same as bare-$ whole-value behavior)
+    b: Always stringify — ${yields.draft.path} in a string always produces a string
+      result
+- id: D9
+  question: 'How should strings with mixed spawn-time and run-time references be handled?
+    E.g., ''Writ: ${writ.title}, Path: ${yields.draft.path}'''
+  options:
+    a: Partial resolution at spawn time — resolve ${writ.*} and ${vars.*}, leave ${yields.*.*}
+      literals in place; complete resolution at run time
+    b: Defer everything to run time — store all inline templates as-is in givensSpec,
+      resolve all refs (writ, vars, yields) when the engine runs
+- id: D10
+  question: 'In a partially-resolved string, what form do unresolved yield refs take
+    in givensSpec? E.g., original ''Title: ${writ.title}, Path: ${yields.draft.path}''
+    after spawn-time resolution'
+  options:
+    a: 'Yield refs remain as ${yields.*.*} literals in the resolved string — ''Title:
+      My Writ, Path: ${yields.draft.path}'''
+    b: Use a sentinel marker to distinguish unresolved refs from literal text that
+      happens to look like ${...}
+- id: D11
+  question: Should ${writ.<field>} work only as inline (embedded in a string), or
+    also as a new whole-value syntax replacing the current $writ?
+  options:
+    a: Both — ${writ.body} works inline AND as a whole-value ref (resolves to the
+      string value of the field)
+    b: Inline only — ${writ.body} works embedded in strings; $writ or ${writ} still
+      gives the whole WritDoc object
+- id: D12
+  question: Which WritDoc fields should be accessible via ${writ.<field>}?
+  options:
+    a: 'All known WritDoc fields: id, type, status, title, body, codex, createdAt,
+      updatedAt, acceptedAt, resolvedAt, resolution'
+    b: 'Only commonly useful fields: id, type, title, body, codex'
+    c: Any field — use generic property access on the WritDoc object without restricting
+      to known fields
+- id: D13
+  question: Should startup validation scan ALL string values for ${...} patterns,
+    or only strings that contain at least one ${...}?
+  options:
+    a: Scan all string values — extract ${...} patterns from any string, validate
+      each expression
+    b: Only scan strings that contain at least one '${' substring — skip pure literals
+      for performance
+- id: D14
+  question: For inline ${yields.*.*} refs, should validation check upstream reachability
+    the same way whole-value refs do?
+  options:
+    a: 'Yes — same validation: engine id must exist in template AND be transitively
+      upstream'
+    b: Only check engine id existence — skip upstream reachability for inline refs
+- id: D15
+  question: How should validation handle a string containing both valid and invalid
+    inline refs?
+  options:
+    a: Fail on the first invalid ref — same as current behavior for any unrecognized
+      variable
+    b: Collect all errors and report them together
+- id: D16
+  question: Should a string containing ${...} patterns that are NOT known namespaces
+    (e.g., '${unknown.foo}') trigger a validation error?
+  options:
+    a: Yes — any ${...} expression that doesn't match writ.*, vars.*, or yields.*.*
+      is an error
+    b: No — unknown ${...} patterns pass through as literal text (for forward compatibility)
+- id: D17
+  question: How should the shared validation logic be structured?
+  options:
+    a: Extract a validateGivensRefs(givens, engineIds, engines, reportError) function
+      where reportError is a callback that either throws or returns a string
+    b: Extract a validateGivensRefs function that returns an array of error strings;
+      callers decide whether to throw or warn
+    c: Extract a validateGivensRefs function that always returns string | null (first
+      error); config caller throws, kit caller returns
+- id: D18
+  question: What should the extracted validation function's signature be?
+  options:
+    a: 'validateGivensRefs(givens: Record<string, unknown>, engineId: string, engineIds:
+      Set<string>, allEngines: RigTemplateEngine[]): string | null'
+    b: 'validateGivensRefs(engines: RigTemplateEngine[], engineIds: Set<string>):
+      string | null — validate all engines in one call'
+- id: D19
+  question: Should the unnecessary { ...engine.givensSpec } spreads in tryRun and
+    tryCollect be removed?
+  options:
+    a: Yes — pass givensSpec directly since resolveYieldRefs already creates a new
+      result object
+    b: No — keep the defensive copy for safety
+- id: D20
+  question: Should the inline interpolation logic be implemented as a shared helper
+    used by both resolveGivens and resolveYieldRefs, or independently in each?
+  options:
+    a: Shared helper — a single interpolateString(template, context) function called
+      by both resolution phases with different context objects
+    b: Independent — each function gets its own inline replacement loop
+- id: D21
+  question: Should the shared interpolation helper also handle the whole-value case
+    (full string is a single reference), or only inline?
+  options:
+    a: Handle both — the helper detects single-expression strings (no surrounding
+      text) and returns the raw value, otherwise returns the interpolated string
+    b: Only handle inline — whole-value detection stays in the callers
+- id: D22
+  question: What should the shared interpolation helper's name and signature be?
+  options:
+    a: 'interpolateTemplate(value: string, resolve: (expr: string) => unknown | undefined):
+      unknown — takes a resolver callback'
+    b: 'interpolateTemplate(value: string, context: Record<string, unknown>): unknown
+      — takes a flat context and uses dot-path traversal'
+- id: D23
+  question: Should normalizeVarRef be preserved for backward compatibility with bare-$
+    whole-value refs?
+  options:
+    a: Preserve it — bare-$ refs ($writ, $vars.key, $yields.eng.prop) continue to
+      use normalizeVarRef before matching
+    b: Remove it — convert all references to ${...} syntax internally
+- id: D24
+  question: In resolveGivens, how should the control flow work for strings that contain
+    inline ${...} but also start with $?
+  options:
+    a: Check for bare-$ whole-value patterns first (existing logic); if no match,
+      fall through to inline interpolation for any string containing ${}
+    b: Check for inline ${...} first; bare-$ patterns are handled as a special case
+      after
+- id: D25
+  question: In resolveGivens, should a bare-$ string that fails whole-value matching
+    but contains ${...} patterns fall through to inline interpolation?
+  options:
+    a: No — a string starting with $ that doesn't match any known whole-value pattern
+      is still an error (caught at validation), same as today
+    b: Yes — e.g., '$prefix ${vars.key}' would be treated as inline interpolation
+- id: D26
+  question: Should there be an escape mechanism for literal ${...} text in givens
+    strings?
+  options:
+    a: No — guild config authors won't need literal ${...} in engine givens
+    b: Yes — support \${...} or $${...} to produce literal ${...} output

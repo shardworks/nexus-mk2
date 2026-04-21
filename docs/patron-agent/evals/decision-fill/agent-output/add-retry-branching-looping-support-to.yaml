@@ -1,0 +1,182 @@
+decisions:
+  - id: D1
+    selected: a
+    confidence: high
+    principles: [32, 33]
+    reasoning: "`when` reads naturally across all five contexts (prose, speech, TS identifier, config file, log line); `if` imports control-flow connotations inappropriate for a declarative template field (#32, #33)."
+  - id: D2
+    selected: a
+    confidence: medium
+    principles: [7, 18, 23]
+    reasoning: "Scalar-with-`!` matches what template authors will actually write (#7); structured object (b) is speculative flexibility without a second consumer (#18); full expression strings (c) are a large parser surface that hasn't earned itself (#23)."
+  - id: D3
+    selected: a
+    confidence: high
+    principles: [2, 30]
+    reasoning: "`skipped` and `cancelled` are a dimensional split (#30) — condition-false vs. system-stopped-after-failure are distinct concepts; conflating them hides the distinction operators need (#2)."
+  - id: D4
+    selected: b
+    confidence: high
+    principles: [4]
+    reasoning: "Conditions reference upstream yields not available at spawn; runtime evaluation at the natural decision point is the single-pass answer (#4). Option (a) is essentially infeasible for the general case."
+  - id: D5
+    selected: a
+    confidence: medium
+    principles: [4]
+    reasoning: "Integrating the condition check into `tryRun()` collapses the pipeline to a single pass that decides run-or-skip when picking the next runnable engine (#4); a separate phase adds a stage without justification."
+  - id: D6
+    selected: a
+    confidence: medium
+    principles: [7, 15]
+    reasoning: "Treating `skipped` as done for upstream satisfaction keeps the dependency contract clean and lets `when` clauses on downstream engines carry cascade intent explicitly (#15); option (b) bakes cascade semantics into the graph shape itself."
+  - id: D7
+    selected: a
+    confidence: medium
+    principles: [2]
+    reasoning: "The `at least one completed` guard is a fail-loud check against the likely-bug case of an all-skipped rig (#2); option (b) conflates failed with completed, which is semantically wrong."
+  - id: D8
+    selected: a
+    confidence: high
+    principles: [2, 20]
+    reasoning: "An explicit `engine-skipped` action makes the distinction visible to crawl-loop readers and books (#20); reusing `engine-completed` silently hides that a branch was pruned (#2)."
+  - id: D9
+    selected: a
+    confidence: high
+    principles: [4]
+    reasoning: "A skip can unblock rig completion just as a completion can; checking in the same crawl step is the single-pass answer (#4)."
+  - id: D10
+    selected: a
+    confidence: high
+    principles: [3, 15]
+    reasoning: "`EngineInstance` is the natural home for per-engine runtime state (#3); smuggling `when` through `givensSpec` breaks the contract that givens describes inputs (#15)."
+  - id: D11
+    selected: a
+    confidence: medium
+    principles: [7]
+    reasoning: "Truthiness is coherent with the `!` prefix operator and matches author intuition (`when: \"$yields.review.passed\"` reads as `run if this is truthy`) (#7); strict-compare makes the negation semantics awkward."
+  - id: D12
+    selected: a
+    confidence: high
+    principles: [2, 13]
+    reasoning: "Full validation at startup (same rules as `$yields.*.*` in givens) catches misconfiguration loud and early (#2) and keeps the first-writer precedent consistent across yield-reference sites (#13)."
+  - id: D13
+    selected: a
+    confidence: medium
+    principles: [7]
+    reasoning: "Undefined-is-falsy yields natural cascading that template authors can reason about (#7); erroring (b) forces authors to write defensive `when` clauses everywhere a skip might propagate."
+  - id: D14
+    selected: a
+    confidence: high
+    principles: [3]
+    reasoning: "Consistent with D10/D4: if `when` lives on `EngineInstance` and evaluates at runtime, `buildFromTemplate()` must copy it (#3)."
+  - id: D15
+    selected: a
+    confidence: high
+    principles: [3]
+    reasoning: "Consistent with D6: if `skipped` satisfies upstream, `findRunnableEngine()` must accept it alongside `completed` (#3)."
+  - id: D16
+    selected: a
+    confidence: high
+    principles: [15]
+    reasoning: "`skipped` is terminal; `failEngine()` should leave terminal engines alone — cancelling a skipped engine would silently mutate terminal state and muddy the contract (#15)."
+  - id: D17
+    selected: a
+    confidence: high
+    principles: [18]
+    reasoning: "Existing fallback (`last completed engine in array order`) already skips `skipped` engines correctly — adding an explicit filter is unnecessary structure (#18)."
+  - id: D18
+    selected: a
+    confidence: high
+    principles: [3]
+    reasoning: "The template is where `when` is authored; `RigTemplateEngine` must carry it (#3)."
+  - id: D19
+    selected: a
+    confidence: high
+    principles: [3, 18]
+    reasoning: "Optional `graft` on the existing `completed` result extends a natural API slot (#3); a new variant (b) fragments the status space, and a context side-channel (c) hides the contribution from the return type and from logs."
+  - id: D20
+    selected: b
+    confidence: high
+    principles: [8, 9]
+    reasoning: "The Fabricator has no reason to know about rig graph manipulation — graft is a Spider concern (#8); apparatus-owned types stay downstream (#9). Option (a) creates a circular dependency for no gain."
+  - id: D21
+    selected: a
+    confidence: medium
+    principles: [15, 2]
+    reasoning: "A typed `SpiderEngineRunResult` extension keeps the cross-component contract explicit (#15); `as any` (b) hides the contract and silences the compiler (#2); (c) is extra structure without benefit."
+  - id: D22
+    selected: a
+    confidence: high
+    principles: [13, 18, 3]
+    reasoning: "Grafted engines are engines — reusing `RigTemplateEngine` keeps one concept, one type (#3); simpler-shape (b) invents new structure without a second consumer (#18), and would make the first live writer of graft (#13) set a divergent precedent."
+  - id: D23
+    selected: a
+    confidence: medium
+    principles: [7, 2]
+    reasoning: "Author-named IDs produce debuggable log lines and explicit upstream references (#7); auto-prefixing (`g1.review`) makes the rig graph harder to read. Validation from D24 catches duplicates loudly (#2)."
+  - id: D24
+    selected: a
+    confidence: high
+    principles: [2, 13]
+    reasoning: "Full validation at graft time (same rules as startup) catches bugs loud and early (#2) and holds the template-vs-graft precedent consistent (#13)."
+  - id: D25
+    selected: a
+    confidence: high
+    principles: [2, 20]
+    reasoning: "An explicit `engine-grafted` action makes rig-graph mutation visible in crawl output and books (#20); reusing `engine-completed` hides a structurally significant event (#2)."
+  - id: D26
+    selected: a
+    confidence: medium
+    principles: [2]
+    reasoning: "Unbounded graft is a real runaway-loop failure mode; a configurable cap with a sane default fails loud on the likely misbehavior (#2)."
+  - id: D27
+    selected: a
+    confidence: low
+    principles: []
+    no_principle_fired: true
+    reasoning: "No principle speaks to the specific numeric default. 50 sits in the middle of the offered range and is a reasonable starting point pending real-world evidence."
+  - id: D28
+    selected: a
+    confidence: medium
+    principles: [4]
+    reasoning: "Processing grafts inside `tryCollect` keeps collection and graft-append in a single pass (#4); a separate phase adds a stage without justification."
+  - id: D29
+    selected: a
+    confidence: high
+    principles: [7]
+    reasoning: "The common graft pattern (e.g., `revise` that depends on the original `review`) needs to reference the grafting engine — refusing this would force authors into awkward workarounds (#7)."
+  - id: D30
+    selected: a
+    confidence: high
+    principles: [13]
+    reasoning: "`buildFromTemplate` already resolves `$writ`/`$vars` at spawn and defers `$yields.*.*` — graft-time resolution matches that first-writer precedent (#13)."
+  - id: D31
+    selected: b
+    confidence: medium
+    principles: [4, 20]
+    reasoning: "Cascading in a single crawl step keeps the pipeline single-pass (#4); returning the full array (vs. only the first ID) preserves structural state for the crawl reader (#20)."
+  - id: D32
+    selected: b
+    confidence: high
+    principles: [20]
+    reasoning: "Consistent with D31: if cascade skipping happens, the `CrawlResult` must expose it as structured state rather than hiding it behind a single ID (#20)."
+  - id: D33
+    selected: a
+    confidence: medium
+    principles: [15, 2]
+    reasoning: "Engines without a `when` clause are unconditional by author intent — auto-cascading through them would auto-insert conditional behavior the author didn't write (#15); if an author wants skip-cascade, they add a `when` clause and the behavior is explicit."
+  - id: D34
+    selected: a
+    confidence: high
+    principles: [3]
+    reasoning: "Consistent with D3: if `skipped` is a new status, the union must list it (#3)."
+  - id: D35
+    selected: a
+    confidence: high
+    principles: [15]
+    reasoning: "New public types (e.g., `SpiderEngineRunResult`) must be exported to be usable by consumers — that's the contract boundary (#15)."
+  - id: D36
+    selected: a
+    confidence: high
+    principles: [18]
+    reasoning: "Existing `isRigBlocked()` checks running/blocked/pending; `skipped` is none of those and is naturally excluded — no change earns itself (#18)."

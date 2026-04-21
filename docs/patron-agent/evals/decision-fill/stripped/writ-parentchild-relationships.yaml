@@ -1,0 +1,323 @@
+decisions:
+- id: D1
+  question: How is the parent/child relationship stored — field on WritDoc or separate
+    book?
+  options:
+    a: parentId optional field on WritDoc — child stores reference to its parent
+    b: Separate relationship book (like the existing links book) with parent/child
+      entries
+- id: D2
+  question: What new fields are added to WritDoc for parent/child?
+  options:
+    a: parentId only — childCount is computed from queries when needed
+    b: parentId and childCount (denormalized, maintained by Clerk on child creation)
+- id: D3
+  question: What is the type signature of the new WritDoc fields?
+  options:
+    a: 'parentId?: string; childCount?: number — both optional, absent when not applicable'
+    b: 'parentId: string | null; childCount: number — always present, null/0 defaults'
+- id: D4
+  question: How are children created — parentId on PostCommissionRequest, or a dedicated
+    decompose() method, or both?
+  options:
+    a: Add parentId to PostCommissionRequest — children are created one at a time
+      via post()
+    b: Add a decompose(parentId, children[]) batch method only
+    c: 'Both: parentId on post() for individual creation, decompose() for batch'
+- id: D5
+  question: Which parent statuses allow children to be added?
+  options:
+    a: new, ready, waiting only — not active or terminal
+    b: new, ready, active, waiting — any non-terminal status
+    c: Any status including terminal (children just won't trigger cascades on completed/failed
+      parents)
+- id: D6
+  question: Is parentId immutable after creation, or can a writ be re-parented?
+  options:
+    a: Immutable — parentId is set at creation time and cannot be changed
+    b: Mutable via a setParent() method that handles re-parenting logic
+- id: D7
+  question: How is ancestry cycle prevention implemented?
+  options:
+    a: Walk up the parent chain from the proposed parent to the root, rejecting if
+      the child id is encountered
+    b: No explicit check — single-parent constraint makes cycles structurally impossible
+      for tree structures
+- id: D8
+  question: Does codex inherit from parent when not explicitly provided on a child?
+  options:
+    a: Yes — child inherits parent's codex if child's codex is undefined
+    b: No — codex must be explicitly set on each child
+- id: D9
+  question: What indexes are added to the writs book for parent/child queries?
+  options:
+    a: Add 'parentId' single-field index only
+    b: Add 'parentId' and compound ['parentId', 'status'] index
+- id: D10
+  question: What is the name of the new parent-specific status?
+  options:
+    a: '''waiting'' — the parent is waiting for children to resolve'
+    b: '''pending'' — the parent has pending child work'
+- id: D11
+  question: Which statuses can transition TO 'waiting'?
+  options:
+    a: new, ready — parent must not yet be picked up by Spider
+    b: new, ready, active — including writs with running rigs
+- id: D12
+  question: Which statuses can transition FROM 'waiting'?
+  options:
+    a: waiting → ready (all children terminal, at least one completed), waiting →
+      failed (child failed), waiting → cancelled (explicit)
+    b: waiting → ready, waiting → failed, waiting → cancelled, waiting → completed
+      (direct completion without re-entering queue)
+- id: D13
+  question: Is 'waiting' a terminal status?
+  options:
+    a: No — waiting is non-terminal (like new, ready, active)
+    b: Yes — waiting is terminal (no further transitions)
+- id: D14
+  question: How is the transition to 'waiting' triggered?
+  options:
+    a: Automatically inside post() when a child is created for a parent that's in
+      new or ready — not exposed as a valid target for transition()
+    b: Exposed as a valid target in ALLOWED_FROM so callers can call transition(id,
+      'waiting') explicitly
+    c: Both — auto-transition in post() AND valid as an explicit transition() target
+- id: D15
+  question: When post() auto-transitions a parent to waiting, should it happen inside
+    the same transaction as the child creation?
+  options:
+    a: Yes — use the Stacks transaction() to atomically create child and transition
+      parent
+    b: No — post() creates child, CDC handler transitions parent
+- id: D16
+  question: Which CDC phase should the child-to-parent rollup handler use?
+  options:
+    a: 'Phase 1 (failOnError: true) — runs inside the transaction, cascade writes
+      are atomic'
+    b: 'Phase 2 (failOnError: false) — runs after commit, errors don''t roll back'
+- id: D17
+  question: What triggers the CDC rollup handler?
+  options:
+    a: Watch clerk/writs for update events where status changed and the writ has a
+      parentId
+    b: Watch clerk/writs for all events and filter in the handler
+- id: D18
+  question: When a child fails, what exactly happens in the cascade?
+  options:
+    a: Cancel all non-terminal siblings, then fail the parent — all in one Phase 1
+      handler invocation
+    b: Fail the parent only — let the parent's failure cascade (D22/S4) handle cancelling
+      siblings
+    c: Cancel all non-terminal siblings, then fail the parent, and propagate up the
+      hierarchy if the parent itself is a child
+- id: D19
+  question: When a child is cancelled (not failed), does it trigger any cascade?
+  options:
+    a: No cascade — child cancellation is a deliberate act, only check if all siblings
+      are now terminal for completion rollup
+    b: Same as failure — cancel siblings and fail parent
+- id: D20
+  question: What is the completion rollup rule — when does a parent transition from
+    waiting to ready?
+  options:
+    a: All children in terminal status AND at least one completed (none failed) →
+      parent ready
+    b: All children completed (no cancelled, no failed) → parent ready
+    c: All children in terminal status AND none failed → parent ready (even if all
+      cancelled)
+- id: D21
+  question: When transitioning siblings to cancelled during failure cascade, should
+    the handler use transition() or direct patch()?
+  options:
+    a: Use transition() — validates state machine rules, sets timestamps correctly,
+      fires CDC for recursive propagation
+    b: Use direct writs.patch() — skips validation for efficiency, manually sets timestamps
+- id: D22
+  question: When a parent is cancelled, should its non-terminal children be auto-cancelled?
+  options:
+    a: Yes — cascade cancellation to all non-terminal children
+    b: No — only fail parents when children fail; cancellation of parents doesn't
+      cascade
+- id: D23
+  question: When a parent is failed (e.g., via writ-fail tool, not via child cascade),
+    should its non-terminal children be auto-cancelled?
+  options:
+    a: Yes — failing a parent cascades cancellation to all non-terminal children
+    b: No — only cancellation cascades downward; failure is only set on parents via
+      child cascade
+- id: D24
+  question: How does the CDC handler avoid infinite recursion when cascading both
+    up and down?
+  options:
+    a: Rely on the Stacks cascade depth limit (16) and the fact that cancelled children
+      don't trigger failure cascade (D19)
+    b: Add explicit visited-set tracking in the handler to prevent re-processing
+- id: D25
+  question: Where is the CDC handler registered — in the Clerk's start() method?
+  options:
+    a: 'Yes — register stacks.watch(''clerk'', ''writs'', handler, { failOnError:
+      true }) in start()'
+    b: Register lazily on first use
+- id: D26
+  question: How is the commission-post tool updated for parent/child?
+  options:
+    a: Add optional parentId param to commission-post tool
+    b: Create a separate writ-add-child tool instead
+    c: 'Both: parentId on commission-post AND a dedicated writ-add-child tool'
+- id: D27
+  question: Is a new writ-children tool needed, or can writ-list's parentId filter
+    suffice?
+  options:
+    a: New dedicated writ-children tool that takes a parentId and returns children
+    b: Add parentId filter to writ-list — no new tool
+    c: 'Both: parentId filter on writ-list AND a dedicated writ-children tool'
+- id: D28
+  question: What does writ-show include for parent/child context?
+  options:
+    a: Include parentId (already on doc), parent writ summary, and children list
+    b: Include parentId only — children can be queried via writ-list with parentId
+      filter
+    c: Include parentId, parent writ summary, children summary (count by status),
+      and first N children
+- id: D29
+  question: What changes to writ-list's status filter enum?
+  options:
+    a: 'Add ''waiting'' and ''new'' to the enum (currently missing: ''new'' is a bug,
+      ''waiting'' is new)'
+    b: Add 'waiting' only
+- id: D30
+  question: What is the type of the parentId filter on writ-list?
+  options:
+    a: 'parentId: string — filters to children of this parent'
+    b: 'parentId: string | null — string filters to children; null filters to root
+      writs only'
+- id: D31
+  question: Should writ-list add parentId to WritFilters on ClerkApi.list()?
+  options:
+    a: Yes — add parentId to WritFilters type and implement in buildWhereClause()
+    b: No — only add the tool param, handle in the tool handler with a separate query
+- id: D32
+  question: Can more children be added to a parent that's already in 'waiting' status?
+  options:
+    a: Yes — parent stays in waiting; the CDC handler counts all children including
+      newly added ones
+    b: No — waiting is a sealed state; no new children can be added
+- id: D33
+  question: Can a writ in 'waiting' status be directly cancelled by an operator?
+  options:
+    a: Yes — add 'waiting' to ALLOWED_FROM['cancelled']
+    b: No — parent must wait for children to resolve; cancel children first
+- id: D34
+  question: What is the complete ALLOWED_FROM map after adding 'waiting'?
+  options:
+    a: 'ready: [''new'', ''waiting'']
+
+      active: [''ready'']
+
+      completed: [''active'']
+
+      failed: [''active'', ''waiting'']
+
+      cancelled: [''new'', ''ready'', ''active'', ''waiting'']
+
+      waiting: [''new'', ''ready'']
+
+      new: []
+
+      '
+    b: 'ready: [''new'', ''waiting'']
+
+      active: [''ready'']
+
+      completed: [''active'']
+
+      failed: [''active'']
+
+      cancelled: [''new'', ''ready'', ''active'', ''waiting'']
+
+      waiting: [''new'', ''ready'']
+
+      new: []
+
+      '
+- id: D35
+  question: When the CDC handler transitions a parent from waiting → ready (completion
+    rollup), what resolution text is set?
+  options:
+    a: No resolution — resolvedAt and resolution are not set (waiting → ready is not
+      terminal)
+    b: Set a status note like 'All children completed' in a non-resolution field
+- id: D36
+  question: Should 'waiting' be treated as terminal for the resolvedAt/resolution
+    field logic?
+  options:
+    a: No — waiting is non-terminal; resolvedAt is not set
+    b: Yes — treat it like a soft-terminal state
+- id: D37
+  question: Can a child writ be created in any initial status, or is it restricted?
+  options:
+    a: 'Same rules as normal writs — draft: true → new, draft: false → ready'
+    b: Children are always created in ready status (no draft children)
+- id: D38
+  question: What error does post() throw when parentId references a non-existent writ?
+  options:
+    a: 'Throw with message: ''Parent writ "<id>" not found.'''
+    b: Silently create the child without parentId
+- id: D39
+  question: What error does post() throw when parentId references a writ in active
+    or terminal status?
+  options:
+    a: 'Throw with message: ''Cannot add children to writ "<id>": status is "<status>",
+      expected one of: new, ready, waiting.'''
+    b: Different error for terminal vs active
+- id: D40
+  question: When post() creates a child and the parent is in 'new' or 'ready' status,
+    how is the parent transitioned to 'waiting'?
+  options:
+    a: post() calls transition(parentId, 'waiting') within a Stacks transaction that
+      also creates the child
+    b: post() directly patches the parent's status to 'waiting' within the transaction
+- id: D41
+  question: Should childCount be incremented atomically with child creation?
+  options:
+    a: Yes — increment childCount on the parent via patch() within the same transaction
+      as child creation
+    b: Compute childCount lazily from queries
+- id: D42
+  question: What does the CDC handler do when a child transitions to 'completed'?
+  options:
+    a: Query all siblings; if all are in terminal status and at least one completed
+      and none failed → transition parent waiting → ready
+    b: Decrement a counter; when counter hits zero → transition parent
+- id: D43
+  question: When the CDC handler cancels siblings due to child failure, what resolution
+    text is set on the cancelled siblings?
+  options:
+    a: 'Set resolution to ''Cancelled: sibling "<failedChildId>" failed'''
+    b: Set resolution to 'Cancelled due to sibling failure'
+    c: No resolution — leave it empty
+- id: D44
+  question: When the CDC handler fails a parent due to child failure, what resolution
+    text is set?
+  options:
+    a: 'Set resolution to ''Child "<childId>" failed: <child resolution>'''
+    b: Set resolution to 'Child writ failed'
+- id: D45
+  question: What resolution is set on the parent when completion rollup triggers (waiting
+    → ready)?
+  options:
+    a: No resolution — waiting → ready is non-terminal, resolution is not set
+    b: Set a temporary note that gets cleared when the parent eventually completes
+- id: D46
+  question: Does the Spider need any code changes for the new 'waiting' status?
+  options:
+    a: No changes — Spider queries status='ready', writs in 'waiting' are naturally
+      excluded
+    b: Add a defensive check in trySpawn() to skip writs with non-zero childCount
+- id: D47
+  question: Does the Spider's writ-status block type need changes?
+  options:
+    a: No changes — 'waiting' is non-terminal, so the block stays 'pending' (correct
+      behavior)
+    b: Add 'waiting' to the block type's TERMINAL_STATUSES set

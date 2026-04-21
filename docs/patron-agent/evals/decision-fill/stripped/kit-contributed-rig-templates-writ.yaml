@@ -1,0 +1,256 @@
+decisions:
+- id: D1
+  question: How are kit-contributed rig template names qualified?
+  options:
+    a: pluginId.templateName (e.g., quality-tools.audit) — matching the Loom's roles
+      pattern
+    b: Unqualified names (same as config templates) with first-registered-wins semantics
+- id: D2
+  question: Where does the rig template registry live — a new class or inline state?
+  options:
+    a: New RigTemplateRegistry class within spider.ts, mirroring BlockTypeRegistry
+    b: Inline Map<string, RigTemplate> variable in the createSpider() closure
+- id: D3
+  question: What consumes tokens should the Spider declare for the new contribution
+    types?
+  options:
+    a: Add 'rigTemplates' and 'rigTemplateMappings' as separate tokens to consumes
+      array
+    b: Add only 'rigTemplates' and fold mappings into the same consumption pass
+- id: D4
+  question: What startup scanning pattern should the Spider use for rig template contributions?
+  options:
+    a: Phase 1a (g.kits()) + Phase 1b (g.apparatuses()) + Phase 2 (plugin:initialized
+      subscription) — the Loom pattern
+    b: Phase 1 (g.kits()) + Phase 2 (plugin:initialized subscription) — the existing
+      BlockTypeRegistry pattern
+- id: D5
+  question: How does guild config override a kit-contributed template?
+  options:
+    a: 'At registration time: if spider.rigTemplates defines a key matching the qualified
+      name, the kit contribution is silently skipped'
+    b: 'At lookup time: config templates take precedence over kit templates in the
+      merged registry'
+- id: D6
+  question: How does dependency-scoped validation work for kit-contributed rig templates
+    — how does the Spider know which plugin contributed a given engine designId?
+  options:
+    a: Spider builds a designId-to-pluginId map at start() by scanning g.kits() and
+      g.apparatuses() for engines contributions
+    b: Spider asks the Fabricator for the source plugin of a designId (requires FabricatorApi
+      change)
+    c: Spider only validates that the designId exists in the Fabricator (no dependency-scope
+      check)
+- id: D7
+  question: What is the set of allowed designIds for dependency-scoped validation
+    of a kit's rig template?
+  options:
+    a: Engine designIds from plugins in kit.requires + kit.recommends + the kit itself
+      + Spider's built-in engines
+    b: Engine designIds from plugins in kit.requires + kit.recommends only + Spider's
+      built-in engines (not the kit's own)
+- id: D8
+  question: What happens when a kit's rig template references a designId that fails
+    dependency-scoped validation?
+  options:
+    a: Console.warn and skip the entire template (Loom approach — warn and drop)
+    b: Throw an error, failing startup
+    c: Console.warn and drop only the offending engine entry, keeping the rest of
+      the template
+- id: D9
+  question: Should kit-contributed templates also run the existing validation checks
+    (non-empty engines, duplicate IDs, upstream refs, cycles, variable refs)?
+  options:
+    a: Yes — run all existing checks plus dependency-scoped designId check
+    b: Only run the dependency-scoped designId check
+- id: D10
+  question: Are kit-contributed writ type names namespace-qualified?
+  options:
+    a: No — unqualified, user-facing names (e.g., 'quality-audit')
+    b: Yes — qualified with pluginId (e.g., 'quality-tools.quality-audit')
+- id: D11
+  question: How does the Clerk resolve the merged set of valid writ types at post()
+    time?
+  options:
+    a: resolveWritTypes() reads from an in-memory Set that was populated at startup
+      from config + kit contributions
+    b: resolveWritTypes() re-scans config and kit state on every call
+- id: D12
+  question: Does the Clerk need a full registry class for writ types, or can it use
+    inline state?
+  options:
+    a: 'Inline state: a Set<string> for names, populated in start() and by plugin:initialized
+      handler'
+    b: A WritTypeRegistry class mirroring BlockTypeRegistry
+- id: D13
+  question: How does config override a kit-contributed writ type with the same name?
+  options:
+    a: 'At registration time: if config.writTypes contains the same name, the kit
+      contribution is silently skipped'
+    b: Both are registered but config's entry takes semantic precedence (e.g., its
+      description wins)
+- id: D14
+  question: What startup scanning pattern should the Clerk use?
+  options:
+    a: Phase 1a (g.kits()) + Phase 1b (g.apparatuses()) + Phase 2 (plugin:initialized)
+      — Loom pattern
+    b: Phase 1 (g.kits()) + Phase 2 (plugin:initialized) — simpler pattern
+- id: D15
+  question: What happens when two different kits contribute a writ type with the same
+    name?
+  options:
+    a: First-registered wins silently (registration order depends on plugin load order
+      in guild.json)
+    b: Console.warn about the duplicate, first-registered wins
+    c: Throw an error at startup
+- id: D16
+  question: Does the Clerk's start() signature need to change?
+  options:
+    a: 'Yes — change from start(_ctx: StartupContext) to start(ctx: StartupContext)
+      and use ctx.on()'
+    b: No — keep ignoring ctx, scan only once at start time
+- id: D17
+  question: Are kit-contributed rig template mapping keys (writ type names) namespace-qualified?
+  options:
+    a: No — mapping keys are writ type names which are unqualified user-facing names
+    b: Yes — qualified with pluginId
+- id: D18
+  question: Can kit-contributed mapping values reference any template name, or only
+    templates from the same kit?
+  options:
+    a: Any registered template name (config or kit-contributed, any kit)
+    b: Only templates from the same kit or from config
+- id: D19
+  question: When should dangling mapping reference validation run — at registration
+    time or as a deferred check?
+  options:
+    a: 'Deferred: validate all mappings after all kits have been scanned (end of start())'
+    b: 'At registration time: validate each mapping as the kit is scanned'
+- id: D20
+  question: What happens when two kits contribute mappings for the same writ type?
+  options:
+    a: First-registered wins silently
+    b: Console.warn about the duplicate, first-registered wins
+- id: D21
+  question: What is the exact lookup precedence chain for lookupTemplate()?
+  options:
+    a: '1. Config rigTemplateMappings[writType] → template name → merged registry
+
+      2. Kit rigTemplateMappings[writType] → template name → merged registry
+
+      3. Merged template registry[writType] directly (backward compat: template name
+      = writ type)
+
+      4. Config rigTemplateMappings[''default''] → template name → merged registry
+
+      5. Merged template registry[''default''] directly
+
+      6. Throw
+
+      '
+    b: '1. Config rigTemplateMappings[writType] → template name → merged registry
+
+      2. Kit rigTemplateMappings[writType] → template name → merged registry
+
+      3. Merged template registry[''default''] directly
+
+      4. Throw
+
+      '
+- id: D22
+  question: Does lookupTemplate() change its signature or use closure state?
+  options:
+    a: Use closure state — access the template registry and mapping registry from
+      createSpider() scope
+    b: Change signature to accept merged registries as parameters
+- id: D23
+  question: Should config template validation remain throw-on-error while kit template
+    validation is warn-and-skip?
+  options:
+    a: Yes — config templates throw (fast fail on operator's own config); kit templates
+      warn and skip (don't let a broken plugin crash the guild)
+    b: Both throw — fail fast on any bad template regardless of source
+    c: Both warn — never fail startup on template issues
+- id: D24
+  question: When should dangling mapping validation errors surface — as warnings or
+    thrown errors?
+  options:
+    a: Config mappings pointing to nonexistent templates throw; kit mappings warn
+      and skip
+    b: All dangling mappings warn
+    c: All dangling mappings throw
+- id: D25
+  question: What format should kit validation warning messages use?
+  options:
+    a: '[spider] Kit "pluginId" rigTemplates.templateName: specific issue description'
+    b: '[spider] rigTemplates: kit ''pluginId'' template ''templateName'' — specific
+      issue'
+- id: D26
+  question: What type is the new spider.rigTemplateMappings config field?
+  options:
+    a: Record<string, string> — writ type name to template name
+    b: 'Array of { writType: string; templateName: string } objects'
+- id: D27
+  question: Does the existing spider.rigTemplates config field change its semantics?
+  options:
+    a: No change — keys remain writ-type-or-template names, values remain RigTemplate
+      objects. Backward compatible.
+    b: Redefine keys as pure template names, require explicit rigTemplateMappings
+      for writ type binding
+- id: D28
+  question: Where should SpiderKit and ClerkKit interfaces be defined?
+  options:
+    a: In the respective types.ts files (spider/src/types.ts, clerk/src/types.ts)
+      and re-exported from index.ts
+    b: In the respective index.ts barrel files directly
+    c: In the main implementation files (spider.ts, clerk.ts) alongside the registration
+      logic, like LoomKit
+- id: D29
+  question: What fields does the SpiderKit interface include?
+  options:
+    a: 'rigTemplates?: Record<string, RigTemplate>; rigTemplateMappings?: Record<string,
+      string>'
+    b: 'rigTemplates?: Record<string, RigTemplate>; rigTemplateMappings?: Record<string,
+      string>; blockTypes?: Record<string, BlockType>'
+- id: D30
+  question: What fields does the ClerkKit interface include?
+  options:
+    a: 'writTypes?: WritTypeEntry[]'
+    b: 'writTypes?: Array<{ name: string; description?: string }> (inline shape, no
+      import needed)'
+- id: D31
+  question: Should the Spider and Clerk scan apparatus supportKits that started BEFORE
+    them, or only after?
+  options:
+    a: Both before and after — scan g.kits() + g.apparatuses() at start, plus subscribe
+      to plugin:initialized
+    b: Only g.kits() at start + subscribe to plugin:initialized (current Spider blockType
+      pattern)
+- id: D32
+  question: When should the Spider validate the merged registries — during scanning,
+    after all Phase 1 scanning, or both?
+  options:
+    a: Validate config templates immediately at start (existing behavior). Validate
+      kit templates at registration time. Validate mappings (both config and kit)
+      as a deferred pass after all Phase 1 scanning completes.
+    b: Validate everything in one deferred pass after all Phase 1 scanning.
+    c: Validate everything immediately as it's registered.
+- id: D33
+  question: How should the test fixtures be extended to support kit contribution testing?
+  options:
+    a: Extend buildFixture() to accept an array of LoadedKit objects; fakeGuild.kits()
+      returns them
+    b: Use the existing fire('plugin:initialized', kit) pattern to inject kits after
+      spider starts
+- id: D34
+  question: When a kit contribution has a malformed field (wrong type, missing required
+    sub-field), what happens?
+  options:
+    a: Console.warn identifying the kit and field, silently skip the contribution
+    b: Throw, failing startup
+- id: D35
+  question: Does spider.rigTemplateMappings support a 'default' key?
+  options:
+    a: 'Yes — a ''default'' mapping acts the same as a ''default'' template entry:
+      used when no writ-type-specific match is found'
+    b: No — 'default' is only valid as a template name, not as a mapping key

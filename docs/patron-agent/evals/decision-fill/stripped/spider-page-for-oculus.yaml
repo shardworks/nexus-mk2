@@ -1,0 +1,182 @@
+decisions:
+- id: D1
+  question: How should Spider declare its soft dependency on Oculus?
+  options:
+    a: 'Add recommends: [''oculus''] to the apparatus declaration'
+    b: Add oculus to requires (hard dependency)
+- id: D2
+  question: Should @shardworks/oculus-apparatus be added to spider's package.json
+    dependencies for compile-time types?
+  options:
+    a: Yes — import PageContribution and RouteContribution types from oculus
+    b: No — define compatible shapes inline in spider, avoid the import
+- id: D3
+  question: Should hono be added to spider's package.json dependencies for route handler
+    typing?
+  options:
+    a: Yes — add hono as a dependency so route handlers get typed Context parameter
+    b: No — type the handler parameter as unknown and use raw Response objects
+- id: D4
+  question: What page ID and title should the Spider page use?
+  options:
+    a: 'id: ''spider'', title: ''Spider'''
+    b: 'id: ''spider'', title: ''Rigging'''
+    c: 'id: ''rigging'', title: ''Rigging'''
+- id: D5
+  question: Where should the static page assets live within the spider package?
+  options:
+    a: 'src/static/ — referenced as dir: ''src/static'' in PageContribution, add ''src/static''
+      to package.json files array for publishing'
+    b: static/ at package root — outside src/, naturally included in published package
+    c: src/static/ in dev, copy to dist/static during build — dir points to dist/static
+- id: D6
+  question: What data source should the rig list use — existing tool REST endpoints
+    or custom API routes?
+  options:
+    a: 'Use existing auto-mapped tool endpoints: GET /api/rig/list, GET /api/rig/show,
+      GET /api/rig/for-writ'
+    b: Create new custom API routes that wrap SpiderApi with additional features
+- id: D7
+  question: How should the writ link in the rig list point — given no clerk Oculus
+    page exists yet?
+  options:
+    a: Link to /pages/clerk/?writ={writId} as a forward reference — works when clerk
+      page is built, 404s otherwise
+    b: Link to the JSON API endpoint /api/writ/show?id={writId}
+    c: Display the writId as plain text with no link
+- id: D8
+  question: Where should sorting and filtering happen — client-side JavaScript or
+    server-side query params?
+  options:
+    a: Client-side JS sorting/filtering on fetched rig data
+    b: Server-side via existing rig-list query params for status filter, client-side
+      for everything else
+    c: Purely server-side with new custom routes for all filter/sort combinations
+- id: D9
+  question: What metadata columns should the rig list table display?
+  options:
+    a: id, writId, status, engine count, createdAt
+    b: id, writId, status, createdAt only
+    c: id, writId, status, engine summary (e.g. '3/5 completed'), createdAt
+- id: D10
+  question: What UI controls should the rig list provide for filtering?
+  options:
+    a: Status dropdown filter only
+    b: Status dropdown filter + writId text input filter
+    c: Status dropdown filter + writId text input + date range filter
+- id: D11
+  question: How should the rig detail view display engine relationships?
+  options:
+    a: Table view with an 'upstream' column showing dependency engine IDs
+    b: Visual pipeline/flowchart using CSS flexbox/grid with arrows between engine
+      boxes
+    c: Graph visualization library (d3, dagre)
+- id: D12
+  question: How should clicking an engine show its details?
+  options:
+    a: Expandable detail panel below the engine node in the pipeline view
+    b: Separate detail section/panel that updates when an engine is selected
+    c: Modal/dialog overlay
+- id: D13
+  question: What fields should the engine detail panel display?
+  options:
+    a: status, designId, upstream, givensSpec, yields, error, sessionId, startedAt,
+      completedAt, block record
+    b: 'Subset: status, designId, upstream, error, timestamps — omit givensSpec and
+      yields as too verbose'
+    c: All fields from (a), with givensSpec and yields shown in collapsible readonly
+      JSON blocks
+- id: D14
+  question: How should the rig detail be loaded — separate fetch or reuse list data?
+  options:
+    a: Fetch full RigDoc via GET /api/rig/show?id={rigId} when a rig is clicked
+    b: Reuse the RigDoc already fetched in the list (list returns full docs)
+- id: D15
+  question: How should rig templates be displayed?
+  options:
+    a: Readonly <textarea> per template with JSON content
+    b: Readonly <pre><code> blocks per template with JSON content
+    c: Structured table/tree view of template fields
+- id: D16
+  question: How should each template be identified in the config UI?
+  options:
+    a: Show each template under its key name (the writ type it matches, or 'default')
+    b: Show all templates as a single combined JSON blob
+- id: D17
+  question: How should engine design data be obtained for the config UI — extend FabricatorApi
+    or scan guild() in a custom route?
+  options:
+    a: Add a listDesigns() method to FabricatorApi and call it from a custom route
+    b: Scan guild().kits() and guild().apparatuses() for engines fields in a custom
+      route handler
+- id: D18
+  question: How should block type data be obtained for the config UI — extend SpiderApi
+    or scan guild()?
+  options:
+    a: Add listBlockTypes() to SpiderApi and call it from a custom route, scan guild()
+      for provenance
+    b: Scan guild().kits() and guild().apparatuses() for blockTypes fields in a custom
+      route handler
+- id: D19
+  question: What details should be shown for each engine design in the config UI?
+  options:
+    a: id, contributing plugin, has-collect indicator (boolean)
+    b: id, contributing plugin only
+- id: D20
+  question: What details should be shown for each block type in the config UI?
+  options:
+    a: id, contributing plugin, pollIntervalMs
+    b: id, contributing plugin, pollIntervalMs, condition schema description
+    c: id, contributing plugin, pollIntervalMs, full Zod schema JSON representation
+- id: D21
+  question: What path namespace should the custom API routes use?
+  options:
+    a: /api/spider/engine-designs and /api/spider/block-types
+    b: /api/_spider/engine-designs and /api/_spider/block-types
+    c: Single endpoint /api/spider/config returning all config data in one response
+- id: D22
+  question: How should the guild-scanning route handler detect engine designs and
+    block types from kit contributions?
+  options:
+    a: Replicate the duck-type checks from Fabricator (typeof id === 'string' && typeof
+      run === 'function') and Spider (typeof id === 'string' && typeof check === 'function')
+    b: Check for the engines and blockTypes field names on kit objects, and iterate
+      their keys without type-guarding individual values
+- id: D23
+  question: What frontend technology should the page use?
+  options:
+    a: Vanilla HTML/CSS/JS — no framework, no build step
+    b: Lightweight framework (Preact, Alpine.js) compiled to static assets
+- id: D24
+  question: How should the page organize the runtime UI and config UI?
+  options:
+    a: Tab-based navigation — 'Rigs' tab and 'Config' tab within the page
+    b: Single scrollable page with sections — rigs section on top, config section
+      below
+    c: Two separate pages contributed as different page IDs
+- id: D25
+  question: How should the page handle navigation between rig list and rig detail
+    views?
+  options:
+    a: In-page view switching — clicking a rig replaces the list with the detail view,
+      with a back button
+    b: Split panel — list on left, detail on right
+    c: Detail view in a modal overlay
+- id: D26
+  question: Should the rig list auto-refresh or require manual refresh?
+  options:
+    a: Manual refresh via a button
+    b: Auto-refresh on a timer (e.g. every 10 seconds)
+    c: Both — auto-refresh with a visible refresh button
+- id: D27
+  question: What status badge colors should map to each engine status?
+  options:
+    a: 'Use existing oculus badge classes: completed→success(green), running→active(cyan+pulse),
+      failed→error(red), blocked→warning(yellow), pending→default(dim), cancelled→default(dim)'
+    b: Define new custom badge styles for engine statuses
+- id: D28
+  question: Where should the route handler code live within the spider package?
+  options:
+    a: In a new file packages/plugins/spider/src/oculus-routes.ts
+    b: Inline in spider.ts within the supportKit declaration
+    c: In a new directory packages/plugins/spider/src/routes/

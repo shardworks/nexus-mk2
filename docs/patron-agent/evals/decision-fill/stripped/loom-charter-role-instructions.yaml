@@ -1,0 +1,100 @@
+decisions:
+- id: D1
+  question: Where does the charter file live and how is it located?
+  options:
+    a: 'Convention: always read from `charter.md` at the guild root. No config needed.'
+    b: 'Configurable: add a `charter` path field to LoomConfig in guild.json, defaulting
+      to `charter.md`.'
+    c: 'Configurable with no default: require explicit `charter` path in LoomConfig;
+      no file read if absent.'
+- id: D2
+  question: When should charter content be read — at startup or at weave time?
+  options:
+    a: Read at startup in start() and cache. Re-reading requires a process restart.
+    b: Read at weave() time on every call. Always fresh, small I/O cost per session.
+    c: Read at startup and cache, with a file watcher or TTL to refresh.
+- id: D3
+  question: What is the config field name and shape for role instruction file paths?
+  options:
+    a: '`instructions: string` — a path relative to guild root, matching the legacy
+      convention exactly.'
+    b: '`instructionsFile: string` — following the ToolDefinition naming convention
+      (which uses instructionsFile for file paths and instructions for inline text).'
+- id: D4
+  question: What is the section format for the composed system prompt?
+  options:
+    a: 'Concatenate with double newlines: `charter + ''\n\n'' + roleInstructions`.
+      No section headers.'
+    b: 'Use markdown headers to delimit sections: `# Charter\n\ncharter_text\n\n#
+      Role Instructions\n\nrole_text`.'
+    c: 'Use XML-style tags to delimit sections: `<charter>\ncontent\n</charter>\n<role-instructions>\ncontent\n</role-instructions>`.'
+- id: D5
+  question: How should missing files be handled?
+  options:
+    a: Warn via console.warn and continue — omit the missing layer from the composed
+      prompt. Return undefined systemPrompt only if all layers are missing.
+    b: Silently skip missing layers — no warning. Return undefined systemPrompt only
+      if all layers are missing.
+    c: Throw an error if a configured file is missing (but not for the default charter
+      path).
+- id: D6
+  question: Should systemPrompt remain optional on AnimaWeave, or become required?
+  options:
+    a: 'Keep optional (`systemPrompt?: string`). Undefined when no layers produce
+      content.'
+    b: 'Make required (`systemPrompt: string`). Return empty string when no layers
+      produce content.'
+- id: D7
+  question: When a role has no definition in config (unknown role), should charter
+    still be included?
+  options:
+    a: Always include charter regardless of role. Only role instructions require a
+      matching role definition.
+    b: Only include charter when a valid role definition exists.
+- id: D8
+  question: Should file reads happen at startup (with caching) or per-weave?
+  options:
+    a: Read all role instruction files at startup alongside charter. Cache in memory.
+    b: Read role instruction files lazily on first weave() for each role. Cache after
+      first read.
+    c: Read role instruction files on every weave() call. No caching.
+- id: D9
+  question: Should the Loom use synchronous or asynchronous file reads?
+  options:
+    a: Synchronous (fs.readFileSync) in start(), matching the Instrumentarium.
+    b: Asynchronous (fs.promises.readFile) — make start() async.
+- id: D10
+  question: Should tool instructions be included in the system prompt in this commission?
+  options:
+    a: Include tool instructions (layer 5) in this commission — they are already resolved
+      and available.
+    b: Defer tool instructions to a separate commission — keep this one focused on
+      charter + role instructions only.
+- id: D11
+  question: Where do tool instructions appear in the composed system prompt?
+  options:
+    a: 'After role instructions, matching the documented order: charter → role instructions
+      → tool instructions.'
+    b: After charter but before role instructions, so role instructions can reference
+      tools.
+- id: D12
+  question: How should tool instructions be formatted within the system prompt?
+  options:
+    a: 'One section per tool with a header: `## Tool: tool-name\n\ninstructions_text`'
+    b: All tool instructions concatenated with separators, no per-tool headers.
+    c: 'A grouped section with an outer header: `# Tools\n\n## tool-name\n\ninstructions_text`'
+- id: D13
+  question: How should the system prompt handle the gap where curriculum (layer 2)
+    and temperament (layer 3) will eventually go?
+  options:
+    a: Just concatenate the layers we have (charter, role instructions, tool instructions).
+      When curriculum/temperament are added later, they insert between charter and
+      role instructions.
+    b: Leave placeholder comments in the composed prompt for future layers.
+- id: D14
+  question: How should file reading be tested?
+  options:
+    a: Use node:fs/promises and os.tmpdir() to create real temp directories with test
+      files. Clean up in afterEach.
+    b: Inject a file reader function into createLoom() for testability.
+    c: Mock fs.readFileSync via module mocking (e.g., node:test mock).

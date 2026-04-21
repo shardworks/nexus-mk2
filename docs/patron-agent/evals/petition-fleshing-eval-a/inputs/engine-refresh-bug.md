@@ -1,0 +1,1 @@
+When viewing engine details on the spider page in oculus, it constantly refreshes. This causes an annoying flicker. But more importantly, it resets the scroll on the transcript and other text areas, meaning it's impossible to read those. Please update the automatic refresh here so that the updates are more targetted, and the scrolling doesnt berak.

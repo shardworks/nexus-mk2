@@ -1,0 +1,250 @@
+decisions:
+- id: D1
+  question: Where should the static page files (index.html, app.js, CSS) live within
+    the parlour package?
+  options:
+    a: src/static/parlour/ — alongside source, mirroring oculus's own src/static/
+      pattern
+    b: static/parlour/ — top-level directory separate from source
+    c: pages/parlour/ — top-level, matching the test fixture convention in oculus
+      tests
+- id: D2
+  question: What page id and title should the contribution use?
+  options:
+    a: 'id: ''parlour'', title: ''Parlour'''
+    b: 'id: ''chat'', title: ''Chat'''
+    c: 'id: ''parlour'', title: ''Chat'''
+- id: D3
+  question: Should the page use vanilla JS or a framework/bundler?
+  options:
+    a: Vanilla JS — no build step, plain HTML/CSS/JS served as static files
+    b: A lightweight framework (Preact/Lit) with a build step
+- id: D4
+  question: Should the parlour package add @shardworks/oculus-apparatus as a dependency
+    for the PageContribution/RouteContribution types?
+  options:
+    a: No dependency — use duck typing; the Oculus casts supportKit to OculusKit at
+      scan time anyway
+    b: Add as a dependency and import the types for type safety
+- id: D5
+  question: How should the package.json files array be updated to include static page
+    assets in published packages?
+  options:
+    a: Add 'src/static' to the files array alongside 'dist'
+    b: Copy static files into dist/ during build and keep files as ['dist']
+- id: D6
+  question: Should the route handlers be defined inline in parlour.ts or in a separate
+    routes file?
+  options:
+    a: 'Separate file: src/routes.ts (or src/routes/index.ts) — imported into parlour.ts'
+    b: Inline in parlour.ts alongside the existing supportKit
+- id: D7
+  question: What streaming transport should the turn endpoint use to deliver ConversationChunks
+    to the browser?
+  options:
+    a: Server-Sent Events (SSE) via Hono's streamSSE helper
+    b: WebSocket connection
+    c: Long polling
+- id: D8
+  question: Should the streaming turn endpoint combine the human turn recording and
+    anima turn into a single request, or require two separate API calls?
+  options:
+    a: Single POST — the server records the human turn, then immediately starts the
+      anima turn and streams the response
+    b: Two calls — client POSTs the human turn, then POSTs a separate request to start
+      the anima streaming turn
+- id: D9
+  question: What HTTP method and path should the streaming turn endpoint use?
+  options:
+    a: POST /api/parlour/turn — body contains conversationId and message
+    b: POST /api/parlour/chat — body contains conversationId and message
+- id: D10
+  question: How should the streaming turn endpoint determine participant IDs (human
+    and anima) from the request?
+  options:
+    a: Client sends only conversationId and message; server looks up participants
+      from the conversation doc
+    b: Client sends conversationId, humanParticipantId, animaParticipantId, and message
+- id: D11
+  question: How should tool_use and tool_result SessionChunks be handled in the chat
+    UI?
+  options:
+    a: Display a compact inline indicator (e.g. a small pill/badge showing the tool
+      name) — no details
+    b: Omit entirely — don't render tool chunks at all
+    c: Show a collapsible section with tool name and result
+- id: D12
+  question: How should human and anima messages be visually differentiated?
+  options:
+    a: Alignment-based — human messages right-aligned, anima messages left-aligned
+      (chat bubble style)
+    b: Color-based — different background colors, both left-aligned with name labels
+    c: Mixed — left-aligned with color differentiation and participant name labels
+- id: D13
+  question: How should 'thinking' messages from the anima be identified and styled?
+  options:
+    a: Treat all text chunks as regular anima text — no thinking differentiation
+    b: Use a CSS class for subdued styling; identify thinking content by checking
+      if the chunk text is wrapped in <thinking> tags or similar provider-specific
+      markers
+    c: Use the SessionChunk type to distinguish — but SessionChunk only has 'text',
+      'tool_use', 'tool_result' with no thinking type
+- id: D14
+  question: What loading indicator should be shown while awaiting the anima's response?
+  options:
+    a: A pulsing dot animation in the chat area where the anima's message will appear
+    b: A spinner icon on the send button area
+    c: Both — pulsing dots in chat area plus disabled/loading state on send button
+- id: D15
+  question: How should the roles list be obtained for the dropdown? The LoomApi has
+    no listRoles() method.
+  options:
+    a: Read guild().guildConfig().loom?.roles directly in a custom route handler —
+      returns guild-defined roles only
+    b: Extend LoomApi with a listRoles() method that returns both guild-defined and
+      kit-contributed roles
+    c: Read guild().guildConfig().loom?.roles in a custom route handler, plus scan
+      kit contributions at route registration time to capture kit roles
+- id: D16
+  question: What API endpoint should serve the roles list?
+  options:
+    a: GET /api/parlour/roles — custom route on the parlour's supportKit
+    b: Add a loom-roles tool to the Loom apparatus and let the Oculus auto-map it
+- id: D17
+  question: When the user selects a different role, what should happen to the current
+    conversation state?
+  options:
+    a: Clear the chat area and show the session sidebar for the new role — no auto-create
+      of a new conversation
+    b: Clear the chat area and automatically create a new conversation for the new
+      role
+    c: Prompt the user to confirm before switching if there's an active conversation
+- id: D18
+  question: How should conversations be filtered to show only those for the selected
+    role?
+  options:
+    a: Fetch all active consult conversations via the existing conversation-list tool
+      route, then filter client-side by participant name matching the role
+    b: Add a custom route GET /api/parlour/conversations?role=X that filters server-side
+    c: Extend parlour.list() with a participantName filter option
+- id: D19
+  question: What should be displayed as the conversation title in the sidebar?
+  options:
+    a: Use topic if non-null, otherwise format createdAt as a readable date/time
+    b: Always use createdAt formatted as date/time
+    c: Use the first human message as the title, truncated
+- id: D20
+  question: Where should the session sidebar be positioned?
+  options:
+    a: Left side — like ChatGPT and Claude's web UI
+    b: Right side
+- id: D21
+  question: What reason should be used when 'ending' a conversation from the sidebar?
+  options:
+    a: Always use 'concluded' — the default end reason
+    b: Use 'abandoned' — since the user is choosing to stop rather than reaching a
+      natural conclusion
+    c: Let the user choose between 'concluded' and 'abandoned'
+- id: D22
+  question: Should the sidebar be always visible, or collapsible?
+  options:
+    a: Always visible when a role is selected
+    b: Collapsible with a toggle button
+- id: D23
+  question: Where should the cost card be positioned?
+  options:
+    a: Below the chat area, above the message input
+    b: Below the message input area
+    c: In a sidebar panel or header
+- id: D24
+  question: What token breakdown should the cost card show?
+  options:
+    a: Total input tokens and total output tokens (aggregated across all turns)
+    b: Just total tokens (input + output combined)
+    c: Input tokens, output tokens, and cache tokens (read + write)
+- id: D25
+  question: Should the cost card update in real-time during streaming, or only after
+    the turn completes?
+  options:
+    a: Update after each turn completes — use the turn_complete chunk's costUsd and
+      the updated conversation detail
+    b: Update in real-time with partial token counts during streaming
+- id: D26
+  question: How should anima response text be made available for conversation history
+    display?
+  options:
+    a: Extend TurnSummary to include an 'output' field; populate it from SessionDoc.output
+      in parlour.show()
+    b: Add a separate custom route that fetches turns enriched with session output
+    c: Don't modify TurnSummary; have the page make separate session-show calls per
+      turn
+- id: D27
+  question: Should TurnSummary also include per-turn cost and token usage?
+  options:
+    a: Yes — add costUsd and tokenUsage fields to TurnSummary, populated from SessionDoc
+    b: No — keep only the aggregate totalCostUsd on ConversationDetail
+- id: D28
+  question: Should ConversationDetail/ConversationSummary be extended with aggregate
+    token totals, or should the page sum per-turn token data client-side?
+  options:
+    a: Add totalInputTokens and totalOutputTokens to ConversationDetail, computed
+      in show()
+    b: Page sums the per-turn tokenUsage from the enriched TurnSummary array client-side
+- id: D29
+  question: What is the complete set of custom API routes the parlour page needs?
+  options:
+    a: GET /api/parlour/roles, GET /api/parlour/conversations, POST /api/parlour/create,
+      POST /api/parlour/turn
+    b: GET /api/parlour/roles, POST /api/parlour/turn only — reuse existing tool routes
+      for list/show/end/create
+    c: GET /api/parlour/roles, GET /api/parlour/conversations, POST /api/parlour/turn
+      only — reuse existing tool routes for show/end, add a create route
+- id: D30
+  question: What cwd should be used when creating new conversations from the page?
+  options:
+    a: guild().home — the guild root directory
+    b: A configurable workspace path from guild.json
+    c: process.cwd()
+- id: D31
+  question: What should the initial page state be on load (before any role is selected)?
+  options:
+    a: Empty state — show the role dropdown with a prompt to select a role; chat area
+      and sidebar are hidden or show placeholder text
+    b: Auto-select the first role alphabetically and load its conversations
+- id: D32
+  question: How should the page handle errors from the streaming turn endpoint (e.g.,
+    conversation ended mid-stream, animator failure)?
+  options:
+    a: Display an error message in the chat area as a system message (distinct from
+      human/anima messages)
+    b: Show a toast/banner notification
+    c: Show an alert dialog
+- id: D33
+  question: Should the 'New Conversation' action create the conversation immediately,
+    or wait until the user sends the first message?
+  options:
+    a: Create immediately — call parlour.create() and show the empty chat for the
+      new conversation
+    b: Lazy create — show an empty chat, but only call parlour.create() when the first
+      message is sent
+- id: D34
+  question: How should the streaming turn endpoint handle the case where the client
+    sends a message but no conversation exists yet (new conversation, lazy creation)?
+  options:
+    a: POST /api/parlour/turn accepts an optional conversationId; when absent, it
+      also accepts 'role' and creates the conversation first, then takes both turns
+    b: POST /api/parlour/create is always called first to get a conversationId; POST
+      /api/parlour/turn always requires conversationId
+- id: D35
+  question: What request body shape should the POST /api/parlour/turn endpoint accept?
+  options:
+    a: '{ conversationId?: string, role?: string, message: string } — conversationId
+      for existing conversations, role for new ones'
+    b: '{ conversationId: string, message: string } with a separate create endpoint'
+- id: D36
+  question: Should the SSE stream include the newly-created conversationId and participant
+    IDs when a new conversation is created via the turn endpoint?
+  options:
+    a: Yes — emit a 'conversation_created' event as the first SSE message with { conversationId,
+      participants }
+    b: No — return conversationId in a response header

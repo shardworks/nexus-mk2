@@ -1,0 +1,212 @@
+decisions:
+- id: D1
+  question: What is the config key name for the template map on SpiderConfig?
+  options:
+    a: rigTemplates — matches the rig concept used throughout the Spider
+    b: templates — shorter, but ambiguous (template of what?)
+    c: pipelines — describes the structure but introduces a new term
+- id: D2
+  question: What are the map keys in rigTemplates, and how does template selection
+    work?
+  options:
+    a: Keys are writ type strings (e.g. 'mandate', 'task'); 'default' is a reserved
+      key used as fallback when no type-specific template exists
+    b: Keys are arbitrary template names; a separate 'typeMapping' field maps writ
+      types to template names
+- id: D3
+  question: What is the full fallback chain when spawning a rig for a writ?
+  options:
+    a: writ.type template → 'default' template → hardcoded 5-engine pipeline
+    b: writ.type template → 'default' template (no hardcoded fallback — if rigTemplates
+      exists but has no match and no default, fail)
+    c: writ.type template → hardcoded 5-engine pipeline (no 'default' key concept)
+- id: D4
+  question: What is the type shape of a single engine entry in a rig template?
+  options:
+    a: '{ id: string; designId: string; upstream: string[]; givens?: Record<string,
+      unknown> } — four fields, upstream required'
+    b: '{ id: string; designId: string; upstream?: string[]; givens?: Record<string,
+      unknown> } — upstream optional (defaults to [])'
+- id: D5
+  question: What is the field name for givens in the template engine config?
+  options:
+    a: givens — distinct from EngineInstance.givensSpec to signal it contains unresolved
+      variable refs
+    b: givensSpec — same name as EngineInstance.givensSpec, implying same semantics
+- id: D6
+  question: What is the TypeScript type for RigTemplate?
+  options:
+    a: '{ engines: RigTemplateEngine[]; resolutionEngine?: string } — engines array
+      plus optional resolution engine declaration'
+    b: RigTemplateEngine[] — just the array, resolution engine handled separately
+- id: D7
+  question: Should the new template types (RigTemplate, RigTemplateEngine) be exported
+    from the package's public API (index.ts)?
+  options:
+    a: Yes — they are part of SpiderConfig which is already public, and consumers
+      may need to construct configs programmatically
+    b: No — keep them internal; consumers only interact with RigDoc/EngineInstance
+      which are already public
+- id: D8
+  question: Should RigDoc store which template key was used to spawn the rig?
+  options:
+    a: No — RigDoc stores the resolved engines only; the template key is not persisted
+    b: Yes — add an optional templateKey field to RigDoc for observability
+- id: D9
+  question: How are variable references represented in the template givens config?
+  options:
+    a: String values starting with '$' are treated as variable references (e.g. "$writ",
+      "$spider.buildCommand"); all other values are passed as literals
+    b: 'A wrapper object distinguishes refs from literals (e.g. { $ref: ''writ'' }
+      vs plain values)'
+- id: D10
+  question: What is the variable resolution vocabulary — how does the general mechanism
+    work?
+  options:
+    a: Two well-known references ($writ, $role) plus a general $spider.<key> prefix
+      that resolves to spiderConfig[key] for any key. This covers buildCommand, testCommand,
+      and any future config field without enumeration.
+    b: 'Enumerate specific variables: $writ, $role, $buildCommand, $testCommand. Each
+      is a named reference.'
+    c: Two well-known references ($writ, $role) plus a general $config.<section>.<key>
+      that can access any guild config section, not just spider.
+- id: D11
+  question: How does $role resolve — is it a shorthand for $spider.role or a separate
+    well-known reference with its own default?
+  options:
+    a: $role is a well-known reference that resolves to spiderConfig.role ?? 'artificer'
+      — distinct from $spider.role which would resolve to spiderConfig.role (possibly
+      undefined)
+    b: $role is just an alias for $spider.role, no special default logic
+- id: D12
+  question: How are undefined variables handled?
+  options:
+    a: Omit the key entirely from the resolved givensSpec
+    b: Set the key to null in givensSpec
+- id: D13
+  question: Can template givens contain literal (non-variable) values?
+  options:
+    a: Yes — any value that isn't a $-prefixed string is passed through as a literal
+      to givensSpec
+    b: No — all givens values must be $-variable references
+- id: D14
+  question: What happens when a givens value is a $-prefixed string that matches no
+    well-known reference and doesn't match the $spider.<key> pattern?
+  options:
+    a: Fail validation at startup — unrecognized $-variables are config errors
+    b: Treat as a literal string — pass through unchanged
+    c: Treat as an undefined variable — omit the key
+- id: D15
+  question: Does $spider.<key> support nested paths like $spider.nested.field, or
+    only top-level keys?
+  options:
+    a: 'Top-level only: $spider.buildCommand resolves to spiderConfig[''buildCommand''];
+      $spider.nested.field is a validation error'
+    b: 'Nested dot-path: $spider.nested.field resolves to spiderConfig.nested?.field'
+- id: D16
+  question: When does template validation run — during start() or deferred?
+  options:
+    a: During start() — check designIds against fabricator.getEngineDesign() plus
+      the Spider's own known supportKit engine IDs
+    b: Deferred via ctx.on('plugin:initialized') after Spider's own engines are registered
+    c: Lazy on first trySpawn() call
+- id: D17
+  question: How does the Spider know its own engine design IDs for start()-time validation?
+  options:
+    a: 'Build a Set from the imported engine objects: new Set([draftEngine.id, implementEngine.id,
+      ...]) — the Spider already imports all five'
+    b: 'Hardcode a const set: new Set([''draft'', ''implement'', ''review'', ''revise'',
+      ''seal''])'
+- id: D18
+  question: What structural validations are performed on each template?
+  options:
+    a: 'Five checks: (1) non-empty engines array, (2) no duplicate engine IDs, (3)
+      all upstream refs point to IDs within the same template, (4) dependency graph
+      is acyclic, (5) resolutionEngine (if specified) must be an ID within the template'
+    b: Same plus (6) at least one engine must have empty upstream (a root node)
+- id: D19
+  question: What cycle detection algorithm should be used?
+  options:
+    a: DFS-based with visited/visiting sets — same pattern used in guild-lifecycle.ts
+      validateRequires()
+    b: Kahn's algorithm (BFS-based, count in-degrees)
+- id: D20
+  question: What is the error message format for validation failures?
+  options:
+    a: 'Prefix with [spider] and include the template key and specific problem: ''[spider]
+      rigTemplates.mandate: designId "foo" not found in engine registry'''
+    b: Throw a generic Error with a descriptive message, no prefix
+- id: D21
+  question: Does validation fail on the first error or collect all errors?
+  options:
+    a: Fail on first error — throw immediately
+    b: Collect all errors and throw one combined message
+- id: D22
+  question: Does startup validation also check $-variable references in givens?
+  options:
+    a: Yes — validate that all $-prefixed strings in givens match the recognized forms
+      ($writ, $role, $spider.<key>)
+    b: No — variable references are resolved at spawn time; bad references just resolve
+      to undefined and get omitted
+- id: D23
+  question: How does the CDC handler determine which engine's yields to use for rig
+    completion resolution?
+  options:
+    a: Read rig.resolutionEngineId (stored on RigDoc at spawn time); fall back to
+      id='seal'; fall back to last completed engine in array order
+    b: Look up the template config at CDC time from writ type, find resolutionEngine;
+      fall back to seal; fall back to last completed
+    c: Always use the last completed engine in the engines array (no resolutionEngine
+      concept)
+- id: D24
+  question: What field name on RigDoc stores the resolution engine ID?
+  options:
+    a: resolutionEngineId — explicit about what it references
+    b: resolutionEngine — matches the template field name
+- id: D25
+  question: How is 'last completed engine' determined for the fallback?
+  options:
+    a: Last engine in the engines array with status='completed' — array order from
+      the template defines the sequence
+    b: Engine with the latest completedAt timestamp
+- id: D26
+  question: Is buildStaticEngines() preserved as a separate function, or replaced
+    by template-based building?
+  options:
+    a: Preserve buildStaticEngines() as-is; the new dispatch function calls it when
+      no template matches
+    b: Express the hardcoded 5-engine pipeline as an internal DEFAULT_TEMPLATE constant
+      and route all spawns through the template builder
+- id: D27
+  question: What is the name for the new dispatch function that selects template vs
+    static?
+  options:
+    a: buildRigEngines(writ, config) — replaces the call site in trySpawn()
+    b: resolveEngines(writ, config) — emphasizes the resolution/lookup aspect
+- id: D28
+  question: What does buildRigEngines return — just engines or engines plus resolutionEngineId?
+  options:
+    a: 'Return { engines: EngineInstance[], resolutionEngineId?: string } so trySpawn
+      can set both on RigDoc'
+    b: Return just EngineInstance[] and have trySpawn separately derive resolutionEngineId
+- id: D29
+  question: For the hardcoded-pipeline path (no templates configured), what resolutionEngineId
+    is set on RigDoc?
+  options:
+    a: Set resolutionEngineId to 'seal' — explicit even for the hardcoded path
+    b: Leave resolutionEngineId undefined — the CDC handler falls back to id='seal'
+      then last-completed
+- id: D30
+  question: Does the start() method remain synchronous (void) or become async?
+  options:
+    a: Remains synchronous — template validation is pure computation over in-memory
+      data
+    b: Becomes async to allow future validation that requires I/O
+- id: D31
+  question: How is the new template logic factored — one function or split?
+  options:
+    a: 'One function: resolveTemplate(writ, config) → { engines, resolutionEngineId?
+      }'
+    b: 'Split: lookupTemplate(writType, config) → RigTemplate | null, resolveGivens(templateGivens,
+      variables) → Record<string,unknown>, buildFromTemplate(template, variables)
+      → { engines, resolutionEngineId? }'
