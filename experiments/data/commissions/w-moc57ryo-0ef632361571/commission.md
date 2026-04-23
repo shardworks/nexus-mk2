@@ -1,0 +1,3 @@
+The brief is explicit that the 'New child' button belongs on the detail view. A natural sibling affordance that is *not* in scope for this brief: a per-row '+child' action button in the list view's `rowActions()` renderer, for writs in `new|open|stuck` phase. That would let operators build hierarchy without entering the detail view at all. Would reuse the same `openNewChild(writ)` function (just passing the row's writ instead of the detail view's writ) and inherit phase gating for free.
+
+Out of scope for this brief, and arguably clutters the per-row actions, but worth capturing as a possible follow-up enhancement.
