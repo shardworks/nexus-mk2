@@ -4,6 +4,8 @@ Latent vocabulary for the guild metaphor: concepts that are still cooking, not y
 
 This document is a **tome** (in its own metaphor) — reference material to consult, not work-in-progress. When opening a new quest, scan this file for related terms and cross-link any matches in the quest's References section. That manual habit is the discovery mechanism: the vocabulary doesn't surface itself; Coco surfaces it by remembering to look.
 
+**Companion registry:** historical term → canonical term lookups live in [`vocabulary-aliases.yaml`](./vocabulary-aliases.yaml) — a machine-readable alias map for resolving renames, drifts, and subsumed concepts across old clicks, briefs, commits, and transcripts. The tome carries the narrative; the registry carries the lookup.
+
 **Active vocabulary bookmark quests** — terms with feature-shaped gaps that have earned their own parked-quest entries:
 
 - **Coinmaster / Purse / Tithe** → cost tracking & token budget allocation (`w-mnszznt5-66d0ec7464bc`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*

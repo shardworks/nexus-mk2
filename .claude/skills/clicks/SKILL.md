@@ -39,6 +39,8 @@ Don't open a click for every exchange. One-off questions, quick clarifications, 
 
 When opening any new click, scan `docs/future/guild-vocabulary.md` for related terms and consider creating cross-links. The vocabulary tome holds latent metaphor concepts that imply future features; the only mechanism that surfaces them at the right moment is this manual habit.
 
+For historical references, consult the companion `docs/future/vocabulary-aliases.yaml` — a structured registry mapping legacy terms (Overseer, BA/PO, pre-2026-04-18 "Brief", etc.) to their canonical successors. When old clicks or commits use an unfamiliar term, the registry tells you what it's called now and whether the concept was renamed, subsumed, or dropped.
+
 ## Viewing clicks
 
 Two commands do the orientation work. Reach for them in this order:

@@ -129,6 +129,8 @@ Clicks should feel like background bookkeeping, not foreground ceremony. Sean sh
 
 When opening any new click, scan `docs/future/guild-vocabulary.md` for related terms and consider creating cross-links. The vocabulary tome holds latent metaphor concepts that imply future features; the only mechanism that surfaces them at the right moment is this manual habit — Coco remembering to look.
 
+For historical references (old clicks, commits, transcripts using terms that have since drifted), consult the companion `docs/future/vocabulary-aliases.yaml` — the machine-readable registry that resolves legacy terms to their canonical successors. When we rename or subsume a term, add an entry to the registry as part of the change; the narrative tome carries the why, the registry carries the lookup.
+
 ## The `nsg` CLI
 
 `nsg` is the guild CLI. You invoke it as plain `nsg <command>` from any Bash tool call — it's on your PATH via `/usr/local/bin/nsg`.
