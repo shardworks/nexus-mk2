@@ -1,0 +1,6 @@
+`docs/guild-metaphor.md` lists only four apparatus (Clockworks, Spider, Surveyor, Guildhall) despite the standard guild shipping roughly fifteen. Apparatus missing from `guild-metaphor.md` entirely: Clerk, Scriptorium, Animator, Loom, Fabricator, Executor, Oculus, Astrolabe, Copilot, Parlour, Instrumentarium, and the four this commission adds to `docs/future/guild-vocabulary.md` (Lattice, Reckoner, Pulse, Ratchet).
+
+Tactical detail:
+- Each missing apparatus has a spec under `docs/architecture/apparatus/{name}.md` whose Purpose section is already the right register for a vocabulary entry.
+- Concrete follow-up: one commission per cluster (e.g. one for session infrastructure — Animator, Loom, Parlour, Instrumentarium; one for the other apparatus — Clerk, Scriptorium, Fabricator, Executor, Oculus, Astrolabe, Copilot) that either seeds entries into `docs/future/guild-vocabulary.md` or promotes them directly into `docs/guild-metaphor.md` once the promotion policy (obs-1) is defined.
+- Affected files: all `docs/architecture/apparatus/*.md` for the listed apparatus (read-only, for mining definitions), plus the vocabulary file the commission targets.
