@@ -85,7 +85,7 @@ parked ──> concluded  (conclude directly from parked)
 parked ──> dropped    (drop directly from parked)
 ```
 
-Terminal states (concluded, dropped) are immutable — no further changes allowed.
+Terminal states (concluded, dropped) are immutable — no further changes allowed. When a concluded decision needs updating (new information, downstream consequences, or the original conclusion turned out wrong), open a new click and link it `supersedes` to the original — see the Links section below.
 
 **Park** a click (live -> parked):
 
@@ -142,6 +142,18 @@ Link types:
 - `depends-on` — this click can't be concluded until the target is resolved
 
 **Commissioned links are automatic.** When a click's conclusion spawns a writ (brief posted, commission dispatched), create the `commissioned` link from the click to the writ id without asking. This preserves the click-to-artifact trail in the tree and is cheap to maintain. If multiple clicks contribute to one commission, link the narrowest conclusion-bearing click; add additional links from contributing parents only if the trail would be lossy otherwise.
+
+**Supersedes is the canonical post-conclusion correction pattern.** Terminal clicks are immutable — you cannot edit a concluded click's goal or rewrite its conclusion. When the record needs updating, open a new click with the updated framing and link it `supersedes` to the original. The original stays frozen (the historical record of what was decided then doesn't change), and the new click carries the updated inquiry and, once concluded, the updated decision.
+
+    nsg click create --goal "<updated framing>"
+    nsg click link --source-id <new-click> --target-id <old-click> --link-type supersedes
+    nsg click conclude --id <new-click> --conclusion "<updated decision>"
+
+Reach for `supersedes` when a concluded decision turned out wrong or incomplete, when new information materially changes what the answer would have been, or when a downstream consequence forces a retroactive re-think. Do **not** reach for it to rephrase a live click (that's `nsg click amend --goal`), for vocabulary drift (consult the alias registry at `docs/future/vocabulary-aliases.yaml`), for lateral cross-references or branching explorations (use `related`), or for dependency tracking (use `depends-on`).
+
+Parent the new click where the inquiry naturally belongs — in the original's subtree if the work is tightly related, or under a different umbrella if the new context has drifted. The `supersedes` link carries the trail regardless of parentage.
+
+**Findability gap.** `nsg click tree` and `extract` do not currently surface inbound supersedes links — a reader arriving at an old concluded click will not see that something has superseded it without running `nsg click show` on that click to inspect its links. Until that gap closes, the convention is to name the old click id in the new click's conclusion so the backlink is captured in prose at minimum.
 
 Remove a link:
 
