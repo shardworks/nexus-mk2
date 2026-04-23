@@ -1,0 +1,3 @@
+Currently, the 'writs' table in Oculus only shows parents->children. To see further levels of descendants, one must drill down via details page. For deeply nested writ hierarchies, this hides writs from view. We should update this table to support "infinite" nesting depth... probably at least like 8 or so. If there is a limit imposed (due to practical width restrictions for indentation), the UI should make it clear that more layers are available (via an '...' child entry or something). This will signal to the user that they may drill in to see more writs.
+
+We should consider increasing the default length of this table to like 100 or something as well, so that more top-level writs can be viewed if there are lots of children.
