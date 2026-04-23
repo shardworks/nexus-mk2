@@ -8,7 +8,7 @@ This document is a **tome** (in its own metaphor) — reference material to cons
 
 - **Coinmaster / Purse / Tithe** → cost tracking & token budget allocation (`w-mnszznt5-66d0ec7464bc`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*
 - **Petition (internal-source variant)** → first-class internal commissions (`w-mnszzo8h-42137bda6681`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*. The petition concept itself is broader (any formally submitted request, patron or internal); this bookmark tracks the internal-source flow specifically.
-- **Vigil** → background monitoring of in-flight commissions (`w-mnszzon4-731bd9827d05`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*
+- **Vigil** → reserved as the label for the Reckoner's oversight/maintenance/watching functions. Earlier bookmark scope (background monitoring of in-flight commissions — click `c-mo1mqgf9`, writ `w-mnszzon4-731bd9827d05`) is now one Reckoner function among several (vision-keeper `c-moa42rxh`, overseer `c-moaj06ty`, in-flight monitoring `c-mo1mqgf9`, intervention pulses `c-mo1z3teo`).
 
 Other terms in this tome remain latent — they live here until they earn a bookmark or get absorbed into an active inquiry.
 
@@ -57,6 +57,34 @@ The Distiller's output artifact — a structured, machine-parseable document der
 ### Inbox
 
 Each guild member has an inbox — a queue where messages are delivered for the member to act on. When a message arrives, it is passed to the member's agent in context, and the member does whatever their role dictates. Inboxes are the primary mechanism for asynchronous coordination between guild entities. (Format and mechanics TBD.)
+
+### Pulse
+
+A discrete signal carried by the Lattice. A pulse is a durable event record with a payload; it carries both delivery state (pending / delivered / failed) and acknowledgment state (pending / acked / dismissed / resolved). Pulses are used for intervention signals (Reckoner → patron), status reports, completion notices, and any other guild-internal or guild-to-patron transmission. Trigger-type on the pulse carries urgency — the pulse itself is a neutral container.
+
+Punchier successor to the earlier "missive" framing; coheres better with the Lattice-as-network metaphor. The pulse is the *transmission event*, which cleanly decouples it from payload size — short signals and payload-bearing completion reports both fit.
+
+## Apparatuses
+
+Named mechanical constructs of the guild — infrastructure-level machinery with focused responsibilities, composed together to operate the guild. Distinct from *roles* (human-equivalent agents like Distiller, Sage) and from *artifacts* (records like writs, pulses, briefs).
+
+### The Lattice
+
+The guild's general-purpose messaging apparatus. Carries pulses between any two points — agent to agent, guild to patron, apparatus to apparatus. Delivers directly (no intermediate courier; the earlier "Herald" carrier role was dropped when this shape settled). Any part of the guild can emit a pulse through the Lattice: the Reckoner (intervention signals), Coinmaster (budget warnings), Clerk (approvals needed), Artificers (completion reports), etc.
+
+System mapping: outbox + delivery infrastructure for notifications and signals. Pulses are durable records with delivery and ack state, stored in the book; the Lattice reads pending-delivery pulses and ships them through configured channels.
+
+### The Reckoner
+
+The guild's command-and-control apparatus — the executive function that senses guild state and acts on it. Responsibilities:
+
+- **Monitor the patron's vision** — the strategic direction the guild is meant to advance.
+- **Monitor operational parameters** — cost, quality, queue state, daemon health, commissions in flight, drift from expected behavior.
+- **Act on observations** via two modes:
+  - *Ask the patron* — emit a pulse through the Lattice to surface something that needs patron judgment (commission stuck, budget exhausted, queue drained, etc.).
+  - *Act autonomously* — post a commission to remediate a guild issue or advance the vision.
+
+Subsumes several existing design clicks as internal functions: c-moa42rxh (vision-keeper), c-moaj06ty (overseer pattern), c-mo1mqgf9 (background monitoring of in-flight commissions), c-mo1z3teo (intervention pulses). Specific internal decomposition (what watchers, what contracts) still to be designed.
 
 ## Records & History
 
@@ -124,7 +152,9 @@ Everything below is Coco riffing. Unvetted, unfiltered, organized loosely by the
 
 **Muster** — the act of assembling members for a commission. Before dispatch, the system musters the required members: checks the roster, verifies availability, confirms the sage is ready, ensures the artificer is active. System mapping: the pre-dispatch validation step. Currently implicit in `send`, but formalizing it as "muster" makes it a named, debuggable phase.
 
-**Vigil** — a period of watching and waiting. After a commission is dispatched, someone (or something) keeps vigil — monitoring progress, watching for failures, waiting for completion. System mapping: the background monitoring that checks commission status, detects failures, and triggers alerts. Currently a manual status check. An engine could keep vigil automatically.
+**Vigil** — the *activity* of watching and waiting, not an actor or construct. Vigil is what is *kept* — the ongoing monitoring itself. Now reserved as a label for the Reckoner's oversight/maintenance/watching functions: the Reckoner keeps vigil over guild operational parameters, in-flight commissions, and the patron's vision. Specific implementations — what exactly is watched, how, when, by what sub-construct — are still to be designed. Not introduced to code or architecture docs yet.
+
+**Sentinel** — reserved term for a single scoped watcher function within the Reckoner. A Sentinel watches one specific thing (writ state, queue depth, daemon health, purse balance, drift from vision) and emits a pulse into the Lattice when its condition fires. Plural by design: the Reckoner can host many Sentinels, each with a narrow scope, composed together into the Reckoner's overall vigil. Not introduced to code or architecture docs yet — reserved until the Reckoner's internal decomposition is firmed up.
 
 **Rite of Naming** — the ceremony by which a new anima is called into being and given their identity. Not just "add to database" — the naming is when the spirit receives its name and seal, becoming a distinct presence in the guild. The rite could include an initial training session at the Academy (aspirant phase), a trial by craft, and formal induction to the roster as an active anima.
 
@@ -132,7 +162,7 @@ Everything below is Coco riffing. Unvetted, unfiltered, organized loosely by the
 
 ### Communication & Coordination
 
-**Herald** — a specialized engine (or role?) that announces events across the guild. Commission completed. New member inducted. Petition granted. House chartered. The herald doesn't decide anything — it broadcasts. System mapping: an event/notification system. Webhooks, log events, Slack notifications, whatever — the herald is the abstraction over "tell everyone something happened."
+**Herald** — *(dropped from active vocabulary.)* Earlier proposed as a carrier/delivery construct for guild announcements. When the messaging apparatus settled as **the Lattice** (which delivers pulses directly, without an intermediate courier role), Herald fell out — the separation between "the apparatus" and "the carrier" collapsed into just the apparatus. Preserved here in case a channel-specific or role-bound courier concept re-emerges later.
 
 **Summons** — a formal request for a specific member's attention. Different from a message in the inbox — a summons is urgent and targeted. "The Oracle is summoned to examine the authentication module." System mapping: a high-priority, synchronous invocation of a specific member, as opposed to async inbox delivery. *(Naming conflict resolved — "summon" removed from foundational metaphor, engine renamed to "compose", later to "manifest.")*
 
