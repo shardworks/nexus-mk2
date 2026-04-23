@@ -1,0 +1,3 @@
+`packages/plugins/clerk/src/types.ts:106` describes default-type resolution in prose: `"Defaults to the guild's configured defaultType, or \"mandate\" if no default is configured."` This mirrors the implementation in `clerk.ts:152–155` (`resolveDefaultType()`).
+
+Once `BUILTIN_WRIT_TYPE` is introduced, a tidier pattern would be to describe the resolution symbolically ("Defaults to the guild's configured defaultType, falling back to the built-in default.") rather than repeating the concrete string. Not in scope, but a tiny simplification to keep in mind for the next editor of this file.
