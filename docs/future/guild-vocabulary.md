@@ -60,7 +60,9 @@ Each guild member has an inbox — a queue where messages are delivered for the 
 
 ### Pulse
 
-A discrete signal carried by the Lattice. A pulse is a durable event record with a payload; it carries both delivery state (pending / delivered / failed) and acknowledgment state (pending / acked / dismissed / resolved). Pulses are used for intervention signals (Reckoner → patron), status reports, completion notices, and any other guild-internal or guild-to-patron transmission. Trigger-type on the pulse carries urgency — the pulse itself is a neutral container.
+A discrete signal carried by the Lattice. A pulse is an **immutable event record** with a payload; once emitted, it is never mutated. It carries delivery state (pending / delivered / failed) for the Lattice's own shipping concerns, but no patron-acknowledgment state — pulses are signals about guild state, not tasks with their own lifecycle. "Is this still live?" is derived by joining the pulse to its referent (typically a writ) in the book, not tracked on the pulse itself.
+
+Pulses are used for intervention signals (Reckoner → patron), status reports, completion notices, and any other guild-internal or guild-to-patron transmission. Trigger-type on the pulse carries urgency — the pulse itself is a neutral container.
 
 Punchier successor to the earlier "missive" framing; coheres better with the Lattice-as-network metaphor. The pulse is the *transmission event*, which cleanly decouples it from payload size — short signals and payload-bearing completion reports both fit.
 
@@ -72,7 +74,7 @@ Named mechanical constructs of the guild — infrastructure-level machinery with
 
 The guild's general-purpose messaging apparatus. Carries pulses between any two points — agent to agent, guild to patron, apparatus to apparatus. Delivers directly (no intermediate courier; the earlier "Herald" carrier role was dropped when this shape settled). Any part of the guild can emit a pulse through the Lattice: the Reckoner (intervention signals), Coinmaster (budget warnings), Clerk (approvals needed), Artificers (completion reports), etc.
 
-System mapping: outbox + delivery infrastructure for notifications and signals. Pulses are durable records with delivery and ack state, stored in the book; the Lattice reads pending-delivery pulses and ships them through configured channels.
+System mapping: outbox + delivery infrastructure for notifications and signals. Pulses are immutable records (durable event log, not mutable tasks) stored in the book; the Lattice reads pending-delivery pulses and ships them through configured channels. Pulses have no acknowledgment state — their referent (typically a writ) holds the live state, and "still needs attention" is derived by joining to that referent.
 
 ### The Reckoner
 
