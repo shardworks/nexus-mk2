@@ -1,0 +1,1 @@
+The recursive walk collects every descendant writ row into memory just to tally phase counts. If Stacks (`packages/plugins/stacks`) grew a cheap `count({ groupBy: 'phase' })` primitive, both `countDescendantsByPhase` and the existing direct-child tally in writ-show could avoid materializing the row payloads. Worth considering when the traversal becomes a measured bottleneck.
