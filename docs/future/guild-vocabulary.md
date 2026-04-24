@@ -9,7 +9,7 @@ This document is a **tome** (in its own metaphor) — reference material to cons
 **Active vocabulary bookmark quests** — terms with feature-shaped gaps that have earned their own parked-quest entries:
 
 - **Coinmaster / Purse / Tithe** → cost tracking & token budget allocation (`w-mnszznt5-66d0ec7464bc`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*
-- **Petition / Petitioner / Reckoner** → petition scheduler apparatus (`c-mod99ris`) — under umbrella `c-moa42fn6` *Stage 3: Self-commissioning*. The Reckoner accepts petitions from registered petitioners (vision-keepers, tech-debt watchers, laboratory/introspection, etc.), weighs them against guild priorities and resource constraints, and dispatches accepted petitions as writs. Supersedes the earlier narrower "internal commission flow" bookmark (`c-mo1mqgqv`, writ `w-mnszzo8h-42137bda6681`).
+- **Petition / Petitioner / Reckoner / Reckonings** → petition scheduler apparatus (`c-mod99ris`) — under umbrella `c-moa42fn6` *Stage 3: Self-commissioning*. The Reckoner accepts petitions from registered petitioners (vision-keepers, tech-debt watchers, laboratory/introspection, etc.), weighs them against guild priorities and resource constraints, and dispatches accepted petitions as writs. The Reckonings book (`c-modc7m16`) is the Reckoner's append-only evaluation log. Supersedes the earlier narrower "internal commission flow" bookmark (`c-mo1mqgqv`, writ `w-mnszzo8h-42137bda6681`).
 - **Vision-keeper** → custodian apparatus for product vision and decomposition ladder (`c-moa42rxh`) — now a petitioner to the Reckoner, not an executive in its own right. One vision-keeper per product.
 - **Vigil / Sentinel** → reserved labels for watching activities and watcher functions. Distributed across the guild (not exclusive to any one apparatus): Sentinels emit Lattice pulses for patron-facing signals and/or emit petitions to the Reckoner for guild-facing corrective work. Individual Sentinels tracked under their respective design clicks (in-flight monitoring `c-mo1mqgf9`, overseer pattern `c-moaj06ty`, intervention pulses `c-mo1z3teo`).
 
@@ -99,15 +99,18 @@ The Reckoner is deliberately narrow: it is **not** a generic command-and-control
 - **Patron-facing signals** (notifications, interventions, status) flow through the **Lattice** as pulses.
 - **Guild-facing work proposals** (what should we do next, what needs corrective action) flow through the **Reckoner** as petitions.
 
-Key design surfaces, all open:
+Key design surfaces:
 
-- Petition shape — what a petition carries (`c-mod9a2gh`)
-- Patron fast-path — bypass vs. unified flow (`c-mod9a48y`)
-- Priority model — storage shape, weighting, multi-product allocation (`c-mod53qxl`, `c-mod9a9un`)
-- Scheduling trigger — timer / arrival / completion / hybrid (`c-mod9a54n`)
-- Decline feedback loop (`c-mod9a6x3`)
+- Petition shape — *concluded* (`c-mod9a2gh`): intent + rationale + priority_signals + context_anchors; no pre-built brief/spec
+- Patron fast-path — *concluded* (`c-mod9a48y`): imperative (`priority=immediate`, auto-accept) vs. discretionary (normal weighing); direct writ creation stays as escape hatch
+- Deferral metadata — *concluded* (`c-modaqnpt`): defer_reason narrowed to product-level concerns (`priority | queue_depth | time_hold | patron_policy | other`); Spider/Coinmaster/Animator handle resource/budget/dependency/rate-limit downstream
+- Decline feedback — *concluded* (`c-mod9a6x3`): two CDC channels (petition state + Reckonings log); decline_reason narrowed to petition validity only; no direct callback
+- Scheduling trigger (`c-mod9a54n`)
 - Petitioner registration extension point (`c-mod9a8fx`)
+- Multi-product priority allocation (`c-mod9a9un`)
+- Priority storage shape (`c-mod53qxl`, separate concern)
 - Petition dedup and conflict (`c-mod9ab0i`)
+- Reckonings book design (`c-modc7m16`)
 
 Design subtree under `c-mod99ris`; supersedes the earlier narrower "internal commission flow" framing (`c-mo1mqgqv`).
 
@@ -126,6 +129,16 @@ System mapping: custody lives in the writ store (product / capability / outcome 
 ### Stories (working term)
 
 Logs, transcripts, and metadata produced by guild activities. Session logs, commission records, trial outcomes, sage advice, cost reports — the narrative record of what the guild did, why, and how it went. The term is provisional; candidates include *chronicles*, *annals*, or *scrolls*. The concept is stable even if the name isn't.
+
+### Reckonings
+
+The Reckoner's append-only evaluation log — one record per consideration event, whether or not the petition's state changed. Each reckoning captures: petition id, timestamp, decision (accept | defer | decline | unchanged | withdrawn), reason (defer_reason or decline_reason enum), weighed priority at the tick, optional notes. The log is the journal; current petition state is the materialized view over accumulated reckonings + original submission.
+
+Payoff: escalation logic (e.g., "petition evaluated 50 times without acceptance → escalate"), research and debugging ("why was this petition deferred 47 times?"), petitioner intelligence (consult own history to decide whether to adjust rationale, re-emit, or withdraw). CDC-attached; observers subscribe to reckoning events the same way they subscribe to writ state transitions.
+
+Naming: "Reckonings" is etymologically coherent with "Reckoner" — the reckonings are what the Reckoner *produces*. Plural noun names both the book (the collection) and individual records.
+
+System mapping: a first-class book alongside petitions, with stacks CDC on state changes. Not yet built; design under `c-modc7m16`.
 
 ## Open Questions
 
