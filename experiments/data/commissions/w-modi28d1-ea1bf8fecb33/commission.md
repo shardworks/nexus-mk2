@@ -1,0 +1,7 @@
+`ToolDefinition.handler` currently receives a single `params` argument. Tools that need to know 'who called me' (Ratchet's `click-create` with optional `createdSessionId`, this commission's `signal` with optional `emitter`) work around this by adding an explicit param that animas must remember to pass. The architecture doc's `signal` example even assumes a `({ name, payload }, { home })` two-arg form that doesn't exist. The right layer to carry caller identity (session id, caller type 'patron'/'anima'/'library', maybe anima name) is a framework-supplied context object passed as the second argument — populated by the tool-server from `X-Session-Id` (it already reads the header) and by the CLI from a `'patron'` constant. This is a framework-wide refactor, not something to bundle into this commission, but it should be on the backlog — it removes the emitter-source guesswork from `signal`, it removes the `createdSessionId` opt-in from Ratchet's tools, and it closes the gap between the arch doc's handler signature and reality.
+
+Files/touchpoints:
+- `packages/plugins/tools/src/tool.ts` — `ToolDefinition.handler` signature.
+- `packages/plugins/tools/src/tool-server.ts` — propagate `X-Session-Id`.
+- `packages/framework/cli/src/program.ts` — populate from CLI entry.
+- Every tool handler across the repo — opt-in backward-compatible.
