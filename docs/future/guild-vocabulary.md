@@ -9,8 +9,9 @@ This document is a **tome** (in its own metaphor) — reference material to cons
 **Active vocabulary bookmark quests** — terms with feature-shaped gaps that have earned their own parked-quest entries:
 
 - **Coinmaster / Purse / Tithe** → cost tracking & token budget allocation (`w-mnszznt5-66d0ec7464bc`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*
-- **Petition (internal-source variant)** → first-class internal commissions (`w-mnszzo8h-42137bda6681`) — under umbrella `w-mo0e2m9q` *Unlocking autonomous operation*. The petition concept itself is broader (any formally submitted request, patron or internal); this bookmark tracks the internal-source flow specifically.
-- **Vigil** → reserved as the label for the Reckoner's oversight/maintenance/watching functions. Earlier bookmark scope (background monitoring of in-flight commissions — click `c-mo1mqgf9`, writ `w-mnszzon4-731bd9827d05`) is now one Reckoner function among several (vision-keeper `c-moa42rxh`, overseer `c-moaj06ty`, in-flight monitoring `c-mo1mqgf9`, intervention pulses `c-mo1z3teo`).
+- **Petition / Petitioner / Reckoner** → petition scheduler apparatus (`c-mod99ris`) — under umbrella `c-moa42fn6` *Stage 3: Self-commissioning*. The Reckoner accepts petitions from registered petitioners (vision-keepers, tech-debt watchers, laboratory/introspection, etc.), weighs them against guild priorities and resource constraints, and dispatches accepted petitions as writs. Supersedes the earlier narrower "internal commission flow" bookmark (`c-mo1mqgqv`, writ `w-mnszzo8h-42137bda6681`).
+- **Vision-keeper** → custodian apparatus for product vision and decomposition ladder (`c-moa42rxh`) — now a petitioner to the Reckoner, not an executive in its own right. One vision-keeper per product.
+- **Vigil / Sentinel** → reserved labels for watching activities and watcher functions. Distributed across the guild (not exclusive to any one apparatus): Sentinels emit Lattice pulses for patron-facing signals and/or emit petitions to the Reckoner for guild-facing corrective work. Individual Sentinels tracked under their respective design clicks (in-flight monitoring `c-mo1mqgf9`, overseer pattern `c-moaj06ty`, intervention pulses `c-mo1z3teo`).
 
 Other terms in this tome remain latent — they live here until they earn a bookmark or get absorbed into an active inquiry.
 
@@ -44,9 +45,20 @@ A formally submitted request to the guild for work to be performed. Petitions ar
 
 Petitions may originate from either side of the guild boundary:
 - **Patron-source petitions** — the patron submits a request from outside the guild (this is what the system formerly called "the brief"; renamed to clarify that the patron's submission is a request, while *brief* is reserved for the Distiller's refined output).
-- **Internal-source petitions** — a guild member submits a request from within the guild for work to build or improve guild resources (paying tech debt, upgrading tooling, refactoring internal systems). Leadership evaluates internal petitions and decides which to grant, balancing cost against value. Tracked as a distinct flow under bookmark click `c-mo1mqgqv` / writ `w-mnszzo8h-42137bda6681`.
+- **Internal-source petitions** — a registered petitioner within the guild submits a request for work to advance a product vision, pay down tech debt, run an introspection task, remediate an observed condition, etc. Internal petitions are weighed and scheduled by the **Reckoner** (the guild's petition scheduler); accepted petitions become writs and enter the normal dispatch pipeline.
 
-Both flavors flow through the same commission infrastructure; the originator is a `source` field on the petition, not a different artifact type. A future sub-term may distinguish the internal subset if usage warrants.
+Both flavors flow through the same commission infrastructure; the originator is a `source` field on the petition, not a different artifact type. Whether patron-source petitions also flow through the Reckoner (as max-priority petitions) or bypass straight to writ is an open design question (`c-mod9a48y`).
+
+### Petitioner
+
+A role contract, not an apparatus — any part of the guild that emits petitions into the Reckoner. Petitioners register through the Reckoner's extension point and implement a contract covering: emit-petition (the submission), receive-feedback (declines, deferrals), and lifecycle hooks. Initial petitioner classes:
+
+- **Vision-keepers** — emit petitions when ladder state marks an outcome ripe for dispatch.
+- **Tech-debt watchers** — emit cleanup petitions from periodic codebase scans.
+- **Laboratory / introspection processes** — emit research, analysis, and post-mortem petitions.
+- **Sentinel-shaped monitors** — emit petitions for corrective commissions when their watched condition crosses a threshold (distinct from Sentinels that emit patron-facing pulses through the Lattice).
+
+The set is open: new petitioner classes can register without the Reckoner needing to know about them specifically. Extension-point shape and contract detail designed under `c-mod9a8fx`.
 
 ### Brief
 
@@ -80,15 +92,34 @@ System mapping: outbox + delivery infrastructure for notifications and signals. 
 
 ### The Reckoner
 
-The guild's command-and-control apparatus — the executive function that senses guild state and acts on it. Responsibilities:
+The guild's **petition scheduler**. Accepts petitions from registered petitioners, weighs them against guild priorities and resource constraints (concurrency limits, token budget, purse balances, patron-presence state), and determines which petitions get dispatched as writs. Accepted petitions become writs and enter the normal commission pipeline; declined or deferred petitions receive feedback so petitioners can re-emit later under different conditions.
 
-- **Monitor the patron's vision** — the strategic direction the guild is meant to advance.
-- **Monitor operational parameters** — cost, quality, queue state, daemon health, commissions in flight, drift from expected behavior.
-- **Act on observations** via two modes:
-  - *Ask the patron* — emit a pulse through the Lattice to surface something that needs patron judgment (commission stuck, budget exhausted, queue drained, etc.).
-  - *Act autonomously* — post a commission to remediate a guild issue or advance the vision.
+The Reckoner is deliberately narrow: it is **not** a generic command-and-control executive, it does not hold product vision, and it does not monitor guild state broadly. Two signal destinations stay cleanly separated:
 
-Subsumes several existing design clicks as internal functions: c-moa42rxh (vision-keeper), c-moaj06ty (overseer pattern), c-mo1mqgf9 (background monitoring of in-flight commissions), c-mo1z3teo (intervention pulses). Specific internal decomposition (what watchers, what contracts) still to be designed.
+- **Patron-facing signals** (notifications, interventions, status) flow through the **Lattice** as pulses.
+- **Guild-facing work proposals** (what should we do next, what needs corrective action) flow through the **Reckoner** as petitions.
+
+Key design surfaces, all open:
+
+- Petition shape — what a petition carries (`c-mod9a2gh`)
+- Patron fast-path — bypass vs. unified flow (`c-mod9a48y`)
+- Priority model — storage shape, weighting, multi-product allocation (`c-mod53qxl`, `c-mod9a9un`)
+- Scheduling trigger — timer / arrival / completion / hybrid (`c-mod9a54n`)
+- Decline feedback loop (`c-mod9a6x3`)
+- Petitioner registration extension point (`c-mod9a8fx`)
+- Petition dedup and conflict (`c-mod9ab0i`)
+
+Design subtree under `c-mod99ris`; supersedes the earlier narrower "internal commission flow" framing (`c-mo1mqgqv`).
+
+### The Vision-keeper
+
+The guild's custodian of product vision. Each vision-keeper holds a forward-looking product vision and its **decomposition ladder** (vision → capabilities → outcomes → commissions), maintains the edges between those rungs, and exposes queries: what is ripe for dispatch, which outcomes are starved, what in-flight work maps to which capability. One vision-keeper per product; a guild with multiple products has multiple vision-keepers.
+
+Vision-keepers are **petitioners** — they emit petitions to the Reckoner when their ladder says work is ripe. They do not dispatch work directly; scheduling decisions belong to the Reckoner, which weighs a vision-keeper's petitions against other petitioners (tech-debt watchers, laboratory/introspection, other vision-keepers) and against resource constraints.
+
+Decomposition-ladder authoring (who produces vision → capability → outcome breakdowns — patron-only, or Reckoner-proposes / patron-ratifies) is a separate design question tracked under the vision-keeper subtree. Likely patron-authored for v0, with sage-like assistance as the machinery matures.
+
+System mapping: custody lives in the writ store (product / capability / outcome as writ types with ladder edges); the petitioning process runs as a standing process watching ladder state. Not yet built; design subtree under `c-moa42rxh`.
 
 ## Records & History
 
@@ -156,9 +187,9 @@ Everything below is Coco riffing. Unvetted, unfiltered, organized loosely by the
 
 **Muster** — the act of assembling members for a commission. Before dispatch, the system musters the required members: checks the roster, verifies availability, confirms the sage is ready, ensures the artificer is active. System mapping: the pre-dispatch validation step. Currently implicit in `send`, but formalizing it as "muster" makes it a named, debuggable phase.
 
-**Vigil** — the *activity* of watching and waiting, not an actor or construct. Vigil is what is *kept* — the ongoing monitoring itself. Now reserved as a label for the Reckoner's oversight/maintenance/watching functions: the Reckoner keeps vigil over guild operational parameters, in-flight commissions, and the patron's vision. Specific implementations — what exactly is watched, how, when, by what sub-construct — are still to be designed. Not introduced to code or architecture docs yet.
+**Vigil** — the *activity* of watching and waiting, not an actor or construct. Vigil is what is *kept* — the ongoing monitoring itself. A label for the distributed watching functions across the guild: Sentinels keep vigil over the things they watch (writ state, queue depth, daemon health, purse balances, drift from a vision-keeper's ladder, etc.). Vigil is not owned by any single apparatus — an earlier design framing that centralized it in the Reckoner was revised when the Reckoner was narrowed to its petition-scheduler role. Specific Sentinels are designed individually, not as a single monolithic Vigil. Not introduced to code or architecture docs yet.
 
-**Sentinel** — reserved term for a single scoped watcher function within the Reckoner. A Sentinel watches one specific thing (writ state, queue depth, daemon health, purse balance, drift from vision) and emits a pulse into the Lattice when its condition fires. Plural by design: the Reckoner can host many Sentinels, each with a narrow scope, composed together into the Reckoner's overall vigil. Not introduced to code or architecture docs yet — reserved until the Reckoner's internal decomposition is firmed up.
+**Sentinel** — a single scoped watcher. A Sentinel watches one specific thing (writ state, queue depth, daemon health, purse balance, drift from vision-keeper ladder) and acts on its condition in one of two ways: emit a **pulse** through the Lattice for a patron-facing signal, or emit a **petition** to the Reckoner for a guild-facing corrective commission. Plural by design: many Sentinels, each narrow in scope, composed across the guild rather than housed in a single executive. Not introduced to code or architecture docs yet — reserved until individual Sentinel designs firm up under the notification and overseer subtrees.
 
 **Rite of Naming** — the ceremony by which a new anima is called into being and given their identity. Not just "add to database" — the naming is when the spirit receives its name and seal, becoming a distinct presence in the guild. The rite could include an initial training session at the Academy (aspirant phase), a trial by craft, and formal induction to the roster as an active anima.
 
