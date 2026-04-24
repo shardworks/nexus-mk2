@@ -1,0 +1,3 @@
+`packages/framework/core/` has tests for `id.ts` and `resolve-package.ts` but no home for SDK-factory tests. The `relay()` factory will be the first proper SDK factory in the package (the rest is types, guild singleton, home resolution, id generation). This commission adds `relay.test.ts`, which is fine — but if `engine()` lands later (see obs-3), we'll want consistent patterns.
+
+Should the nexus-core package standardize on: (a) one test file per SDK function, named after the symbol; (b) a shared test-helpers module for factory fail-loud assertions; (c) anything else? Worth a lightweight decision now before multiple factories accumulate in parallel files.
