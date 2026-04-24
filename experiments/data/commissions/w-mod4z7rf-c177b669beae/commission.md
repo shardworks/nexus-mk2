@@ -1,0 +1,1 @@
+Brief explicitly defers this to a follow-up phase. A guild that wants to tune `implement`'s max attempts for their deployment currently cannot without forking the design. Follow-up commission adds a `guild.json.spider.engineRetryOverrides: Record<designId, RetryConfig>` block validated at startup (same validation pattern as `animator.rateLimitBackoff`).
