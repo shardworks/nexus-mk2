@@ -1,0 +1,3 @@
+`docs/architecture/apparatus/ratchet.md:415-427` describes a future `click-commission` sugar that combines `conclude` + `commission-post` + `link` in one transactional call. The shape this commission lands for `click-supersede` is structurally identical (multi-write atomic sugar that returns both halves). When the Commission Sugar finally ships, its design discussion would benefit from referencing the supersede sugar as the precedent it follows.
+
+No action needed in *this* commission beyond the documentation update already in scope (S5). The observation is for the future Commission Sugar implementer: 'see the supersede sugar at `ratchet.ts:???` for the canonical multi-write pattern.'
