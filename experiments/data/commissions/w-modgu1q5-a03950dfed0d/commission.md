@@ -1,0 +1,3 @@
+Commander auto-groups in `packages/framework/cli/src/program.ts:162-189` create a group with description `${groupName} commands` — a generic placeholder. There's no way for an apparatus to set a richer description for the auto-grouped namespace (e.g. 'Clockworks runner control — list, tick, run pending events.'). The brief asks for 'help text describing the forthcoming subcommands.'
+
+Possible refinement: extend `registerTools` to accept per-group descriptions, or have apparatus register a sentinel tool that supplies the group description. Not blocking the skeleton (the chosen stub tools carry their own descriptions), but the namespace-level help UX is thin. Consider improving when a second apparatus hits the same need.
