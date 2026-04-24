@@ -1,0 +1,5 @@
+`docs/architecture/apparatus/stacks.md:30` states the policy ("Schema changes are additive only — new books and new indexes are always safe; nothing is ever dropped automatically"). `packages/plugins/stacks/src/sqlite-backend.ts:315-335` confirms it: only `CREATE INDEX IF NOT EXISTS` is issued.
+
+This is a correct policy but has a hidden consequence: a plugin author who *reduces* the declared index set on an existing book leaves orphan indexes on every deployed SQLite database. There is no migration affordance today and no guidance on how a plugin author should shrink an index declaration safely. If ever this commission decides code-to-doc (D1 `code-to-doc`), that decision implicitly removes one compound (`['parentId', 'status']`) on existing deployments — the stale index would linger.
+
+Follow-up worth considering: (a) a one-paragraph caveat in stacks.md or the plugin-author guide explaining the additive-only footgun, and/or (b) a `stacks sqlite-vacuum-indexes` maintenance command that reconciles declared vs live indexes and reports orphans.
