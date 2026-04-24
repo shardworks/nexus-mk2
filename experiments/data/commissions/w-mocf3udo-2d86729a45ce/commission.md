@@ -1,0 +1,3 @@
+The test at `packages/plugins/clerk/src/clerk.test.ts:320-327` hand-describes the writ-id format in a multi-line comment to motivate a `slice(0, lastIndexOf('-'))` operation. The canonical format is already documented at `packages/framework/core/src/id.ts:6`, and the `shortId()` helper exported from the same file does exactly this slicing operation.
+
+The test could be simplified to call `shortId(posted.id)` and reference the `id.ts` JSDoc, eliminating the duplicated and drift-prone inline description. Out of scope for this commission (which is focused on format-string drift) but a natural follow-up.
