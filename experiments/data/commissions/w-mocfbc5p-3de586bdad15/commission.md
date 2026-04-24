@@ -1,0 +1,5 @@
+`buildTree` (`packages/plugins/ratchet/src/ratchet.ts:115-148`) gates recursion with `currentDepth < maxDepth`. A negative `maxDepth` evaluates `0 < -1` as false and returns the root-only tree; a non-integer like `1.5` passes through untouched, giving odd but not broken behavior. The zod schemas on `click-tree.ts:141` and `clerk/src/tools/writ-tree.ts:114` both accept `z.number().optional()` with no further constraint. No tests assert on rejection.
+
+This commission will inherit the same behavior on `click-extract` (per D4). That is the right call locally — validating only extract would create asymmetry with its peer tool — but the rough edge remains. A dedicated cleanup commission could tighten validation on all three surfaces (`ratchet.tree`, `ratchet.extract`, `clerk.tree`) in one pass, e.g. `z.number().int().nonnegative().optional()`, with matching assertions in the API layer.
+
+Low priority — no user-reported friction, just a latent fail-quietly surface.
