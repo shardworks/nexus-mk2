@@ -1,0 +1,5 @@
+After D1, `animator/state` holds two well-known documents (`'guild-heartbeat'` and `'dispatch-status'`) with disjoint non-id fields. The Stacks API types a book with a single generic parameter; there is no way to express "this book contains rows of shape A at id X and shape B at id Y" that enforces the constraint at write time.
+
+The shortcut in D2 (two narrowed book references) relies on each writer's discipline. A future writer that looks up the book generically and calls `put({ id: 'dispatch-status', guildAliveAt: ... })` will write a corrupt row without a TypeScript error.
+
+The durable fix is at the Stacks layer — some form of `Book<{ id: 'guild-heartbeat' } & GuildStateDoc | { id: 'dispatch-status' } & AnimatorStatusDoc>` or a sibling API like `stacks.singletonDoc('animator', 'state', 'dispatch-status', schema)` that handles the id+shape contract together. Out of scope for this fixup, but worth surfacing as a pattern-level concern: single-row books are common across the codebase and this is not the first "stash a second document in the state book" that will happen.
