@@ -105,7 +105,7 @@ Key design surfaces:
 - Patron fast-path — *concluded* (`c-mod9a48y`): imperative (`priority=immediate`, auto-accept) vs. discretionary (normal weighing); direct writ creation stays as escape hatch
 - Deferral metadata — *concluded* (`c-modaqnpt`): defer_reason narrowed to product-level concerns (`priority | queue_depth | time_hold | patron_policy | other`); Spider/Coinmaster/Animator handle resource/budget/dependency/rate-limit downstream
 - Decline feedback — *concluded* (`c-mod9a6x3`): two CDC channels (petition state + Reckonings log); decline_reason narrowed to petition validity only; no direct callback
-- Scheduling trigger (`c-mod9a54n`)
+- Scheduling trigger — *concluded* (`c-mod9a54n`): v0 runs on a fixed-interval polling tick (no event-driven triggers), matching Spider's pattern; depends on Clockworks MVP timer apparatus (`c-mo1mql8a`)
 - Petitioner registration extension point (`c-mod9a8fx`)
 - Multi-product priority allocation (`c-mod9a9un`)
 - Priority storage shape (`c-mod53qxl`, separate concern)
