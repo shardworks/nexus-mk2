@@ -60,6 +60,7 @@ NSG_CMD=(node --disable-warning=ExperimentalWarning --experimental-transform-typ
 CODEX=""
 COMPLEXITY=""
 GUILD_PATH="/workspace/vibers"
+DRAFT=0
 BODY=""
 
 show_help() {
@@ -76,10 +77,14 @@ Required:
 
 Options:
   --complexity <n>       Patron complexity estimate (Fibonacci: 1 2 3 5 8 13 21)
+  --draft                Create the writ in draft (new) phase instead of open.
+                         Draft writs are not dispatched until explicitly
+                         published via `nsg writ publish --id <id>`.
   --guild-path <path>    Guild root directory (default: /workspace/vibers)
   -h, --help             Show this help
 
-The Spider picks up ready writs automatically. Data collection
+The Spider picks up ready (open-phase) writs automatically. Draft writs
+sit outside the dispatch queue until published. Data collection
 (commission artifacts, session records, commission log, quality
 scoring) is handled by the Laboratory apparatus in the guild.
 HELP
@@ -106,6 +111,10 @@ while [[ $# -gt 0 ]]; do
       GUILD_PATH="${2:-}"
       [[ -z "$GUILD_PATH" ]] && { echo "Error: --guild-path requires a value" >&2; exit 1; }
       shift 2
+      ;;
+    --draft)
+      DRAFT=1
+      shift
       ;;
     -h|--help)
       show_help
@@ -188,11 +197,12 @@ nsg() {
 log "Posting commission..."
 log "  guild=$GUILD_PATH codex=$CODEX"
 log "  title=$TITLE"
+[[ "$DRAFT" -eq 1 ]] && log "  phase=draft (will not dispatch until published)"
 
-POST_RESULT=$(nsg commission-post \
-  --title "$TITLE" \
-  --body "$BODY" \
-  --codex "$CODEX") || {
+POST_ARGS=(commission-post --title "$TITLE" --body "$BODY" --codex "$CODEX")
+[[ "$DRAFT" -eq 1 ]] && POST_ARGS+=(--draft)
+
+POST_RESULT=$(nsg "${POST_ARGS[@]}") || {
   err "Commission post failed"
   exit 2
 }

@@ -49,9 +49,17 @@ The line is intent vs how-to, not test/no-test or criteria/no-criteria.
 
 ### Drafting
 
-Draft in `.scratch/brief-<slug>.md`. The slug should be short and recognizable (e.g., `brief-spider-follows-gating.md`). This gives Sean a navigable file he can annotate and review in his editor — drafts are not collaborated inline in chat.
+**Default: post the brief directly as a draft-phase writ.** No scratch files, no editor dance. Sean reviews the draft in Oculus; if it needs changes, iterate via `nsg writ edit` (or re-post and cancel the old draft). The draft-phase writ is the reviewable surface.
 
-A typical brief structure (adapt as needed; this is a starting template, not a constraint):
+```bash
+./bin/commission.sh --codex <codex> --draft [--complexity N] -- 'body text here'
+```
+
+The body is the full brief, including its markdown. The title is extracted from the first line (the `# Title` heading).
+
+**Do not draft in `.scratch/` by default.** The "draft a markdown file, get Sean to review it in his editor, iterate in chat, then post" cycle is dead — Sean explicitly asked to skip it. The only exception is when Sean specifically requests offline editor review of a file (e.g., for a large, complex brief where annotation-in-place is the right collaboration mode). In that case, use `.scratch/brief-<slug>.md`; otherwise, direct-to-system.
+
+A typical brief structure (adapt as needed; this is a writing template, not a file-location directive):
 
 ```
 # <Title>
@@ -77,9 +85,18 @@ this one builds on or supersedes>
 
 Other sections appear when the work warrants them — e.g., "Substrate changes" when the brief carries adjustments to existing substrate alongside the main work; "Authoring surfaces" when there are multiple consumer-facing entry points.
 
+### Draft phase vs immediate dispatch
+
+The direct-to-system workflow gives you two dispatch modes:
+
+- **Draft (`--draft`)** — the default when any of the following apply: the brief is part of a multi-commission batch, depends on other writs (via `spider.follows`), or Sean hasn't yet seen the final body. Sean reviews in Oculus; publish via `nsg writ publish --id <writ-id>` when ready.
+- **Open (no `--draft`)** — appropriate when the brief was fully worked out in chat, is a single unit, has no dependencies, and Sean has signaled he wants it to go immediately. The writ enters the dispatch queue at post time.
+
+When in doubt, use `--draft`. A draft is cheap to review and publish; an already-dispatched writ is harder to retract.
+
 ### Iteration
 
-Sean iterates on the brief by editing the scratch file directly (or in chat). When he provides feedback — file edits, annotations, or out-of-band comments — **restate a summary of that feedback in chat**, using Sean's direct words as much as possible. This "states it for the record" so the substance appears in the transcript where Scribe can capture it (transcript-capture habit, per coco.md).
+Sean iterates on a draft by reviewing it in Oculus and telling Coco what to change. When he provides feedback — edits, annotations, or out-of-band comments — **restate a summary of that feedback in chat**, using Sean's direct words as much as possible. This "states it for the record" so the substance appears in the transcript where Scribe can capture it (transcript-capture habit, per coco.md). Apply the feedback via `nsg writ edit` (for narrow body tweaks) or by re-posting a corrected draft and cancelling the old one (for substantial rewrites).
 
 ### Click references in briefs
 
@@ -103,33 +120,52 @@ When drafting, do the grep before handing the brief to Sean: `grep -n '\.scratch
 
 Use `bin/commission.sh` from the sanctum:
 
-    ./bin/commission.sh --codex <codex> [--complexity N] -- @.scratch/brief-<slug>.md
+    ./bin/commission.sh --codex <codex> [--draft] [--complexity N] -- 'body text...'
+
+Or, when a scratch file exists (offline-review exception):
+
+    ./bin/commission.sh --codex <codex> [--draft] [--complexity N] -- @.scratch/brief-<slug>.md
 
 - `--codex` is required. Common values: `nexus` (the framework). Ask Sean if uncertain.
-- `--complexity` is the patron's dispatch-time estimate on the Fibonacci scale (1, 2, 3, 5, 8, 13, 21). If Sean hasn't volunteered one when he says "dispatch this," ask before posting — it's a primary data point for X008 and missing-at-dispatch entries become a cleanup task at the next session.
-- The `@<path>` form reads the body from a file. The title is auto-extracted from the brief's first heading.
-- The script returns the writ id (`w-…`) on success. Capture it for the post-dispatch bookkeeping below.
+- `--draft` creates the writ in draft phase (does not dispatch until published). See "Draft phase vs immediate dispatch" above for when to use it.
+- `--complexity` is the patron's dispatch-time estimate on the Fibonacci scale (1, 2, 3, 5, 8, 13, 21). If Sean hasn't volunteered one when he says "dispatch this," ask before posting — it's a primary data point for X008 and missing-at-dispatch entries become a cleanup task at the next session. For drafts, complexity can be patched later at publish time; ask either way.
+- The `--` form takes the body as a literal argument; the `@<path>` form reads the body from a file. In both cases, the title is auto-extracted from the brief's first heading.
+- The script returns the writ id (`w-…`) on success. Capture it for any follow-on work (follows-links, publish, bookkeeping).
 
 Underlying CLI: `bin/commission.sh` wraps `nsg commission-post` and additionally patches the complexity into the Laboratory's commission log entry. **Always** prefer the wrapper — calling `nsg commission-post` directly skips the log-patching step.
 
+### Multi-commission batches
+
+When dispatching multiple related commissions (e.g., a decomposed refactor with dependencies), post all of them as drafts, wire the `spider.follows` links between them, then leave them draft for Sean's Oculus review. Publish the leaves last, once Sean has ratified the batch. Link syntax:
+
+    nsg writ link --source-id <follower> --target-id <prerequisite> --kind spider.follows --label follows
+
+Both `--label` and `--kind` are required — `--label` is the casual relationship name; `--kind` is the load-bearing registered link type that Spider's dispatch logic reads.
+
 ## Post-dispatch bookkeeping
 
-When a brief is dispatched, three things must follow:
+"Dispatch" means the writ enters the Spider's queue — at post time for open-phase writs, at publish time for draft-phase writs. The bookkeeping fires on the actual dispatch moment.
 
-1. **Conclude the parent design click.** The click whose subtree drove the design is now resolved by the act of dispatch. Conclude it with a short summary of the final shape and the dispatched writ id. Example conclusion:
+Three things follow:
+
+1. **Conclude the parent design click.** The click whose subtree drove the design is now resolved by the act of dispatch. Conclude it with a short summary of the final shape and the dispatched writ id(s). Example conclusion:
 
        Design fully resolved and dispatched as commission w-mo35s0fo-1a1e3cd285bc.
        Final shape: <one-paragraph summary of the locked-in design>.
 
-2. **Delete the scratch file.** The brief has been published into the writ system; the scratch copy is no longer the source of truth. Per the "Collaborating on Documents" directive in coco.md, scratch files are deleted when their content is published. Don't let `.scratch/` accumulate stale dispatched briefs.
+2. **Delete any scratch file.** If the offline-review exception was used and a `.scratch/brief-*.md` file was created, delete it after dispatch — the writ carries the content now. In the default direct-to-system flow, there's nothing to delete.
 
-3. **Coco-log entry.** The dispatch is part of a session of work; the coco-log entry covers the design conversation and the act of dispatching. Reference the writ id in the log so future sessions can join the design session to the resulting commission.
+3. **Coco-log entry.** The dispatch is part of a session of work; the coco-log entry covers the design conversation and the act of dispatching. Reference the writ id(s) in the log so future sessions can join the design session to the resulting commission(s).
+
+For multi-commission batches, conclude the parent click once (naming all dispatched writ ids) rather than per-commission.
 
 ## Common pitfalls
 
 - **Drifting into spec.** The most common failure. Symptoms: file paths appearing in the brief, full TypeScript code blocks beyond a shape sketch, test file names, exit criteria like "the foo.ts file at line N is updated." When you catch this, ask the gut-check question and rewrite.
+- **Drafting in `.scratch/` by default.** The old editor-review dance is dead. Post directly as a draft-phase writ and let Sean review in Oculus; only use `.scratch/` when Sean explicitly asks for offline file review.
 - **Leaking sanctum references into the brief.** `.scratch/...` paths, sanctum doc paths, experiment directories. Dead links from the artificer's perspective. See "Stay inside the target repository" above.
 - **Stripping click references.** Don't try to make briefs self-contained by inlining the substance of their source clicks — that's the sage's job. Briefs reference; specs inline.
-- **Forgetting the complexity rating.** Missing-at-dispatch complexity becomes a session-startup cleanup task. Ask before posting.
+- **Forgetting the complexity rating.** Missing-at-dispatch complexity becomes a session-startup cleanup task. Ask before posting (or before publishing a draft).
 - **Skipping the wrapper script.** `nsg commission-post` works but skips the log-patching step. Always go through `bin/commission.sh`.
+- **Forgetting `--label` on a `spider.follows` link.** The `nsg writ link` command requires both `--label` (casual name) and `--kind` (registered load-bearing type). Passing only `--kind` fails.
 - **Forgetting to conclude the parent click.** Leaves the design click sitting in `live` indefinitely, pretending there's still active design work when the work is actually in flight as a commission.
