@@ -1,0 +1,5 @@
+`packages/plugins/ratchet/pages/clicks/index.html` renders the click tree in the browser from `GET /api/click/tree?format=json`. Its `buildTreeNodeEl()` function (~line 434) draws status badge + short id + goal per row but shows no link info inline. The detail pane does render `click.links` via `renderLinkRow()` using the enriched `click-show` response, so supersedes are surfaced there — but only when a click is selected.
+
+This commission explicitly scopes itself to CLI tools and states "no changes to `nsg click show`" — and, by extension, not Oculus. However, once this commission's D9 decision (extend tree JSON with supersede fields) lands, the Oculus page has the data available in its local `forest` state already and could render an inline marker (e.g. the same `→ c-<short>` badge) with a modest DOM-builder patch. A follow-up commission would close the equivalent findability gap for dashboard viewers.
+
+Affected file: `packages/plugins/ratchet/pages/clicks/index.html` (specifically `buildTreeNodeEl`). Cost: small JS patch + likely a CSS class for the suffix badge.
