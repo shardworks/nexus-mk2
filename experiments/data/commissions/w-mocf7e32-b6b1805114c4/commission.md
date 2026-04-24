@@ -1,0 +1,5 @@
+The removed bullet (`docs/architecture/apparatus/ratchet.md:411`, pre-`419b876`) used the invented notation `w-{random}-{hash}` / `c-{random}-{hash}` — a two-segment shape that matches neither the actual id format nor any other substrate. The same class of mistake shows up in `docs/architecture/apparatus/clerk.md:273` and `:629` where the hyphen between timestamp and random is dropped from `w-{base36_timestamp}{hex_random}` (tracked separately as sibling `w-moc5pegi-ba2c2d41fca6`).
+
+Both cases would be prevented by a one-line convention: **id-format doc entries should cite `generateId` and use its canonical three-segment notation `{prefix}-{base36_timestamp}-{hex_random}`**, matching the docstring in `packages/framework/core/src/id.ts:3-19`.
+
+This observation is surfaced for curator/patron review rather than promoted as a live edit — the concrete instances are already tracked (one resolved, one open in a sibling). A formal doc-convention rule is worth capturing only if a third drifted instance appears.
