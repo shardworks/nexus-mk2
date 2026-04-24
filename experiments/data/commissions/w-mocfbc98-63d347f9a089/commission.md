@@ -1,0 +1,5 @@
+`packages/plugins/ratchet/src/tools/click-extract.ts:20` unconditionally passes `full: true` to `ratchet.extract()`, while `ratchet.extract()` at `ratchet.ts:693` defaults `full: false` for programmatic callers. The asymmetry is intentional — the CLI is a human-read surface that benefits from conclusions visible, the API serves both human and machine callers — but it is neither documented in prose nor explained in a code comment.
+
+This commission does not need to fix the asymmetry; it only needs to avoid propagating it to `depth` (per D9, the tool forwards `depth` untouched). But the design intent could usefully live as a one-line comment on `click-extract.ts:20` or as a note in the README alongside the `full` parameter's row. A future tidy-up could either document it or, if a `--full=false` CLI flag is ever wanted, remove the override in favor of reading `params.full`.
+
+Low priority; raising it so a future implementer who notices the override in a diff doesn't assume it is a mistake.
