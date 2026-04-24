@@ -1,0 +1,5 @@
+In `packages/plugins/animator/src/animator.ts:809-813`, the back-off cache is warmed via `void backoff.read().catch(...)`. `animate()` reads the cache synchronously via `backoff.peek()` (line 578) which initialises from `freshStatusDoc()` (state: running). Before the awaited read lands, animate() calls dispatch even if persisted state is paused.
+
+D14 closes this window by making the read awaited at the top of `start()`, so `peek()` reflects persisted state before `start()` returns. The narrow observation is that, until D24 ships, the bug is live in production: a daemon restart during a pause window allows animate() to dispatch a session that then hits a real rate-limit terminal, re-opening the pause. Operator impact is bounded (one stray session per restart) but observable.
+
+Folded into the commission via D14; this observation records the precondition for the record.
