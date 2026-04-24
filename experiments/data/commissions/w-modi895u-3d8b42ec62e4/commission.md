@@ -1,0 +1,3 @@
+Because Arbor's `wireKitEntries()` iterates standalone kits before apparatus supportKits, and the Clockworks relay registry follows first-writer-wins, a user kit can override a stdlib relay (summon-relay, any future bundled relay) simply by declaring a relay with the same name. This is a real and potentially desirable feature (operators can wrap or replace framework behavior) but it is not documented anywhere.
+
+Actionable: add a paragraph to `docs/architecture/clockworks.md` under the ClockworksKit section explaining the override mechanic, or add a DEVELOPERS.md note. Out of scope for this commission's implementation but worth capturing so the property is intentional, not accidental.
