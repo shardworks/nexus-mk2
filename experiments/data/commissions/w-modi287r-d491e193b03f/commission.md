@@ -1,0 +1,5 @@
+`docs/architecture/clockworks.md` and `docs/reference/event-catalog.md` describe emission via a non-existent `signalEvent()` helper and reference a `validateCustomEvent()` predicate that does not exist in code. The live API once this commission ships is `ClockworksApi.emit(name, payload, emitter)` and validation lives inside the `signal` tool handler. Additionally, `clockworks.md`'s `signal` tool example uses `handler: async ({ name, payload }, { home }) => { ... }` — a two-arg form that predates the current single-arg `ToolDefinition.handler` contract. Update both docs so downstream plugin authors do not copy dead shapes.
+
+Files:
+- `docs/architecture/clockworks.md` — "The `signal` Tool" section, handler-signature example.
+- `docs/reference/event-catalog.md` — "Signaling Custom Events" / "From an engine" example; "Reserved Namespaces" references to `validateCustomEvent()`.
