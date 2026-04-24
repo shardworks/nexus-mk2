@@ -1,0 +1,3 @@
+The brief explicitly scopes other link types out of this commission ("Rendering other link types in tree/extract" — Out of scope). Each has different semantics and deserves its own design conversation. But the pattern implemented here (link-aware `ClickTree` enrichment, per-row/per-click surfacing) is general. If the guild decides to surface any of the other three link types in tree/extract, the same plumbing carries the load — the question is placement and glyph choice, not architecture.
+
+Worth a follow-up design click under the clicks-evolution umbrella (`c-mo1itggx`): "Should `related` / `depends-on` / `commissioned` links be surfaced in tree/extract, and how?" This would sit alongside `c-mobzwczn` as a sibling design concern.
