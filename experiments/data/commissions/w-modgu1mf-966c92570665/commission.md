@@ -1,0 +1,3 @@
+`packages/framework/core/src/guild-config.ts:8-11` defines `schema?: Record<string, string>` on `EventDeclaration`. `docs/reference/event-catalog.md:113-116` notes 'schema — payload schema hint (informational only, not enforced at runtime).' `docs/architecture/clockworks.md` calls it 'Deferred — Payload schema enforcement.' The field is decorative and will likely stay so until some later commission.
+
+Future follow-up: decide whether to (a) promote it to a Zod shape and enforce in `signal`, (b) remove it entirely, or (c) clearly label it deprecated. Not blocking any Clockworks-skeleton task. Record for future cleanup — tied to task 3 (signal tool).
