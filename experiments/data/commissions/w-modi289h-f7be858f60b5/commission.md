@@ -1,0 +1,5 @@
+`WritPhase` is `new | open | stuck | completed | failed | cancelled`. `docs/reference/event-catalog.md` says writ-lifecycle events are `{type}.ready | completed | stuck | failed` — mapping `open` phase to `.ready` event and dropping `cancelled`. The mapping is intentional (see brief task 7 / event-catalog) but nowhere in code or docs does a single place say 'the `ready` event fires when phase transitions to `open`' or 'cancelled phase does not emit a lifecycle event'. First operator/plugin author to wire a standing order for a cancellation will be surprised. Add a small table in either `event-catalog.md` or a new section in `clockworks.md` mapping phase transition to emitted event name.
+
+Files:
+- `docs/reference/event-catalog.md` — "Writ Lifecycle Events" subsection.
+- Possibly `packages/plugins/clerk/src/types.ts` JSDoc for `WritPhase`.
