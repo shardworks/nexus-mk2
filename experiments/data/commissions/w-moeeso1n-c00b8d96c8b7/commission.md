@@ -1,0 +1,5 @@
+`packages/plugins/claude-code/src/babysitter.ts` exports `STDERR_DIAGNOSTIC_TAIL_LIMIT = 200` (around line 617) and uses it as the slice cap for the rolling stderr tail attached to `terminationDiagnostic.stderrExcerpt` on a `'failed'` terminal report. 200 characters is small — a single Node stack frame line can exceed it (`at Function.foo (/long/path/to/file.ts:NNN:CC)`), so the excerpt frequently truncates *before* the actual root-cause line. Operators reviewing DLQ records to understand what fell through the cracks see only the trailing stack frames, not the error text.
+
+Fix is small: bump the limit to a value that comfortably accommodates a typical 6–12-line traceback (e.g. 1024 or 2048) and update the test in `babysitter.test.ts` („attaches terminationDiagnostic reflecting only the stderr tail“, lines ~1063–1113) which currently asserts `excerpt.length <= 200`.
+
+The size is a config value, not a structural choice — worth a small standalone commission so the change can be discussed against the cost of larger session-record payloads (which the Animator stores).
