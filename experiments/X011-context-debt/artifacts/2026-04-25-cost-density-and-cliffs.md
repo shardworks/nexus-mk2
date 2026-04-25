@@ -177,6 +177,56 @@ The misses concentrate in framework-level packages (cli, core) — likely cross-
 
 ---
 
+## Cliffs Across Other Metrics
+
+Bucketed each file-characteristic metric and looked for cliff shapes. Five metrics show clean step-changes that would form viable threshold gates:
+
+```
+metric              cliff at        sessions above       cost share
+                    threshold       (n / 70)             captured
+─────────────────────────────────────────────────────────────────
+total_cross_pkg     50              7  (10%)             36%
+total_imports       80              9  (13%)             50%
+total_exports       65              4  (6%)              23%
+total_types         80              4  (6%)              25%
+n_files             17              8  (11%)             22%
+```
+
+Smooth-ramp metrics that don't form clean cliff-gates but still matter linearly: `total_branches` (cyclomatic proxy), `total_loc`, `max_loc`. Real signals for cost dashboards / monitoring; less suitable for hard threshold gating.
+
+The strongest single cliff is **cross-package imports ≥ 50** — sharpest jump at the threshold ($11 → $26 mean cost). It also directly measures the cost mechanism (each cross-package edge is the agent reading another package's interface). Total imports captures the largest fraction of cost (50%) but has a smoother approach to its cliff.
+
+These cliff metrics are computable at planning time without LLM calls — once the manifest predicts file paths, walking the predicted files in the draft worktree and grepping their import statements produces all the signals.
+
+---
+
+## Per-File Distribution and Ratchet Thresholds
+
+The cliff metrics above are session-aggregates. For per-file quality checks at commit time (a separate lever — see Intervention Implications below), the relevant numbers are per-file distributions across all 171 unique files touched by post-Apr-16 implement sessions:
+
+```
+metric              p50    p75    p90    p95    p99    max
+─────────────────────────────────────────────────────────────
+loc                 149    405    819   1519   3537  10691
+imports               4      8     13     15     20     23
+cross_pkg             2      4      6      8     10     11
+cross_pkg_symbols     2      6     10     13     22     27
+funcs                 1      4      8     12     36     71
+exports               1      3      7     12     22     40
+types                 0      2      6     12     23     41
+branches              6     18     35     60    326    418
+```
+
+Outliers worth naming:
+- `packages/plugins/spider/src/spider.test.ts` — 10,691 LOC, 71 funcs (sic — top by funcs), 27 cross-pkg symbols. Roughly the size of the entire framework on April 3.
+- `packages/plugins/spider/src/static/spider-ui.test.ts` — 1,519 LOC, **71 funcs** (the actual top by funcs), 0 exports.
+- `packages/plugins/spider/src/spider.ts` — 3,258 LOC, 36 funcs, 9 cross-pkg lines.
+- 7 of the top 10 cross-package-coupled files are `*.test.ts`. Test fixtures legitimately import from packages they exercise, but the concentration suggests test-helper consolidation could shrink the per-test symbol footprint without changing test behavior.
+
+For per-file ratchet thresholds, **p95 is a reasonable cut** — by definition only ~5% of touched files sit above the threshold today, so almost all commits stay below without effort, and any commit pushing a file *into* the top 5% triggers the check.
+
+---
+
 ## Intervention Implications
 
 Updated ranking for the interventions umbrella (`c-modxx4nj`):
@@ -187,7 +237,63 @@ Concrete implementation: at the sage-writer or `spec-publish` stage, regex-extra
 
 A 15-pred bound would catch ~75% of the 20+-actual sessions. The remaining ~25% slip through with predicted 10–14 that ended up actual 20+ — those would benefit from a **runtime check inside the implement engine** (if actual files-touched grows past N, halt and ask), but that's a follow-on if the planning gate alone isn't enough.
 
-**Estimated impact:** the 8 sessions above the cliff in this dataset accounted for $217 of $568 total cost (38%). A gate that prevented those from running as single commissions — instead splitting them into 2–3 smaller ones each — would not eliminate that work but would distribute it across cheaper sessions. Best case savings ≈ 25–35% of total implement cost; worst case (poor decomposition by patron) ≈ flat or negative.
+**Three-tier metric evolution** (click `c-moe1tb5k`): the gate metric can sharpen over time without changing the architecture.
+
+```
+v0   predicted_files >= 15            captures 22% of cost   (regex over manifest)
+v1   predicted_imports >= 80          captures 50% of cost   (+ grep imports)
+v2   predicted_cross_pkg >= 50        captures 36% of cost   (+ filter @shardworks/*)
+```
+
+Each version uses the same machinery — extract path list from the manifest, then read predicted files from the draft worktree. v0 is operationally simplest. v1 captures the largest cost fraction. v2 has the sharpest cliff and most directly measures the cost mechanism. Suggested progression: ship v0 enforcing, instrument v1 and v2 as observers (compute and log but don't gate), validate cliff thresholds in production, then convert the strongest observer to enforcing or compose them.
+
+**Estimated impact:** the 8 sessions above the v0 cliff in this dataset accounted for $217 of $568 total cost (38%). A gate that prevented those from running as single commissions — instead splitting them into 2–3 smaller ones each — would not eliminate that work but would distribute it across cheaper sessions. Best case savings ≈ 25–35% of total implement cost; worst case (poor decomposition by patron) ≈ flat or negative.
+
+### 2. Commit-time complexity ratchet (NEW; click `c-moe1zydb`)
+
+Complementary to the planning gate. Where the planning gate prevents *expensive commissions* from running, the commit ratchet prevents *expensive-making changes* from landing. Implemented in the review engine: after implement commits, before seal merges, the reviewer computes per-file metrics on touched files and fails review if any file's metric exceeds threshold *and* the change made it worse. Files already over threshold are grandfathered until refactored — only the direction of change is gated.
+
+Threshold candidates from the per-file p95 distribution above:
+
+```
+file_LOC          > 1,500    (or 2,500 if more permissive)
+imports per file  > 15
+cross_pkg lines   > 8
+cross_pkg symbols > 13
+funcs per file    > 12
+exports per file  > 12
+types per file    > 12
+```
+
+Ratchet semantics: a commit that *reduces* a metric is always allowed, even on legacy files. A commit that *grows* a metric is allowed if the file stays below threshold afterward. A commit that grows a metric on a file already above threshold is rejected. New files are gated against the absolute threshold.
+
+This is a structural-debt prevention layer — won't cure existing debt but stops further accumulation. Pairs with file-level simplification work (below) which actively reduces existing debt.
+
+### 3. File-level simplification targets (NEW; click `c-moe1ym8p`)
+
+Three concrete, well-scoped refactors surface from the per-file audit:
+
+- **Split `spider/src/spider.test.ts`** (10,691 LOC, 27 cross-pkg symbols) into per-feature test files (dispatch / rigs / pieces / retry / rate-limit). Smaller per-touch blast radius for any spider-related commission.
+- **Split `spider/src/static/spider-ui.test.ts`** (71 funcs in 1,519 LOC). High function density, candidate for breaking by tested UI surface.
+- **Split `spider/src/spider.ts`** (3,258 LOC, 36 funcs). Foundation for the larger spider decomposition (`c-moe0m87q`); even partial splits help.
+
+Test-fixture consolidation across the broader test corpus is a separate pass — the per-test cross-pkg symbol footprint can likely shrink with shared helpers.
+
+### 4. Task-count cap at 6 (existing `c-modxxyfz`)
+
+Coarser proxy for the same mechanism. Tasks correlate with files (each adds ~2–3k chars and a few files), and the cliff in the task-count distribution (cost mean $6.74 at 6 tasks → $17.68 at 7 tasks) maps cleanly to the predicted-files cliff. Operationally simpler than the predicted-files gate (count integers, not regex-extract paths), but less precise — a 6-task spec can still touch 20 files if the action descriptions are broad.
+
+### 5. Animator simplification (NEW; click `c-moe0m38e`)
+
+Top per-LOC density in the dataset. Halving its cost-per-LOC to the average rate would save ~$0.018/LOC → $0.010/LOC across animator-touching sessions. Not the biggest dollar lever (small footprint), but the highest-leverage simplification target by complexity-density. Worth a 1–2-hour read of `packages/plugins/animator/src/` to identify whether the cost is in the state machine, the subprocess plumbing, or the transcript I/O.
+
+### 6. Spider decomposition (NEW; click `c-moe0m87q`)
+
+Volume hotspot: 34% of sessions touch spider. Per-LOC is average but aggregate is largest ($138 attributed). Splitting spider into spider-core / spider-rigs / spider-state would reduce blast radius for most substrate work — a commission affecting rig templates wouldn't need to read the dispatch loop. Lower priority than animator (structural surgery vs targeted refactor) but high aggregate potential.
+
+### 7. Cross-package coupling audit (NEW; under `c-moe1il6j`)
+
+A non-LLM analysis: build the import graph across all packages, rank packages by inbound cross-package edges (most "imported from") and outbound cross-package edges (most "imports from"). The intersection of high-inbound and high-outbound is the over-coupled core. Gives a ranked refactor backlog for boundary-tightening work. Cheap to compute (parse imports, build graph) and produces a concrete list of "where to invest in encapsulation."
 
 ### 2. Task-count cap at 6 (existing `c-modxxyfz`)
 
