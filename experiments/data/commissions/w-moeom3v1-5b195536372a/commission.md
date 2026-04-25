@@ -1,0 +1,3 @@
+`packages/plugins/lattice/src/types.ts:74` declares `context: Record<string, unknown>` with no size limit. This commission's `attemptsSummary` is bounded by retry maxAttempts (typically 2-3 entries), but a future emitter could write a 10MB payload by accident. Stacks may have its own limit but the Lattice contract doesn't surface one.
+
+Follow-up: consider adding a soft byte-size cap in `LatticeApi.emit` (e.g. 32KB warn, 256KB hard reject) and documenting it. Not load-bearing for engine-retry-exhaustion (payload is small) but a reasonable hardening when extending the substrate.
