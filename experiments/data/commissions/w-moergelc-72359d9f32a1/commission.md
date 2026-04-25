@@ -1,0 +1,5 @@
+`packages/plugins/astrolabe/src/tools.test.ts:80-82` carries a comment that says `// astrolabe's start() now calls clerk.registerWritType(...) for piece and observation-set, so the test harness must surface a stub that absorbs those calls.` The actual code at `astrolabe.ts:424-425` calls `clerk.registerWritType(STEP_CONFIG)` and `clerk.registerWritType(OBSERVATION_SET_CONFIG)` — the rename from `piece` to `step` already shipped, but the comment was not updated.
+
+**Tactical fix:** Update the comment to read `// astrolabe's start() now calls clerk.registerWritType(...) for step and observation-set, so the test harness must surface a stub that absorbs those calls.`
+
+No behavioral change. One-line comment edit. Out of scope for the cartograph commission, but worth a follow-up so the comment doesn't mislead the next reader who searches for `piece` in astrolabe.
