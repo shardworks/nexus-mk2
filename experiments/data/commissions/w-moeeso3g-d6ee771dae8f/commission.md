@@ -1,0 +1,5 @@
+`packages/plugins/claude-code/src/index.ts` `cancel()` (around line 137) uses `console.warn(\`[claude-code] Unknown cancelHandle kind: ${kind}\`)` for unknown-kind diagnostics. `packages/plugins/claude-code/src/babysitter.ts` and `detached.ts` use `process.stderr.write(...)` everywhere (e.g. babysitter MCP-proxy diagnostics, fatal-error path, retry-failure messages).
+
+The two paths emit at slightly different levels and with different formatting. After `redirectStderrToFile` runs in the babysitter, both end up in the same per-session log file — but the `console.warn` in `index.ts` runs in the *parent* (the guild process), where it goes to whatever stderr the guild has at that moment. The mixed style is a small reading cost (the next editor must check which to use) and a small operability cost (the guild's own log gets the `console.warn` whereas the babysitter's log gets the `process.stderr.write` lines).
+
+Fix: pick one (likely `process.stderr.write` with a `[claude-code]` prefix to match the babysitter style) and convert the single `console.warn` site. Small one-file commission.
