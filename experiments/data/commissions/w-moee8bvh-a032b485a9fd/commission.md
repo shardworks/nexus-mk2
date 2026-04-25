@@ -1,0 +1,7 @@
+The README's `## Startup Routines` section enumerates 5 stages (eager pause-state read → DLQ drain → eager pause reconciliation → downtime credit → heartbeat reconciliation → guild self-heartbeat). The actual `animator.ts` `start()` runs more than that:
+
+- The README omits step 4 in the implementation: `cleanupLegacyStatusBook(g.home, dispatchStatusBook)` (`animator.ts:875`), the one-shot migration that drops the orphan `books_animator_status` SQLite table left behind by an old commit. Best-effort, idempotent, but it's a real boot-time side-effect.
+- The README omits the `setEmitter({...})` registration (`animator.ts:887`) that lets `handleSessionRecord` fire `session.ended` / `session.record-failed` without re-resolving `guild()`. This is load-bearing for any DLQ'd terminal that fires through `handleSessionRecord` during boot.
+- The README's stage numbering disagrees with the source: README starts at §0 ("Eager pause-state read") through §5 ("Guild Self-Heartbeat"); the source has more stages.
+
+Update `packages/plugins/animator/README.md` § Startup Routines so the documented sequence matches the implementation and the legacy-cleanup step is explicit. While in there, decide whether `cleanupLegacyStatusBook` deserves a deprecation note ("slated for removal once all installs have rolled past commit 6cb832a") so a future reader can rip it out without re-discovering the rationale.
