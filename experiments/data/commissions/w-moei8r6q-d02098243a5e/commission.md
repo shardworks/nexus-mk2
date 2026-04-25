@@ -1,0 +1,3 @@
+Per-apparatus tests (`packages/plugins/oculus/src/oculus.test.ts`, `packages/plugins/clockworks/src/clockworks.test.ts`) call `plugin.apparatus.stop?.()` directly on isolated fixtures. The full ordering invariant (Stacks closes after Oculus, etc.) is currently untested anywhere — a regression in the start-loop's `startedApparatuses` ordering would silently produce a wrong shutdown order today.
+
+This observation is partially addressed by S5 of this commission, but a follow-up concern is whether the shutdown-ordering test should be a per-plugin convention (each apparatus test asserts 'I stop before my dependency') or centralized in `arbor.test.ts`. A short conventions note would help future apparatus authors.
