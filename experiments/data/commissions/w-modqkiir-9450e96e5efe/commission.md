@@ -1,0 +1,5 @@
+**Site:** `packages/framework/cli/src/commands/plugin.ts` pluginInstall/Remove run outside any guild runtime. This commission's D8 selected the bootstrap-guild emission strategy: at the end of an install, call createGuild() to start every apparatus just to emit one event.
+
+**Why this matters now:** Bootstrap-guild emission incurs a real cost — every apparatus in the guild starts (Stacks initializes the database, Clerk runs its one-shot migrations, Animator runs orphan-recovery, Spider scans rigs, etc.) just so the install command can write a single `tool.installed` row. For a guild with many apparatuses this could add seconds to the install command.
+
+**Suggested follow-up:** Once Clockworks daemon (Phase 2) lands, evaluate whether `tool.installed` could instead be deferred and emitted on the daemon's next pass. The bootstrap-guild path is correct under the current model; the alternative needs the daemon to exist.
