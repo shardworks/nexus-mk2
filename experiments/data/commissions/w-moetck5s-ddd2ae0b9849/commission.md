@@ -1,0 +1,5 @@
+`packages/plugins/clockworks/src/standing-order-validator.ts` enforces an allowlist of top-level keys for the other half of `ClockworksConfig`, but no parallel validator covers `EventDeclaration`. Today an operator can write arbitrary keys on a value object under `clockworks.events` (e.g. `{ "code.reviewed": { description: "...", fooTypo: 1 } }`) and the apparatus loads silently — nothing reads the value at all.
+
+This is out of scope for the schema-field cleanup (recorded as D3=no-validator above) but worth a follow-up writ: if and when validation is wanted, the right shape is an `event-declaration-validator.ts` mirroring the `standing-order-validator.ts` allowlist pattern. Both surfaces that consume `clockworks.events` (`packages/plugins/clockworks/src/tools/signal.ts:60` and the CLI's hand-written mirror at `packages/framework/cli/src/commands/signal.ts:156`) would need to call it, with structurally-equivalent error messages — same dual-surface contract the standing-order validator and the signal validator already maintain.
+
+Not blocking; not noticed previously because it has never failed loud.
