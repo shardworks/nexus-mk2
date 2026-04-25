@@ -1,0 +1,6 @@
+`docs/architecture/clockworks.md` is the spec source for this commission, but two snippets in it still use `summon:` sugar that task 4 removed:
+
+- Lines 211–212 show the SOF payload example `standingOrder: { on: "commission.failed", summon: "steward" }`.
+- Line 264 in the `guild.json` Shape sample lists `{ on: "commission.failed", summon: "steward" }` and `{ on: "standing-order.failed", summon: "steward" }` as canonical examples.
+
+Sibling commission `w-modf69vg` (Refresh Clockworks architecture doc) already plans to rewrite the standing-order shape sections, drop the `summon:` sugar discussion entirely, and refresh the `guild.json` Shape block. The two snippets above are inside its declared scope; this observation exists only to make sure the SOF payload example specifically gets touched (its inclusion is implicit in the brief but not enumerated). Suggest: when the doc-refresh implementer reaches the Error Handling section, rewrite the `standingOrder` field of the example to `{ on: "commission.failed", run: "summon-steward" }` (or whatever role-summon relay name ships).
