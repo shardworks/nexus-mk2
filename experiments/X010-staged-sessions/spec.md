@@ -125,20 +125,18 @@ beat decomposed dramatically (0.38× billed cost, 0.29× turns, clean seal).
 The conclusion holds for that scale, but the regime has since shifted in
 a way that re-opens H4 (the threshold question, currently parked).
 
-**What changed.** Two commits on Apr 16-17 changed implement engine
-behavior:
+**What changed.** Commit `920e65ca` (Apr 16) — sage-writer began
+emitting a `<task-manifest>` XML block, and the implement
+EXECUTION_EPILOGUE was rewritten to require task-by-task work with a
+verify command and commit per task. This turned a bounded single-pass
+session into an iterative multi-task loop. (A paired Apr 17 commit
+`260f5cf9` inlined click content into briefs and was initially
+suspected as a second driver, but empirical brief-size measurement
+ruled it out for implement — see the cost analysis artifact.)
 
-- `920e65ca` (Apr 16) — sage-writer began emitting a `<task-manifest>`
-  XML block; implement EXECUTION_EPILOGUE was rewritten to require
-  task-by-task work with a verify command and commit per task.
-- `260f5cf9` (Apr 17) — sage-writer began inlining full click content
-  into specs, producing longer richer prompts that fed forward into
-  implement.
-
-Together these turned a bounded single-pass session into an iterative
-multi-task loop. Average implement session lengths roughly doubled
-(77 → ~150 turns), and avg cost grew 13× across April (~$0.65 → $8.56)
-with cache-read tokens growing 18×. Full analysis:
+Average implement session lengths roughly doubled (77 → ~150 turns),
+and avg cost grew 13× across April (~$0.65 → $8.56) with cache-read
+tokens growing 18×. Full analysis:
 [`../X011-context-debt/artifacts/2026-04-25-implement-cost-analysis.md`](../X011-context-debt/artifacts/2026-04-25-implement-cost-analysis.md).
 
 **Why this matters for X010.** The H1 baseline tested ~77-turn sessions

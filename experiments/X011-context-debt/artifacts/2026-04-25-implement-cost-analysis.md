@@ -86,9 +86,18 @@ This turned a bounded single-pass session into an iterative multi-task loop.
 ### Commit 2: `260f5cf9` — Apr 17 17:01
 **"sage-writer: inline click content, do not preserve ids in the brief"**
 
-Paired with `da0e460` granting sage roles `ratchet:read`. The sage-writer now resolves every click reference in the brief/decisions (`click-extract`, `click-show`) and inlines the full rationale into the spec, making the planning output and the `writ.body` substantially larger and more detailed.
+Paired with `da0e460` granting sage roles `ratchet:read`. The sage-writer now resolves every click reference in the brief/decisions (`click-extract`, `click-show`) and inlines the rationale into its own prose rather than preserving click IDs as dead pointers.
 
-This fed forward into implement sessions (especially via `${yields.plan-finalize.spec}` in the plan-and-ship rig, introduced Apr 18-19), producing longer and richer prompts for the implementer.
+**Empirical result: not a significant driver of implement session cost.** Brief body sizes measured before and after:
+
+| Period | n (substantial briefs >3k) | avg body chars |
+|---|---|---|
+| Apr 10–15 (pre) | 32 | ~8,400 |
+| Apr 17–18 (post) | 8 | ~9,600 |
+
+No meaningful growth. Most commissions before Apr 17 didn't embed dense click-ID references in their source material — the sage-writer was producing self-contained prose already. The inlining instruction changed the working *method*, not the output volume.
+
+**Where this commit does add cost:** in the *planning session* itself (sage-writer calls `click-extract` / `click-show` multiple times during its own session). This inflates planning rig costs, not implement rig costs. Not the subject of this investigation.
 
 ---
 
