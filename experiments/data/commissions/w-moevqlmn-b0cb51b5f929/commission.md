@@ -1,0 +1,5 @@
+The parent observation set (`w-moe4ry0m`) already contains writ `w-moe4rymt`: *"Daemon coexistence warning in `nsg clock run` may cause noisy stderr in CI / scripted use."* This commission's S3 reworks the same warning text. If both commissions land independently, the second one re-rewords text the first one shipped, producing churn.
+
+The two are compatible: a tighter contract sentence (this commission) should also be *quieter* (the CI-noise commission). A coordinated rewrite that satisfies both — a one-line warning that names the contract precisely AND can be silenced via `NSG_QUIET=1` or a `--quiet` flag — would land cleaner than two sequential rewrites.
+
+Follow-up scope: when curating either writ, cross-link with the other and prefer combining their work into a single CLI commission. No code change here — just curator coordination.
