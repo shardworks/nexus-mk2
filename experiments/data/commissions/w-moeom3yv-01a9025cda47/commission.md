@@ -1,0 +1,3 @@
+`docs/architecture/apparatus/reckoner.md:347-349` and the README list `reckoner.writ-cancelled` as an explicit open question — patron-initiated cancellations produce no pulse today. This is orthogonal to engine-retry-exhaustion but related: when an engine-retry-in-progress rig is cancelled (operator action), no pulse fires today, and the patron may not realize automatic recovery was abandoned mid-flight.
+
+Follow-up: consider adding a `reckoner.writ-cancelled` trigger that fires on mandate-root cancellations (analogous to writ-failed but for the cancelled phase). Out of scope for this commission; the brief explicitly scopes engine-retry-exhaustion only. Worth recording so the gap doesn't disappear.
