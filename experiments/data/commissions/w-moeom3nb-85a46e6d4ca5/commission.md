@@ -1,0 +1,3 @@
+Today, when a Discord channel encounters an unknown `triggerType`, `contextFields` falls back to emitting one field per context key (`channel.ts:114-118`). This is undocumented in the lattice-discord README. New emitters that ship before the channel updates will get this generic rendering — likely fine but not contractually guaranteed.
+
+Follow-up: add a 'fallback rendering' note to `lattice-discord/README.md` explaining what unknown trigger types render as and what's NOT guaranteed (color, field ordering, truncation). This is a one-paragraph doc update, not load-bearing for this commission.
