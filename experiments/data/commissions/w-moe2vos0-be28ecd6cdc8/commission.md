@@ -1,0 +1,5 @@
+Decision D12 hardcodes `clerk.transition(writId, 'failed', { resolution })` inside the summon relay. That works for mandate; for plugin-defined writ types whose terminal-failure state is named differently, the call throws (per the writ-type validator's reachability rules in clerk.ts).
+
+A narrow-scoped helper — e.g. `clerk.failWrit(writId, resolution)` — that resolves the writ's type config and picks the first terminal state with `attrs.includes('failure')`, then transitions, would let the summon relay (and any future policy plugin like `clockworks-retry`) target the right state without each caller hardcoding `'failed'`. The helper aligns with Three Defaults #3 (`extend the API at the right layer; don't route around it`).
+
+Out of scope for this brief, but would let task 9's error-handling work and any future writ-type-aware retry policy reuse the same primitive.
