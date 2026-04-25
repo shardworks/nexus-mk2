@@ -1,0 +1,5 @@
+`docs/architecture/clockworks.md` L190–212 (Phase 2 daemon section) describes the per-tick poll loop in terms of `processEvents` only. The shipped daemon (`packages/plugins/clockworks/src/daemon.ts` L504–536) runs `processSchedules` first on every tick, then `processEvents` (commission decision D18, surfaced in README L196–198). This is operator-visible: a scheduled relay that emits new events lands them in the events book during the scheduler pass; the same tick's event-processing pass picks them up, so cascade latency is one tick rather than two.
+
+The in-progress doc-refresh commission (`w-modf69vg`) de-scopes restructuring the Phase 2 daemon prose. The new Scheduled Standing Orders section (per that commission's brief) will mention the scheduler pass briefly, but the Phase 2 section's own prose stays event-only.
+
+Follow-up commission should add one paragraph (or one bullet to the existing per-dispatch-line description) noting the scheduler-first / events-second pass order. Two-to-three sentences; trivial scope.
