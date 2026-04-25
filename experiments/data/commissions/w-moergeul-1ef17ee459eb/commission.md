@@ -1,0 +1,5 @@
+Brief explicitly notes Reckoner integration is out of scope. The Reckoner (per `c-mod9a54n` and follow-on clicks) plans to walk active visions/charges/pieces and dispatch petitions for under-served leaves. With cartograph shipping the typed substrate, the Reckoner can begin reading the ladder.
+
+**Tactical fix (separate commission):** Reckoner plugin imports `@shardworks/cartograph-apparatus`, walks the visions book filtered by stage='active', drills down through charges and pieces via `clerk.tree({ rootId: visionId, type: ['charge', 'piece', 'mandate'] })`, generates petition writs for under-served leaves. Likely also adds the `cartograph.lifted-from`-style link kind for provenance from petition mandate back to the originating piece.
+
+Trigger: scaffold commission completes; vision-keeper agent runtime is at least far enough along to populate the ladder with real data.
