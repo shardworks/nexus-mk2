@@ -1,5 +1,5 @@
 ---
-status: draft
+status: ready
 ---
 
 # X011 — Context Debt
@@ -17,6 +17,19 @@ The agent partially mitigated this itself (`npm install 2>&1 | tail -10`) but th
 ## Hypothesis
 
 A significant fraction of context window usage (and therefore cost) comes from tool output that is consumed once and never referenced again. Providing agents with output-controlled execution tools — commands that suppress output on success, truncate to N lines, or summarize results — would reduce context growth without reducing agent effectiveness.
+
+## Prior Evidence (motivation)
+
+The April 25 implement-engine cost analysis ([`artifacts/2026-04-25-implement-cost-analysis.md`](artifacts/2026-04-25-implement-cost-analysis.md)) is the strongest motivating data we have for this experiment. Across April, implement-engine session cost grew ~13× (avg $0.65 → $8.56). Decomposition of token categories:
+
+- Cache-read tokens: 668k → 11,934k avg/session (~18×)
+- Output tokens: 8k → 50k avg/session (~6×)
+
+Cache-read growth dominated cost growth. The mechanism is exactly what X011 hypothesizes at session scale: every additional turn re-reads the entire accumulated conversation history, and the conversation history has grown — partly because of structural changes (the Apr 16 task manifest forcing iterative verify cycles) and partly because tool output and intermediate work are not pruned.
+
+The April analysis does not isolate "dead tool output" as a fraction of the cache-read total — it observes the aggregate effect. X011 proposes the targeted measurement: of the cache-read volume each turn re-pays, how much is referenced again vs how much is dead weight that could be summarized, truncated, or quietly suppressed?
+
+Related click: `c-modxwx8c` (root cost-analysis click) — see also its `verify-as-separate-rig` and `bound-manifest-body` recommendations, which are independent levers for the same cost mechanism.
 
 ## Possible Approaches
 

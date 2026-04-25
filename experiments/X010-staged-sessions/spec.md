@@ -118,6 +118,59 @@ This is the synthesis hypothesis — it depends on the findings from H1, H2, and
 - **Depends on commission type:** Feature additions hand off cleanly; deep refactors don't. The mechanism is useful but not universal — needs guidance on when to use it.
 - **Just write smaller commissions:** The real lesson is that the patron (or sage) should decompose work into smaller independent commissions rather than using staging. Each commission is self-contained, merges independently, and doesn't need a handoff mechanism. Staging is overengineered; the answer is better task decomposition.
 
+## Addendum (Apr 25, 2026) — Post-Manifest Regime Change
+
+H1 was concluded falsified at the Oculus-page scale on Apr 16: monolithic
+beat decomposed dramatically (0.38× billed cost, 0.29× turns, clean seal).
+The conclusion holds for that scale, but the regime has since shifted in
+a way that re-opens H4 (the threshold question, currently parked).
+
+**What changed.** Two commits on Apr 16-17 changed implement engine
+behavior:
+
+- `920e65ca` (Apr 16) — sage-writer began emitting a `<task-manifest>`
+  XML block; implement EXECUTION_EPILOGUE was rewritten to require
+  task-by-task work with a verify command and commit per task.
+- `260f5cf9` (Apr 17) — sage-writer began inlining full click content
+  into specs, producing longer richer prompts that fed forward into
+  implement.
+
+Together these turned a bounded single-pass session into an iterative
+multi-task loop. Average implement session lengths roughly doubled
+(77 → ~150 turns), and avg cost grew 13× across April (~$0.65 → $8.56)
+with cache-read tokens growing 18×. Full analysis:
+[`../X011-context-debt/artifacts/2026-04-25-implement-cost-analysis.md`](../X011-context-debt/artifacts/2026-04-25-implement-cost-analysis.md).
+
+**Why this matters for X010.** The H1 baseline tested ~77-turn sessions
+against decomposed alternatives at that scale. Today's implement
+sessions habitually run at ~150 turns and frequently more — closer to
+the regime H4 anticipated. The "long sessions are cheaper" finding may
+not generalize to this regime, because:
+
+- Cache-read amplification is super-linear in session length
+  (every turn pays for re-reading all prior turns).
+- The orientation-tax-pays-once advantage of monolithic shrinks as
+  the cache-read tax compounds.
+- Auto-compaction (the gracefully-handled context ceiling observed in
+  the H1 baseline) costs ~4 turns of orientation each time it fires
+  — a real but bounded toll.
+
+**Candidate H4 answer.** Click `c-modxxtu6` proposes a
+checkpoint-and-fresh-session architecture: end the implement session
+after each task commit, start a fresh one with a compact handoff
+(git log + manifest progress + active-task pointer). Each session's
+cache starts small and doesn't compound. With a 5-task manifest this
+plausibly looks like 5 × $1 instead of 1 × $8 — a different staging
+shape than the rig-decomposition tested in H1, and one that exploits
+the manifest's existing task structure as the natural handoff
+boundary.
+
+**Implication for the experiment.** H4 is currently parked. A reasonable
+unpark trigger is: if `c-modxxtu6` reaches design or prototype, it
+becomes a natural H4 variant to measure (single-session vs.
+manifest-checkpointed). The H1 result is not invalidated; the regime
+that generated it has narrowed.
+
 ## Procedure
 
 ### Phase 1 — Cost Curve Analysis (H1)
