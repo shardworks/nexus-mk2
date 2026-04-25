@@ -1,0 +1,5 @@
+`docs/architecture/index.md:199` introduces the apparatus example block with `// @shardworks/clockworks — the guild's event-driven nervous system`. The actual published package is `@shardworks/clockworks-apparatus` (verified `packages/plugins/clockworks/package.json:2`). The `-apparatus` suffix is the descriptor that `derivePluginId` strips to produce the plugin id, but the package-name itself includes the suffix.
+
+This is a doc/code mismatch on package naming, distinct from the `nexus-clockworks` plugin-id concern that this mandate targets (D5 selected `no-change`). Other apparatus docs handle this correctly — e.g. `clerk.md:5` `Package: @shardworks/clerk-apparatus · Plugin id: clerk`.
+
+Fix: change the comment to `// @shardworks/clockworks-apparatus — the guild's event-driven nervous system` (or rewrite the section header in clerk.md style if the document layout supports it). Trivial single-line edit.
