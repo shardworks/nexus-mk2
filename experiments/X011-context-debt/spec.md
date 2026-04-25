@@ -29,7 +29,16 @@ Cache-read growth dominated cost growth. The mechanism is exactly what X011 hypo
 
 The April analysis does not isolate "dead tool output" as a fraction of the cache-read total — it observes the aggregate effect. X011 proposes the targeted measurement: of the cache-read volume each turn re-pays, how much is referenced again vs how much is dead weight that could be summarized, truncated, or quietly suppressed?
 
-Related click: `c-modxwx8c` (root cost-analysis click) — see also its `verify-as-separate-rig` and `bound-manifest-body` recommendations, which are independent levers for the same cost mechanism.
+A follow-on Apr 25 deep-dive ([`artifacts/2026-04-25-cost-density-and-cliffs.md`](artifacts/2026-04-25-cost-density-and-cliffs.md), n=74 implement sessions joined to seal-commit diffs) refined the picture further:
+
+- **Files-touched is the single strongest cost predictor** (Pearson +0.81 vs cost) — beats spec size, beats task count, beats churn-LOC.
+- A clear cost cliff sits at ~20 actual files / ~15 predicted files: 11% of sessions above the cliff account for ~38% of total post-Apr-16 implement cost.
+- Per-package cost density splits into three patterns: volume hotspots (spider, clerk, astrolabe — 25-34% of sessions, average per-LOC), density hotspots (animator, claude-code — small footprint, 2× per-LOC), and cheap packages (ratchet, clockworks, lattice — half the per-LOC rate).
+- Per-LOC cost varies 340× across the population — most of the spread is exploration cost, the agent reading the codebase to make a small change.
+
+The full investigation arc, including refuted intervention hypotheses and the methodological lessons, is documented as a case study at [`docs/case-studies/2026-04-25-implement-cost-investigation.md`](../../docs/case-studies/2026-04-25-implement-cost-investigation.md).
+
+Related clicks: `c-modxwx8c` (root cost-analysis), `c-modxx4nj` (interventions umbrella with the predicted-files-gate, animator-simplification, and spider-decomposition candidates), `c-modzr9w0` (project complexity measurement direction), `c-modzrgiu` (cost-drift sentinel under Stage 2 self-correction).
 
 ## Possible Approaches
 
