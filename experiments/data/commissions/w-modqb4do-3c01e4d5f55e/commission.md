@@ -1,0 +1,3 @@
+The brief's 'Out of Scope' section explicitly excludes introducing the planning-layer `piece` (the recursive decomposition node above mandate). After this rename ships, the term `piece` will be free in the writ-type registry. There is currently no commission writ for the planning-layer piece registration (vision/feature/piece writ types under c-mod53o6h are still being designed).
+
+Follow-up: file a commission to introduce the planning-layer `piece` writ-type registration, attaching it to the c-mod53o6h subtree once the parent design (`c-modeor2d`, naming, and `c-modee69x`, packaging) concludes. The commission should also clarify whether `piece` is contributed by Astrolabe (peer to the renamed `step`) or by a new vision/product apparatus.
