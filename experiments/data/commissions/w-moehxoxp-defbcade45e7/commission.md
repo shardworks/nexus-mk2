@@ -1,0 +1,3 @@
+Spider's `failEngine` wraps the rig patch and the writ status-slot write in a single outer `stacks.transaction()` so the rigs→writs CDC cascade and the status-slot write coalesce into one Phase 2 event (see `clockworks-retry/src/clockworks-retry.test.ts:200-212` test helper). The proposed rescue tool's per-writ apply path does the same two writes (`transition` + `setWritStatus`). Confirm at implementation time that wrapping them in a `stacks.transaction()` is the right contract, or whether per-call atomicity is sufficient.
+
+If wrapping is required, document the rationale in the tool's source so a future maintainer doesn't strip the wrapper while refactoring.
