@@ -1,0 +1,5 @@
+`docs/architecture/clockworks.md` L95 currently shows `{ "on": "book.nexus-ledger.writs.updated", "run": "audit-writ-changes" }` as an example of binding to a CDC-auto-wired event. The actual emitted plugin id for the writs book is `clerk` (per `packages/plugins/clockworks/src/clockworks.ts` L432–434, where the event name is composed from `event.ownerId`). The correct example would be `book.clerk.writs.updated`.
+
+The in-progress doc-refresh commission for clockworks.md (`w-modf69vg`) explicitly de-scopes the CDC auto-wiring section ('Sections describing ... book CDC auto-wiring ... can stay as-is'), so this fix is left for a follow-up.
+
+Follow-up should be a one-line edit: change `book.nexus-ledger.writs.updated` to `book.clerk.writs.updated` on L95 of `docs/architecture/clockworks.md`. Trivial scope; could be bundled with obs-2 if a single docs-cleanup commission is opened.
