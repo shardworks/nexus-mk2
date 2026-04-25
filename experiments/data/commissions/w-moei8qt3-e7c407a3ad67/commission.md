@@ -1,0 +1,3 @@
+`packages/plugins/tools/src/instrumentarium.ts:362-389` declares only `start()`; `nsg start --foreground` (`packages/framework/cli/src/commands/start.ts:243-276`) starts the tool HTTP server via `tools.startToolServer(...)` and explicitly closes the returned handle in its SIGTERM path. The handle ownership is genuinely on the caller side today (decision D7 keeps it that way for this commission).
+
+When a future caller wants the apparatus to own the lifecycle (e.g. a non-CLI host that drives shutdown via `guildInstance.shutdown()` and expects 'all servers go down'), Instrumentarium should grow `stop()` that tracks any started server and closes it. Out of scope here because the daemon is the only consumer and it owns the handle, but the asymmetry will surface again.
