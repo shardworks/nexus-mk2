@@ -1,0 +1,3 @@
+`packages/plugins/reckoner/src/reckoner.ts:204-251` houses `alreadyEmitted`, the persisted-pulses-book dedupe guard. The reckoner doc explicitly notes this is emitter-local and 'should be promoted into LatticeApi.emit when a second emitter appears' (`reckoner.md:300-308`). The engine-context enrichment in this commission stays inside the same emitter and reuses the same guard, so no promotion is needed yet — but the deferred work is real.
+
+Follow-up: once a second pulse emitter is introduced (anima completion, coinmaster), promote the dedupe guard into the Lattice's `EmitPulseRequest` contract via an explicit `idempotencyKey` field, and remove the per-emitter guard. Reckoner.md already flags this as the natural follow-up.
