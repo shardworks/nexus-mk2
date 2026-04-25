@@ -1,0 +1,3 @@
+This commission introduces the first bulk-mutation CLI tool. The proposed shape is `writ-rescue-stuck` defaults to dry-run / list-only, with `--apply` to actually mutate. Once landed, document this convention (in `docs/architecture/apparatus/` or a developer guide) so future bulk tools (e.g. observation backfill, rig sweep, stacks compaction) inherit the same default-safe shape rather than each picking their own affordance. Without an explicit convention, drift is likely.
+
+Files to update: a short note in `docs/DEVELOPERS.md` or a dedicated `docs/guides/cli-conventions.md`. Tag the convention with the rescue tool as the precedent.
