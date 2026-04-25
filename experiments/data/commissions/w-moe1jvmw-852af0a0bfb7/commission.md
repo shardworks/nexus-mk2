@@ -1,0 +1,7 @@
+Two reference docs still show `standing-order.failed` wiring with the dropped sugar forms that task 4 removed:
+
+- `docs/reference/event-catalog.md` lines 156–169 (the "Standing Order Wiring" section) documents `summon:` and `brief:` as canonical order types, alongside `run:`. After this commission ships SOF emission, operators reading this doc will copy a wiring example that the standing-order validator rejects at load time.
+- `docs/guides/building-engines.md` line 216 shows the literal example `{ "on": "standing-order.failed", "brief": "steward" }` for the loop-guard wiring example. Same problem.
+- `docs/reference/event-catalog.md` line 67 describes SOF emitter conditions as 'engine throws or anima session fails' — 'engine' is the pre-relay vocabulary; 'anima session fails' implies a separate failure surface that the new summon-relay-as-regular-relay model handles via the relay throwing.
+
+The sibling commission `w-modf69vg` (Refresh Clockworks architecture doc) is scoped to `clockworks.md` only — these two reference docs are explicitly out of its scope. They want their own pass to bring the wiring examples into alignment with `{on, run, with?}`. Tactical detail: rewrite each example to use `run: <relay>` form, drop `brief:`/`summon:` references entirely, and update the SOF condition wording to 'a standing order's relay throws or its name fails to resolve.'
