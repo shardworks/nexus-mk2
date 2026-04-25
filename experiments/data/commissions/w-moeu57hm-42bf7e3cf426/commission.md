@@ -1,0 +1,3 @@
+`SpiderConfig` now exposes three concurrency knobs (`maxEnginesPerRig` default 50, `maxConcurrentEngines` default 3, `maxConcurrentEnginesPerRig` default 1) that gate dispatch in `tryRun` and rig-spawning in `trySpawn`. The Configuration section (lines 791–808) documents only `pollIntervalMs` and `variables`.
+
+This matters for operators tuning a guild for parallel work — the defaults limit the system to one in-flight engine per rig and three across the system. A follow-up commission should add the three fields to the configuration JSON example and a one-line explanation each, plus a note that `tryRun` skips rigs that would exceed either limit (engines stay pending, no error).
