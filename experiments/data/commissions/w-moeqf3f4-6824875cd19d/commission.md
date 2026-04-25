@@ -1,0 +1,9 @@
+The literal capability of *scoping the table to stuck writs only* is not provided by the post-T5 classification filter. Selecting `active` returns both regular `open` and `stuck` mandate writs (and any other registered type's active states); stuck writs are visually distinguished only by `badge--warning` (`packages/plugins/clerk/pages/writs/index.html` lines 266-276; `packages/plugins/clerk/src/writ-presentation.ts` lines 121-128). 
+
+If the guild later wants the operator to focus on "needs-attention" work directly, the right layer is an attrs-based filter at the apparatus boundary:
+
+- Extend `WritFilters` (`packages/plugins/clerk/src/types.ts`) and the underlying `clerk.list`/`clerk.tree` Stacks queries to accept an `attrs?: string | string[]` parameter that intersects against each writ's *current state's* attrs (resolved through the registered `WritTypeConfig`).
+- Surface the param on the CLI tools `writ-list.ts` and `writ-tree.ts` as `--attrs stuck` (repeatable union, mirroring the existing `--phase` / `--classification` shape).
+- On `pages/writs/index.html`, add a small "attrs" affordance — most cheaply a single `Stuck only` toggle next to the State filter bar, or more generally a button per known attr (`success`, `failure`, `cancelled`, `stuck`).
+
+This is type-agnostic (any registered type that uses the `stuck` attr inherits the affordance) and keeps the `phase` query path mandate-narrow as agreed by T5 D9. It is intentionally out of scope for this mandate because the brief pre-empts in favor of no code change; record this as a follow-up for the patron to lift if the visual-only distinction proves insufficient in practice.
