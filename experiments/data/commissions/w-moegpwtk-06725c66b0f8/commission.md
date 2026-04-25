@@ -1,0 +1,8 @@
+Audit Hotspot 3 / cross-cutting observation. `packages/plugins/claude-code/README.md` § Rate-Limit Detection (lines 56–69) describes a **two-branch NDJSON detector** with active `subtype` and `is_error` branches:
+
+> 1. **Structural `subtype`** — `parseStreamJsonMessage` inspects every NDJSON message whose `subtype` contains `rate_limit` / `rate-limit` and emits a tag with `source: 'ndjson-result'`.
+> 2. **Structural `is_error`** — if `msg.is_error === true` and the carried error text matches the rate-limit phrasing regex, the same tag is produced.
+
+The code at `packages/plugins/claude-code/src/index.ts:69–81` is a **one-branch detector** matching only the top-level `error` field, with the JSDoc at lines 30–67 explicitly naming `subtype` and `is_error` as **retired** branches. Tests in `rate-limit-detection.test.ts` assert the retirement (e.g. `'does NOT tag a speculative subtype-only shape (retired — never observed)'`).
+
+Explicitly out of scope for the babysitter-runtime extraction, but flagged in the brief's References for downstream pickup. A small commission to update the README's Rate-Limit Detection section to reflect the one-branch active surface and explain the retirement history (matching the JSDoc) would close the drift. Care: the retirement reasoning is load-bearing for understanding why the detector stays narrow — copy from the JSDoc rather than rewriting from scratch.
