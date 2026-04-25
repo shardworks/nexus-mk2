@@ -1,0 +1,3 @@
+After the engine-retry commission lands, `RigStatus` shrinks to `running | completed | failed | cancelled`, but legacy rigs persisted with `'stuck'` or `'blocked'` linger. Spider's `RigFilters.status` already accepts the legacy strings (`spider/src/types.ts:288-294`), but Oculus rig-list pages may not surface a filter for them. Without a UI affordance, operators have to use the CLI rescue tool to discover affected rigs.
+
+Add a `Legacy stuck` / `Legacy blocked` filter or visual indicator to the Oculus rig-list page (`packages/plugins/oculus`-served Spider page at `packages/plugins/spider/src/static/`) so operators can see legacy clutter even without invoking the rescue tool. Pairs naturally with sibling `w-mod4z7y6` (refresh dashboard badge mappings).
