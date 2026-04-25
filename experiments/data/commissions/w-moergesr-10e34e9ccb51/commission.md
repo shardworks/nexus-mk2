@@ -1,0 +1,5 @@
+Brief D6 explicitly carves the vision-keeper agent runtime out of the scaffold commission. The role file at `packages/plugins/cartograph/vision-keeper.md` ships as a placeholder. Without the runtime, no agent ever launches against the cartograph data layer; the typed API exists only as a contract surface.
+
+**Tactical fix (separate commission):** Design the vision-keeper agent's role instructions (the actual contents of `vision-keeper.md`), add `loom` and `animator` to cartograph's apparatus.requires (per brief D11, 'once the agent runtime lands, loom moves to required'), contribute the role via `supportKit.roles` (mirror astrolabe's sage-* roles wiring), wire a Spider rig template that summons the agent on a schedule or on a writ-type creation event, and decide the agent's tool charter (which write tools it gets and over which books).
+
+Trigger: scaffold commission completes; downstream consumer (Reckoner, sanctum-side instrumentation) demands agent-driven decomposition.
