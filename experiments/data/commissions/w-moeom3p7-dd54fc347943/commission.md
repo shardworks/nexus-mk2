@@ -1,0 +1,3 @@
+`packages/plugins/lattice/src/tools/pulse-show.ts:18-23` returns the raw `PulseDoc`. The CLI prints it via the framework's default JSON renderer. Trigger-specific text rendering (similar to `nsg rig show`'s engine-block) would help patrons reading pulses on the terminal.
+
+Follow-up: add an optional `--format text|json` to pulse-show with a per-trigger text renderer that mirrors what the Discord channel does. This is a quality-of-life improvement, not load-bearing. Easy candidate for a future commission once a second emitter exists or once an additional context shape lands.
