@@ -1,0 +1,5 @@
+The repo root contains a `_plan/` directory (`_plan/00-meta.md` through `_plan/06-clicks.md`) belonging to plan `w-modf696g-466fb615667c` (the scheduled-standing-orders commission), not the current rename commission `w-moera3n9`. The `_plan/00-meta.md` records `status: writing` for that prior plan.
+
+Leftover plan scratch directories at the workspace root are noise: they show up in `grep -r reckoner` (catching `_plan/01-inventory.md` lines 11/160 and `_plan/06-clicks.md` lines 5/8) and obscure the signal in audit-style sweeps. The current Astrolabe pipeline writes plan artifacts to the Plan record (via `inventory-write` / `scope-write` etc.) rather than to a flat-file `_plan/` directory, so the directory's existence is a residue from an earlier plan-storage convention or a draft artifact that wasn't cleaned up.
+
+Follow-up: delete `_plan/` from the repo root, or move plan-artifact storage somewhere out of the grep path. Either fix is one-shot and unblocks future audit sweeps.
