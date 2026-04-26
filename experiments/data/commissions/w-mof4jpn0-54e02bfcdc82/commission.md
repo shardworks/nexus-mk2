@@ -1,0 +1,7 @@
+The framework already has a uniform rule: 'two kits contributing the same identifier is a hard startup error' (`docs/architecture/apparatus/spider.md` §"Plugin-default template and mapping": 'The same fail-loud rule applies to Clerk `writTypes`, Spider `blockTypes`, and Fabricator engine designs — the policy is framework-wide, not Spider-specific.'). Decision D17 in this plan adopts the same rule for petitioner registration.
+
+But each apparatus currently implements the duplicate check independently — Clerk's `registerWritTypeInternal` builds an in-memory `Map` and throws a `[clerk] registerWritType: duplicate writ type …` error; Spider's mapping merge does the same in its kit scan; the new Reckoner will write its own duplicate check too. The error messages, the prefix conventions (`[clerk]`, `[spider]`), and the reporting of contributing-plugin ids are convergent but uncoordinated.
+
+There's a refactoring opportunity to extract a single `kit-collision` validator helper (or a `Registry<TConfig>` with a uniform `register(pluginId, key, config)` and `seal()` API) in `@shardworks/nexus-core` or a small shared package. Each apparatus's registry then becomes a wrapper around that helper. Benefits: identical error messages, single test surface, no risk of silent first-wins/last-wins drift across apparatuses.
+
+Out of scope for this commission, but worth tracking once a third (Reckoner petitioner registry) instance lands.
