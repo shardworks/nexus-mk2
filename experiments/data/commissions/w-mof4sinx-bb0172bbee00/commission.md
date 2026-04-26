@@ -1,0 +1,5 @@
+If D1 lands as `sentinel-apparatus`, the workspace gains a new role-shape vocabulary term — the brief notes future click-staged sentinels (`c-modzrgiu` cost-drift sentinel, `c-moegda00` structural-complexity sentinel) that would form a coherent family. `docs/future/guild-vocabulary.md` is the registry of such terms; today its 'The Reckoner' entry (lines 23–31) describes the queue-observer behavior under that name.
+
+Follow-up: when D1 settles on `sentinel`, add a `Sentinels` family entry to `guild-vocabulary.md` describing the role-shape (a watcher that announces) and listing its members (queue-observer-now-sentinel, plus the two click-staged sentinels). Without that entry, 'sentinel' enters the vocabulary by way of the package name without an explanatory anchor.
+
+Out of scope for this rename commission (the brief is explicit about not updating conceptual prose), but the new vocabulary term will want a home before the second sentinel lands.
