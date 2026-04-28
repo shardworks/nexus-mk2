@@ -1,0 +1,3 @@
+`packages/plugins/spider/src/static/spider.js` tracks `selectedEngineId` independently inside the rig detail view (engine pipeline click handler at line ~1015). Once D13 keeps engine state out of the URL, refreshing the page on a rig URL drops back to the rig overview with no engine selected.
+
+Follow-up: extend the rig deep-link to `?rig=ID&engine=ENGINE_ID` so operators can share a 'this exact engine on this rig' link. Best done after D13's `?rig=ID` shape is in place.
