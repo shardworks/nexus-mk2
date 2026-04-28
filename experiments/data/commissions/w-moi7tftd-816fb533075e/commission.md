@@ -1,0 +1,3 @@
+`packages/plugins/oculus/src/oculus.ts:89-95` resolves boolean query params via `value === 'true'` after coercion — anything else (`'1'`, `'yes'`, `'TRUE'`) becomes `false`. Tools are documented to take booleans but only one input shape is honoured.
+
+Surfaced during inventory; not used by this brief's changes (the new toggles live entirely client-side). Worth a small follow-up to either widen the truthy check (`'true'|'1'|'yes'`) or document the strict contract on the Oculus README.
