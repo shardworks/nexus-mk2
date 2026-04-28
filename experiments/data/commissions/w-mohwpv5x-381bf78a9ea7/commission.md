@@ -1,0 +1,3 @@
+Three apparatuses validate ids of the form `{pluginId}.{kebab-suffix}` against the same pattern: Clerk's link-kinds (`KIND_SUFFIX_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/`), Lattice trigger-types (the brief asserts the same shape — verify in lattice source), and now the Reckoner's source ids. Each currently re-declares the regex inline.
+
+Follow-up: extract a `validateKebabSegmentSuffix(id, contributingPluginId)` helper to `@shardworks/nexus-core`'s public surface. All three sites import it. Reduces drift risk if the framework ever decides to allow nested-dot suffixes or other relaxations. Bundle with a small refactor in clerk.ts and the lattice grammar.
