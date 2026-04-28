@@ -1,0 +1,5 @@
+The schedule table is built once at `start()` (`clockworks.ts:645–668`) and cannot be edited without an apparatus restart. With kit-contributed schedules entering the same table, the same constraint applies: a kit ships `@every 60s`, the operator finds it noisy, and the only way to change it is to recompile the kit or restart the guild after editing operator-overlay config (which doesn't actually override kit entries per the additive merge rule).
+
+The pre-existing observation in the brief (`docs/architecture/clockworks.md`, line 172: 'Operators editing schedule entries in guild.json must restart the apparatus for the change to take effect') only intensifies once kit-contributed schedules ship. Worth a future commission to support hot-reload of the schedule table, or at minimum a documented `nsg clock reload` operator surface that re-seeds the table without a full apparatus restart.
+
+Affects `packages/plugins/clockworks/src/clockworks.ts` schedule-seed loop and `packages/plugins/clockworks/src/scheduler.ts` (the in-memory `schedule` array's mutability assumptions).
