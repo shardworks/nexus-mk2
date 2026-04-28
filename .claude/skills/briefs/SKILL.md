@@ -52,7 +52,7 @@ The line is intent vs how-to, not test/no-test or criteria/no-criteria.
 **Default: post the brief directly as a draft-phase writ.** No scratch files, no editor dance. Sean reviews the draft in Oculus; if it needs changes, iterate via `nsg writ edit` (or re-post and cancel the old draft). The draft-phase writ is the reviewable surface.
 
 ```bash
-./bin/commission.sh --codex <codex> --draft [--complexity N] -- 'body text here'
+./bin/commission.sh --codex <codex> --draft -- 'body text here'
 ```
 
 The body is the full brief, including its markdown. The title is extracted from the first line (the `# Title` heading).
@@ -120,19 +120,18 @@ When drafting, do the grep before handing the brief to Sean: `grep -n '\.scratch
 
 Use `bin/commission.sh` from the sanctum:
 
-    ./bin/commission.sh --codex <codex> [--draft] [--complexity N] -- 'body text...'
+    ./bin/commission.sh --codex <codex> [--draft] -- 'body text...'
 
 Or, when a scratch file exists (offline-review exception):
 
-    ./bin/commission.sh --codex <codex> [--draft] [--complexity N] -- @.scratch/brief-<slug>.md
+    ./bin/commission.sh --codex <codex> [--draft] -- @.scratch/brief-<slug>.md
 
 - `--codex` is required. Common values: `nexus` (the framework). Ask Sean if uncertain.
 - `--draft` creates the writ in draft phase (does not dispatch until published). See "Draft phase vs immediate dispatch" above for when to use it.
-- `--complexity` is the patron's dispatch-time estimate on the Fibonacci scale (1, 2, 3, 5, 8, 13, 21). If Sean hasn't volunteered one when he says "dispatch this," ask before posting — it's a primary data point for X008 and missing-at-dispatch entries become a cleanup task at the next session. For drafts, complexity can be patched later at publish time; ask either way.
 - The `--` form takes the body as a literal argument; the `@<path>` form reads the body from a file. In both cases, the title is auto-extracted from the brief's first heading.
 - The script returns the writ id (`w-…`) on success. Capture it for any follow-on work (follows-links, publish, bookkeeping).
 
-Underlying CLI: `bin/commission.sh` wraps `nsg commission-post` and additionally patches the complexity into the Laboratory's commission log entry. **Always** prefer the wrapper — calling `nsg commission-post` directly skips the log-patching step.
+Underlying CLI: `bin/commission.sh` wraps `nsg commission-post`. Always prefer the wrapper for consistency.
 
 ### Multi-commission batches
 
@@ -165,7 +164,6 @@ For multi-commission batches, conclude the parent click once (naming all dispatc
 - **Drafting in `.scratch/` by default.** The old editor-review dance is dead. Post directly as a draft-phase writ and let Sean review in Oculus; only use `.scratch/` when Sean explicitly asks for offline file review.
 - **Leaking sanctum references into the brief.** `.scratch/...` paths, sanctum doc paths, experiment directories. Dead links from the artificer's perspective. See "Stay inside the target repository" above.
 - **Stripping click references.** Don't try to make briefs self-contained by inlining the substance of their source clicks — that's the sage's job. Briefs reference; specs inline.
-- **Forgetting the complexity rating.** Missing-at-dispatch complexity becomes a session-startup cleanup task. Ask before posting (or before publishing a draft).
-- **Skipping the wrapper script.** `nsg commission-post` works but skips the log-patching step. Always go through `bin/commission.sh`.
+- **Skipping the wrapper script.** Always go through `bin/commission.sh` for consistency with the dispatch flow.
 - **Forgetting `--label` on a `spider.follows` link.** The `nsg writ link` command requires both `--label` (casual name) and `--kind` (registered load-bearing type). Passing only `--kind` fails.
 - **Forgetting to conclude the parent click.** Leaves the design click sitting in `live` indefinitely, pretending there's still active design work when the work is actually in flight as a commission.

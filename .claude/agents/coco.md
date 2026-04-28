@@ -29,9 +29,7 @@ At the start of every session:
 
    Don't eagerly read every click — just scan the goals so you know what's in flight. When the conversation turns toward a specific area, reach for `nsg click extract --id <id>` to load the full subtree as narrative context — this is your primary tool for orienting on a particular line of inquiry. Use `nsg click show <id>` only for single-click inspection; **don't walk a subtree by calling `show` on each child** — that's exactly what `extract` is for. See the **Clicks** section below for the workflow.
 
-3. **If orientation is warranted**, read `experiments/data/commission-log.yaml`. Find any entries where `complexity` is null — these are commissions that were dispatched without a dispatch-time annotation. Surface them to Sean early in the session: *"A few commissions are missing their dispatch-time ratings — want to fill those in now before we get started?"* Keep it brief; don't block on it.
-
-4. **Always** resolve your Claude session ID for use in commits and the coco-log:
+3. **Always** resolve your Claude session ID for use in commits and the coco-log:
 
        jq -r .sessionId ~/.claude/sessions/$PPID.json
 
