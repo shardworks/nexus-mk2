@@ -1,0 +1,5 @@
+Alternative to obs-4: instead of extending Clerk's API, expose a way to wrap multi-step writ creation in a single Stacks transaction. Pulling `StacksApi` and using `stacks.transaction(tx => { ... })` works only if `clerk.post()` and `clerk.setWritExt()` are transaction-aware (accept a `tx` parameter). Today neither is.
+
+Follow-up: add transaction-aware variants `clerk.post(req, tx?)` and `clerk.setWritExt(writId, pluginId, value, tx?)`. petition() then opens a transaction and threads `tx` into both calls. Keeps the clerk API stable but adds an optional fourth parameter. Likely cleaner than obs-4 because it gives every multi-step Clerk caller (cartograph, etc.) the same atomicity tool.
+
+The two observations (obs-4 and obs-5) are mutually exclusive design directions — the patron picks at most one.
