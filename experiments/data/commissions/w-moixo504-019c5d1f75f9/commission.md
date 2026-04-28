@@ -1,0 +1,5 @@
+`packages/plugins/spider/src/static/spider.js:565-582` documents (in a long inline comment) that the `writ-filter` filter site falls back to empty string while the display site at `updateRigRow` falls back to the em-dash literal `WRIT_TITLE_MISSING` — and warns that unifying the two fallbacks would cause every missing-title row to spuriously match user-supplied filter strings that contain a character appearing in the em-dash.
+
+This is correct but fragile. The comment lives inside the function body where future refactors might miss it. The pattern is also a hint that the rig payload should grow a structured `hasWritTitle` boolean rather than relying on string-equality vs sentinel — making the asymmetry no longer necessary.
+
+Proposed: refactor `writ-filter` filter logic to consume an explicit `rig.writTitle ?? null` (or equivalent) and adjust display + filter sites to share the same predicate.
