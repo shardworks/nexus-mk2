@@ -124,6 +124,17 @@ Decomposition-ladder authoring (who produces vision → capability → outcome b
 
 System mapping: custody lives in the writ store (product / capability / outcome as writ types with ladder edges); the petitioning process runs as a standing process watching ladder state. Not yet built; design subtree under `c-moa42rxh`.
 
+## Naming primacy
+
+Foundational plugins that own a substrate get the unique privilege of contributing names without a plugin prefix within that substrate. The convention codifies "the apparatus that owns the substrate names its inhabitants natively; everyone else namespaces their contributions."
+
+Established 2026-04-28 via writ `w-moix2b56-19767872adb9` (resolving click `c-moiwnzw6`):
+
+- **Clerk** owns the writ graph and contributes link kinds without a prefix. The first such kind is `depends-on` — the precedence relationship that says the source writ cannot advance until the target reaches a terminal phase. Spider reads `depends-on` for dispatch gating; the Reckoner will read it for petition-consideration gating (design click `c-moiwnmoc`); Astrolabe writes it from observation-lift. The kind was previously `spider.follows`, contributed by the Spider plugin — the rename reflects its framework-level scope.
+- All other plugins contribute link kinds prefixed with their own plugin id (`spider.X`, `astrolabe.X`, `cartograph.X`, etc.). Clerk's link-kind validator special-cases `pluginId === 'clerk'` to allow both prefixed (`clerk.X`) and unprefixed (`X`) forms; other plugins remain prefix-required.
+
+The principle is per-substrate; the carve-out is per-plugin. If a future foundational plugin (e.g., a hypothetical apparatus owning some other substrate) needs the same privilege, the validator gets another targeted carve-out — there is no generic "primacy plugin" config and no speculative generalization.
+
 ## Records & History
 
 ### Stories (working term)
