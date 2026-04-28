@@ -1,0 +1,7 @@
+The C1 design's catalog narrative reads 'the emitter calls `ClockworksApi.emit(name, payload, '<plugin-id>')` directly' for plugin-owned events, but no plugin in the codebase enacts this convention today — both Animator (`session-emission.ts:49`) and Clockworks's writ-lifecycle observer use the literal `'framework'` for the emitter argument. Per decision D4 in this plan, C4 keeps `'framework'` because the brief is silent and the alternative would smuggle a cross-plugin convention shift into a name-rename commission.
+
+The broader concern is that the catalog narrative is aspirational, not enacted. A follow-up should pick one of:
+- Update every plugin emit site to pass its own pluginId (Animator, Clockworks observer; would also touch Astrolabe `astrolabe.plan-finalize`'s emit on `astrolabe.plan.files-over-threshold`, currently passes `'astrolabe'` already — worth verifying).
+- Update the catalog narrative to acknowledge that framework emits use the literal `'framework'` regardless of contributing plugin.
+
+Files affected if pluginId becomes the convention: `packages/plugins/animator/src/session-emission.ts`, `packages/plugins/clockworks/src/writ-lifecycle-observer.ts`, possibly more after C2/C3/C5 land. The events-book emitter column is observable to operators and standing-order subscribers so the choice is not internal-only.
