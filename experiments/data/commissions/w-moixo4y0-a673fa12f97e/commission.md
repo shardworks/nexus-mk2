@@ -1,0 +1,5 @@
+`packages/plugins/ratchet/pages/clicks/index.html:379-392`, `packages/plugins/clerk/pages/writs/index.html:229-251`, `packages/plugins/spider/src/static/spider.js:82-107`, `packages/plugins/spider/src/static/feedback/feedback.js:37-67`, `packages/plugins/animator/src/static/animator.js:25-49`, and `packages/plugins/astrolabe/pages/astrolabe/astrolabe.js:23-46` all carry byte-equivalent copies of the same two helper functions. Inline comments on most of them explicitly cite "Ratchet's `updateUrl` (D9)" as the origin, acknowledging the duplication.
+
+The deep-link commission consolidates these into `window.NexusUrl` as part of its happy path. If for any reason the commission ships only the helper without migrating callers (against D10's mandatory-adoption recommendation), this observation should be promoted to its own commission to do the cleanup pass.
+
+Paths above name every site exactly.
