@@ -1,0 +1,5 @@
+Tests like `packages/plugins/spider/src/static/spider-ui.test.ts:1919-2034` assert URL-handling correctness by regex-matching the bundle's source text (e.g. `assert.match(spiderJs, /window\.history\.pushState/)`). This catches accidental deletions but not behavioral bugs (e.g. wrong key name, wrong push/replace choice, missing key on popstate).
+
+The deep-link commission introduces enough new URL-state per page that a richer test pattern is worth considering: stand up a JSDOM (or DOM shim) and exercise the IIFE end-to-end against a fake history API. The existing `writs-type-filter.test.js` already shows a DOM shim approach that could be generalized.
+
+Flag for follow-up: a single 'oculus-url-test-utils' package (or test helper) that gives every page test a canonical fake `window`/`history`/`location` to drive.
