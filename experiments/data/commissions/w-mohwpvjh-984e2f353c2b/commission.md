@@ -1,0 +1,3 @@
+The brief enumerates eight behavioral cases. S9 covers them as unit tests, but a single end-to-end integration test (kit declaration + Reckoner start + petition + withdraw + sealed registry) helps catch wiring issues across the boundary between kit collection (Wire phase) and registry seal (`phase:started`). The sentinel package has a similar `integration.test.ts` for its CDC observer.
+
+Follow-up: in addition to the unit tests in S9, ship an `integration.test.ts` that boots a fake guild with two contributing kits, registers their petitioners, opens a session, calls `petition()` and `withdraw()`, and asserts the writs/ext state. Increases coverage modestly; useful when the CDC-handler commission lands and reuses the fixture.
