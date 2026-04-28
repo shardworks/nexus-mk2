@@ -1,0 +1,7 @@
+**The risk.** Observation `w-mohwpvf7` (lifted from the Reckoner planning run) flags this as a sanity-check: kit-validation in `packages/framework/arbor/src/guild-lifecycle.ts` resolves `requires: ['reckoner']` against the apparatus whose plugin id is `reckoner`. After commission `w-mohuvn8h` (already complete), the apparatus matching `reckoner` is the petitioner Reckoner, NOT the legacy pulse-emitter (now `sentinel`). Vision-keeper's `requires: ['reckoner']` should resolve to the petitioner Reckoner.
+
+**Why this matters.** If the renamed-Reckoner namespace handoff is incomplete (e.g., a stale `RECKONER_PLUGIN_ID = 'reckoner'` constant in Sentinel still owns the namespace, or the Arbor's plugin-id derivation treats the npm package suffix differently from the kit's `requires` lookup), vision-keeper will fail validation against the wrong apparatus or against neither.
+
+**Concrete check.** Add a validation test to vision-keeper's test suite that boots a fixture containing both `sentinel` and `reckoner` apparatuses + the vision-keeper kit, asserts that `requires: ['reckoner']` validation passes, and that `reckoner.petition` is the call vision-keeper actually makes (not `sentinel.petition`, which does not exist). This is parallel to `w-mohwpvf7` but specific to vision-keeper.
+
+**Atomicity.** A single test addition; lift only if the test exposes a real namespace bug, in which case the resulting fix is a separate commission.
