@@ -1,0 +1,3 @@
+Vision-keeper's kit (commission `w-mohuvshq`) will declare `requires: ['reckoner']`. The framework's kit-validation (`packages/framework/arbor/src/guild-lifecycle.ts` `validateRequires`) checks that `reckoner` is an installed apparatus. After this commission, the apparatus matching `reckoner` is the petitioner Reckoner — not the sentinel pulse-emitter (whose plugin id is `sentinel`).
+
+Not an action item here — just a sanity-check that the namespace handoff is clean. The framework treats plugin id as the apparatus's identity, and the rename is invisible to consumers as long as guild.json lists `@shardworks/reckoner-apparatus` (or whatever D1 picks).
