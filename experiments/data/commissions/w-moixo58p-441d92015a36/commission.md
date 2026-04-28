@@ -1,0 +1,5 @@
+`packages/plugins/oculus/README.md:73-81` documents `nexus-format.js` as 'the' chrome script. `packages/plugins/oculus/src/oculus.test.ts:614-747` similarly tests chrome injection assuming a single script tag. When this commission adds `nexus-url.js`, both surfaces need updating.
+
+The better long-term design: chrome injection accepts a list of shared scripts (perhaps a `chromeScripts` config or an internal registry inside the apparatus), and tests assert 'each registered script appears'. That moves the apparatus from 'exactly one helper' to 'a kit of helpers', which is the natural shape once two exist.
+
+Proposed: refactor `injectChrome` (oculus.ts:151-190) to accept `scriptPaths: string[]` instead of a single `scriptPath`. Update README and oculus.test.ts to enumerate the shared-script registry.
