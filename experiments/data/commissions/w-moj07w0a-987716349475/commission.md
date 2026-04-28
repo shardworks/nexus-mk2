@@ -1,0 +1,5 @@
+D5 selected adding a `weight?: number` column to `ReckoningDoc` because the brief's SchedulerDecision interface declares `weight?` with the comment 'optional; logged into Reckonings'. The registry commission ships this additive column. Two follow-on concerns surface:
+
+1. **Indexing.** The current declared index set on `reckoner/reckonings` (declared in `packages/plugins/reckoner/src/reckoner.ts:861-874` and documented in `docs/architecture/reckonings-book.md:697-710`) does not include weight. No named query in the contract document filters or orders by weight. If a real priority-walk scheduler ships and analytics workloads emerge ('show me decisions weighted above N since T'), the index set needs a corresponding entry. The registry commission should not speculatively add the index; track for the future scheduler.
+
+2. **Doc cross-reference.** `docs/architecture/reckonings-book.md` describes ReckoningDoc's record body without a weight column. The reckonings-book doc-pass should describe the new column, the iff-outcome invariant for it (does it apply only to outcome: 'accepted'? does deferred carry it too?), and the sortable semantics if any.
