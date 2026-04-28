@@ -1,0 +1,3 @@
+The brief calls out that the registry is `descriptive infrastructure` — operators / Oculus need to enumerate registered petitioners. This commission exposes `listPetitioners()` on the apparatus's API (per D13) but does not ship a CLI tool to call it.
+
+Follow-up: add a small `nsg reckoner list-petitioners` tool (under `supportKit.tools`) that prints the registered petitioners in a table (SOURCE | PLUGIN | DESCRIPTION). Read-only; permission: 'read'. Drop-in pattern from cartograph's `nsg vision list` and similar. Out of brief scope but a natural follow-up once the registry exists.
