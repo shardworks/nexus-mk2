@@ -1,0 +1,3 @@
+`docs/architecture/reckonings-book.md:629` references `RESERVED_EVENT_NAMESPACES` and lists `anima.`, `commission.`, `tool.`, etc. as reserved namespaces. The const was removed by C1 (events-kit infrastructure, mandate `w-mohuop84`) and replaced with the merged kit + guild.json set. The reckonings-book doc is now inconsistent with the as-shipped C1 architecture.
+
+Not in scope for C4 (which only touches Animator-owned events). Surfaced for a future doc sweep that aligns reckonings-book.md with the post-C1 validator architecture: the per-prefix reservation model is replaced by per-name kit declarations with `pluginDeclared` stickiness.
