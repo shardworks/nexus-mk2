@@ -1,0 +1,6 @@
+The relay walker in `packages/plugins/clockworks/src/clockworks.ts:138–164` warns and skips on malformed values, but other walkers in the codebase may differ. Spider's `consumes: ['blockTypes', 'rigTemplates', 'rigTemplateMappings']` and the Lattice's `consumes: [LATTICE_CHANNELS_KIT]` walkers are candidates.
+
+If the events walker (S2) chooses warn-and-skip per the relay-walker precedent (D5/D6/D19), and other walkers fail-loud, third-party kit authors get inconsistent feedback. Worth a one-pass audit to either: (a) confirm the warn-and-skip convention is uniform; (b) document the inconsistency and pick a guild-wide rule; (c) align the holdouts.
+
+**Files**: `packages/plugins/spider/src/spider.ts`, `packages/plugins/lattice/src/lattice.ts`, `packages/plugins/loom/src/loom.ts`, `packages/plugins/oculus/src/oculus.ts`, `packages/plugins/fabricator/src/fabricator.ts`, `packages/plugins/tools/src/instrumentarium.ts`.
+**Action**: Document or align the malformed-kit-value handling convention across walkers.
