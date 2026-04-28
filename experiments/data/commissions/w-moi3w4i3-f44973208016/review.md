@@ -1,0 +1,19 @@
+# Review: w-moi3w4i3-f44973208016
+
+## Update clockworks.md pseudocode to walk `ctx.kits('books')` instead of `ctx.plugins`
+
+**Outcome:**
+<!-- success | partial | wrong | abandoned -->
+
+**Spec quality (post-review):**
+<!-- strong | adequate | weak -->
+
+**Revision required:**
+<!-- yes | no -->
+
+**Failure mode (if not success):**
+<!-- spec_ambiguous | requirement_wrong | execution_error | complexity_overrun -->
+
+## Notes
+
+<!-- What went well? What went wrong? What would you change about the spec? -->
