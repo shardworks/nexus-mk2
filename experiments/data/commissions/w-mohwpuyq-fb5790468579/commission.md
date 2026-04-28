@@ -1,0 +1,3 @@
+`packages/plugins/sentinel/src/index.ts` line 2 docstring: `* @shardworks/sentinel-apparatus — The Reckoner.` and `packages/plugins/sentinel/README.md` line 3: `The Reckoner — a narrow observer that emits Lattice pulses ...`. These descriptions are wrong once the petitioner Reckoner ships under plugin id `reckoner`.
+
+Follow-up: edit both files to refer to the apparatus as 'The Sentinel' (or whatever name the patron picks for the pulse-emitter post-rename). Trivial wording change; bundles naturally with obs-2.
