@@ -1,1 +1,0 @@
-Build a review queue for commissioned work. When an anima finishes something, I should be able to see it pending review, look at the output, and accept or send back for revision without having to chase down the session tree.

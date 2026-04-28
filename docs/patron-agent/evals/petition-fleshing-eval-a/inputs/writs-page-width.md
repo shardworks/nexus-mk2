@@ -1,1 +1,0 @@
-The 'writs' page extends to the full width and height of the viewport, which feels cluttered. It should be updated to match other pages (Spider, Guild, etc.) and have some margin. This may mean that some of the components need a 'card' treatment to their styles.
