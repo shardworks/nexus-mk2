@@ -1,0 +1,5 @@
+`packages/plugins/oculus/src/oculus.ts:607-738` builds the guild home page (`/`) inline and serves it via `c.html(...)` without routing through `injectChrome`. As a result, neither `window.NexusFormat` (today) nor a future `window.NexusUrl` would be defined on the home page.
+
+The home page has no UI filter state today, so the gap doesn't bite this commission's deliverables, but it's a structural inconsistency: every other contributed page gets the chrome treatment, the apparatus's own page does not. If chrome ever evolves to include navigation breadcrumbs, theming, or a connection-status banner, the home page would silently miss it.
+
+Proposed fix: refactor the inline home-page handler to render an `index.html`-shaped string and route it through `injectChrome` the same way `/pages/{id}/` does.
