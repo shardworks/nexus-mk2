@@ -1,0 +1,7 @@
+The three sage-primer instruction docs (`sage-primer-attended.md`, `sage-primer-scoping.md`, `sage-primer-solo.md`) carry the same `astrolabe.observation-lift` description sentence (citing `astrolabe.lifted-from` and `spider.follows`/post-rename `depends-on`) word-for-word. The current commission's S8 must update all three identically — a copy-paste 3x.
+
+This is the third instance of this prose-replication problem in the Astrolabe primer family (see prior atomicity guidance text and lift-when-it's-not-bigger-than-its-host text). The general fix is to factor a shared 'instructions partial' that all three primers `include`, but the codebase has no MD-include mechanism today.
+
+Out-of-scope rationale: scope of the current commission is the rename only; the broader doc-DRY problem is a separate refactor and would require introducing a partial-include mechanism (or accepting the divergence and introducing a CI lint to detect drift). Lift it as a small follow-up so future commissions touching primer-shared prose have a single home.
+
+Files affected by every shared-prose touch today: `sage-primer-attended.md`, `sage-primer-scoping.md`, `sage-primer-solo.md` — plus, occasionally, `sage-primer-reader.md` and `sage-writer.md` for adjacent shared sections.
