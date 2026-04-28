@@ -1,0 +1,7 @@
+`docs/guides/building-relays.md:411` carries the same stale `pending`-phase / `ready`-phase / auto-routing language that the present sweep removes from `core-api.md`. There is no `pending` phase, no `ready` phase, and no auto-route inside `clerk.transition()` today — mandate goes `new → open → completed/failed/cancelled` with `stuck` as a non-terminal off `open`, governed by per-type `WritTypeConfig.childrenBehavior` (see `packages/plugins/clerk/src/clerk.ts` lines 87–191).
+
+This was originally lifted as `w-moettefk` and bundled into the present `core-api.md` sweep, but the parent commission scoped strictly to `core-api.md`. A separate guide-level sweep is needed:
+
+- Audit `docs/guides/building-relays.md` end-to-end against today's `RelayDefinition` / `RelayContext` / `RelayHandler` surface in `packages/plugins/clockworks/src/relay.ts`.
+- Replace any reference to a `pending`-phase or `ready`-phase auto-routing model on parent completion. Today's cascade lives in the children-behavior engine and is opt-in per writ type via `WritTypeConfig.childrenBehavior` (`allSuccess` / `anyFailure` upward; `parentTerminal` downward).
+- Verify event-name examples align with `writ.<type>.<status>` convention (e.g. `writ.mandate.open` rather than legacy `commission.posted` / `writ.created` patterns).
