@@ -1,0 +1,5 @@
+After this commission lands, the plugin id `reckoner` belongs to the new petitioner Reckoner. The existing `docs/architecture/apparatus/reckoner.md` continues to describe the old pulse-emitter (`Plugin id: reckoner`, three trigger types, no config). An operator running `guild().apparatus<ReckonerApi>('reckoner')` will retrieve the petitioner-side API but the doc page describes a different apparatus altogether.
+
+This observation only fires if D23 selects `defer-to-observation`. If D23 selects `rewrite-apparatus-doc`, this work happens inside the commission and no follow-up is needed. Recording here so the patron/anima can route it appropriately at decision-review time.
+
+Follow-up: rewrite `docs/architecture/apparatus/reckoner.md` to mirror `docs/architecture/petitioner-registration.md`'s scope (helper API, registry, config). Move the pulse-emitter content to a new `docs/architecture/apparatus/sentinel.md` page. Update `packages/plugins/sentinel/src/index.ts` and `README.md` to reference the new doc path.
