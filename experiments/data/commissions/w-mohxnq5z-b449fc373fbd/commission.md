@@ -1,0 +1,3 @@
+The repo root contains a `_plan/` directory with `00-meta.md` through `06-clicks.md` files referencing a different planId (`w-modf696g-466fb615667c`, status `writing`). These files do not affect this commission's work — no source code reads from them — but they would mislead a future reader expecting `_plan/` to be authoritative for THIS plan.
+
+Follow-up: either delete the stale files, move them under a dated archive folder (`_plan/archive/<planId>/`), or formalize the convention that `_plan/` is the on-disk projection of whichever Astrolabe plan is most recently in `writing` status. The third option is the most useful but requires Astrolabe-level support.
