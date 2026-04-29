@@ -15,7 +15,7 @@
 
 | Component | Package | Key commits | Status |
 |---|---|---|---|
-| Cartograph data layer (vision/charge/piece writ types + companion docs) | `@shardworks/cartograph-apparatus` | `f69f1c6` (scaffold) | **Shipped** |
+| Cartograph data layer (vision/charge/piece writ types + companion docs) | `@shardworks/cartograph-apparatus` | `f69f1c6` (scaffold) | **Shipped — slot-cleanup commission pending** |
 | Cartograph CLI (vision/charge/piece × create/show/list/patch/transition) | (in cartograph-apparatus) | `a04cd6c` | **Shipped** |
 | Reckoner core (registry, source-id grammar, ext slot, petition/withdraw helpers) | `@shardworks/reckoner-apparatus` | `89fb1ab`, `64113e0`, `f7fb5b0` | **Shipped** |
 | Reckoner CDC handler + Reckonings book + startup catch-up | (reckoner) | `e59abd6` | **Shipped** |
@@ -36,7 +36,7 @@ The entire surveying cascade machinery:
 - Disk-authored visions (`<GUILD>/vision/<slug>/vision.md` + sidecar)
 - `nsg vision apply` CLI verb (and its priority flags)
 - Survey writ types (`survey-vision` / `survey-charge` / `survey-piece`)
-- SurveyDoc companion type and `books.surveys`
+- Survey-writ envelope metadata via `status['surveyor']` / `ext['surveyor']` sub-slots (no companion book — adopts the post-cleanup writ-slot pattern)
 - `ext['surveyor']` slot — priority hints
 - Surveyor-apparatus substrate plugin
 - Default scaffold-surveyor plugin
@@ -74,6 +74,32 @@ The entire surveying cascade machinery:
 ## 3. Commission briefs
 
 ### 3.1 Ready-now commissions
+
+#### Commission Z — Cartograph slot-cleanup (prerequisite to Commission C)
+
+Mechanical refactor in `@shardworks/cartograph-apparatus`:
+
+- Collapse `VisionDoc` / `ChargeDoc` / `PieceDoc` companion books into
+  a single `writ.ext['cartograph'] = { stage, codex }` sub-slot on
+  the underlying writ.
+- `createVision` / `createCharge` / `createPiece` become thin
+  wrappers — `clerk.post` + `clerk.setWritExt('cartograph', ...)` in
+  one `stacks.transaction`.
+- `transitionVision` / `transitionCharge` / `transitionPiece` likewise
+  wrap `clerk.transition` + `clerk.setWritExt('cartograph', ...)` in
+  one transaction (the existing API silently strips `ext` from
+  transition bodies, so the transaction shape is the atomicity floor).
+- `patchVision` / `patchCharge` / `patchPiece` collapse to
+  `setWritExt`.
+- Read-side helpers (`showVision`, `listVisions`, …) project from
+  `writ.ext['cartograph']`.
+- Update the surveying-cascade arch doc: §3.4 (SurveyDoc) is rewritten
+  as `status['surveyor']` / `ext['surveyor']` sub-slots; §3.6 (CDC
+  observer watch target) shifts from per-cartograph-book streams to
+  type-filtered writs; §3.7 (substrate scope) drops `books.surveys`.
+
+Existing tests cover the cartograph API contract; this commission
+keeps that contract stable while reshaping internals.
 
 #### Commission A — Vision authoring on disk
 
@@ -127,20 +153,24 @@ briefs until their gating questions resolve.
 - New plugin `@shardworks/surveyor-apparatus`
 - Three survey writ types (`survey-vision`, `survey-charge`,
   `survey-piece`)
-- SurveyDoc + `books.surveys`
+- Survey-writ envelope metadata via `status['surveyor']` /
+  `ext['surveyor']` sub-slots — no companion book
 - Surveyor registry (kit-contribution surface)
 - `ext['surveyor']` slot ownership + dimension-translation logic
-- CDC observer on cartograph book events
+- CDC observer watching writs filtered by type (survey-vision /
+  -charge / -piece)
 - Rig-template routing (substrate looks up registered surveyor's
   templates)
-- SurveyDoc stamping on rig completion
+- Completion stamping on the survey writ via `status['surveyor']`
 - Surveyor anima tool surface (create_charge[s], create_piece[s],
   create_mandate[s])
 - Tests: CDC fires → survey writ created → ext.reckoner stamped per
-  hints + defaults → SurveyDoc populated on completion
+  hints + defaults → status['surveyor'] populated on completion
 
 Depends on resolution of arch §5.2 (dynamic rig-template
-registration).
+registration), and on the cartograph slot-cleanup commission
+landing first (so this substrate is built against the
+companion-doc-free shape).
 
 #### Commission D — Spider extension for survey writ dispatch
 
@@ -183,9 +213,15 @@ patron value.
 ## 4. Order of operations
 
 ```
+[Phase 0 — substrate-shape prerequisite]
+Z (cartograph slot-cleanup) ──→  unblocks Commission C's substrate
+                                  brief by removing companion-doc
+                                  pattern before the substrate is
+                                  designed
+
 [Phase 1 — dispatch immediately]
-B (cleanup)        ──→  unblocks substrate naming
-A (vision apply)   ──→  delivers authoring loop standalone
+B (cleanup)        ──→  unblocks substrate naming  (already shipped)
+A (vision apply)   ──→  delivers authoring loop standalone (already shipped)
 
 [Phase 2 — design conversation, then dispatch]
         ┌───→ C (substrate)
