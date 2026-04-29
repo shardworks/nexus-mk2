@@ -89,7 +89,7 @@ Other sections appear when the work warrants them — e.g., "Substrate changes" 
 
 The direct-to-system workflow gives you two dispatch modes:
 
-- **Draft (`--draft`)** — the default when any of the following apply: the brief is part of a multi-commission batch, depends on other writs (via `spider.follows`), or Sean hasn't yet seen the final body. Sean reviews in Oculus; publish via `nsg writ publish --id <writ-id>` when ready.
+- **Draft (`--draft`)** — the default when any of the following apply: the brief is part of a multi-commission batch, depends on other writs (via `depends-on`), or Sean hasn't yet seen the final body. Sean reviews in Oculus; publish via `nsg writ publish --id <writ-id>` when ready.
 - **Open (no `--draft`)** — appropriate when the brief was fully worked out in chat, is a single unit, has no dependencies, and Sean has signaled he wants it to go immediately. The writ enters the dispatch queue at post time.
 
 When in doubt, use `--draft`. A draft is cheap to review and publish; an already-dispatched writ is harder to retract.
@@ -135,11 +135,11 @@ Underlying CLI: `bin/commission.sh` wraps `nsg commission-post`. Always prefer t
 
 ### Multi-commission batches
 
-When dispatching multiple related commissions (e.g., a decomposed refactor with dependencies), post all of them as drafts, wire the `spider.follows` links between them, then leave them draft for Sean's Oculus review. Publish the leaves last, once Sean has ratified the batch. Link syntax:
+When dispatching multiple related commissions (e.g., a decomposed refactor with dependencies), post all of them as drafts, wire the `depends-on` links between them, then leave them draft for Sean's Oculus review. Publish the leaves last, once Sean has ratified the batch. Link syntax:
 
-    nsg writ link --source-id <follower> --target-id <prerequisite> --kind spider.follows --label follows
+    nsg writ link --source-id <dependent> --target-id <prerequisite> --kind depends-on --label depends-on
 
-Both `--label` and `--kind` are required — `--label` is the casual relationship name; `--kind` is the load-bearing registered link type that Spider's dispatch logic reads.
+Both `--label` and `--kind` are required — `--label` is the casual relationship name; `--kind` is the load-bearing registered link type that Spider's dispatch logic and the Reckoner's dependency-aware consideration both read.
 
 ## Post-dispatch bookkeeping
 
@@ -165,5 +165,5 @@ For multi-commission batches, conclude the parent click once (naming all dispatc
 - **Leaking sanctum references into the brief.** `.scratch/...` paths, sanctum doc paths, experiment directories. Dead links from the artificer's perspective. See "Stay inside the target repository" above.
 - **Stripping click references.** Don't try to make briefs self-contained by inlining the substance of their source clicks — that's the sage's job. Briefs reference; specs inline.
 - **Skipping the wrapper script.** Always go through `bin/commission.sh` for consistency with the dispatch flow.
-- **Forgetting `--label` on a `spider.follows` link.** The `nsg writ link` command requires both `--label` (casual name) and `--kind` (registered load-bearing type). Passing only `--kind` fails.
+- **Forgetting `--label` on a `depends-on` link.** The `nsg writ link` command requires both `--label` (casual name) and `--kind` (registered load-bearing type). Passing only `--kind` fails.
 - **Forgetting to conclude the parent click.** Leaves the design click sitting in `live` indefinitely, pretending there's still active design work when the work is actually in flight as a commission.
