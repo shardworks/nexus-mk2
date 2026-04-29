@@ -1,0 +1,9 @@
+Today, `cartograph.patchVision({ codex })` (called by the `nsg vision patch --codex` CLI tool at `packages/plugins/cartograph/src/tools/vision-patch.ts:35–38`) updates only the **companion doc's** codex field. The underlying writ row's `writ.codex` is untouched. As a result, after a codex patch:
+
+- `clerk.list({ codex: 'new-codex' })` returns the writ (it filters on writ.codex — still the old codex, so it doesn't match the new value).
+- `cartograph.listVisions({ codex: 'new-codex' })` does match (filters on companion doc's codex — the new value).
+- `oculus`'s writs page renders the writ's codex (old value) while the cartograph CLI lists it under the new codex.
+
+This silent drift was masked by the typed API's monopoly on cartograph-aware reads, but it's wrong on its face. The cartograph cleanup commission *naturally fixes it* under the recommended D1.stage_only / D2.clerk_edit_writ_codex path — the patch routes through `clerk.edit({ id, codex })` so writ.codex is canonical and consistent. **If the patron-anima overrides D1 to D1.stage_and_codex_per_brief**, the drift returns in a slightly different shape (writ.codex stale, ext.cartograph.codex fresh), and the commission must then explicitly write both atomically (D2.both_in_tx).
+
+Lifting this as a standalone observation in case the cartograph cleanup is descoped or split, so the bug fix has its own ticket. Files: `packages/plugins/cartograph/src/cartograph.ts:353–358`, `packages/plugins/cartograph/src/tools/vision-patch.ts:35–38`, `packages/plugins/cartograph/src/tools/charge-patch.ts`, `packages/plugins/cartograph/src/tools/piece-patch.ts`.
