@@ -118,6 +118,15 @@ This is the synthesis hypothesis — it depends on the findings from H1, H2, and
 - **Depends on commission type:** Feature additions hand off cleanly; deep refactors don't. The mechanism is useful but not universal — needs guidance on when to use it.
 - **Just write smaller commissions:** The real lesson is that the patron (or sage) should decompose work into smaller independent commissions rather than using staging. Each commission is self-contained, merges independently, and doesn't need a handoff mechanism. Staging is overengineered; the answer is better task decomposition.
 
+### H4 sharpening and H5 (added Apr 29, 2026)
+
+The Apr 29 addendum adds three sharpened sub-hypotheses (H4a, H4b, H4c)
+formalizing the cost model for split sessions, and introduces H5 — a
+parallel hypothesis on inventory-induced pure-read context bloat as a
+separate cost lever. See the [Apr 29 addendum](#addendum-apr-29-2026--h4-cost-model--sub-hypotheses-h5)
+below for full predictions, empirical confirmations, and falsification
+paths.
+
 ## Addendum (Apr 25, 2026) — Post-Manifest Regime Change
 
 H1 was concluded falsified at the Oculus-page scale on Apr 16: monolithic
@@ -168,6 +177,204 @@ unpark trigger is: if `c-modxxtu6` reaches design or prototype, it
 becomes a natural H4 variant to measure (single-session vs.
 manifest-checkpointed). The H1 result is not invalidated; the regime
 that generated it has narrowed.
+
+## Addendum (Apr 29, 2026) — H4 Cost Model & Sub-Hypotheses; H5
+
+The Apr 25 addendum re-opened H4 with one candidate architecture
+(`c-modxxtu6`, checkpoint-and-fresh-session at manifest-task boundaries) but
+no quantitative target thresholds. A subsequent session-economics analysis
+during a polyrepo design conversation derived a cost model for split-session
+costs and ran it against the existing transcript archive (104 sessions ≥ 50
+turns; see [`artifacts/2026-04-29-h4-naive-split-simulation.md`](artifacts/2026-04-29-h4-naive-split-simulation.md)).
+The findings sharpen H4 into three measurable sub-hypotheses (H4a/H4b/H4c)
+and surface a separate cost lever as a new top-level hypothesis (H5).
+
+### Cost Model
+
+For a session with N turns and per-turn cache-read `cr[i]`:
+
+- **Monolithic cost** = `Σ cr[i]` (cumulative cache-read across all turns).
+- **Handoff split at K with handoff size H** ≈ `monolithic − (N−K) × (cr[K] − H)`.
+  Savings are linear in remaining-turns × (context-at-split minus handoff).
+  Per-turn cost is clamped to ≥ H (a session can't have less context than
+  its starting handoff).
+- **Naive split at K** ≈ `monolithic + baseline_cost − (N−K) × α`, where
+  `α = cr[K] − B` is the phase-1-specific accumulated content and
+  `baseline_cost` is the cost session 2 incurs to re-do the orientation reads.
+
+The model assumes per-turn cache-read dominates session cost (60–94% per the
+2026-04-03 analysis). Output and cache-creation costs are not modeled —
+giving a conservative lower bound on naive-split overhead.
+
+### H4a — Naive Splitting Has a Per-Half Break-Even
+
+Splitting a session into two without a structured handoff (each session does
+its own baseline orientation) breaks even only when the post-split work has
+enough turns to amortize the re-read tax: `T_post ≥ B_cost / α`.
+
+**Prediction:** for current-regime implement sessions (Opus 4, ~150 turns
+total, baseline B ≈ 100–200K, α ≈ 50–100K), naive splitting requires roughly
+**50–80 turns of post-split work** to break even. Below that, baseline
+re-read cost exceeds the savings.
+
+**Empirical confirmation:** simulation across 104 transcripts shows
+**73% have NO split point at which naive splitting saves money**, and the 27%
+that do have median break-even at `T_post ≈ 79 turns`. Both recent rigs
+(139 and 155 turns) fall into the "naive never wins" majority.
+
+**Falsification path:** if a sample of in-flight commissions shows naive
+break-even consistently below 30 turns OR consistently above 120 turns, the
+formula calibration is wrong and the model needs revision.
+
+### H4b — Handoff Size Determines Savings Magnitude
+
+The savings from splitting scale primarily with `(B − H)`, not with α. A
+small handoff captures most of the available savings ceiling.
+
+**Prediction:**
+
+- 30K handoff → median ~32% savings on midpoint splits.
+- 60K handoff → median ~25% savings.
+- 100K handoff → median ~15% savings.
+- 0K handoff (full re-read / naive) → median *negative* savings.
+
+The asymmetry is dramatic: a 30K handoff saves ~3× more than naive splitting
+even where naive can win at all.
+
+**Empirical confirmation:** at 30K handoff midpoint splits, **93% of 104
+sessions show positive savings** with median 32%.
+
+**Falsification path:** a live test with a real handoff implementation that
+saves substantially less than the model predicts (e.g., <15% on a session
+the model predicts 30%+) would invalidate the cost model — likely because of
+unmodeled costs (output expansion, cache-creation taxes, orientation
+turns at session 2's start).
+
+### H4c — Handoff Architecture Must Suppress Per-Session Orientation
+
+The 2026-04-16 H1 monolithic-baseline result (decomposed Rig 2 cost 2.6× the
+monolithic equivalent) was driven primarily by **turn-count expansion**:
+piece-session split work into 6 pieces averaging 44 turns each, but the
+*total* turn count was 3.5× the monolithic version. Each piece paid its own
+orientation tax (re-read spec, re-grep codebase, re-validate prior commits,
+re-state the plan, draft its own commit message). The handoff candidate in
+`c-modxxtu6` only succeeds if it suppresses that tax.
+
+**Empirical baseline of the orientation tax** (see
+[`artifacts/2026-04-29-h4c-orientation-tax-analysis.md`](artifacts/2026-04-29-h4c-orientation-tax-analysis.md)):
+across 105 implementer transcripts, time-to-first-productive-call
+(Edit/Write/file-mod Bash) has median 6 turns and 24K context, mean ~10
+turns and 36K context, with a long tail of 19% of sessions taking ≥ 15
+turns. Substantive code changes cluster in the long tail — Rig 2 (Reckoner
+tick) took 34 turns and 199K context to first edit, ~22% of session length.
+Calibration: if X010 H1 piece-session R2's six pieces each spent ~6-10
+turns orienting, that's 36-60 extra turns total — sufficient to explain
+the observed 3.5× total turn-count expansion.
+
+**Prediction:** a handoff architecture wins only when total turn-count across
+all sessions stays within ~1.3× monolithic. Above ~1.5× expansion, even
+handoff savings are eaten by extra turns.
+
+**Empirical signal to watch:** in a live H4 test, measure the first 10 turns
+of each post-handoff session. Target: first-edit at turn ≤ 5. Acceptable:
+turn ≤ 10. Failure: turn > 15 (the orientation tax wasn't suppressed; the
+handoff is too thin or the prompt structure isn't using it).
+
+**Falsification path:** if a well-designed handoff architecture still
+produces >1.3× turn expansion (no matter how the handoff is structured),
+this hypothesis suggests the orientation tax is *intrinsic* to fresh
+sessions and can't be avoided structurally — the answer would shift back
+toward "make monolithic sessions cheaper" (e.g., context eviction in the
+provider) rather than "split with handoffs."
+
+### H5 — Inventory-Induced Pure-Read Context Bloat
+
+The reader-analyst's inventory format directs the implementer to read files
+for type information and pattern reference using full-path pointers. For
+substantive code changes, these "for understanding" reads accumulate large
+amounts of context the implementer never edits. This is a separate cost
+lever from the H4a/H4b/H4c handoff-splitting mechanism — it reduces what
+*gets carried forward* in the first place, rather than how the carryforward
+replays.
+
+**Prediction:** in current substantive implements (cross-package code
+changes, new abstraction integrations), the share of Read-into-context
+content that is never subsequently Edited or modified will exceed 30%, with
+substantive commissions clustering above 40%. Mechanical commissions
+(deletions, renames, doc-edits) will remain near 0–5% pure-read.
+
+**Empirical confirmation:** the recent rig pair shows the bimodality. Rig 1
+(vision-keeper cleanup, mechanical) had 1.9% pure-read share. Rig 2
+(Reckoner tick, substantive) had **49.1%** — ~56K tokens of context bloat
+from 13 pure-read files including `clockworks.ts` (44K),
+`reckoner.test.ts` (34K), `clockworks/types.ts` (27K), `summon-relay.ts`
+(23K). Across 147 turns of cumulative replay, this contributed ~8M cache
+reads — roughly 20% of the rig's total cache cost was paid on context that
+never informed an edit. Tracing the source: the inventory's "Key types and
+interfaces (read-points, not copied verbatim)" and "Adjacent patterns"
+sections direct the implementer to full-file Reads. See
+[`../X011-context-debt/artifacts/2026-04-29-read-utilization-analysis.md`](../X011-context-debt/artifacts/2026-04-29-read-utilization-analysis.md).
+
+**Falsification path:** if a sample of substantive implementer transcripts
+shows pure-read share consistently below 20% across diverse commission
+types, the inventory format is not the dominant cost mechanism it appears
+to be — and the prescription (inline excerpts in the spec rather than
+full-file pointers) wouldn't deliver the predicted savings.
+
+**Acceptance signal for the intervention:** the four sub-interventions
+(inline type signatures, inline pattern templates, do-not-read markers,
+pre-quote source excerpts; bundled as Priority 1 under cost-optimization
+umbrella `c-mok4nke6`) should drive median pure-read share on substantive
+commissions below 15%. A before/after measurement on a representative
+substantive commission is the validation test.
+
+### Operational Implications
+
+The decision framework derived from H4a–H4c (when to stage vs run
+monolithic, what handoff size to target, how to detect orientation
+suppression failures) is documented separately in
+[`artifacts/2026-04-29-h4-operational-findings.md`](artifacts/2026-04-29-h4-operational-findings.md).
+That artifact carries recommendations and decision tables; this addendum
+carries the formal hypotheses and falsification paths only.
+
+### Updated Procedure
+
+The X010 procedure (Phase 1–3) is updated to add a new phase before live
+testing:
+
+#### Phase 1.5 — Cost-Model Validation (H4a, H4b)
+
+Already complete (2026-04-29 simulation artifact). Confirms the cost model
+predictions against the existing transcript archive. No further work needed
+unless the cost model is challenged.
+
+#### Phase 2 — Live H4 Test (newly framed)
+
+Replace the original Phase 2's monolithic-vs-staged comparison with a
+narrower test: monolithic vs 2-session-handoff midpoint split, on the *same*
+commission body, with a deliberate <30K handoff design.
+
+- Pick an in-flight commission of 100+ expected turns
+- Run as monolithic, capture cost, turns, quality
+- Run again with a single mid-task checkpoint, capture same metrics
+- Compare to model prediction (~32% savings)
+- If actual savings within 10pp of predicted → cost model validated
+- If actual savings substantially lower → identify the unmodeled overhead
+  (output expansion? handoff bloat? orientation re-emergence?)
+
+#### Phase 3 — Synthesis (unchanged)
+
+The synthesis goal stays "find the threshold" — but with the cost model in
+hand, the threshold is now a derived quantity rather than an empirical
+search.
+
+---
+
+*Apr 29 addendum source artifacts:*
+- [`artifacts/2026-04-29-h4-naive-split-simulation.md`](artifacts/2026-04-29-h4-naive-split-simulation.md) — H4a/H4b cost-model simulation
+- [`artifacts/2026-04-29-h4c-orientation-tax-analysis.md`](artifacts/2026-04-29-h4c-orientation-tax-analysis.md) — H4c per-fresh-session tax measurement
+- [`../X011-context-debt/artifacts/2026-04-29-read-utilization-analysis.md`](../X011-context-debt/artifacts/2026-04-29-read-utilization-analysis.md) — H5 pure-read-share measurement
+- [`artifacts/2026-04-29-h4-operational-findings.md`](artifacts/2026-04-29-h4-operational-findings.md) — derived decision framework
 
 ## Procedure
 

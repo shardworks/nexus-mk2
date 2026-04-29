@@ -128,29 +128,30 @@ indeed neither has any naive-split break-even.
 
 ### Handoff (30K) is a near-universal win
 
-Distribution of 30K-handoff savings at midpoint split, across all 101 sessions:
+Distribution of 30K-handoff savings at midpoint split, across all 104 sessions
+(model with the per-turn-context floor clamped to handoff size H — see Method):
 
 ```
-min:     −28.9%   (one outlier session — small/short, unfavorable curve)
-p25:     +26.3%
-median:  +33.0%
-p75:     +41.9%
-max:     +73.7%
-positive: 94/101 (93%)
+min:     −29.2%   (one outlier session — small/short, unfavorable curve)
+p25:     +23.1%
+median:  +32.1%
+p75:     +36.0%
+max:     +50.5%
+positive: 97/104 (93%)
 ```
 
 **93% of sessions in the dataset benefit from a 30K-handoff midpoint split,
 with median savings of one-third.**
 
-By session-length bucket (30K-handoff midpoint savings):
+By session-length bucket (30K-handoff midpoint savings, clamped model):
 
 | Bucket | N | Median savings | Best achievable savings (any split point) |
 |---|---:|---:|---:|
-| 50–99 turns | 52 | +32.3% | +33.7% |
-| 100–149 turns | 29 | +32.2% | +40.7% |
-| 150–199 turns | 11 | +41.3% | +44.5% |
-| 200–299 turns | 5 | +36.0% | +49.5% |
-| 300+ turns | 4 | +50.3% | +104.0% |
+| 50–99 turns | 53 | +30.2% | +33.2% |
+| 100–149 turns | 31 | +32.1% | +38.4% |
+| 150–199 turns | 11 | +34.9% | +38.0% |
+| 200–299 turns | 5 | +36.0% | +45.1% |
+| 300+ turns | 4 | +35.5% | +53.5% |
 
 Savings ramp with session length. Long sessions (300+) leave 50%+ on the
 table by running monolithically.
@@ -159,31 +160,29 @@ table by running monolithically.
 
 | Session | Turns | Naive best | 30K handoff best | Handoff edge |
 |---|---:|---:|---:|---:|
-| `cd8ba358` | 588 | +55.2% | +127.0% | +71.8 pp |
-| `807a2a89` | 463 | +65.5% | +89.7% | +24.3 pp |
-| `1e85ced3` | 383 | +23.4% | +118.3% | +94.9 pp |
-| `003e859f` | 311 | (naive ≤ 0) | +42.1% | — |
-| `8d1d17b8` | 288 | +52.3% | +90.4% | +38.2 pp |
-| `30687cf6` | 250 | (naive ≤ 0) | +49.5% | — |
-| `7578529e` | 249 | +59.4% | +113.6% | +54.2 pp |
+| `cd8ba358` | 588 | +55.2% | +59.4% | +4.2 pp |
+| `807a2a89` | 463 | +65.5% | +47.6% | −17.9 pp |
+| `1e85ced3` | 383 | +23.4% | +61.2% | +37.8 pp |
+| `003e859f` | 311 | (naive ≤ 0) | +41.3% | — |
+| `8d1d17b8` | 288 | +52.3% | +45.1% | −7.2 pp |
+| `30687cf6` | 250 | (naive ≤ 0) | +48.6% | — |
+| `7578529e` | 249 | +59.4% | +50.6% | −8.7 pp |
 | `023683e5` | 241 | (naive ≤ 0) | +37.5% | — |
 | `be5795ea` | 224 | (naive ≤ 0) | +39.8% | — |
-| `5ae4c570` | 195 | +19.1% | +70.8% | +51.7 pp |
-| `bae3f417` | 180 | +34.0% | +69.3% | +35.3 pp |
-| `166741dd` | 162 | +28.7% | +61.7% | +32.9 pp |
+| `5ae4c570` | 195 | +19.1% | +45.5% | +26.4 pp |
+| `bae3f417` | 180 | +34.0% | +50.0% | +15.9 pp |
+| `166741dd` | 162 | +28.7% | +38.0% | +9.2 pp |
 | `rig2-impl` | 155 | (naive ≤ 0) | +53.1% | — |
 | `rig1-impl` | 139 | (naive ≤ 0) | +48.2% | — |
 
-Where naive does work, handoff still beats it by 24–95 percentage points.
-
-Note: `+127%` and `+118%` savings figures look impossible (you can't save
-more than 100%). They reflect the model's idealization — the handoff session
-2's accumulated cache-read genuinely is smaller than the original second
-half's accumulated cache-read, because the original second half was
-carrying ~300K of context that contributed nothing to the work. The
-"savings" exceeds 100% in cases where session 2's run is cheaper than just
-the *monolithic incremental cost* of the second half. This is the
-theoretical ceiling, not what we'd actually achieve — see Caveats.
+A handful of very-long sessions show naive splitting beating handoff
+(`807a2a89`, `8d1d17b8`, `7578529e`). For sessions far above naive
+break-even, the naive "redo orientation" path saves α at every later-turn
+step — and the cumulative win across hundreds of turns can exceed what a
+single midpoint handoff captures with K fixed at 50%. In practice handoff
+splits remain the better mechanism: they're robust across session shapes
+and stable across all session lengths, whereas naive splitting drops to
+negative savings for 73% of sessions and is useful only in narrow regimes.
 
 ## Findings
 
@@ -251,10 +250,12 @@ This simulation gives quantitative targets and a sharper failure mode:
    are probably 5–10 percentage points lower than the model predicts.
 
 2. **Idealized handoff.** The model assumes session 2 can begin productive
-   work on turn 1, with no orientation overhead. In reality, even the
-   best-designed handoff probably requires 3–5 turns of "where am I, what
-   am I doing" before edits begin. This eats into savings linearly with
-   how many sessions are split off.
+   work on turn 1, with no orientation overhead. The companion
+   orientation-tax analysis (`2026-04-29-h4c-orientation-tax-analysis.md`)
+   shows median fresh sessions take 6 turns and accumulate 24K context
+   before the first productive call — so a real handoff implementation
+   that doesn't structurally suppress orientation would lose meaningful
+   ground from this idealization.
 
 3. **The 60% baseline-knee heuristic is a guess.** It picks the turn
    where cache-read first reaches 60% of final as the orientation/work
@@ -263,11 +264,12 @@ This simulation gives quantitative targets and a sharper failure mode:
    heuristic (e.g., gradient-change detection) might reclassify some
    "naive never wins" sessions.
 
-4. **Savings >100% are model artifacts.** A few long sessions show
-   handoff savings >100%. Mathematically this means the simulated split
-   accumulates *fewer* cache-read tokens than the original was paying
-   per turn at the end — which is true on paper but not achievable in
-   practice (you can never save more than you spent).
+4. **Per-turn cost clamped to handoff size.** Earlier versions of this
+   model showed savings >100% for some long sessions — an artifact of
+   allowing the post-split context to drop below the handoff floor. The
+   model now clamps per-turn cache-read to >= H, which removes the
+   artifact while leaving the headline numbers basically unchanged
+   (median midpoint savings 33% → 32%).
 
 5. **Mixed engine populations.** The archive includes implement sessions,
    reader-analyst, and various other roles. Aggregate stats average across

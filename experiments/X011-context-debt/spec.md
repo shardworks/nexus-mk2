@@ -1,5 +1,5 @@
 ---
-status: ready
+status: active
 ---
 
 # X011 — Context Debt
@@ -58,3 +58,88 @@ Related clicks: `c-modxwx8c` (root cost-analysis), `c-modxx4nj` (interventions u
 
 - Session transcript data from multiple commissions (for measuring dead output)
 - X007/X010 cost analysis tooling (for quantifying the cost impact)
+
+## First Instrument: Read Utilization Analysis (Apr 29, 2026)
+
+X011 was activated on 2026-04-29 alongside the publication of its first
+empirical instrument: a transcript analyzer that classifies every Read
+in an implementer session against subsequent edits, measuring the
+fraction of read content that is *never modified* — i.e., context bloat
+in the precise sense the X011 hypothesis names. The artifact and script
+land in this experiment:
+
+- [`artifacts/2026-04-29-read-utilization-analysis.md`](artifacts/2026-04-29-read-utilization-analysis.md) — initial findings on the rig pair (1.9% vs 49.1% pure-read share) plus root-cause tracing to the astrolabe inventory format
+- [`artifacts/scripts/h4_read_utilization.py`](artifacts/scripts/h4_read_utilization.py) — the analyzer, generalizable to any Claude Code transcript
+
+The analyzer output classifies each Read as one of:
+
+- **Read AND edited** — file was Read, then later Edit/Written (legitimate work)
+- **Read AND bash-modified** — file was Read, then deleted/moved/sed-i'd via Bash
+- **Read but NEVER touched** — pure context bloat
+
+Aggregate stats per session: total read content size, share of each
+class, top files in each class, category breakdown (test / doc /
+source / config).
+
+### Generalizing the Instrument
+
+The Apr 29 instrument is purpose-built for Claude Code transcripts and
+the framework's tool repertoire (Edit, Write, Read, Bash with
+filesystem-modifying commands). To turn it into a standing X011
+measurement that runs across the full implement-session population — not
+just one-off rigs — three generalizations are needed:
+
+1. **Schema-stable per-session output.** Today the script prints a
+   human-readable table. To support trend tracking, it should also emit
+   a YAML or JSON record per session with a stable schema:
+
+   ```yaml
+   session_id: ses-...
+   transcript_path: ...
+   total_read_chars: 458640
+   total_read_files: 21
+   read_and_edited: { chars: 233544, files: 8 }
+   read_and_bash_modified: { chars: 0, files: 0 }
+   pure_read: { chars: 225096, files: 13, share: 0.491 }
+   pure_read_top_files: [{path, chars}, ...]
+   pure_read_by_category: { source: ..., doc: ..., test: ..., config: ... }
+   ```
+
+   This output should land in `experiments/data/X011/<session_id>.yaml`
+   alongside the existing session record.
+
+2. **Batch driver across the session corpus.** A wrapper script that
+   walks all archived transcripts (or filters by engine role / date
+   window), runs the analyzer on each, and produces both per-session
+   YAML and a cohort-level summary (median pure-read share, distribution
+   by engine, distribution by commission size). This lets X011 track
+   pure-read share as a metric that drifts over time — useful for
+   measuring intervention impact.
+
+3. **Laboratory integration (eventual).** Once the schema stabilizes,
+   the analyzer becomes a Laboratory standing-instrument: when a session
+   completes, the lab automatically runs the analyzer and records the
+   pure-read profile alongside the session yaml. Operators see
+   pure-read share as a dashboard metric. Pre-and-post-intervention
+   measurements happen automatically.
+
+Generalizations 1 and 2 are sanctum-side data work, low effort. They
+should ship soon to support the **Apr 29 cost-optimization landscape's
+Priority 1** (inventory excerpting): the acceptance signal for that
+intervention is "median pure-read share on substantive commissions
+drops below 15%." Without instrument generalization, that signal can
+only be measured one rig at a time.
+
+Generalization 3 (Laboratory integration) is medium-effort framework
+work and depends on the X011 schema being stable.
+
+## Status
+
+X011 is active as of 2026-04-29. The first instrument (read-utilization
+analysis) is published; current open work is:
+
+- Generalize the instrument for cohort measurement (schema stabilization
+  + batch driver)
+- Run baseline measurement across the post-Apr-16 implement corpus
+- Coordinate with the cost-optimization umbrella `c-mok4nke6` Priority 1
+  to measure the impact of inventory excerpting on pure-read share

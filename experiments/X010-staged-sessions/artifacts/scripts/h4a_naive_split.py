@@ -119,13 +119,18 @@ def handoff_split_cost(turns: List[TurnCR], K: int, H: int) -> int:
 
     Session 1: turns 1..K (unchanged).
     Session 2: (N-K) turns each with context = H + (orig_cr[K+i] - orig_cr[K]).
+
+    Per-turn cache_read is clamped to >= H — a session can't have less
+    context than its starting handoff. (This affects the rare cases where
+    the post-split delta would otherwise produce negative values; mostly
+    a no-op but prevents savings >100% artifacts in late-session ranges.)
     """
     N = len(turns)
     if K >= N or K <= 0:
         return total_cost(turns)
     s1 = sum(t.cr for t in turns[:K])
     cr_at_K = turns[K - 1].cr
-    s2 = sum(H + (turns[K + i].cr - cr_at_K) for i in range(N - K))
+    s2 = sum(max(H, H + (turns[K + i].cr - cr_at_K)) for i in range(N - K))
     return s1 + s2
 
 

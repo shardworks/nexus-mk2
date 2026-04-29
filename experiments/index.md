@@ -9,7 +9,8 @@ Maintained by Coco. Update when experiments are created, activated, or closed.
 | [X006](X006-guild-metaphor/spec.md) | The Guild Metaphor | Does the guild metaphor improve agent performance and patron experience compared to plain instructions? |
 | [X008](X008-patrons-hands/spec.md) | The Patron's Hands | How does the bootstrap period (Coco doing implementation) shape patron expectations when autonomous agents come online? |
 | [X013](X013-commission-outcomes/spec.md) | Commission Outcomes | What predicts good outcomes from autonomous commissions — and can revision rate serve as a system health indicator? |
-| [X010](X010-staged-sessions/spec.md) | Staged Sessions | What is the relationship between session length, cost, and output quality for autonomous commissions? Phase 1 (cost curve) complete at original scale; Apr 25 addendum notes the post-manifest regime change has re-opened H4 (threshold). |
+| [X010](X010-staged-sessions/spec.md) | Staged Sessions | What is the relationship between session length, cost, and output quality for autonomous commissions? Phase 1 (cost curve) complete at original scale; Apr 29 addendum sharpens H4 into H4a/H4b/H4c sub-hypotheses (cost model + handoff thresholds) and adds H5 (inventory pure-read bloat). |
+| [X011](X011-context-debt/spec.md) | Context Debt | How much context window is consumed by tool output never referenced again, and can we reduce it? Activated 2026-04-29 with the read-utilization instrument as its first artifact. |
 
 ## Ready (approved, not yet started)
 
@@ -18,7 +19,6 @@ Maintained by Coco. Update when experiments are created, activated, or closed.
 | [X003](X003-commission-prompt-tuning/spec.md) | Commission Prompt Tuning | How do pre-commission instructions affect agent performance on identical tasks? |
 | [X004](X004-iteration-context/spec.md) | Iteration Context | How does context about prior sessions affect quality and safety when an agent iterates on its own work? |
 | [X009](X009-metaphor-as-instruction/spec.md) | Metaphor as Implicit Instruction | Does the guild metaphor carry actual behavioral weight, or is it decorative? |
-| [X011](X011-context-debt/spec.md) | Context Debt | How much context is consumed by tool output never referenced again, and can we reduce it? |
 
 ## Draft (not yet approved)
 
