@@ -1,0 +1,11 @@
+The brief, the parent click `c-moji050w`, and the resolution of Commission B (`w-moji63xm`) all reference `docs/architecture/surveying-cascade.md` as the load-bearing settled architecture for the surveying cascade. **The file is not present in this working tree** (`/workspace/vibers/tmp/nexus-drafts/nexus/draft-mojmj4wf-c60546f5/docs/architecture/`). Commission B's commit `0164cf6` (`docs: redefine The Surveyor as the cartograph-decomposition substrate`) only added the *forward-reference* to the file (in `docs/guild-metaphor.md` and `docs/architecture/index.md`); it did not author the file itself.
+
+The sanctum-side click subtree (`c-moji050w`) names the absolute path `/workspace/nexus/docs/architecture/surveying-cascade.md` — a path outside this working tree. Possibilities:
+
+1. The doc is authored only in the sanctum repo (and was never copied into the framework working tree).
+2. The doc was authored in a different draft worktree that hasn't merged.
+3. The doc was always intended to ship with this commission (the cartograph cleanup) and the brief's references to §3.4/§3.6/§3.7 anticipate sections this commission will create.
+
+Whichever is the case, the divergence between sanctum-side guild knowledge and the framework working tree is a coordination hazard that affects every commission downstream of the cartograph cleanup (Commissions C–G in the surveying-cascade subtree). A follow-up commission should: (a) verify whether `surveying-cascade.md` exists in the sanctum-side `/workspace/nexus/` repo; (b) if so, copy it into the framework working tree under `docs/architecture/surveying-cascade.md`; (c) if not, escalate that the architecture doc was never authored. Affects: every commission whose brief references the surveying-cascade arch doc (currently `c-moji0ggh`, `c-moji0i7s`, `c-moji0km6`, `c-moji0maw`, `c-moji0nti`).
+
+Why this is its own observation rather than absorbed into this commission: the cartograph cleanup commission can author or update one file's three sections, but reconciling the sanctum/working-tree split is a doc-coordination task spanning multiple files and probably involves review of the broader architecture doc set. Lift it as a separate concern.
