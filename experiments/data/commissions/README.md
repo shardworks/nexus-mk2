@@ -1,71 +1,34 @@
-# Commission Data
+# Commission Data (frozen)
 
-Per-commission artifacts, organized by writ ID (e.g. `w-abc123/`). Pre-Clerk commissions used session IDs (`ses-*`) or ad-hoc labels as folder names.
+Per-commission artifact directories from the X013 (Commission Outcomes) era. Folder names are writ IDs (`w-*`) from the Clerk; pre-Clerk commissions used session IDs (`ses-*`) or ad-hoc labels.
 
-## Two-Tier Data Architecture
+**This tree is no longer being populated.** The Laboratory plugin that mirrored writs and sessions into this directory was retired 2026-04-30 (see [`packages/laboratory/README.md`](../../../packages/laboratory/README.md)). The 22 surviving directories are the ones that contained substantive patron-written `review.md` notes; 1224 directories with only auto-generated content (commission body, template review, session telemetry) were deleted because all their data is reproducible from the guild books.
 
-Commission data is split across two tiers:
+## Where to find data going forward
 
-1. **Commission log** (`experiments/data/commission-log.yaml`) — lean, human-navigable. Contains patron-subjective judgments: complexity, spec quality (pre/post), outcome, revision required, failure mode, and notes. Designed to be read end-to-end by a human or agent.
+| Signal | Source |
+|---|---|
+| Writ body and status | `clerk/writs` — `nsg writ show <id>` |
+| Writ relationships | `clerk/links` — `nsg writ` link tools |
+| Session telemetry (cost, tokens, duration, anima, engine) | `animator/sessions` — `nsg session show <id>` |
+| Engine→session linkage within a rig | `spider/rigs` — `nsg rig for-writ <id>` |
 
-2. **Per-commission artifacts** (this directory) — the full evidentiary record. Contains objective/automated data: session telemetry, instrument outputs, commission body, dispatch log, review notes.
+## What's in the surviving directories
 
-The `id` field in the commission log corresponds to the folder name here. This is the join key for assembling a unified analytical dataset.
+Each preserved folder contains some subset of:
 
-### What lives where
+- `commission.md` (or legacy `prompt.md` / `spec.md`) — the writ body as dispatched.
+- `review.md` — patron review notes (this is why the folder was kept).
+- `dispatch.log` — timestamped dispatch lifecycle log from `inscribe.sh`.
+- `sessions/*.yaml` — frozen session telemetry snapshots from the Laboratory era.
+- `instruments/<name>/result.yaml` and `instruments/<name>/context/` — frozen instrument outputs (spec-blind / spec-aware quality scorers, codebase-integration scorer) where they were run.
+- `quality-blind.yaml` / `quality-aware.yaml` / `quality-context/` — legacy pre-instruments-directory layout for some early commissions.
 
-| Data | Location | Source |
-|------|----------|--------|
-| Patron complexity estimate | Commission log | Manual, at dispatch |
-| Spec quality (pre/post) | Commission log | Manual |
-| Outcome, revision required | Commission log | Manual, at review |
-| Failure mode | Commission log | Manual, at review |
-| Session cost, duration, tokens | `sessions/*.yaml` | The Laboratory (auto) |
-| Instrument results | `instruments/{name}/result.yaml` | Instrument runner (auto) |
-| Instrument context | `instruments/{name}/context/` | Instrument runner (auto) |
-| Commission body text | `commission.md` | `inscribe.sh` (auto) |
-| Dispatch lifecycle log | `dispatch.log` | `inscribe.sh` (auto) |
-| Patron review notes | `review.md` | Manual |
+These are historical artifacts. The instrument runners that produced the `instruments/` outputs (`bin/instrument-review.sh` and friends) still exist as scripts but are no longer auto-triggered by the Laboratory. New commissions do not get directories here.
 
-## Directory Layout
+## Frozen commission-log baseline
 
-```
-{commission-id}/
-  commission.md              # The writ body — what the patron commissioned
-  dispatch.log               # Timestamped dispatch lifecycle log
-  review.md                  # Patron review notes and observations
-  sessions/                  # Session records (YAML): timing, cost, tokens
-  instruments/               # Instrument results and context
-    spec-blind-quality-scorer/
-      result.yaml            # Scores, aggregate, per-run detail
-      context/               # Assembled prompts + extracted inputs
-        system-prompt.md
-        user-message.md
-        input-diff.txt
-        input-full-files.txt
-        ...
-    spec-aware-quality-scorer/
-      result.yaml
-      context/
-        ...
-    codebase-integration-scorer/
-      result.yaml
-      context/
-        input-api-surface.txt
-        ...
-```
+The pruned commission log (150 patron-touched entries) lives in the experiments that reference it, not in this directory:
 
-## Instruments
-
-| Instrument | Aperture | Dimensions | Trigger |
-|------------|----------|------------|---------|
-| `spec-blind-quality-scorer` | Narrow (diff + local) | test, structure, error, consistency | Every commission (auto) |
-| `spec-aware-quality-scorer` | Narrow (diff + local + spec) | test, structure, error, consistency, requirements | Every commission with spec (auto) |
-| `codebase-integration-scorer` | Wide (diff + full API surface) | utility reuse, module placement, pattern coherence, scope discipline | Every commission with spec (auto) |
-
-Each instrument result file records the instrument name, version, parameters, and per-run detail. Results are self-describing — the `instrument.name` and `instrument.version` fields identify exactly which instrument and rubric produced the scores.
-
-## Notes
-
-- Legacy commission folders may contain `quality-blind.yaml`, `quality-aware.yaml`, and `quality-context/` from the pre-instruments-directory layout. These are superseded by the `instruments/` structure.
-- Legacy folders may also contain `prompt.md`, `spec.md`, and `session.json` from the pre-Clerk workflow. These are superseded by `commission.md`, `instruments/*/context/`, and `sessions/` respectively.
+- [`experiments/X013-commission-outcomes/artifacts/2026-04-30-commission-log-frozen-baseline.yaml`](../../X013-commission-outcomes/artifacts/2026-04-30-commission-log-frozen-baseline.yaml)
+- [`experiments/X008-patrons-hands/artifacts/2026-04-30-commission-log-frozen-baseline.yaml`](../../X008-patrons-hands/artifacts/2026-04-30-commission-log-frozen-baseline.yaml)

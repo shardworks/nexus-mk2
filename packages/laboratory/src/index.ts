@@ -3,12 +3,12 @@
  *
  * This plugin is a retired observational apparatus. It previously watched
  * Stacks CDC events on the Clerk's writs and links books and the
- * Animator's sessions book, mirroring data into the sanctum's
- * `experiments/data/commission-log.yaml` and `experiments/data/commissions/<id>/`
- * trees. As of 2026-04-30, the manual commission-log fields have been
- * deprecated as a research instrument (spec generation is automated, so
- * spec quality has no patron-set variance, and structured patron review
- * has been retired). All collection points have been removed.
+ * Animator's sessions book, mirroring observational data into a sanctum
+ * filesystem tree. As of 2026-04-30, the underlying research instrument
+ * (the commission log) was deprecated — spec generation is now automated
+ * (no patron-set quality variance), and structured patron review has been
+ * retired. All collection points have been removed. The historical
+ * commission-log baseline is preserved as an artifact under X013 and X008.
  *
  * The data the Laboratory used to mirror is fully available from the
  * guild books: writ status and links from `clerk` (writs, links), and

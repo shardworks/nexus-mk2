@@ -40,4 +40,4 @@ Maintained by Coco. Update when experiments are created, activated, or closed.
 | # | Name | Reason |
 |---|---|---|
 | [X002](X002-agent-session-launcher/spec.md) | Agent Session Launcher | Deliverable built as part of session refactor; experiment no longer needed |
-| [X013](X013-commission-outcomes/spec.md) | Commission Outcomes | Spec generation became automated (Astrolabe pipeline), eliminating spec-quality variance; structured patron review (complexity, outcome, failure_mode, reviewed_at) was retired 2026-04-30. The four hypotheses depended on patron-set instrumentation that no longer exists. Historical dataset (150 patron-touched entries) preserved in `commission-log.yaml`. |
+| [X013](X013-commission-outcomes/spec.md) | Commission Outcomes | Spec generation became automated (Astrolabe pipeline), eliminating spec-quality variance; structured patron review (complexity, outcome, failure_mode, reviewed_at) was retired 2026-04-30. The four hypotheses depended on patron-set instrumentation that no longer exists. Historical dataset (150 patron-touched entries) preserved as a frozen baseline in the X013 and X008 artifacts dirs. |

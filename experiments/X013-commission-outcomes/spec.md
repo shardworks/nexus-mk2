@@ -13,9 +13,10 @@ superseded_reason: |
   H3 revision rate as health signal, H4 attribution) depended on
   patron-set instrumentation that no longer exists. The historical
   dataset (150 patron-touched entries through 2026-04-29) is preserved
-  in commission-log.yaml as a frozen baseline; the per-commission
-  artifact directories were pruned to the 22 with substantive review
-  notes. Future work in this space (X014 technical spec quality,
+  as a frozen baseline at
+  artifacts/2026-04-30-commission-log-frozen-baseline.yaml;
+  the per-commission artifact directories were pruned to the 22 with
+  substantive review notes. Future work in this space (X014 technical spec quality,
   X015 spec detail as model substitute) takes a different
   experimental approach not dependent on patron-set ratings.
 ---
@@ -153,6 +154,17 @@ the goal is to hold agent constant when comparing spec quality effects,
 or hold spec constant when comparing agents.*
 
 ## Data Collection
+
+> **Historical note (2026-04-30):** The Data Collection section below
+> describes the instrument *as it was operated* during X013's active
+> period. References to `experiments/data/commission-log.yaml` and
+> `experiments/data/commissions/<id>/` are to the live instrument paths
+> that no longer exist. The frozen baseline of the commission log lives
+> at [`artifacts/2026-04-30-commission-log-frozen-baseline.yaml`](artifacts/2026-04-30-commission-log-frozen-baseline.yaml).
+> The 22 surviving per-commission directories with substantive patron
+> review notes remain in place. The Laboratory's CDC watchers that
+> populated both have been removed. See the spec frontmatter for the
+> supersession context.
 
 ### Data Architecture
 
