@@ -1091,21 +1091,34 @@ const server = http.createServer(async (req, res) => {
       const dispatchMeta = readMeta(slug);
       const prevWritId = dispatchMeta.writId ?? null;
 
-      const commissionScript = path.join(PROJECT_ROOT, 'bin', 'commission.sh');
       const codex = dispatchMeta.codex || '';
-      const complexity = body.complexity || '';
 
       if (!codex) return jsonResponse(res, { error: 'codex is required' }, 400);
 
-      const spawnArgs = [commissionScript, '--codex', codex];
-      if (complexity) spawnArgs.push('--complexity', complexity);
-      spawnArgs.push('--', '@' + specPath);
+      // Read the spec body and derive a title from the first non-frontmatter,
+      // non-empty line. Markdown header prefixes (#, ##, ...) are stripped;
+      // truncate to 100 chars with an ellipsis to keep writ titles readable.
+      const specBody = fs.readFileSync(specPath, 'utf-8');
+      const bodyNoFm = specBody.replace(/^---\n[\s\S]*?\n---\n?/, '');
+      const firstLine = bodyNoFm.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? '';
+      let title = firstLine.replace(/^#+\s*/, '');
+      if (title.length > 100) title = title.slice(0, 100) + '…';
+
+      if (!title) return jsonResponse(res, { error: 'could not extract title from spec body' }, 400);
+
+      const spawnArgs = [
+        'nsg', 'commission-post',
+        '--guild-root', GUILD_PATH,
+        '--title', title,
+        '--body', specBody,
+        '--codex', codex,
+      ];
 
       // Respond immediately, run dispatch async
       jsonResponse(res, { ok: true, message: 'dispatch started' });
 
       const dispatchKey = slug + ':dispatch';
-      const proc = spawn('bash', spawnArgs, { cwd: PROJECT_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+      const proc = spawn(spawnArgs[0]!, spawnArgs.slice(1), { cwd: PROJECT_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
       const pipeline: PipelineProcess = { step: 'dispatch', proc, log: [], startTime: Date.now(), tokenCount: 0 };
       running.set(dispatchKey, pipeline);
       sendSSE(slug, 'status', { step: 'dispatch', state: 'running' });
@@ -1116,8 +1129,8 @@ const server = http.createServer(async (req, res) => {
           pipeline.log.push(line);
           sendSSE(slug, 'log', { line: '[dispatch] ' + line });
 
-          // Capture writ ID from commission.sh output
-          const writMatch = line.match(/Commission posted:\s+(w-[^\s]+)/);
+          // Capture writ ID from `nsg commission-post` JSON output (single-line JSON object with `id`).
+          const writMatch = line.match(/"id"\s*:\s*"(w-[^"]+)"/);
           if (writMatch) {
             const writId = writMatch[1];
             console.log('[workshop] Captured writ ID: ' + writId);
