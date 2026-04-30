@@ -52,10 +52,12 @@ The line is intent vs how-to, not test/no-test or criteria/no-criteria.
 **Default: post the brief directly as a draft-phase writ.** No scratch files, no editor dance. Sean reviews the draft in Oculus; if it needs changes, iterate via `nsg writ edit` (or re-post and cancel the old draft). The draft-phase writ is the reviewable surface.
 
 ```bash
-./bin/commission.sh --codex <codex> --draft -- 'body text here'
+nsg commission-post --codex <codex> --draft \
+  --title "<brief title>" \
+  --body "$(cat .scratch/brief-<slug>.md)"
 ```
 
-The body is the full brief, including its markdown. The title is extracted from the first line (the `# Title` heading).
+The body is the full brief, including its markdown. The title must be supplied explicitly (typically the brief's `# Title` heading text, sans the `#`).
 
 **Do not draft in `.scratch/` by default.** The "draft a markdown file, get Sean to review it in his editor, iterate in chat, then post" cycle is dead — Sean explicitly asked to skip it. The only exception is when Sean specifically requests offline editor review of a file (e.g., for a large, complex brief where annotation-in-place is the right collaboration mode). In that case, use `.scratch/brief-<slug>.md`; otherwise, direct-to-system.
 
@@ -118,20 +120,16 @@ When drafting, do the grep before handing the brief to Sean: `grep -n '\.scratch
 
 ## Posting
 
-Use `bin/commission.sh` from the sanctum:
+Use `nsg commission-post` directly:
 
-    ./bin/commission.sh --codex <codex> [--draft] -- 'body text...'
-
-Or, when a scratch file exists (offline-review exception):
-
-    ./bin/commission.sh --codex <codex> [--draft] -- @.scratch/brief-<slug>.md
+    nsg commission-post --codex <codex> [--draft] \
+      --title "<title>" \
+      --body "$(cat path/to/brief.md)"
 
 - `--codex` is required. Common values: `nexus` (the framework). Ask Sean if uncertain.
+- `--title` is required. Use the brief's first heading verbatim (sans `#`); truncate to ~100 chars if longer.
 - `--draft` creates the writ in draft phase (does not dispatch until published). See "Draft phase vs immediate dispatch" above for when to use it.
-- The `--` form takes the body as a literal argument; the `@<path>` form reads the body from a file. In both cases, the title is auto-extracted from the brief's first heading.
-- The script returns the writ id (`w-…`) on success. Capture it for any follow-on work (follows-links, publish, bookkeeping).
-
-Underlying CLI: `bin/commission.sh` wraps `nsg commission-post`. Always prefer the wrapper for consistency.
+- The command emits a JSON object with `id` (the new writ id) on stdout. Parse and capture it for any follow-on work (depends-on links, publish, bookkeeping).
 
 ### Multi-commission batches
 
@@ -164,6 +162,5 @@ For multi-commission batches, conclude the parent click once (naming all dispatc
 - **Drafting in `.scratch/` by default.** The old editor-review dance is dead. Post directly as a draft-phase writ and let Sean review in Oculus; only use `.scratch/` when Sean explicitly asks for offline file review.
 - **Leaking sanctum references into the brief.** `.scratch/...` paths, sanctum doc paths, experiment directories. Dead links from the artificer's perspective. See "Stay inside the target repository" above.
 - **Stripping click references.** Don't try to make briefs self-contained by inlining the substance of their source clicks — that's the sage's job. Briefs reference; specs inline.
-- **Skipping the wrapper script.** Always go through `bin/commission.sh` for consistency with the dispatch flow.
 - **Forgetting `--label` on a `depends-on` link.** The `nsg writ link` command requires both `--label` (casual name) and `--kind` (registered load-bearing type). Passing only `--kind` fails.
 - **Forgetting to conclude the parent click.** Leaves the design click sitting in `live` indefinitely, pretending there's still active design work when the work is actually in flight as a commission.

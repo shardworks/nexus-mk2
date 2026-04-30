@@ -1,5 +1,23 @@
 ---
-status: active
+status: superseded
+superseded_at: 2026-04-30
+superseded_reason: |
+  Spec generation became automated through the Astrolabe pipeline,
+  eliminating spec-quality variance — every commission now ships with a
+  plan-writer-authored spec rated 'strong' by construction. Structured
+  patron review (complexity, outcome, failure_mode, reviewed_at,
+  reviewed_by_ethnographer) was retired 2026-04-30: the Laboratory's
+  CDC watchers were removed, the manual fields deprecated, and the
+  ethnographer's commission-probing protocol withdrawn. All four
+  hypotheses (H1 spec quality predicts outcome, H2 complexity threshold,
+  H3 revision rate as health signal, H4 attribution) depended on
+  patron-set instrumentation that no longer exists. The historical
+  dataset (150 patron-touched entries through 2026-04-29) is preserved
+  in commission-log.yaml as a frozen baseline; the per-commission
+  artifact directories were pruned to the 22 with substantive review
+  notes. Future work in this space (X014 technical spec quality,
+  X015 spec detail as model substitute) takes a different
+  experimental approach not dependent on patron-set ratings.
 ---
 
 # X013 — Commission Outcomes

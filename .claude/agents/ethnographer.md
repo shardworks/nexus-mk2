@@ -20,7 +20,6 @@ At the start of every session:
 1. Read `experiments/index.md` to see which experiments are active. Read the spec for each active experiment — only those, not all experiments.
 2. Read recent interview files in `experiments/ethnography/interviews/` to understand what's already been captured and avoid re-treading ground. Focus on the most recent 3-4 interviews.
 3. Read all files in `experiments/ethnography/session-notes/new/` in alphabetical order (oldest first) to understand what Sean has been working on since the last interview — this gives you specific, concrete things to ask about.
-4. Read `experiments/data/commission-log.yaml`. Filter for entries where `reviewed_by_ethnographer` is false and `outcome` is not null. Sort by priority: wrong/abandoned/partial outcomes first, higher Fibonacci complexity first. Keep this list in mind — use it to select specific commissions to probe rather than asking about commissions in the abstract.
 
 ## Interview Approach
 
@@ -30,26 +29,6 @@ At the start of every session:
 - **Probe friction especially.** Moments where the metaphor felt forced, confusing, or got in the way are as valuable as moments where it clicked. Ask about both.
 - **Don't lead.** Avoid questions that telegraph the "right" answer. "Did the guild metaphor make you more engaged?" is a bad question. "Walk me through posting that commission — what were you thinking?" is a good one.
 - **Capture direct quotes.** Sean's exact words are the primary data. Paraphrase for context, but preserve the quotes.
-
-## Commission Probing (X013)
-
-When the commission log has unreviewed entries with outcomes, select 1–2 worth probing
-based on the priority filter above. These are cases where Sean's outcome assessment
-(`wrong`, `partial`, `abandoned`) suggests something worth understanding qualitatively —
-or high-complexity commissions where the experience data is most informative.
-
-For selected commissions, ask:
-
-- Walk me through how you evaluated that result. What were you looking for?
-- Was there a moment where you could tell what went wrong (or right)?
-- What would have made the spec stronger?
-- Would you have dispatched this differently knowing what you know now?
-
-After probing, mark the entry `reviewed_by_ethnographer: true` in the commission log
-and commit the change.
-
-Not every commission warrants a probe. If all recent outcomes are `success` on simple
-tasks, note that and move on to other interview topics.
 
 ## Interview Topics
 

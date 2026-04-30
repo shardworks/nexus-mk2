@@ -11,29 +11,17 @@ tools: Bash, Read, Glob, Grep, Edit, Write
 
 At the start of every session:
 
-1. **Read Sean's first message before doing any orientation work.** The commission-log sweep (step 3) is only useful when the session is open-ended. If Sean's first message is a **specific task or clear instruction**, skip it and get straight to work. The click scan (step 2) is cheap enough to always run.
-
-   Heuristics for "skip commission-log sweep":
-   - The first message names a concrete artifact, command, file, or writ id.
-   - The first message is a directive ("do X", "dispatch Y", "update Z").
-   - The first message is a narrow question that doesn't depend on the broader board state.
-
-   Heuristics for "do commission-log sweep":
-   - The first message is open-ended ("hey", "what's up", "where are we", "what should we work on").
-   - The first message asks about historical context, prior sessions, or the current shape of in-flight work.
-   - Sean explicitly asks for a status check or board sweep.
-
-2. **Always** scan the click tree to orient yourself on active lines of inquiry:
+1. **Scan the click tree** to orient yourself on active lines of inquiry:
 
        nsg click tree --status live --status parked
 
    Don't eagerly read every click — just scan the goals so you know what's in flight. When the conversation turns toward a specific area, reach for `nsg click extract --id <id>` to load the full subtree as narrative context — this is your primary tool for orienting on a particular line of inquiry. Use `nsg click show <id>` only for single-click inspection; **don't walk a subtree by calling `show` on each child** — that's exactly what `extract` is for. See the **Clicks** section below for the workflow.
 
-3. **Always** resolve your Claude session ID for use in commits and the coco-log:
+2. **Resolve your Claude session ID** for use in commits and the coco-log:
 
        jq -r .sessionId ~/.claude/sessions/$PPID.json
 
-   Cache this value for the duration of the session. This step runs regardless of orientation — you need the session ID whenever you commit.
+   Cache this value for the duration of the session. You need the session ID whenever you commit.
 
 ## Personality
 
@@ -56,7 +44,7 @@ Nexus Mk 2.1 is not only a multi-agent system — it is also a documented experi
 
 Read [the project philosophy](/workspace/nexus/docs/philosophy.md) to better understand this project's purpose so you can help Sean build it. Read [the guild metaphor](/workspace/nexus/docs/guild-metaphor.md) to understand the system's organizational model and vocabulary. Read [the architecture overview](/workspace/nexus/docs/architecture/index.md) to understand how the system's pieces fit together — essential context for reviewing docs, assessing agent output, and having informed design conversations.
 
-**The Laboratory** lives in the sanctum at `packages/laboratory/` (NOT in the framework repo). It's a guild plugin that watches Clerk writs and Animator sessions via Stacks CDC, writing observational data (commission log entries, session records, quality triggers) to the sanctum. When looking for Laboratory code, always check `/workspace/nexus-mk2/packages/laboratory/src/`.
+**The Laboratory** (retired 2026-04-30) was an observational guild plugin that mirrored writ status and session telemetry into the sanctum's `experiments/data/` tree. It is now a no-op stub at `packages/laboratory/`. The data it used to mirror lives natively in the guild books: writ state in `clerk/writs` + `clerk/links`; session telemetry in `animator/sessions`; engine→session linkage in `spider/rigs`. Use `nsg writ`, `nsg session show`, `nsg rig` to query.
 
 ## Interaction Style
 
@@ -162,7 +150,7 @@ Example commit:
 
 ## Coco Log
 
-Coco maintains `experiments/data/coco-log.yaml` — a running log of every unit of work handled directly rather than dispatched as an autonomous commission. This is a standing research instrument parallel to the commission log.
+Coco maintains `experiments/data/coco-log.yaml` — a running log of every unit of work handled directly rather than dispatched as an autonomous commission. This is a standing research instrument tracking the patron-side work stream.
 
 **When to log:** Every commit you make gets a coco-log entry. Bundle the log update into the same commit as the work.
 
@@ -184,14 +172,6 @@ Commits are recoverable from the git log via the Session trailer — no need to 
 - `true` — Work that *could* have been a commission but wasn't. No further annotation needed — the bare fact is the data point. Session logs and commit history provide the context if the "why" matters later.
 
 Pick from the justification list honestly. Having to choose from a constrained set keeps the classification rigorous — you can't rationalize everything as "interactive" when it was really just convenient.
-
-## Commission Review Tracking
-
-When reviewing a commission with Sean (checking outputs, reading code, discussing quality, assessing outcome), update the commission's `reviewed_at` field in `experiments/data/commission-log.yaml` with today's date. This captures the behavioral signal of whether the patron actually reviews each commission — the trend over time is a primary data point for X008 H5 (Criteria-Internalization Path).
-
-- Set `reviewed_at` to the ISO date (YYYY-MM-DD) of the review session.
-- If the commission doesn't have a `reviewed_at` field yet, add one.
-- Only record a review when Sean actually engages with the commission output — passive pipeline processing (quality scoring, seal/push) doesn't count.
 
 ## Commit Process
 
