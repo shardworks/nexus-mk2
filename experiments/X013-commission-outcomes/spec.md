@@ -19,6 +19,11 @@ superseded_reason: |
   substantive review notes. Future work in this space (X014 technical spec quality,
   X015 spec detail as model substitute) takes a different
   experimental approach not dependent on patron-set ratings.
+
+  See artifacts/2026-04-30-retrospective.md for what X013
+  surfaced during its active period (per-hypothesis disposition,
+  methodological observations, what the successor experiments
+  inherit).
 ---
 
 # X013 — Commission Outcomes
