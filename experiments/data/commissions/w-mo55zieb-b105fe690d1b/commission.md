@@ -1,5 +1,0 @@
-astrolabe.generatedWritType config becomes a ghost field on the combined-rig path
-Where: packages/plugins/astrolabe/src/types.ts defines AstrolabeConfig.generatedWritType?: string with default 'mandate'. spec-publish reads it via guildConfig().astrolabe?.generatedWritType ?? 'mandate'.
-Status after this commission: Still used by the old astrolabe.two-phase-planning rig. The combined rig does not invoke spec-publish (or if D4 went the other way on a future pass, passes postMandate: false), so the config is unreached for the default brief path. No guild sets this value currently; it has been vestigial since landing.
-Why it matters: As briefs migrate off the two-phase rig entirely (which is expected once the combined rig is the default), this field becomes fully dead. A follow-up cleanup after the old planning rigs are deleted (post multi-rig refactor) can drop it.
-Follow-up: Delete AstrolabeConfig.generatedWritType and inline the literal 'mandate' in spec-publish after the old two-phase-planning rig is retired.

@@ -1,5 +1,0 @@
-Stacks' `stacks.book(ownerId, name)` trusts callers to pass the plugin id as `ownerId`. The StacksApi contract (`docs/architecture/apparatus/stacks.md:72-75`) says 'Trust-based: not validated at runtime against the caller's identity.' Nothing prevents an apparatus from writing into another apparatus's books. `readBook` vs `book` is the only guardrail and only at the type level.
-
-All current apparatus correctly use their own plugin id, but as the guild plugin graph grows this trust boundary becomes a correctness-by-convention risk. The CDC auto-wiring in task 8 increases exposure — the Clockworks will call `stacks.watch(plugin.id, bookName, ...)` across every plugin's books, which is the first systemic cross-owner access.
-
-Future follow-up: consider a lightweight runtime check (pass the apparatus's id via setup or via `guild()`), or formalise the owner-id-equals-plugin-id rule with a startup assert. Not blocking the skeleton.

@@ -1,6 +1,0 @@
-The Future State `workshops → codexes` migration entry in `docs/architecture/index.md` (lines 542–554) describes work that has already landed in `packages/framework/core/`. Residual drift remains:
-
-- Test fixtures in plugins still pass `workshops: {}`: `packages/plugins/loom/src/loom.test.ts:67`, `packages/plugins/parlour/src/parlour.test.ts`, `packages/plugins/tools/src/tools/tools-list.test.ts`, `packages/plugins/tools/src/tools/tools-show.test.ts`, `packages/plugins/tools/src/instrumentarium.test.ts`, `packages/plugins/tools/src/tool-server.test.ts`, `packages/plugins/fabricator/src/fabricator.test.ts`, `packages/plugins/animator/src/animator.test.ts`, `packages/plugins/animator/src/oculus-routes.test.ts`, `packages/plugins/animator/src/tools/session-lifecycle.test.ts`, `packages/plugins/animator/src/tools/session-tools.test.ts` (all set `workshops: {}` in test setup).
-- Reference docs still describe legacy paths and types: `docs/reference/core-api.md` lines 452, 463 (`workshopsPath`), 464 (`workshopBarePath`), 553 ("List all workshops with status"), 668 (`RehydrateResult.workshopsCloned[]`); `docs/guides/building-tools.md` lines 155, 246.
-
-None of this is in the architecture-index sweep, but a follow-up scoped commission should remove the test-helper stubs (now that the field is gone from `GuildConfig`) and update the reference docs.

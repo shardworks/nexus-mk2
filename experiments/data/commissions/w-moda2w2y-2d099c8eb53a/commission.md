@@ -1,5 +1,0 @@
-The brief mentions two production false-positive incidents where rate-limit writs had their assistant summaries tagged as rate-limit. The direct patch addresses the `msg.type === 'result'` + result-text branch, but the surviving `msg.is_error === true` + error-text branch in `detectRateLimitFromNdjson` (`packages/plugins/claude-code/src/index.ts:80-93`) also uses `RATE_LIMIT_STDERR_PATTERN` on user-supplied text (the `msg.error` / `msg.message.error` field). If an assistant response ever has `is_error: true` for some orthogonal reason and the prose contains 'rate limit', this branch fires too.
-
-Post-fixup, this is the narrower case (only fires on error messages, not happy-path results), so it is safer than the removed branch — but it is still pattern-matching on free-form provider text. A follow-up commission could replace the regex with a strict whitelist of structured `msg.error.code` values (e.g. `'anthropic.rate_limit'`) once a corpus of real signatures has been collected via the D5 diagnostic capture.
-
-Not in scope for this fixup.

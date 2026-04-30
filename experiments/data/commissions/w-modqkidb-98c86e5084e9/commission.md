@@ -1,5 +1,0 @@
-**Site:** `docs/architecture/clockworks.md` lists `commission.sealed` (success); `docs/reference/event-catalog.md` lists `commission.completed` (success); the brief enumerates both as separate non-negotiable events.
-
-**Why this matters now:** This commission's D5 emits both on the same trigger (root-mandate→completed) per the brief, but downstream operators reading either doc will be confused about which one to bind to. Both will fire identically on every successful commission completion.
-
-**Suggested resolution:** A doc-cleanup commission that picks a canonical name (sealed *or* completed), updates both docs, and prunes the duplicate from the framework emission list. The brief's 'every row in the table' rule implicitly ratifies both as long as both docs list both, but the duplication is technical debt.

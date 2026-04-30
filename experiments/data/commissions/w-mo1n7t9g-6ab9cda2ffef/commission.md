@@ -1,7 +1,0 @@
-<task id="t4">
-    <name>Harden piece-session collect() error handling and yield actual writ status</name>
-    <files>packages/plugins/spider/src/engines/piece-session.ts</files>
-    <action>Replace the bare `catch {}` around `clerk.transition(piece.id, 'completed', ...)` with a classified catch: when the caught error's message indicates the writ is already terminal (look for the substrings the existing Clerk transition error messages produce when transitioning from `cancelled`, `completed`, or `failed`, e.g. wording like `already terminal` or `status is`), treat the failure as expected and continue silently. For any other error, emit a warning naming the piece ID and the error before continuing. After the transition attempt completes (either successfully or via the expected-error branch), re-read the piece writ via Clerk and include its actual status as a new field on the `yields` object returned by `collect()`. Preserve all existing yields fields and the existing graft/graftTail return shape. Do not let `collect()` throw — the convention is that `collect()` returns; failures escalate via Spider's `failEngine`, which this code path does not invoke.</action>
-    <verify>pnpm -w typecheck && pnpm -w test --filter spider</verify>
-    <done>collect() classifies transition errors (silent on already-terminal, warns on anything else), always re-reads and includes the piece writ's actual status in yields, and never throws; existing piece-pipeline tests still pass.</done>
-  </task>

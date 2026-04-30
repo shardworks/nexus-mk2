@@ -1,8 +1,0 @@
-`docs/reference/conversations.md` is comparably out of date with the v2 model. Specific drift:
-
-- The schema section names an `animas` table, an `anima_id` column on `sessions`, and a `commission_assignments`/`commission_sessions` join family that no longer exists.
-- The API section documents top-level functions (`createConversation`, `takeTurn`, `endConversation`, `nextParticipant`, `formatConveneMessage`, `listConversations`, `showConversation`) as `@shardworks/nexus-core` exports. They live on `ParlourApi` today (`packages/plugins/parlour/src/types.ts:173-231`), accessed via `guild().apparatus<ParlourApi>('parlour')`.
-- 'Manifest at Turn Time' references `manifest()` — a v1 anima-identity function that is gone. Today the Loom's `weave()` runs at turn time.
-- The 'Session Infrastructure Changes' subsection describes `SessionProviderLaunchOptions`, `launchStreaming?`, `SessionLaunchOptions` with `claudeSessionId` — every name from the v1 session funnel. The current Animator surface is `AnimatorApi.summon()` / `animate()` returning `AnimateHandle = { sessionId, chunks, result }` (see `packages/plugins/animator/src/types.ts:197-321`).
-
-Recommend a sibling sweep modelled on the present `core-api.md` plan: carve out v1 sections, narrow what survives to factual conversations content, point at `docs/architecture/apparatus/parlour.md` for the API surface, and align schema with today's `conversations` and `turns` books.

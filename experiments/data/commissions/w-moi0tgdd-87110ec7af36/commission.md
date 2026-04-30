@@ -1,9 +1,0 @@
-**The gap.** D6 hardcodes the brief's 'typical' dimensions for drift-detected and proactive elaboration as defaults. The Reckoner combination function (the algorithm that turns dimensions into a scheduling weight) is owned by a future Reckoner-core commission and explicitly out of scope per the contract §3. When that commission lands, the fitness of vision-keeper's hardcoded presets will be visible: are drift petitions consistently approved fast? Are elaboration nudges consistently deferred? The brief's prescribed dimensions may need tuning against the combination function's behavior.
-
-**Concrete files.** Vision-keeper's `buildDriftPriority` / `buildElaborationPriority` constants in `src/vision-keeper.ts` (per D20) become the tuning surface. Calibration is parallel to the `complexity`-claim calibration loop tracked at click `c-mohd0luw`.
-
-**Why this matters.** The brief's prescribed dimensions are the 'typical' case based on the contract document's narrative, but typical is not optimal. Once real reckonings exist, the presets either confirm the contract's intuitions or flag where they need revision — and either outcome is interesting design feedback for the Reckoner core.
-
-**Proposal.** When the Reckoner combination function lands, schedule a calibration pass that runs vision-keeper's two presets against synthetic drift / elaboration scenarios and reports approval rates. Adjust the constants if the data warrants. This is the same shape as `c-mohd0luw` (complexity calibration) but for priority dimensions.
-
-**Atomicity.** A research / calibration click, not a code commission. Promotes alongside the Reckoner combination function commission.

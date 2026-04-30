@@ -1,3 +1,0 @@
-Sessions `ses-mod0sx5i-ac11f1c2` and `ses-mod20hcf-24c4be2d` will remain in the sessions book with `status: 'rate-limited'` after this fixup lands (the brief says this is out of scope). UI filters that render sessions by status will group them with genuine rate-limited sessions, and historical rollup counters will overstate the rate-limit incident count.
-
-The brief judges "manual surgery on a session book carries more risk than the misleading record carries cost" — this observation surfaces the cost so a future decision can weigh a scripted cleanup once the broader audit surface (Laboratory CDC replay, session-annotation tooling) matures.

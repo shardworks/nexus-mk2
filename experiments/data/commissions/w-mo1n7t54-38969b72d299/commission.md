@@ -1,7 +1,0 @@
-<task id="t1">
-    <name>Extract cascade-message constant and update downward cascade in clerk.ts</name>
-    <files>packages/plugins/clerk/src/clerk.ts (and possibly an index/barrel that re-exports public symbols, if one exists)</files>
-    <action>Introduce a module-level exported constant in clerk.ts holding the new cascade resolution string `'Automatically cancelled due to parent termination'`, modeled on the existing `PIECE_EXECUTION_EPILOGUE` pattern in the Spider plugin. Update `handleParentTerminal` so that: (a) when the parent's terminal status is `failed` or `cancelled`, it cancels every non-terminal child using the new constant as the resolution; (b) when the parent's terminal status is `completed`, it does not cancel — instead it logs a warning naming the parent writ ID and each non-terminal child writ ID (these children indicate an upstream bookkeeping gap). Keep the function as a Phase 1 CDC handler with `failOnError: true`; do not couple Clerk to Spider/rig state.</action>
-    <verify>pnpm -w typecheck && grep -r "sibling failure" packages/ docs/</verify>
-    <done>The new constant is exported from clerk.ts; handleParentTerminal uses it on the failure/cancellation branch and logs a warning (no cancellation) on the completion branch; no `'sibling failure'` literal remains in the source tree.</done>
-  </task>

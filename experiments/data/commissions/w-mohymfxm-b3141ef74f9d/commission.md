@@ -1,5 +1,0 @@
-An in-repo grep finds no production callers (only Animator's own emit sites and tests) for any of the six soon-to-be-changed names. Any externally-installed guild that wires standing orders against `session.ended` or `anima.session.ended` will silently stop receiving them when C4 lands. There is no in-repo migration shim or operator-facing release note pipeline for guild.json schema updates.
-
-This is a 'are we sure no one outside the repo cares?' check. The answer for `nexus` itself is yes (no in-repo subscribers); operators of forks or downstream guilds need to know to update standing-order names.
-
-A changelog or migration-note artifact would be the natural mitigation. Out of scope for C4 (the brief does not mention release notes); flagged so that a follow-up release-management commission can decide whether to issue migration guidance covering all four migration commissions (C2/C3/C4/C5).

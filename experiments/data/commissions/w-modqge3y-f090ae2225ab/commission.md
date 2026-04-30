@@ -1,5 +1,0 @@
-The Reckoner reads `writ.status?.spider` (typed as `SpiderStuckStatus`) directly on the writ doc to build `WritStuckContext`. The slot is owned by Spider and written via `clerk.setWritStatus(writId, 'spider', value)`. Reckoner reads but never writes to it.
-
-While reviewing T4, I noticed Reckoner doesn't write a corresponding `status.reckoner` slot — it stores all observation in pulses. The brief doesn't ask for this and there's no compelling reason to add it, but if a future commission wants a "current pulse summary on the writ" surface (so a writ-show tool can render the latest stuck pulse without round-tripping to lattice), the slot is available and the convention is established (animator, spider already use it).
-
-Not actionable today; surfacing because T4 is the right moment to consider whether Reckoner's emission-only model is sustainable as more channels reason about writ state. No files to touch.

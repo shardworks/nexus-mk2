@@ -1,5 +1,0 @@
-The repo root contains a `_plan/` directory with seven files (00-meta.md through 06-clicks.md) carrying scratch content from a **different** commission (“Scheduled standing orders (cron) MVP-1” targeting `packages/plugins/clockworks/`). The 00-meta.md identifies a different `planId` (`w-modf696g-466fb615667c`) and the inventory describes Clockworks-only changes — nothing in those files relates to the current claude-code complexity diagnosis.
-
-The directory was not removed when the prior commission terminated, so it now sits at the repo root as orphaned scratch. The `pnpm-workspace.yaml` and root `package.json` do not reference it, so there is no build impact, but the files appear in any repo-wide grep / file listing and risk being mistaken for an active plan by future readers.
-
-Fix: remove `_plan/` from the working tree (and add `_plan/` to `.gitignore` if scratch dirs are expected to live there transiently across draft commissions). Small commission, no code changes.

@@ -1,3 +1,0 @@
-`docs/architecture/index.md` line 515 (§11) has only a TODO HTML comment describing the missing prose: event-driven nervous system, framework vs custom events, runner modes, error handling, and a forward link to `clockworks.md`. Now that the package is extracted (`@shardworks/clockworks-apparatus` at `packages/plugins/clockworks/`), this section is the last documentation gap on the path from the diagram to the apparatus row. Filling it would dovetail naturally with creating `docs/architecture/apparatus/clockworks.md` (see obs-2).
-
-Follow-up: scope a Clockworks documentation commission that writes the §11 prose and the apparatus contract doc together. Out of scope for the current sweep, which only updates the table row and the dependency examples.

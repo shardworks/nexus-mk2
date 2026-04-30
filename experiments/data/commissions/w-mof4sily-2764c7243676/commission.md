@@ -1,7 +1,0 @@
-Counter-intuitive but real: `grep -r "from '@shardworks/reckoner-apparatus'"` returns zero results in the workspace. The package is a leaf — no other package imports its types or symbols. Consumers of its emitted pulses are decoupled (they read `lattice/pulses` rows by trigger-type string, not by importing the trigger constants).
-
-This means the rename's import-path sweep is trivially empty: nothing outside the package itself depends on the npm name as an import specifier. The brief's caution about 'sweep import statements in source files' is satisfied by changing the in-package files (`src/index.ts` header comment, README install instructions) and the lockfile.
-
-Lifting this as a follow-up worth knowing because: it suggests the package's public type-export surface (`ReckonerApi`, the `Trigger*` constants, the context payload types) is *unconsumed*. The package was likely scaffolded with a public type surface in anticipation of consumers that never materialized. Future tightening of the type surface (or moving the types into the lattice apparatus alongside `PulseDoc`) is a separate cleanup; this rename doesn't depend on it.
-
-Not a bug — unused exports are a normal endpoint of an MVP. Worth noting because future tightening could collapse the renamed package's public surface to just the plugin factory once the subsume commission lands.

@@ -1,5 +1,0 @@
-**Site:** `docs/reference/event-catalog.md` lists `workshop` and `workspaceKind` as required payload fields for `session.started` and `session.ended`. `packages/plugins/animator/src/types.ts` SessionDoc has neither; `workshop` is unmodeled at the session level and `workspaceKind` is a Spider rig concept (`RigDoc.workspaceKind`).
-
-**Why this matters now:** This commission's D7 omits both fields from the emission with a code comment, but the catalog says they're part of the payload contract. Standing orders that bind on these payload keys will see undefined.
-
-**Suggested resolution:** Either (a) add `workshop` and `workspaceKind` to SessionDoc (populated by Spider when a rig owns the session), or (b) remove them from the catalog. (a) is more useful for downstream automation but touches Spider; (b) is a cheap doc edit.

@@ -1,5 +1,0 @@
-`packages/plugins/spider/src/static/spider-ui.test.ts:2024-2032` carries two assertions explicitly forbidding `tab=` and `engine=` URL params, citing prior decisions D13 and D14 ('explicit out-of-scope').
-
-The new brief elevates 'all UI interactions should be deep-linkable' to an Oculus-level requirement. Per the primer rule that brief overrides precedent, these test assertions need to invert (or be deleted) once the new policy lands. This observation tracks the work item for whichever scope item ends up including the tab / engine deep-linking (decision D13 above).
-
-If the patron picks the narrower interpretation (filter-shaped only), this observation becomes a documentation-only follow-up: update the inline test comments to cite the new Oculus-level policy as the reason these are out of scope for this page.

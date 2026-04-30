@@ -1,5 +1,0 @@
-This commission ships `clock-status` as an anima-callable MCP tool but only `nsg clock start`/`stop` as patron-CLI subcommands. There is no anima-callable `clock-stop` or `clock-start`. That asymmetry is intentional today — starting/stopping the daemon is an operator decision — but it will surface as a constraint when an anima needs to redeploy a guild and wants to take the clockworks daemon down cleanly first.
-
-Follow-up: consider whether `clock-stop` (and maybe `clock-restart`) should be anima-callable MCP tools. Probably guarded by permission level. Out of scope for this commission; ship the read-only `clock-status` first and add write surfaces if an evidence-driven need surfaces.
-
-Tactical detail: the existing tool contract supports `permission: 'admin'` for tools that should be restricted; that mechanism could gate a future `clock-stop` tool to roles with admin grants.

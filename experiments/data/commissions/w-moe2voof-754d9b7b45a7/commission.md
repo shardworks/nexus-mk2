@@ -1,3 +1,0 @@
-Decision D10 lands a new plugin-keyed slot at `writ.status.clockworks = { sessionAttempts: N }`. Existing plugin-owned slots (`status.spider`, `status.astrolabe`, etc.) are documented inline in their respective apparatus files. The Clerk's `setWritStatus` doc (`packages/plugins/clerk/src/types.ts:65-77`) describes the convention but does not enumerate slot owners.
-
-Adding a short table or schema map somewhere (likely `docs/architecture/apparatus/clerk.md` or `docs/reference/writ-status-slots.md` if a new doc warrants it) would make the convention discoverable without grep. This becomes more useful as more apparatus claim slots.

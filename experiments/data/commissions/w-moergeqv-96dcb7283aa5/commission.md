@@ -1,5 +1,0 @@
-Brief D7 explicitly carves CLI surfaces out of the scaffold commission. Once cartograph ships and a downstream consumer (vision-keeper agent runtime, or hand-operator workflow) exists, an `nsg vision-create / vision-show / vision-list / charge-create / …` CLI surface will be required so operators can author and inspect ladder nodes without writing TypeScript glue.
-
-**Tactical fix (separate commission):** Add a tools-apparatus dependency to `@shardworks/cartograph-apparatus`, contribute a tools array via supportKit (mirror astrolabe's seven-tool pattern in `packages/plugins/astrolabe/src/astrolabe.ts:138-301`), wire CLI commands in `packages/framework/cli/src/commands/` so `nsg vision-create --title --body` etc. work. Also: contribute appropriate roles via supportKit.roles so the future agent runtime can summon a vision-keeper anima with read/write permissions on cartograph's books.
-
-Trigger: vision-keeper agent runtime commission lands (which itself depends on this scaffold).

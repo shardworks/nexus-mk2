@@ -1,3 +1,0 @@
-`packages/plugins/reckoner/src/reckoner.ts` lines 8–18 enumerate the three trigger types in mandate-phase terms ("a root writ enters `stuck`", "the queue has 0 `open` writs"). Post-T4 this is misleading on multi-type guilds. Same file line 11 ("a root writ enters `stuck` and the stuck is terminal non-success") and line 13–14 ("after any terminal writ transition, the queue has 0 `open` writs and 0 active rigs") need a refresh to read "a root mandate writ" / "no active-classified writs across any type."
-
-This is a JSDoc/wording change, not a behavior change. Could be folded into T4 if scope allows, but the brief out-of-scopes documentation — surfacing for T7 to sweep at the same time as the architecture doc.

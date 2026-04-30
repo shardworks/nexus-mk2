@@ -1,3 +1,0 @@
-`packages/plugins/spider/README.md:412` describes the `animator-paused` block-type's behavior as "Blocks until the Animator's rate-limit back-off machine reports `state === 'running'` OR `pausedUntil` has elapsed." — the predicate body composed in prose for the third time.
-
-This is on the borderline of S3's scope (which targets the Animator-side READMEs and the architecture doc). The Spider README copy is conceptually the same kind of duplication. A unifying refresh that points all three locations (animator README, animator architecture doc, spider README) at the canonical helper name keeps the prose layer in sync with the code. Worth a follow-up if S3 is scoped narrowly to just the Animator-side docs.

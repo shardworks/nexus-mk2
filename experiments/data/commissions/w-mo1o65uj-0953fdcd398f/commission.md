@@ -1,7 +1,0 @@
-<task id="t6">
-    <name>Write companion page tests</name>
-    <files>packages/plugins/ratchet/pages/clicks/*.test.js; packages/plugins/ratchet/package.json (only if the test script needs a glob extension)</files>
-    <action>Write companion tests using node:test + assert/strict + the FakeElement DOM-shim pattern from the writs-page test files. Cover the page's pure logic per D21: tree-build from a flat list (or from the JSON click-tree response, whichever the page ingests), prune-by-status correctness including the subtree-hiding property, subtree scoping including breadcrumb derivation from an ancestor chain, detail-pane rendering (fields, children section, links section), and link dispatch by prefix (c-…, w-…, other). Re-declare the functions under test at the top of each test file since they are IIFE-scoped in the page. If the Ratchet test script does not already pick up pages/**/*.test.js, extend the glob or script so these tests run in CI.</action>
-    <verify>pnpm --filter @shardworks/nexus-plugin-ratchet test — confirm the new companion tests are discovered and pass.</verify>
-    <done>The companion test files exist, the test runner discovers and executes them, and they pass.</done>
-  </task>

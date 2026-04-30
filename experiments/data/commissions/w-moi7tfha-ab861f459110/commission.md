@@ -1,3 +1,0 @@
-After this commission lands, ~5 dashboard pages will carry near-identical copies of `currentUrlParams`/`updateUrl(changes)`/`popstate` handlers (≈ 30–40 LOC each), modelled on `packages/plugins/ratchet/pages/clicks/index.html:379-392,1133-1140`. Once a sixth page needs deep-linking the duplication will be hard to ignore.
-
-Proposed follow-up: add `packages/plugins/oculus/src/static/url-state.js` exposing a tiny `urlState(paramName, { onPop })` helper, inject it via the same `injectChrome` path that already injects `nexus-format.js` (`packages/plugins/oculus/src/oculus.ts:174-178`), and migrate each page to a one-liner. Defer until at least one new page asks for deep-linking; current commission deliberately chose per-page copies (D9) to keep the diff tight.

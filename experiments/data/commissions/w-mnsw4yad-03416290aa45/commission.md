@@ -1,1 +1,0 @@
-`nsg writ edit` currently only accepts `--body`. Support for `--title` should be added.

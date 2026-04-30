@@ -1,3 +1,0 @@
-`packages/plugins/spider/src/static/index.html:27-30` and `spider.js:1755-1778` toggle Rigs vs Config tabs purely via JS state. Refreshing while on Config snaps back to Rigs.
-
-D14 declines to add this to the present commission because the brief is silent on tabs. The Animator and Astrolabe pages have similar tab-like sub-views (and Spider also has a Feedback page registered as a separate `pages` entry, which dodges this concern). Worth a future writ to make every multi-tab dashboard remember its tab via `?tab=`.

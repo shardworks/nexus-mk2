@@ -1,3 +1,0 @@
-Extract markdown emits `Superseded by:` and `Supersedes:` lines by default (no flag required per brief). For clicks with deep supersede chains or many outbound supersedes, this adds non-trivial line count to the per-click block. Most consumers will welcome the density, but some automation or human consumers (e.g. a reader who just wants the goals) may prefer to opt out.
-
-Not in scope (brief: "visible by default"). If a consumer voices the need after landing, a `--no-supersedes` flag on `click-extract` would be a small follow-up. Preserving this as an observation so the feature request doesn't surface cold.

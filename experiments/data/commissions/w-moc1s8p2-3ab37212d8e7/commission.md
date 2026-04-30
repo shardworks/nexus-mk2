@@ -1,1 +1,0 @@
-`packages/plugins/clerk/README.md` was not inspected in this reading pass. If it mentions the writs page showing 'parent/child' relationships or similar 2-level framing, those sentences will go stale as soon as this commission ships. A quick find-and-review pass at implementation time should catch any documentation drift.

@@ -1,3 +1,0 @@
-`docs/architecture/clockworks.md` line 219 calls the Clockworks runner 'a framework engine that processes the event queue.' Other architecture docs (fabricator.md, spider.md, plugins.md) reserve 'engine' for the new EngineDesign concept (Spider/Fabricator rigging). Two senses of 'engine' coexist: the older 'engine = framework process or Clockworks handler' usage, and the newer 'engine = EngineDesign'.
-
-A short glossary entry or a one-line clarification at the top of clockworks.md (or in `docs/architecture/index.md`) would prevent future readers from re-importing the older sense. Low-cost, high-leverage — same magnitude as the engine→relay rename in the guides but at the architectural layer.

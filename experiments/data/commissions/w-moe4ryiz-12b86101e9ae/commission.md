@@ -1,5 +1,0 @@
-Decision D7 recommends a startup banner with pid, interval, log path. None of those survive a daemon restart — a new pid every time, same interval/log path. Operators correlating issues across restarts have to read the log line by line.
-
-A cheap upgrade: include a daemon-instance UUID in the startup banner and tag every per-dispatch log line with it. Multi-restart traces become greppable as a single thread. The id is also useful if a future commission ever runs multiple daemon instances (sharded by event name, etc.).
-
-Tactical detail: not in scope for the brief. The brief's silence on log format gives the implementer latitude; recommendation D6/D7 follows what operators expect today. A daemon-instance ID is additive and can ship in a follow-up if log analysis shows operators struggling with multi-restart correlation.

@@ -1,7 +1,0 @@
-<task id="t1">
-    <name>Confirm scriptorium rebase-conflict throw signature and the seal engine's current shape</name>
-    <files>packages/plugins/codexes/src/scriptorium-core.ts, packages/plugins/spider/src/engines/seal.ts, packages/plugins/spider/src/engines/implement-loop.ts, packages/plugins/spider/src/types.ts</files>
-    <action>Read scriptorium-core's seal() to identify every throw path and the exact prefix used for rebase conflicts. Read seal.ts to understand its current givens (including `abandon`), upstream yields, and return shape. Read implement-loop.ts to confirm the graft return-shape conventions (shape of `RigTemplateEngine[]`, templating syntax for `${writ}` and `${yields.<id>.<field>}`, `graftTail` semantics). Note any divergence from the inventory's claims — if scriptorium has more than one throw site that could plausibly look like a rebase conflict, the discriminator in t2 must be tightened to cover only the one D9 targets.</action>
-    <verify>Read-only — no command. Produce a short scratch note listing the rebase-conflict throw prefix string, the current seal givens, and the exact graft-return key names.</verify>
-    <done>You can recite, for the next task, the exact substring/regex that distinguishes rebase-conflict throws from other seal failures, and the exact result-shape seal must return when grafting recovery.</done>
-  </task>

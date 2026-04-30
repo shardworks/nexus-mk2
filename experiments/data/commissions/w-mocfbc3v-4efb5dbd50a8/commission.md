@@ -1,3 +1,0 @@
-The commission body cites `packages/plugins/ratchet/src/ratchet.ts:107-139` for `buildTree` and `packages/plugins/ratchet/src/ratchet.ts:455-463` for `extract()`. Current line numbers: `buildTree` sits at **115–148** and `extract()` sits at **690–698**. The drift doesn't affect the intended edit — both symbols are still uniquely greppable — but it mirrors the exact pattern flagged as `obs-1` on the predecessor commission (`w-moc29uv4-df61bb6407af`), suggesting the brief-authoring line-number hygiene concern is systemic rather than one-off.
-
-Follow-up: the recommended convention from the predecessor's obs-1 (anchor on symbols/headings rather than line numbers) remains unadopted across brief authoring. A guild-level norm or lint would prevent this class of drift.

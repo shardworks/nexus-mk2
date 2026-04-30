@@ -1,1 +1,0 @@
-The 'cancel rig' button on engine details of the Astrolabe does not work. The button flickers, but nothing happens. I'm unsure if the tool works or not, so have not determiend if its a web ui bug or problem with the tool implementation.

@@ -1,3 +1,0 @@
-The legacy regex `/Child "([^"]+)" failed:/g` matches anywhere in the string, so a free-text operator-supplied resolution that incidentally contained `Child "some-id" failed:` would have surfaced that id as a 'leaf cause' even though no cascade had occurred. This was a long-standing edge case latent in the predicate; the cutover (D6=no-fallback) removes it as a side-effect. Worth recording so anyone reviewing past pulses understands the semantics shifted from 'string-pattern derived' to 'engine-asserted'.
-
-Files: `packages/plugins/reckoner/src/predicates.ts:82-92`. Out of scope because the cutover already addresses the false-positive case.

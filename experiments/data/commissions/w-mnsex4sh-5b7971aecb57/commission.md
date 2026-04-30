@@ -1,1 +1,0 @@
-Currently, writs can only be edited (via tool or ui) if they are in a 'new' status. Relax this requirement so any writ can have it's title or body edited. (Though not it's type or codex.)

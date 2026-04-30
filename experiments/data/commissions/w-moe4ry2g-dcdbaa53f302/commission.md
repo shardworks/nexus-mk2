@@ -1,5 +1,0 @@
-`packages/framework/cli/src/commands/start.ts` (lines 92-130) and `packages/framework/cli/src/commands/stop.ts` (lines 20-56) duplicate four helper functions verbatim: `isProcessAlive(pid)`, `readPidFile(file)`, `tryUnlink(file)`, `waitForExit(pid, timeoutMs)`. The Clockworks daemon (this commission) needs the same four helpers from both the CLI's new subcommands and the apparatus's `clockStart`/`clockStop`/`clockStatus` core-API functions.
-
-Decision D12 in this commission's plandoc recommends extracting them into `@shardworks/nexus-core` alongside the existing `clockPidPath`/`clockLogPath` helpers. That extraction also lets `nsg start` and `nsg stop` consume the shared helpers, removing the existing duplication.
-
-Follow-up tactical detail: add a `pid-helpers.ts` module to `packages/framework/core/src/` exporting `isProcessAlive`, `readPidFile`, `tryUnlink`, `waitForExit`; re-export from `index.ts`; update `start.ts` and `stop.ts` to import from `@shardworks/nexus-core`. Tests in `start.test.ts` and `stop.test.ts` already cover the helpers indirectly; new direct unit tests in `core` would be cheap to add.

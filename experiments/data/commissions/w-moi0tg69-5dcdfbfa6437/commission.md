@@ -1,7 +1,0 @@
-**The gap.** The brief out-of-scopes 'where the vision is stored, how it's structured, how drift is detected' — vision-keeper v0 exposes a snapshot-emission API that takes pre-built payload data. There is no apparatus today that produces that payload. The downstream commissions are also undrafted: no writ tracks the vision-artifact-storage commission, the drift-detection commission, or the rig that processes vision-keeper-produced writs.
-
-**Why this matters.** v0 vision-keeper ships a worked-example contract surface, but until the surrounding commissions land it is exercised only by tests. The follow-on chain is: vision-artifact storage → drift-detection apparatus that calls vision-keeper.emit → Reckoner CDC handler that approves vision-keeper writs (`w-mohuvpu2`, undrafted/unbuilt) → rig that processes approved writs (out of scope, undrafted). Each of these is a separate commission, but the chain is not currently visible in the writ tree.
-
-**Proposal.** Lift each of these as a top-level mandate so the chain is at least catalogued. Curators decide priority; the brief deliberately scoped the petitioner side first because it can be tested in isolation.
-
-**Atomicity.** Multiple discrete follow-up mandates — vision-artifact storage, drift detection, rig design — each its own commission. Lift as a connected set so curators see the dependency chain.

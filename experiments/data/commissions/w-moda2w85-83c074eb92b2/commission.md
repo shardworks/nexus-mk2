@@ -1,3 +1,0 @@
-The custom route handler in `oculus-routes.ts` under D22 is deleted. The auto-generated route wraps the tool handler's return with `c.json(result)` in `packages/plugins/oculus/src/oculus.ts:436`. There is no middle layer that enforces the tool's return matches the route's documented response shape. A future refactor that accidentally changes `animator-status`'s return (e.g. returns a string error message on some failure path) would silently change the route body, breaking the Spider banner's JSON parse in the browser.
-
-The default pattern the codebase uses for tool-contributed routes is "trust the tool"; introducing response-shape contracts is a framework-level concern. Out of scope for this fixup, but worth noting as a regression-risk surface created by D22.

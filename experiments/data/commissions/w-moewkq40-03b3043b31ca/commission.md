@@ -1,5 +1,0 @@
-Decision D6 leaves retention as 'append-only-forever default with documented archival pattern as opt-in.' The brief explicitly asked for 'when retention becomes a real concern.' The storage-growth math in the inventory pegs the worst case at ~5.26M rows/yr and ~10GB/yr at 2KB/row — enough that a long-running guild on small storage would notice, but not enough to justify designing the retention machinery now.
-
-Follow-up: draft a Reckonings retention design commission that activates when at least one of these trip-wires fires — (a) the Sentinel pattern (`c-modou6dv` is the parked precedent) or Laboratory ingestion provides a natural archive sink we can defer rows into; (b) an operator explicitly requests pruning because the Reckonings book is uncomfortably large in their guild; (c) the new Reckoner has been in production for >6 months and the row-count growth has been measured to validate or refute the projection.
-
-This is a 'wait for the trigger' observation, not a design gap — but having the trigger conditions explicit makes the deferred design discoverable when one of them fires.

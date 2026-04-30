@@ -1,5 +1,0 @@
-`docs/architecture/index.md` line 69 writes `[The Clockworks](apparatus/clockworks.md)`, but the file `docs/architecture/apparatus/clockworks.md` does **not** exist (only `apparatus/clockworks-stacks-signals.md` is present in that directory). Every other apparatus row in the Default Apparatus table at lines 271–283 has a working link target (stacks.md, codexes.md → scriptorium.md aside, clerk.md, etc.).
-
-This is doc-only drift: the link target should either be created (a Clockworks API contract doc following the `_template.md` convention) or the link should be downgraded to plain text. The current sweep recommends matching the broken link in the new table row to preserve consistency, deferring the fix to a scoped follow-up.
-
-Affected files: `docs/architecture/index.md` (line 69 §2 prose, plus the new Default Apparatus row added by S3). Also: §11 "## The Clockworks" placeholder at line 515 explicitly says `Link to clockworks.md` in its TODO comment, anticipating the same target.

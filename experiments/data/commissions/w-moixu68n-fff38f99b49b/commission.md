@@ -1,7 +1,0 @@
-Today every link-kind id is a bare string literal at the call site — `'spider.follows'`, `'astrolabe.lifted-from'`, and now `'depends-on'`. The current commission's pre-rename grep across 14 files shows the cost: a single rename touches ~25 separate string-literal sites. The pattern of plugin-prefixed kind ids is stable enough that lifting an exported constant per kind (e.g. `DEPENDS_ON_LINK_KIND` from `@shardworks/clerk-apparatus`, `LIFTED_FROM_LINK_KIND` from `@shardworks/astrolabe-apparatus`) would let downstream readers/writers import a symbol instead of a string — the next rename or refactor needs only to change the constant.
-
-Out-of-scope rationale for the current commission: the brief is silent on this and the ergonomic win is uneven (one constant per kind across many plugins is a wide change). Worth its own commission once the second or third rename inflicts the same grep tax. Defer until then.
-
-Files that would gain symbol-imports after a constants pass: `packages/plugins/spider/src/spider.ts` (~6 sites), `packages/plugins/astrolabe/src/engines/observation-lift.ts` (1 site), `packages/plugins/astrolabe/src/astrolabe.ts` (registration site, 1), and every test file that mentions any kind by id.
-
-Not a bug; not blocking. Quality-of-life refactor.

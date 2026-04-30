@@ -1,5 +1,0 @@
-The `astrolabe.patron-anima` engine is registered as a kit-contributed engine (`astrolabe.ts:313`). The plan-and-ship rig template wires it (`plan-and-ship.ts:78-87`) but in principle a custom rig template in another guild could also wire it, in any position relative to a custom decision-review.
-
-After D2/clear-selected, the engine becomes the authority on "if I abstained, the decision needs human attention". A custom rig template author might wire patron-anima followed by a custom downstream gate that does *not* honour the `selected === undefined` invariant — they'd then silently miss abstentions in the same shape this bug hit.
-
-Not a fix for this commission, but worth a short doc note in the patron-anima JSDoc (D8 changes already in scope) that the engine relies on the consumer honouring `selected === undefined ⇔ needs patron attention` to surface abstentions. This is documentation of a coupling, not a code change.

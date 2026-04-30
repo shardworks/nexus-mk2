@@ -1,6 +1,0 @@
-<!-- Live body for this quest is a file in the vibers guild. See .claude/skills/quests/SKILL.md. -->
-<!-- Do not edit this row body while the quest is live. -->
-
-## Goal
-
-Design and ship the concurrency-control substrate that lets the autonomous scheduler run multiple planning and execution rigs in parallel without producing confidently-wrong plans. Covers the pieces that sit alongside (but outside) the atlas work: (a) optimistic concurrency control over observed read sets so a plan computed against one repo/atlas state is validated before commit and dispatch, (b) plan-vs-plan conflict handling for two Astrolabe sessions planning simultaneously against overlapping territory, (c) trusted intake tiers so the patron can dump work into a hopper without implicitly committing to immediate dispatch (backlog vs ready pool vs parked), (d) park/release semantics for periods of upstream churn where specific blockers can't be enumerated, and (e) load-bearing `blocked_by` links as a first-class way to express hard prerequisites the scheduler must respect. Outcome is an articulated scheduler safety model plus the writ-substrate changes needed to enforce it.

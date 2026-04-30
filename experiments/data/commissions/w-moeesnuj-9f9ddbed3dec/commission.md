@@ -1,5 +1,0 @@
-`packages/plugins/claude-code/README.md` (around the “Rate-Limit Detection” section, lines ~56–71) describes the detector as “a **two-branch NDJSON detector**” with active branches `Structural subtype` and `Structural is_error`. The current code in `packages/plugins/claude-code/src/index.ts` (`detectRateLimitFromNdjson` and the comment block above it, lines ~30–81) defines a **single** branch — a regex against the top-level `error` field on NDJSON messages. The two-branch description is the *retired* shape; tests in `src/rate-limit-detection.test.ts` explicitly pin negative behaviour against both retired branches.
-
-Downstream impact: anyone reading the README for orientation will form a wrong mental model and may, while “narrowing” the detector, accidentally re-introduce one of the retired branches.
-
-Fix is doc-only — update the README's “Rate-Limit Detection” section to describe the single active branch and to explicitly mention the retired branches as the safety net (so the README itself becomes load-bearing context for the next editor). No code or tests change.

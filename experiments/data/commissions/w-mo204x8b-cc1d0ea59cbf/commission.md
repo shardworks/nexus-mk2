@@ -1,7 +1,0 @@
-<task id="t3">
-    <name>Filter pre-decided decisions from the InputRequestDoc and extend the fast-path</name>
-    <files>packages/plugins/astrolabe/src/engines/decision-review.ts</files>
-    <action>In the first-pass branch (plan status `analyzing`), compute the set of decisions whose `selected` is not yet set, and build the InputRequestDoc's `questions` and `answers` maps from that set only — pre-decided decisions produce no `questions[id]` or `answers[id]` entry (D7). Scope items continue to be included in the InputRequestDoc when one is emitted. Extend the fast-path so that when no decisions are reviewable the plan transitions directly from `analyzing` to `writing` **regardless of scope count** (D6, scope-agnostic); in that case no InputRequestDoc is emitted and scope items are implicitly auto-accepted. Do NOT add any validation of the analyst-set `selected` (D8). Do NOT change `buildDecisionSummary` or `buildAnalysisTags` (D9). Do NOT change the reconcile-time invariant check — it already handles analyst-set `selected` correctly.</action>
-    <verify>pnpm -w --filter @shardworks/astrolabe typecheck</verify>
-    <done>The first pass excludes pre-decided decisions from the InputRequestDoc, the fast-path fires whenever no decisions are reviewable (irrespective of scope), the existing reconcile/invariant logic is untouched, and the package typechecks.</done>
-  </task>

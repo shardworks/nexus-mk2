@@ -1,1 +1,0 @@
-`packages/plugins/clerk/src/tools/writ-list.ts` exposes a `parentId` query param that is strictly one level deep, consistent with `WritFilters.parentId`. Users who see writ-show return deep counts may (reasonably) expect `writ-list?parentId=X` to return the deep descendants. Either surface the divergence in tool instructions or add a `rootId` filter (see obs-1).

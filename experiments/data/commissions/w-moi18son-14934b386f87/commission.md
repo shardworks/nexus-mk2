@@ -1,6 +1,0 @@
-`packages/plugins/codexes/src/scriptorium-core.ts` line 648 throws `Sealing failed after ${maxRetries} retries.` whenever the rebase loop exits without an FF. With the detached-HEAD reattach in place, this message becomes a much more accurate signal of genuine concurrent-push contention (the only remaining cause of loop exhaustion is real ref races on the target). Two follow-ups would close the loop on the brief's `c-mof5scdo` companion concern:
-
-1. Differentiate the failure signal: when the loop exhausts retries, the message should name what kept failing — e.g., include the final target SHA, the source SHA, and a short "target moved on origin during retries" hint when `advanceToRemote` advanced the target ref between iterations.
-2. Carry that distinction onto the writ resolution / SealResult so Sentinel's planned surfacing rule (`c-mof5scdo`) can pattern-match "genuine contention" vs. "stuck for some other reason" without log scraping.
-
-This is explicitly out of scope for the current commission per the brief ("Reworking the seal retry-budget mechanics or the 'after 3 retries' error message"), but the diagnostic improvement is small and is the natural next step once reattach lands.

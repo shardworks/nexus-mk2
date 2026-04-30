@@ -1,5 +1,0 @@
-Decision D9 recommends the daemon catch every exception from `processEvents` in its poll loop and log+continue. That works for transient errors (SQLite lock contention, malformed `guild.json` standing-orders that the operator can fix and reload). It also works for terminal errors (Stacks file gone, FS permission revoked) — the daemon will keep logging and never make progress.
-
-A future enhancement: distinguish transient (retry-friendly) from terminal (give-up) errors and exit nonzero on the latter so a process supervisor (systemd, pm2) can restart the daemon. Today there is no such supervisor in the codebase, but operator workflows in production typically run under one.
-
-Tactical detail: a simple heuristic — N consecutive throws within M seconds → escalate. Or distinguish by error class (Stacks-IO error → terminal; ValidatorError → transient). Out of scope for this commission; surfaces if real production usage shows the log-and-continue path masking actual outages.

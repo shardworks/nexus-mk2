@@ -1,3 +1,0 @@
-For every plan's cost panel, `packages/plugins/astrolabe/pages/astrolabe/astrolabe.js::fetchCostData` L399-L408 fans out one `/api/session/show?id=...` per anima-session engine. A 4-engine plan triggers 5 round trips (1 rig + 4 sessions). The spider already exposes a pre-aggregated `RigCostSummary` on the `RigView` shape (see `packages/plugins/spider/src/rig-view.ts` + `RigCostSummary` in `types.ts` L130-L137) — it is computed server-side from the same sessions.
-
-Once `rig-for-writ` either returns `RigView` (see obs-1) or a dedicated per-writ cost endpoint exists, the astrolabe panel could replace the fan-out with a single fetch. Keep this deferred until the shape unification in obs-1 is decided — that decision determines the right server endpoint.

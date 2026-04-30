@@ -1,7 +1,0 @@
-<task id="t2">
-    <name>Add `recover` given to seal and implement the catch-and-graft branch</name>
-    <files>packages/plugins/spider/src/engines/seal.ts, packages/plugins/spider/src/types.ts (only if seal-yield shape needs widening)</files>
-    <action>Extend seal's givens with an optional `recover` flag defaulting to `true`. Wrap the scriptorium.seal() call in a try/catch. If `abandon: true`, do not engage recovery at all — let any throw propagate. If `recover === false`, do not engage recovery — let any throw propagate. Otherwise, on a caught error matching the rebase-conflict signature confirmed in t1, return a `completed` result whose yields encode the failed seal (e.g. `ok: false`, a reason field, and a flag indicating recovery was grafted), with `graft` containing two `RigTemplateEngine` entries (the manual-merge quick engine and the retry seal engine, the latter chained `upstream` of the former) and `graftTail` set to the retry engine's id (D14). Pass through the original draft yield, writ, and any other context the grafted engines need via givens templating, modeled on implement-loop. Errors not matching the rebase-conflict signature must re-throw unchanged.</action>
-    <verify>pnpm -w --filter @nexus/spider typecheck</verify>
-    <done>seal.ts compiles, `recover` is in its givens contract, and the catch branch builds a graft + graftTail referring to the new `manual-merge` engineId and the reused `seal` engineId (with `recover: false`).</done>
-  </task>

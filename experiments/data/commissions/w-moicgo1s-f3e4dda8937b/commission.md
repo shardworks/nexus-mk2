@@ -1,3 +1,0 @@
-The architecture-doc example arrays at line 117 (`"plugins": ["books", "clockworks", "sessions", "..."]`) and line 249 (`"plugins": ["books", "clockworks", "spider", "sessions", "nexus-git"]`) reference a `sessions` plugin id. The current package set (`packages/plugins/*/package.json`) contains no `sessions` package; session lifecycle is split between `@shardworks/animator-apparatus` and `@shardworks/claude-code-apparatus` (plugin ids `animator`, `claude-code`).
-
-Not lifted in this commission — the brief is bounded to the six listed bullets and the in-sweep edits use `minimal-rename` (D13). A follow-up doc-hygiene commission should refresh both example lists to a real, current default set so a copy-pasted example actually validates.

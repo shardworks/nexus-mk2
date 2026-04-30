@@ -1,3 +1,0 @@
-The bullet being pruned (`docs/architecture/apparatus/ratchet.md:411`) phrases the decision as "Should click IDs follow the same `w-{random}-{hash}` pattern as writs, or use a different prefix (e.g., `c-{random}-{hash}`)..." — but the actual writ and click ID pattern is `{prefix}-{base36_timestamp}-{hex_random}`, not random-then-hash. The "{random}-{hash}" framing suggests a two-random-segment shape that doesn't match either substrate.
-
-The bullet is being removed anyway, so this self-corrects. Noted for completeness: the stale doc wasn't just stale on its answer, it was also imprecise on its framing.

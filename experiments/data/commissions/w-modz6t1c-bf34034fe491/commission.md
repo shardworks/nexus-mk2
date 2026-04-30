@@ -1,5 +1,0 @@
-`docs/architecture/apparatus/clerk.md`'s 'Writ-Type Registry' section (lines 677–685) describes the registration path in prose but has no code example showing a plugin's `start()` calling `clerk.registerWritType(config)`. The 'Mandate's lifecycle' section (lines 687–736) is the only worked-example code in the doc, and mandate is registered by the Clerk's own `start()` — so a reader has no in-doc precedent for what plugin-side type registration looks like.
-
-The new integration test (this commission) will land such an example as test code (per D5, using `makeWritTypeApparatus`). Once it's in, the architecture doc could cite it (e.g. 'see `multi-type.integration.test.ts` for a worked plugin-side registration example') so a reader has a concrete pointer.
-
-Low-priority. Out of scope for this commission; observation only.

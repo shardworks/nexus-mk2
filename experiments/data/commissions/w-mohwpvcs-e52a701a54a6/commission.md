@@ -1,3 +1,0 @@
-Clerk surfaces its writ-types and link-kinds via dedicated tools (`writ-types`, `writ-link-kinds`). Operators expect every kit-static contribution registry to be enumerable from a tool or page. Without this, a guild operator cannot answer 'what petitioners are registered?' without reading source code.
-
-Follow-up: either (a) ship a Reckoner-side tool (see obs-8), or (b) wire the petitioners registry into the Oculus's writs page (or a new reckoner page) as a sibling to the link-kinds panel. UX work, separate commission.

@@ -1,3 +1,0 @@
-`packages/plugins/oculus/src/static/style.css:62-71` sets `button { background: var(--blue) }` on the bare element selector. Every `.btn`-class button that doesn't override the background ends up filled blue regardless of state — this is what makes the Children toggle, type-filter buttons, and the State filter's All button look identical when toggled.
-
-Follow-up: change the base `button` rule to `background: transparent` (or none) and force `.btn` / `.btn--primary` etc. to declare backgrounds explicitly. This will surface every implicitly-blue button across the dashboard family, but is the only way to remove the trap that bit this commission. Out of scope here because the touch radius extends to every page, but a fix worth scheduling.

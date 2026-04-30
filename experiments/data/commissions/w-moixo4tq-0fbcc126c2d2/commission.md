@@ -1,5 +1,0 @@
-`docs/architecture/index.md:298` lists the Oculus alongside every other apparatus, but `docs/architecture/apparatus/` has no `oculus.md` (every other listed apparatus does). The `_template.md` exists; the file is simply missing.
-
-This is the doc gap the deep-link commission's S2 would fill, but the gap predates the deep-link work and is broader: Oculus has no documented apparatus contract — chrome injection, page kit interface, route precedence, tool→REST mapping rules, and so on are documented only in the README and the inline comments of `oculus.ts`. A doc lift to fill this in (using the existing `oculus.ts` source + README as the seed) would benefit every future contributor and any plugin author trying to reason about page contracts.
-
-Files in scope: create `docs/architecture/apparatus/oculus.md` paralleling the structure of `apparatus/clerk.md` or `apparatus/animator.md`.

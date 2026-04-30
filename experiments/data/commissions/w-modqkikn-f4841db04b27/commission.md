@@ -1,5 +1,0 @@
-**Site:** `packages/plugins/clockworks/src/signal-validator.ts` and `packages/framework/cli/src/commands/signal.ts` both export `RESERVED_EVENT_NAMESPACES` and `WRIT_LIFECYCLE_SUFFIXES` and both implement `validateSignal`. The duplication is intentional (the CLI deliberately avoids depending on plugin packages — see signal.ts header comment) but means catalog changes (e.g. adding a new reserved namespace) must be applied to both files.
-
-**Why this matters now:** This commission may add framework events under the `commission.`, `session.`, `tool.`, `migration.`, `guild.` namespaces. Those namespaces are already reserved, so no new entries; but if a future commission adds a new namespace (e.g. `anima.` once the entity lands, or a new `lattice.` or `spider.` framework namespace), both files need a coordinated update.
-
-**Suggested follow-up:** Add a CI lint that asserts the two arrays are equal. Cheap to write; catches drift before it ships.

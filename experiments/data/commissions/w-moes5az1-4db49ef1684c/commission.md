@@ -1,5 +1,0 @@
-`packages/plugins/spider/src/spider-test-fixture.ts:362` provides `async getStatus() { return {} as never; }` as the AnimatorApi mock. Tests that don't exercise the rate-limit pause path tolerate this because the spider code under test does not consult the result.
-
-After the S1 refactor, `isAnimatorPaused()` calls `isDispatchable(status)` which reads `state` and `pausedUntil` from the doc. An empty-object mock returns `state === undefined`, which makes `isDispatchable` return `false` at the first branch (state !== 'running'), then return `true` at the no-`pausedUntil` branch — i.e. the engine treats the Animator as dispatchable. That behavior is consistent with what the tests presumably want (the rate-limit gate doesn't fire in non-rate-limit tests), but it is incidental, not designed.
-
-A tighter mock (`async getStatus() { return { id: 'dispatch-status', state: 'running', backoffLevel: 0 }; }`) would express the intent and would not hide a future bug where `isAnimatorPaused()` starts caring about a field other than `state`/`pausedUntil`. Worth a small cleanup in the fixture file.

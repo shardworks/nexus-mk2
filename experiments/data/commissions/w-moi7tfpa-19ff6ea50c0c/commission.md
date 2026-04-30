@@ -1,3 +1,0 @@
-`packages/plugins/clerk/src/tools/writ-tree.ts:104-112` and `writ-list.ts:65-74` declare the `phase` filter as `z.enum(['new','open','stuck','completed','failed','cancelled'])` — the mandate vocabulary baked in. The Writs page deliberately stopped using this in favour of `classification` (T5/D9), but plugin-contributed writ types still cannot be filtered by their own phase names through the public API.
-
-Follow-up: widen `phase` to `z.string()` plus a runtime check against the registered type's state catalogue, OR add an `attrs`/`excludeAttrs` filter (the latter would also obviate D1's client-side prune). Out of scope for this commission, but worth a future writ.

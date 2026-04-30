@@ -1,3 +1,0 @@
-When selecting filters on Oculus pages (e.g. writs, spider, others) the filter selections are stored in-memory and not reflected in URL changes. This means refreshing the page, bookmarking, copying+pasting URLs, etc. does not preserve the filters--the users get the default, unfiltered view. We should ensure that all changes to filter options are reflected via URL updates so the search results are deep-linkable.
-
-We should also surface this as a broader Oculus-level requirement, that all UI interactions should be deep-linkable.

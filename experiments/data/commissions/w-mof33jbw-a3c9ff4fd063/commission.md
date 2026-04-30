@@ -1,5 +1,0 @@
-Decision D5 of this plan recommends Spider re-read overrides on each retry decision so guild.json edits take effect without a daemon restart — matching Animator's pattern. Decision D7 defers the live-reload test because the existing fixture (`packages/plugins/spider/src/engine-retry.test.ts` lines 138–161) installs a `fakeGuild` whose `guildConfig()` returns a closure-captured object; mid-test mutation would require either reaching into the closure or rebuilding the fixture.
-
-A missing test seam is itself a hazard: live-reload behaviour ships untested.
-
-Follow-up: introduce a small fixture helper that exposes the underlying `GuildConfig` object as a mutable handle (e.g. `fixture.setGuildConfig(patch)`), so tests can flip `engineRetryOverrides` mid-flight and assert the next failure handler reads the new value. Once available, add the deferred D7 live-reload regression. The same harness would benefit any future config-driven behaviour and is not retry-specific.

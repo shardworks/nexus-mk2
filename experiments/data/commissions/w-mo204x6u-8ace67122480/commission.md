@@ -1,7 +1,0 @@
-<task id="t2">
-    <name>Mirror razor + defaults + pre-fill rule to sage-analyst.md</name>
-    <files>packages/plugins/astrolabe/sage-analyst.md</files>
-    <action>Apply the same content changes from t1 to `sage-analyst.md`, adapted to this file's section structure (`### Step 2: Decision Analysis` rather than `### Decision Analysis`; three numbered Process steps rather than six). The razor content, three defaults, D2 pre-fill rule wording, and "investigate, don't punt" guideline must read identically to what you wrote in t1 — this is parallel duplication, not paraphrase. After editing, diff the two files' decision-analysis sections and confirm that the differences are limited to file-local framing (heading levels and surrounding Process-step language), not to razor/defaults/pre-fill content.</action>
-    <verify>diff &lt;(sed -n '/^### Decision Analysis/,/^### /p' packages/plugins/astrolabe/sage-reading-analyst.md) &lt;(sed -n '/^### Step 2: Decision Analysis/,/^### /p' packages/plugins/astrolabe/sage-analyst.md); grep -niE "pre-fill.*selected.*with.*recommendation" packages/plugins/astrolabe/sage-analyst.md || echo "ok — old rule removed"</verify>
-    <done>`sage-analyst.md` contains structurally equivalent razor, defaults, and pre-fill-rule content to `sage-reading-analyst.md`; the old unconditional pre-fill phrasing is gone from this file; "investigate, don't punt" appears in both the razor subsection and a numbered Process step.</done>
-  </task>

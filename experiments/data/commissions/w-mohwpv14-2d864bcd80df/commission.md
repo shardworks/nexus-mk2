@@ -1,5 +1,0 @@
-Clerk's `PostCommissionRequest` (clerk/types.ts line 199) accepts `{ type?, title, body, codex?, parentId? }`. The Reckoner contract §1 documents Workflow 1 as `clerk.post({ ..., ext: { reckoner: { ... } } })` — but `ext` is silently dropped today (TypeScript would fail on this, but a JSON-level call would just discard it).
-
-A petitioner using Workflow 1 must call clerk.post() then clerk.setWritExt() in two operations — same pattern this commission's `petition()` helper uses. A crash between the two leaves an orphaned writ in `new` phase with no `ext.reckoner` (D7 records this risk).
-
-Follow-up: extend `PostCommissionRequest` with an optional `ext?: Record<string, unknown>`. In `clerk.post()`, when `ext` is supplied, write it inside the same transaction as the row insert. Petitioners then have a single atomic post path; the helper's two-call shape can collapse to a single call. Touches Clerk's apparatus, types, and tests. Probably one mid-sized commission.

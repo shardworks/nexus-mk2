@@ -1,5 +1,0 @@
-`docs/architecture/apparatus/reckoner.md` §"Drain predicate (D7)" notes: "There is intentionally no dedupe across bursts in MVP. If multiple terminal transitions land in rapid succession and each sees the drain condition, each will emit. The accepted cost is documented here and in the brief's primer observations."
-
-Multi-type guilds will hit this more often: when a batch of writs across multiple types all complete around the same time, the burst frequency goes up. The dedupe-across-bursts work is explicitly out of scope for T4, but the post-T4 pulse-volume profile should probably be measured before declaring the MVP cost still acceptable.
-
-No code change for T4. Follow-up: a small commission to add a short suppressive window (e.g. 1s debounce on drain pulses keyed on `(triggerType, lastTerminalWritId)` — or simpler, dedupe within a 5s window keyed on triggerType only).

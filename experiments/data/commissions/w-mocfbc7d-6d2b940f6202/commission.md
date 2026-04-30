@@ -1,3 +1,0 @@
-`collectDescendantIds` (`packages/plugins/ratchet/src/ratchet.ts:264-272`) recursively walks the full descendant tree with no depth bound. It is used by `ratchet.list({ rootId })` (line 404) and `ratchet.countDescendantsByStatus` (line 748). Once this commission lands, three of the four Ratchet traversal surfaces will honor `depth` (`tree`, `extract`, and by extension their CLI tools), leaving `list({ rootId })` asymmetric.
-
-The asymmetry is not severe in practice — `list` already pages via `offset`/`limit` — but a `list --root-id c-xxx --depth 1` surface would parallel the other tools cleanly. Deferred from this brief; worth a follow-up commission if the symmetry matters.

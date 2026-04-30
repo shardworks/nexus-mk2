@@ -1,5 +1,0 @@
-Decision D10 recommends exporting the daemon's inline foreground entry from the apparatus (e.g. `clockRunDaemon(home, options)`). This is the testability handle: integration tests can call the function directly, drive the loop for a few ticks via a fake timer or short interval, then signal SIGTERM via the same shutdown deferred.
-
-A dedicated daemon-integration test (separate from the existing dispatcher unit tests) would catch regressions in: PID-file lifecycle, SIGTERM responsiveness, log line format, abortable-sleep correctness, log-and-continue exception handling. Pattern from `nsg start.test.ts` is the closest precedent.
-
-This isn't an observation that requires a separate commission — the implementation commission should land such a test alongside the daemon. Filed here so the implementation commission's spec writer doesn't miss it.

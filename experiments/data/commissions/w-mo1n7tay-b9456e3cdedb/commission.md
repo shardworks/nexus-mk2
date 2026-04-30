@@ -1,7 +1,0 @@
-<task id="t5">
-    <name>Add regression test for pre-cancelled piece writ during collect()</name>
-    <files>packages/plugins/spider/src/engines/piece-pipeline.test.ts (or a sibling test file under packages/plugins/spider/src/engines/ if that better fits the existing test layout)</files>
-    <action>Add a test that simulates the race outcome by transitioning the piece writ to `cancelled` before Spider's `tryCollect` runs the piece-session engine's `collect()`. Use the same mock Animator harness as existing piece-pipeline tests. Assert that: (a) `collect()` does not throw; (b) the silent-swallow path does NOT trigger a warning (already-terminal is expected); (c) yields include the piece writ's actual status (`cancelled`); (d) the engine completes from Spider's perspective. Then add a second test that simulates an unexpected transition failure (e.g. by stubbing `clerk.transition` to throw an error whose message does NOT match the already-terminal classification) and assert that the warning log fires with the piece ID and that `collect()` still returns yields including the writ's actual current status.</action>
-    <verify>pnpm -w test --filter spider</verify>
-    <done>Two new regression tests exist covering the expected-error path (pre-cancelled piece) and the unexpected-error path (warning emitted); both pass; both fail if the bare catch is reintroduced.</done>
-  </task>

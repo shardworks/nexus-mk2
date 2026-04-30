@@ -1,3 +1,0 @@
-`packages/framework/core/src/id.ts:34-36` exports a `shortId()` helper whose JSDoc explicitly states it is 'the natural shape for CLI output, tree renderings, and pulse-context payloads' and that apparatus `resolveId()` implementations accept its output as a prefix.
-
-The `resolveId()` prefix-lookup test at `clerk.test.ts:320-327` reimplements `shortId()` inline with `posted.id.slice(0, posted.id.lastIndexOf('-'))`. Using the helper would be clearer and would remove one more hand-written format description.

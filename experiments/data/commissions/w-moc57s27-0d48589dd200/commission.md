@@ -1,3 +1,0 @@
-In `submitPostForm()` at `packages/plugins/clerk/pages/writs/index.html` lines 1414–1418, the `finally` block runs `document.getElementById('post-draft-checkbox').checked = false;`. On the success path this runs *after* `clearPostForm()` + `closePostForm()` have already reset the form and closed it. Double-clear is harmless but the `finally` reset is redundant on the success path and is the only control reset that uses `finally` — all other reset work lives inside `clearPostForm()`. Minor inconsistency; not a bug. A follow-up could either move the reset entirely into `clearPostForm()` or document why the draft checkbox is special.
-
-Not part of this brief; noticed while reading `submitPostForm()` to plan the parentId branch.

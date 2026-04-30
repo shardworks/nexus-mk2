@@ -1,5 +1,0 @@
-**Site:** `docs/reference/core-api.md` documents a v1 surface (`commission()`, `instantiate()`, `manifest()`, `launchSession()`, `_migrations` table, `signalEvent`/`isFrameworkEvent` helpers). None of these exist in the current code; the plugin/apparatus model from v2 supersedes them.
-
-**Why this matters now:** This commission found that operators following core-api.md would be unable to map the documented event-emission helpers to current code. The doc references `signalEvent(home, name, payload, emitter)` as the framework-emission helper; the current path is `guild().apparatus<ClockworksApi>('clockworks').emit(...)`.
-
-**Suggested resolution:** A documentation-pass commission that audits core-api.md against the current code, removes references to deleted symbols, and links readers to the correct apparatus surfaces. Could batch with `docs/architecture/clockworks.md`'s pending refresh (already tracked in `w-modf69vg`).

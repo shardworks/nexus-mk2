@@ -1,5 +1,0 @@
-After C2's rename, the dispatcher's `isStandingOrderFailedTrigger` (line 520 of `dispatcher.ts`) checks `name === 'clockworks.standing-order.failed'`. The corresponding emit lambda (in `clockworks.ts` post-D20) references the same constant. The two MUST agree or cascades run forever.
-
-C2 hoists the literal once via D20; this observation flags that the loop-guard probe is the OTHER reader of the same constant. The cleanest shape is a single exported `SOF_EVENT_NAME` constant referenced by both the dispatcher's probe and the apparatus's emit lambda. C2 implements that.
-
-Future-proof variant: have the probe consult Clockworks's merged event set and detect any name the apparatus declared with a 'cascading-fail' marker. Out of scope for C2, but a cleaner design once the events-kit infrastructure has another half-year of maturity.

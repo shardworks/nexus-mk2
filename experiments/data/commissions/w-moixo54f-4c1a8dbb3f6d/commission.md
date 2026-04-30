@@ -1,5 +1,0 @@
-Every page with URL-state has a popstate handler that reads the current URL params, then calls a per-page restore function. The structure is the same on every page — see `packages/plugins/clerk/pages/writs/index.html:1966-1973`, `packages/plugins/ratchet/pages/clicks/index.html:1133-1140`, `packages/plugins/spider/src/static/spider.js:1955-1962`, `packages/plugins/spider/src/static/feedback/feedback.js:859-866`, `packages/plugins/animator/src/static/animator.js:491-499`, and `packages/plugins/astrolabe/pages/astrolabe/astrolabe.js:727-...`.
-
-If the deep-link commission lands a `window.NexusUrl.onChange(handler)` API (D2's minimal surface), all six handlers collapse to a single registration. The shared helper itself can also be the place that suppresses re-pushes during popstate-driven view changes (the `skipUrlPush` flag pattern that every page reinvents).
-
-No file changes implied here; this observation is the longer-term consolidation target.

@@ -1,5 +1,0 @@
-The commission brief states: 'The `StandingOrder` union type in `nexus-core`'s `guild-config.ts` currently anticipates `summon:` and `brief:` sugar variants; this commission collapses the union to the single variant above.'
-
-Actual location: the union lives in `packages/plugins/clockworks/src/types.ts`. `nexus-core/src/guild-config.ts` does not import or define it; the clockworks types module augments `nexus-core`'s `GuildConfig` interface via `declare module '@shardworks/nexus-core'` to add `clockworks?: ClockworksConfig` (which transitively references `StandingOrder`).
-
-The architectural intent is preserved (clockworks owns the type at the right apparatus boundary), so the brief's reference is just imprecise rather than load-bearing wrong. No code change needed; surfacing for the record so a future reader doesn't try to chase the type into nexus-core.

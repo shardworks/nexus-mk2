@@ -1,3 +1,0 @@
-`packages/plugins/clockworks/README.md` lines 7-25 say: 'The unattended daemon and cron scheduling are still to come.' Once this commission lands, that wording is wrong on the daemon front. Update the status block to reflect: write path, dispatcher, CDC auto-wiring, manual CLI, framework-event emission, AND the unattended daemon (`nsg clock start/stop/status`, `clock-status` MCP tool, core-API `clockStart`/`clockStop`/`clockStatus`) are all live. Cron scheduling is still TBD.
-
-Tactical detail: edit lines 7-25, drop 'The unattended daemon and cron scheduling are still to come', insert a sentence about the daemon. Keep the cron-scheduling future-tense reference.

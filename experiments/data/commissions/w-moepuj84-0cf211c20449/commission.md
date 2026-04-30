@@ -1,3 +1,0 @@
-There is no operator-facing or kit-author guide for the new 'engine' (EngineDesign) concept. The fabricator.md and spider.md apparatus specs document the type and execution model, but those are reference-shaped, not tutorial-shaped. Once dynamic rig extension lands (the Fabricator's MVP scope explicitly defers it), third-party kit authors will need a guide for contributing engines under `kit.engines`.
-
-A `docs/guides/building-engine-designs.md` mirroring `building-tools.md` and the rewritten `building-relays.md` would close the kit-author guide trio. Defer until at least one third-party engine ships outside Spider's supportKit; today every engine lives inside `spider-apparatus` and the apparatus spec is sufficient for those authors.

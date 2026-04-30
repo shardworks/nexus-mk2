@@ -1,5 +1,0 @@
-Today the standing-order validator (`packages/plugins/clockworks/src/standing-order-validator.ts`) only checks structural shape (allowed top-level keys; required fields; optional `with` is a plain object). It does **not** validate that the `run:` value names a registered relay — the dispatcher catches that at runtime and writes an error dispatch row (`dispatcher.ts:194-209`).
-
-For stdlib relays whose names are known at apparatus-bootstrap time (`summon-relay`, future scheduled-cron relay), the validator could learn the names and fail-fast on operator typos (`run: 'sumon-relay'`). This stays scoped: only stdlib names; user-contributed kit relays still surface at runtime because they are dynamically registered.
-
-Weak suggestion — the runtime-only error path is workable. Worth surfacing if standing-order config friction comes up in future operator feedback.

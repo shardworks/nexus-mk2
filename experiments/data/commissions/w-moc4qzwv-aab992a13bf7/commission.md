@@ -1,1 +1,0 @@
-Already tracked as sibling writ `w-moc1izt5`. Recording here for completeness: `docs/architecture/index.md:273–293` lists a Standard Guild apparatus table that does not reflect the installed plugin set under `packages/plugins/` (which includes ratchet, lattice, reckoner, oculus, astrolabe, copilot, clockworks-retry, etc.). Not addressed by this commission.

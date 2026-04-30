@@ -1,7 +1,0 @@
-Cartograph's writ types in v0 will be registered without `childrenBehavior` cascade (per decision D12 in this plan), matching astrolabe's `step` and `observation-set` pattern. Mandate, by contrast, declares `parentTerminal: { transition: 'cancelled', resolution: 'Automatically cancelled due to parent termination' }` so that cancelling a mandate auto-cancels all its non-terminal descendants.
-
-For cartograph, the natural rule is similar: cancelling a vision should cancel all its descendant charges, pieces, and any mandates attached under them. Without the cascade, an operator who cancels a vision leaves a tree of orphaned active-state children that future tooling will have to triage manually.
-
-**Tactical fix:** In a follow-on commission once the agent runtime exists and operator workflows are clearer, add `childrenBehavior.parentTerminal` to each cartograph writ type's WritTypeConfig. The `transition` target lives in the *child* type's config; the validator does not enforce cross-type reachability so each type's `allowedTransitions` must independently include `cancelled` from every non-terminal state (the mandate-clone six-state machine already does).
-
-Explicitly deferred from v0 because patron-walkthrough semantics for charge/piece haven't been litigated yet — a too-eager cascade might cancel work the patron meant to preserve. Worth revisiting once the vision-keeper runtime ships and the cancel-vision use case has a concrete handler.

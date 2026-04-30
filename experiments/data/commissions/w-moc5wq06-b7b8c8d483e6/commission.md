@@ -1,5 +1,0 @@
-The Ratchet already has a snapshot test (`packages/plugins/ratchet/src/ratchet.test.ts:107-117`) pinning the runtime `supportKit.books.*.indexes` arrays, and the Clerk has an equivalent (`packages/plugins/clerk/src/clerk.test.ts:140-143`). Neither doc-side declaration is verified against its plugin — this commission exists because the Ratchet doc silently drifted from ratchet.ts.
-
-Consider a small test in each apparatus package (or a single shared harness) that parses the `supportKit` code block out of `docs/architecture/apparatus/<name>.md` and asserts the declared indexes match the plugin's runtime declaration. Simplest implementation: grab the fenced TypeScript block containing `supportKit:`, run it through a lightweight parser (or just string-compare after normalization), and fail loudly on drift.
-
-This would have caught the current drift at CI time and would prevent a recurrence without the primer needing to notice it.

@@ -1,9 +1,0 @@
-**Where:** `packages/plugins/reckoner/src/reckoner.ts:730-767` (the `buildReckoningRow` helper).
-
-**What:** The `ReckoningDoc` type declares `deferCount`, `firstDeferredAt`, and `lastDeferredAt` as optional fields (`packages/plugins/reckoner/src/types.ts:333-339`), and `docs/architecture/reckonings-book.md` lines 479-494 describes their running-counter semantics in detail (each new deferral increments `deferCount`, `firstDeferredAt` is preserved, `lastDeferredAt` is refreshed; the journal is the source of truth). `buildReckoningRow` does not implement any counter logic today; the helper neither reads prior deferred rows nor populates these fields.
-
-**Why not fix in this commission:** Decision D4 in this plan punts the counter wiring to the staleness-diagnostic commission (c-moixpj1l), which is the named consumer of the counters. The brief here doesn't prescribe wiring them.
-
-**Why this deserves a follow-up:** The doc-vs-code gap will widen as more defer paths come online. The staleness diagnostic commission either has to wire the counters as a sub-task (orphaned ownership) or live without them (eroding the doc's source-of-truth claim). A small dedicated commission to fold the counter logic into `buildReckoningRow` (one prior-row lookup + three field populations) keeps the staleness work focused on its actual surface (thresholds, surface, action).
-
-**Suggested follow-up:** A scoped commission to retrofit deferCount/firstDeferredAt/lastDeferredAt into `buildReckoningRow`, applying to every deferred row regardless of reason. Touches one helper, adds one query (find prior deferred rows by writId), no API changes.

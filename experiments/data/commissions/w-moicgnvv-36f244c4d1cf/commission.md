@@ -1,5 +1,0 @@
-The brief body for w-moi6ik0k (and predecessor w-moi2v2fc) includes the bullet `“clockworks-retry listed as top-tier capability (now retired).”` A case-insensitive search across `docs/architecture/index.md` for `clockworks-retry`, `retry`, and `top-tier` returns **no hits**. Other repo hits (`packages/plugins/sentinel/src/engine-context.integration.test.ts`, `docs/architecture/apparatus/spider.md`) are outside the index-doc sweep.
-
-Likely options: (a) the term was scrubbed from `index.md` in an earlier edit and the brief bullet is stale, or (b) the brief author was thinking of a sibling doc (e.g. `apparatus/spider.md`). Either way, this brief↔file mismatch is worth surfacing so the patron can decide whether to retarget the bullet or drop it.
-
-Follow-up: search the apparatus docs (`docs/architecture/apparatus/*.md`) for `clockworks-retry` references and assess whether a separate cleanup pass should retire the term there.

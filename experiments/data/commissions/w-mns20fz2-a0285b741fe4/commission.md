@@ -1,1 +1,0 @@
-Oculus has its own api server for hosting HTTP tools. This is redundant with the tool server added to the instrumentarium in w-mns1wmnr-bd5b0ad60037, which supports multiple different use cases. We should remove the Oculus tool server and instead have the oculus server proxy any 'api' requests that are not for explicitly registered oculus endpoints to the instrumentarium server.

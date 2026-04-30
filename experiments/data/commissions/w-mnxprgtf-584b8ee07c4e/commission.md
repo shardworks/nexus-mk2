@@ -1,1 +1,0 @@
-Tell me how many files are in this project's git repo (head of main).

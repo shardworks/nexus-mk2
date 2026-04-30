@@ -1,9 +1,0 @@
-**The gap.** The Reckoner contract (`docs/architecture/petitioner-registration.md` §9, §15 open question g) frames Channel-1 as 'a standing order keyed on writ-update events, filtered to writs they posted', and the brief calls for the keeper to 'ship a standing-order configuration'. But `clockworks.standingOrders` lives in `guild.json` only — there is no kit-contributable surface today. Vision-keeper can ship the *relay* (via supportKit.relays) but the *standing order* must be hand-wired by every operator, and the recipe lives only in vision-keeper's README.
-
-**Why this matters.** Every future petitioner (patron-bridge, tech-debt detector, etc.) will face the same gap: the relay travels with the kit, but the standing order must be redundantly added to every guild's guild.json. This is a systematic friction point in the Channel-1 path the contract document calls 'canonical'.
-
-**Proposal.** Extend Clockworks to accept a `standingOrders` kit contribution type (parallel to `relays` and `events`). Kit-contributed standing orders merge with operator-declared ones at apparatus start. Validation rules stay identical (validator already pure / reusable per `standing-order-validator.ts`).
-
-**Concrete files.** Augment `packages/plugins/clockworks/src/types.ts` to declare a `standingOrders` field on `ClockworksKit`; extend `clockworks.ts:start()` to merge kit-contributed orders into the run-time set; update `validateStandingOrders` to accept the kit-contribution path. Vision-keeper's README recipe section becomes a one-line reference instead of a copy-paste block.
-
-**Atomicity.** This is a discrete commission — one new kit-contribution type, one merge point, one doc update. Independent of vision-keeper or any specific petitioner.

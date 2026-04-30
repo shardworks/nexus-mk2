@@ -1,6 +1,0 @@
-`docs/reference/event-catalog.md` lines 64–69 list only `standing-order.failed` in the Clockworks framework events table; lines 73–83 list seven reserved namespaces. Adding `schedule.fired` and `schedule.` (decision D19) is in scope for this commission, but the doc has other drift worth a separate cleanup pass:
-
-- Line 9 talks about reserved namespaces but only names three (`commission.`, `session.`, `standing-order.`) inline—it should match the canonical list at lines 73–83.
-- The 'Standing Order Wiring' section (lines 139–159) shows examples using the dropped sugar form `{ on: 'commission.posted', summon: 'artificer' }`. This contradicts the shipped validator that rejects `summon:`. Sibling commission `w-modf69vg` covers `clockworks.md` but explicitly out-of-scopes other reference docs.
-
-The sweep should: align line 9 with the canonical list, rewrite the Standing Order Wiring examples to the canonical `{ on, run, with? }` shape, and verify all other code snippets match the shipped reality.

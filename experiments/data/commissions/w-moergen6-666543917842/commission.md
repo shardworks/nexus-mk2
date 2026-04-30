@@ -1,5 +1,0 @@
-The cartograph scaffold brief (`w-moepkalv-0ead1599bc23`) carries a `<task-manifest>` block with task t3 titled "Resolve astrolabe piece-writ-type collision" and the surrounding `What NOT To Do` section that says: 'Astrolabe ALSO registers a writ type called `piece` today (atomic-step-of-mandate sense). With the cartograph `piece` (recursive ladder node sense), TWO different `piece` writ types would conflict in the registry.' Direct read of `packages/plugins/astrolabe/src/astrolabe.ts:386-426` confirms astrolabe registers only `step` and `observation-set`. The Spider-side rename (`b553e49`) already chased through to the astrolabe-side registration; the brief author had a stale mental model.
-
-**Tactical fix:** Future briefs in this lineage (vision-keeper agent runtime commission, CLI commission) should not duplicate the t3 task or its 'verify and rename' framing. The `piece` name is unambiguously available for cartograph.
-
-Most likely a documentation-only follow-up: amend the brief writ if it's still active for editing, or surface this fact in the spec writer's notes so downstream commissions don't re-investigate the same false collision.

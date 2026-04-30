@@ -1,3 +1,0 @@
-`packages/framework/core/src/guild.ts:111-115` documents `clearGuild()` as 'called by Arbor at shutdown or in tests' — but Arbor has no shutdown path that calls it today. The wording presupposes a contract that does not exist.
-
-Depending on D6's resolution this may be retired naturally by this commission (if `shutdown()` calls `clearGuild()` itself); if D6 lands as `leave-alone`, the JSDoc still needs an edit so it stops promising what the code never does. Either way, an outside-of-this-commission audit may want to confirm whether any test that relies on `clearGuild()` for reset semantics is actually relying on the side-effect of *also* stopping apparatus (it isn't today, but the wording suggests it could be assumed).

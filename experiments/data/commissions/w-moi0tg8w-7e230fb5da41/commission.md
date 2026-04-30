@@ -1,7 +1,0 @@
-**The gap.** Vision-keeper's behavioral case 2 in the brief reads: 'The Reckoner approves the petition (when scheduling logic permits — once the CDC-handler commission lands); the writ transitions to open and Spider dispatches it.' That commission is `w-mohuvpu2` — currently in `state: new`, undrafted/unbuilt. Until it lands, every petition vision-keeper emits sits in `new` phase indefinitely. Tests for vision-keeper synthesize the transition with a direct `clerk.transition(writId, 'open')` call; production guilds have no path past `new`.
-
-**Why this matters.** The brief's worked example exercises every contract surface, but observers in production cannot witness the full flow until `w-mohuvpu2` lands. This is not a vision-keeper bug — the petitioner side is correct — but it is a coordination concern: when `w-mohuvpu2` lands, vision-keeper's integration test should be revisited to remove the synthetic transition step.
-
-**Proposal.** Track the dependency between this commission and `w-mohuvpu2` so curators see the full chain. Optionally schedule a follow-up to vision-keeper's tests to switch from synthetic-transition to real-Reckoner-CDC-driven transitions once `w-mohuvpu2` lands.
-
-**Atomicity.** Pure tracking observation — not a separate code commission unless the test-revisit pulls into scope.

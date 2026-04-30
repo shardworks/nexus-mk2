@@ -1,5 +1,0 @@
-`docs/architecture/apparatus/clerk.md:629` documents the writ ID format as `w-{base36_timestamp}{hex_random}` — with no separator between the base-36 timestamp and the hex-random suffix. The actual `generateId` implementation at `packages/framework/core/src/id.ts:15-19` produces `` `${prefix}-${ts}-${rand}` `` — i.e. `w-{base36_ts}-{hex_random}` with a hyphen between segments.
-
-Real writ IDs in this corpus confirm the hyphened shape (e.g. `w-moc29uv4-df61bb6407af` — the very writ this primer is processing).
-
-This is a pre-existing documentation drift in clerk.md, independent of the ratchet brief but relevant because D4 recommends mirroring Clerk's pattern into ratchet.md; the corrected-note recommendation explicitly avoids propagating this error. A cleanup commission could fix the Clerk entry in place.

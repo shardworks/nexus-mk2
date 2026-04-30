@@ -1,5 +1,0 @@
-The brief explicitly defers override and disable mechanisms (`No mechanism for operators to override or disable a kit-contributed order`). For the Reckoner's first contribution this is fine — the schedule expression is operator-controllable via `reckoner.tickSchedule` in guild.json, which the Reckoner-side commission threads through its kit at start.
-
-But once two or more apparatuses ship default standing orders, operators will hit cases where they want to silence a kit's contribution without uninstalling the apparatus (e.g., "I want vision-keeper installed but don't want its periodic snapshot every hour"). The brief flags this as `out of scope; design follows a real consumer` — record this as the consumer-driven trigger so future commissions can pick it up when a guild operator surfaces the friction.
-
-Affects `packages/plugins/clockworks/src/types.ts` (likely a `StandingOrder.id` field plus a `clockworks.disabledStandingOrders` config key) and `packages/plugins/clockworks/src/clockworks.ts` (merge-time filtering).

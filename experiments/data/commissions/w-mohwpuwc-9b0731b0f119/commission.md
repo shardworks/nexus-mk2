@@ -1,7 +1,0 @@
-`packages/plugins/sentinel/src/types.ts` line 164 declares `export const RECKONER_PLUGIN_ID = 'reckoner';`. The constant is used as Lattice `pulse.source` and as the prefix for trigger types (`reckoner.writ-stuck`, `reckoner.writ-failed`, `reckoner.queue-drained`). The package's actual derived plugin id is `sentinel` (npm name `@shardworks/sentinel-apparatus`).
-
-After this commission lands, `reckoner` is the plugin id of a different apparatus (the petitioner Reckoner). The naming becomes actively misleading: a Lattice consumer keying on `pulse.source === 'reckoner'` thinks they are reading the petitioner Reckoner's pulses, but they are actually reading sentinel's.
-
-Follow-up: rename the constant to `SENTINEL_PLUGIN_ID = 'sentinel'`, update the trigger-type string constants (`TRIGGER_WRIT_STUCK = 'sentinel.writ-stuck'`, etc.), update tests, update `docs/architecture/apparatus/sentinel.md`, and update any Lattice-channel consumers in the in-tree codebase. This is a breaking change for any downstream channel filter that hardcodes `reckoner.writ-stuck`; surface as a release-note item.
-
-The commission should not do this in flight — it ripples through tests, channel configs, and possibly external guild.json files. Defer.

@@ -1,3 +1,0 @@
-The brief's tree suffix format is `→ c-<shortId>` (id only). After the feature has been in use for a while, operators may want more context — especially when the superseder lives in a different subtree and the reader can't eyeball its goal nearby. A goal-snippet variant (`→ c-X "<goal snippet>"`) would mirror extract's form.
-
-Explicitly not in scope per the brief. Noting so that when the findability pattern matures, there's a captured idea for the next iteration rather than re-discovering it ad-hoc. The current design's tree-width-preservation policy (D10) would naturally absorb the addition: a longer suffix simply reserves more from the goal budget.

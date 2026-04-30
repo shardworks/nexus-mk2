@@ -1,5 +1,0 @@
-The present sweep removes seven major API areas from `core-api.md` (Tool Installation, Tool Registry, Preconditions, Workshops, Worktrees, Bundles, Migrations, Upgrade, Guild Init, Rehydrate) by establishing they no longer exist in any form — `nsg plugin install/remove` and Stacks auto-migration replace them. There is currently no CHANGELOG, RELEASES, or migration-notes document recording these v1→v2 removals.
-
-A prospective operator following an old guide that says 'call `installTool()` to install the stdlib bundle' or 'call `addWorkshop()` to register a remote' has no documented entry point telling them what replaced it. Today's fix path is to grep the codebase or read this writ chain.
-
-Recommend a guild-level decision on whether to maintain a `docs/CHANGELOG.md` (or equivalent) capturing the v1 surface removals with one-line redirect notes (e.g. 'installTool() → use `nsg plugin install <package>`'). The investment pays back the next time a doc-hygiene sweep crosses one of these surfaces.

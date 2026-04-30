@@ -1,5 +1,0 @@
-The parent click `c-mobzw9of` (documented supersedes as canonical post-conclusion correction in the clicks skill) explicitly notes: "honest callout on the current findability gap (tree/extract don't surface inbound supersedes; name the old click id in the new conclusion as a prose backlink until c-mobzwczn lands)."
-
-Once this commission lands, the prose-backlink workaround is redundant for readers of tree/extract. The clicks skill's SKILL.md should be revisited to remove or soften the workaround callout — it's currently guidance that instructs authors to perform work (naming the old click id in the new conclusion) whose value has been absorbed by tooling. Authors can still choose to name the id in prose if it adds context, but the skill should stop requiring it as a findability fallback.
-
-The skill file lives outside this repo (in `.claude/skills/clicks/SKILL.md` in the guild config, per the parent click's conclusion), so this is a cross-repo doc-sweep follow-up rather than an in-repo edit.

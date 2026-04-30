@@ -1,5 +1,0 @@
-`docs/future/guild-vocabulary.md` §"The Reckoner" describes the *current* narrow-observer Reckoner: 'A narrow observer that watches the guild's work and announces when things go wrong or go quiet … reads the Clerk's books and listens for three specific conditions: a commission that stalls (stuck), a commission that fails, and the moment the guild's work queue drains entirely.'
-
-This description will be wrong once the rename in commission `w-moera3n9` (per click `c-modeou1t`) lands and the new petition-scheduler Reckoner is implemented. The renamed apparatus (queue-observer / sentinel) keeps the narrow-observer behavior; the new Reckoner is the petition scheduler.
-
-Follow-up commission: rewrite the vocabulary entry once both (a) the rename ships and (b) the new Reckoner has at least its first apparatus doc landed. The entry should describe the petition scheduler in the guild's own conceptual register; the renamed observer becomes its own vocabulary entry. `docs/architecture/index.md` §"Standard Guild" → "Opt-in Apparatus" table also names `reckoner` as the 'Stall, failure, and drain observer' — same update.

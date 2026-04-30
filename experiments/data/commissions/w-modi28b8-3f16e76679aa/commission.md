@@ -1,6 +1,0 @@
-Click `c-modgto1o` (concluded) established that standing orders have exactly one canonical form: `{ on, run, with? }`. The `summon:` / `brief:` sugar variants were dropped; `summon` is a regular relay invoked via `run: summon-relay`. However, `docs/architecture/clockworks.md` still shows sugar forms throughout ("The `summon` Verb (syntactic sugar)", the guild.json examples with `"summon": "artificer"`), and `packages/plugins/clockworks/src/types.ts` `StandingOrder` type is still the old three-branch union `{ on, run } | { on, summon, prompt? } | { on, brief }`. The click records that a doc refresh is tracked in task 12 (`w-modf69vg`), but this commission's primer should note that the existing type declaration will need to be rewritten and that any reader of the current doc may form wrong expectations about `signal`-adjacent surfaces. Downstream: when task 7 wires framework events and task 4 wires the dispatcher, the new single-form standing-order shape needs to be in place.
-
-Files:
-- `packages/plugins/clockworks/src/types.ts` — `StandingOrder` union.
-- `docs/architecture/clockworks.md` — "Standing Orders", "guild.json Shape" sections.
-- Lifted into existing task `w-modf69vg`.

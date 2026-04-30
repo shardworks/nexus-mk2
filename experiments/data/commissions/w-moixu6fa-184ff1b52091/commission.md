@@ -1,7 +1,0 @@
-Spider's `getSpiderFollowsTargets()` helper and the cycle-message string `'Cycle detected in spider.follows graph'` both encode the kind id in their names. The current commission's D6 renames them to `getDependsOnTargets()` and `'Cycle detected in depends-on graph'` — mechanical, and the cleanest match for the rename's framing.
-
-Observation: Spider's role as a gate-evaluator is decoupling from the specific kind name. When the Reckoner starts reading the same kind for petition consideration (sibling click c-moiwnmoc), the codebase will have two readers of `depends-on` whose internal helpers all encode the kind name. A more-decoupled naming convention (e.g. `getDependencyTargets`, `'Cycle detected in dependency graph'`) would survive the next rename without code changes.
-
-The present commission deliberately keeps the symbol→kind mapping legible (per D6 rationale), but the longer-term direction is decoupling. Worth a small follow-up that picks a kind-neutral helper-naming convention and applies it to Spider's gate code (and to the Reckoner's consideration code once it lands).
-
-Not urgent; quality-of-life refactor surfaced by considering the kind-rename pattern's likely future repetition.

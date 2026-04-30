@@ -1,1 +1,0 @@
-`packages/plugins/spider/src/static/spider.css:256-260` defines an `.elapsed-running` class with a pulsing cyan animation. spider.js no longer renders this class anywhere; the elapsed ticker writes plain text into `#ed-elapsed`. The dead CSS rule should be removed in a polish pass alongside the badge refresh, not as part of this commission.

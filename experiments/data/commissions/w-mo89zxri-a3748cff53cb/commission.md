@@ -1,2 +1,0 @@
-Rig-list 2 s poll does full tbody rebuild
-fetchRigListQuiet() (line 300) rebuilds the entire rig list <tbody> via innerHTML on every 2 s tick whenever any rig is in-flight. This collapses any selection state or transient DOM state on the list. Not an issue for the current UI (there is no per-row state), but a keyed in-place update — matching the pipeline-node pattern — would be a natural next refactor if any interactive row state is ever added.

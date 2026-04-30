@@ -1,3 +1,0 @@
-`packages/plugins/lattice-discord/src/channel.ts:87-120` uses an if/else chain on `pulse.triggerType`. With three trigger types it's manageable; as the Lattice grows additional emitters (anima completion, coinmaster, future Reckoner triggers) the chain will sprawl.
-
-Follow-up: refactor `contextFields` to a registry like `Record<string, (ctx) => EmbedField[]>` keyed by triggerType. The generic fallback stays as the default. This is a pure refactor with no behavior change, but it scales cleanly when channel-specific renderers proliferate. Best done when adding the second new trigger; deferring now to keep this commission small.

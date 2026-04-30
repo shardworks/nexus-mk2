@@ -1,3 +1,0 @@
-The original `* → stuck` transition that left the writ in its current state would already have fired a `reckoner.writ-stuck` pulse. The rescue's `stuck → open` transition is the symmetric un-stick — should the Reckoner emit a corresponding `writ-unstuck` pulse so subscribers see the lifecycle close cleanly?
-
-Look at `packages/plugins/reckoner/src/reckoner.ts:344+` for the existing writ-stuck pulse path. If no symmetric un-stuck pulse exists, this is a small but useful addition that pairs with the rescue tool's deployment — operators using the Lattice integration would otherwise see a stale 'stuck' notification with no follow-up. May or may not be worth folding into this commission depending on Reckoner's existing surface.

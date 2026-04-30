@@ -1,3 +1,0 @@
-`packages/plugins/animator/src/tools/session-show.ts` is 36 lines but I did not read its handler in this audit (the file is small enough that the inventory glossed it). When a future planner picks up refactor candidate (A) (SessionDoc writeback reducer), they will want to confirm `session-show` returns the same SessionDoc shape the reducer produces. Worth a quick eyeball pass when the reducer commission opens, ensuring the read tool's projection (which fields it surfaces) doesn't accidentally hide a field the reducer is responsible for populating.
-
-Minor; not blocking. Add to the candidate (A) commission's reading list as a one-line check.

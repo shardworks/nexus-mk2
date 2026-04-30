@@ -1,3 +1,0 @@
-`packages/plugins/astrolabe/pages/astrolabe/astrolabe.js:614-642` implements a one-way deep-link — the page can be opened with `?plan=ID` and will jump to detail, but clicking a plan from the list view does NOT push the URL. Same bug class as the Writs page before this commission.
-
-If D15 is overridden to writs-and-rigs-only, this gap should be tracked separately so the read-on-init behavior doesn't tempt operators to think deep-linking already works.

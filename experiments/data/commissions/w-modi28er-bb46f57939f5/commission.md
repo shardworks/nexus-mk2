@@ -1,5 +1,0 @@
-`packages/framework/cli/src/program.ts` `buildToolCommand` auto-derives Commander flags from a tool's Zod shape, but `z.record(z.unknown())` / `z.object({...})` schemas degrade into 'pass the raw string through, let Zod reject it' — the CLI cannot invoke a tool whose input includes a JSON object. This commission hits the issue on the `signal` tool's `payload` param (see D6) and works around it by hand-authoring a framework command. Generalizing the coercion path to JSON.parse record/object-typed flags would let future tools expose JSON-shaped params to CLI callers without hand-writing a command, and would let `signal` itself be auto-registered cleanly.
-
-Files:
-- `packages/framework/cli/src/helpers.ts` — `coerceCliOpts`, schema-type detection.
-- `packages/framework/cli/src/program.ts` — `buildToolCommand`.

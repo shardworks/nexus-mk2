@@ -1,5 +1,0 @@
-Today every dispatch log line in `clock.log` is `<ISO timestamp> <eventId> <eventName> [<handlerName>] <status> <durationMs>ms`. Under the at-most-twice contract, an operator post-mortem investigating a duplicated side effect needs to tell which of the two dispatcher instances produced each row. The persisted `event_dispatches` row carries no instance id either, so even cross-referencing with the events book doesn't help.
-
-A cheap fix is to derive a per-process dispatcher id at apparatus `start()` (e.g. `dispatcher-<base36_ts>-<hex>` matching the existing id family) and prefix every log line and every `event_dispatches` row's `error` column (or a fresh dedicated `instanceId` column) with it. This intersects with `w-moe4ryiz` ("Daemon's start-time banner should record the daemon's own ID for cross-restart correlation") which already proposes the banner half; the dispatcher-row half is a sister change.
-
-Follow-up scope: design a single `instanceId` field that flows through the banner (w-moe4ryiz), the per-dispatch log lines, and the event_dispatches row schema. Requires a Stacks schema migration for the books-book.

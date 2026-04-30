@@ -1,3 +1,0 @@
-While renaming `[piece-session]` to `[step-session]` (D11), it became apparent that the console-warn prefix is used as a load-bearing string — tests filter on it. There is no documented convention for warning prefixes (compare `[clerk-cdc]`, `[spider]`, etc., which appear ad-hoc across the codebase). When a renamer changes a constant, they must remember to update the warning prefix and every test that filters on it; this is fragile.
-
-Follow-up: a small commission to either (a) introduce a structured logger that does not depend on prefix string parsing, or (b) document the prefix convention and provide a single helper so `console.warn('[step-session] ...')` and the test-side filter both reference one constant.

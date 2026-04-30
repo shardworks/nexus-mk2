@@ -1,7 +1,0 @@
-`packages/plugins/spider/src/tools/rig-show.ts` lines 41–43 surface per-engine attempt counts as `attempts: N (retry budget consumed: M)`. There is no ceiling — operators cannot tell whether `M=2` is the last attempt before terminal failure or the third of five.
-
-With guild-level retry overrides shipping, the gap becomes more pronounced: an operator who sets `engineRetryOverrides.implement = { maxAttempts: 5 }` cannot verify the override took effect from the rig view alone. Today they would observe via the absence of a terminal-failed engine after attempt 3, which is a behavioural inference rather than a direct readout.
-
-Follow-up: extend the `rig-show` rendering to surface the engine's *effective* `maxAttempts` (post-override) on the `attempts:` line, e.g. `attempts: 2 (retry budget consumed: 2 of 5)`. Resolve via the same helper Spider uses at retry-decision time so the displayed ceiling matches what Spider will actually enforce.
-
-This is adjacent to the umbrella commission's obs-9 ("Expose retry metadata on BlockTypeInfo and engine-designs tool output") but is a CLI-rendering concern rather than a registry-shape concern; it belongs in its own follow-up so the patron can scope each independently.

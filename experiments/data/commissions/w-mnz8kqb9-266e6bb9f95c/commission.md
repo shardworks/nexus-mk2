@@ -1,6 +1,0 @@
-<!-- Live body for this quest is a file in the vibers guild. See .claude/skills/quests/SKILL.md. -->
-<!-- Do not edit this row body while the quest is live. -->
-
-## Goal
-
-Design and ship the second layer of the Astrolabe atlas: deterministically computed structured facts about the repository (symbol index, dependency graph, test↔source map, public-API surface per package, recent-churn data) produced by non-LLM tooling. These facts back two consumption paths — (a) cheap MCP tools Astrolabe agents can call to verify ground truth mid-session without triggering a filesystem grind, and (b) selective structured snippets injected alongside the prose preamble when a commission specifically benefits from exact-name precision (e.g. a refactor commission that needs the real list of call sites, not an LLM's paraphrase). Outcome is (a) a list of fact types and their shapes, (b) tool selections (tree-sitter? madge? ast-grep? custom?), (c) a query surface definition, and (d) a decision on prose-alongside-structured preamble injection.

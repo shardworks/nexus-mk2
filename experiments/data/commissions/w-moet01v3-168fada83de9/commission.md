@@ -1,7 +1,0 @@
-The CLI surface uses 'plugin' (`nsg plugin install`, `nsg plugin remove`, `nsg plugin list`) but the framework events emitted by `packages/framework/cli/src/commands/plugin-bootstrap-emit.ts` are named `tool.installed` and `tool.removed`. Operators wiring a standing order against plugin lifecycle would naturally try `plugin.installed` first; they'd get no signal because the actual event is `tool.installed` and standing-order matching is exact-string equality.
-
-The legacy 'tool' terminology may have been chosen to match the catalog's parenthetical phrasing 'a tool (implement, engine, curriculum, or temperament)' — but that framing is itself archaic; the modern surface refers to plugins.
-
-Options for a follow-up commission: (a) rename the events to `plugin.installed` / `plugin.removed`, add `plugin.` to `RESERVED_EVENT_NAMESPACES`, ripple through tests and the canonical catalog, and remove `tool.` from the reserved list (or keep it for backward-compat with any operator standing orders that wired against it); (b) keep `tool.*` but rename the CLI commands to `nsg tool install/remove` (cosmetic and arguably worse — 'plugin' is the current vocabulary). Option (a) is recommended.
-
-This is a code change plus a doc change; the parent reconciliation commission only documents the as-is `tool.*` names per its D7 (scope discipline).

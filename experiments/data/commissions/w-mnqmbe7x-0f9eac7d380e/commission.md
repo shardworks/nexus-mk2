@@ -1,1 +1,0 @@
-In the Rigs list on the Oculus Spider page, I would like the 'rig title' to be a clickable link which navigates to the rig details, the same as clicking the rig ID.
