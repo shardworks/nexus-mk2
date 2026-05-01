@@ -8,11 +8,8 @@
  * The five phase orchestrators (`lab.{setup,scenario,probes,archive,
  * teardown}-phase`) form the rig template's static backbone; they
  * read `writ.ext.laboratory.config` at run time and emit per-phase
- * grafts. The other engines (codex/guild fixtures, scenario,
- * probes, archive) are the work engines those grafts reference.
- *
- * Stubs land their real implementations under their respective
- * implementation children.
+ * grafts. The other engines (codex/guild fixtures, scenario, probes,
+ * archive) are the work engines those grafts reference.
  */
 
 import type { EngineDesign } from '@shardworks/fabricator-apparatus';
@@ -23,24 +20,30 @@ import {
   commissionPostXguildEngine,
   waitForWritTerminalXguildEngine,
 } from './scenario-xguild.ts';
-import {
-  archiveStub,
-  probeGitRangeStub,
-  probeStacksDumpStub,
-} from './stubs.ts';
+import { archiveEngine } from '../archive/engine.ts';
+import { trialContextEngine } from '../probes/trial-context.ts';
+import { stacksDumpEngine } from '../probes/stacks-dump.ts';
+import { gitRangeEngine } from '../probes/git-range.ts';
 
 export const engines: Record<string, EngineDesign> = {
   // Phase orchestrators (template backbone)
   ...phaseEngines,
 
-  // Work engines (graft targets)
+  // Fixture work engines
   'lab.codex-setup': codexSetupEngine,
   'lab.codex-teardown': codexTeardownEngine,
   'lab.guild-setup': guildSetupEngine,
   'lab.guild-teardown': guildTeardownEngine,
+
+  // Scenario work engines
   'lab.commission-post-xguild': commissionPostXguildEngine,
   'lab.wait-for-writ-terminal-xguild': waitForWritTerminalXguildEngine,
-  'lab.probe-stacks-dump': probeStacksDumpStub,
-  'lab.probe-git-range': probeGitRangeStub,
-  'lab.archive': archiveStub,
+
+  // Probe work engines
+  'lab.probe-stacks-dump': stacksDumpEngine,
+  'lab.probe-git-range': gitRangeEngine,
+  'lab.probe-trial-context': trialContextEngine,
+
+  // Archive engine
+  'lab.archive': archiveEngine,
 };

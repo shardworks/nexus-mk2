@@ -34,6 +34,8 @@ import {
   guildSetupEngine,
   guildTeardownEngine,
 } from './guild-fixture.ts';
+import { StacksTestStub } from '../archive/test-stacks-stub.ts';
+import { LAB_TRIAL_ARCHIVES_BOOK, type LabTrialArchive } from '../archive/book.ts';
 
 // ── Test infrastructure ─────────────────────────────────────────────
 
@@ -45,11 +47,27 @@ function makeTmpDir(prefix: string): string {
   return dir;
 }
 
+/**
+ * Module-scope stacks stub — installed alongside the fake guild so
+ * the teardown engine's archive-presence check (which calls
+ * `guild().apparatus<StacksApi>('stacks')`) finds a working surface.
+ * `installFakeGuild` resets it; tests opt into archive-row presence
+ * by calling `seedArchive(...)`.
+ */
+let stacksStub = new StacksTestStub();
+
 function installFakeGuild(home: string): void {
+  stacksStub = new StacksTestStub();
   const fake: Guild = {
     home,
-    apparatus: () => { throw new Error('not provided in test'); },
-    tryApparatus: () => null,
+    apparatus<T>(name: string): T {
+      if (name === 'stacks') return stacksStub.asApi() as T;
+      throw new Error(`fake guild: apparatus "${name}" not provided in test`);
+    },
+    tryApparatus<T>(name: string): T | null {
+      if (name === 'stacks') return stacksStub.asApi() as T;
+      return null;
+    },
     config: () => ({}),
     writeConfig: () => undefined,
     guildConfig: () => ({ name: 'fake', nexus: '0.0.0', plugins: [] }),
@@ -59,6 +77,16 @@ function installFakeGuild(home: string): void {
     startupWarnings: () => [],
   };
   setGuild(fake);
+}
+
+function seedArchive(trialId: string): void {
+  const row: LabTrialArchive = {
+    id: 'lar-test-0001',
+    trialId,
+    archivedAt: new Date().toISOString(),
+    probes: [],
+  };
+  stacksStub.seed({ ownerId: 'laboratory', bookName: LAB_TRIAL_ARCHIVES_BOOK }, row);
 }
 
 afterEach(() => {
@@ -357,7 +385,7 @@ describe('lab.guild-teardown', () => {
     installFakeGuild(home);
   });
 
-  it('refuses when context.upstream.archive is absent', async () => {
+  it('refuses when no archive row exists for the trial', async () => {
     await assert.rejects(
       () =>
         guildTeardownEngine.run(
@@ -367,14 +395,15 @@ describe('lab.guild-teardown', () => {
             upstream: {},
           }),
         ),
-      /archive engine has not yielded/,
+      /no archive row exists for trialId/,
     );
   });
 
-  it('removes the guild dir when archive is present', async () => {
+  it('removes the guild dir when an archive row is present', async () => {
     // Create a fake guild dir at the default location.
     const labHost = makeTmpDir('teardown-host');
     installFakeGuild(labHost);
+    seedArchive(TRIAL.writId);
     const guildDir = path.join(
       labHost,
       '.nexus',
@@ -389,7 +418,7 @@ describe('lab.guild-teardown', () => {
       { _trial: TRIAL },
       makeContext({
         engineId: 'fixture-test-guild-teardown',
-        upstream: { archive: { stub: true } },
+        upstream: {},
       }),
     );
 
@@ -404,11 +433,12 @@ describe('lab.guild-teardown', () => {
   });
 
   it('tolerates a missing guild dir (e.g. setup never ran)', async () => {
+    seedArchive(TRIAL.writId);
     const result = await guildTeardownEngine.run(
       { _trial: TRIAL },
       makeContext({
         engineId: 'fixture-test-guild-teardown',
-        upstream: { archive: { stub: true } },
+        upstream: {},
       }),
     );
 
@@ -416,13 +446,14 @@ describe('lab.guild-teardown', () => {
   });
 
   it('rejects malformed guildName at validation time', async () => {
+    seedArchive(TRIAL.writId);
     await assert.rejects(
       () =>
         guildTeardownEngine.run(
-          { guildName: 'Bad Name' },
+          { guildName: 'Bad Name', _trial: TRIAL },
           makeContext({
             engineId: 'fixture-test-guild-teardown',
-            upstream: { archive: { stub: true } },
+            upstream: {},
           }),
         ),
       /guildName must be kebab-case/,
@@ -432,14 +463,15 @@ describe('lab.guild-teardown', () => {
   it('honors explicit guildPath override', async () => {
     const labHost = makeTmpDir('override-host');
     installFakeGuild(labHost);
+    seedArchive(TRIAL.writId);
     const customPath = makeTmpDir('custom-guild');
     fs.writeFileSync(path.join(customPath, 'guild.json'), '{}');
 
     const result = await guildTeardownEngine.run(
-      { guildName: 'whatever', guildPath: customPath },
+      { guildName: 'whatever', guildPath: customPath, _trial: TRIAL },
       makeContext({
         engineId: 'fixture-test-guild-teardown',
-        upstream: { archive: { stub: true } },
+        upstream: {},
       }),
     );
 

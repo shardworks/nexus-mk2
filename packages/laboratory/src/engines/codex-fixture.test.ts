@@ -34,6 +34,8 @@ import {
   codexSetupEngine,
   codexTeardownEngine,
 } from './codex-fixture.ts';
+import { StacksTestStub } from '../archive/test-stacks-stub.ts';
+import { LAB_TRIAL_ARCHIVES_BOOK, type LabTrialArchive } from '../archive/book.ts';
 
 // ── Test infrastructure ─────────────────────────────────────────────
 
@@ -127,6 +129,7 @@ function createStubScriptorium(state: StubScriptoriumState): ScriptoriumApi {
 interface FakeGuildContext {
   home: string;
   scriptorium: ScriptoriumApi;
+  stacks: StacksTestStub;
 }
 
 function installFakeGuild(ctx: FakeGuildContext): void {
@@ -134,10 +137,12 @@ function installFakeGuild(ctx: FakeGuildContext): void {
     home: ctx.home,
     apparatus<T>(name: string): T {
       if (name === 'codexes') return ctx.scriptorium as T;
+      if (name === 'stacks') return ctx.stacks.asApi() as T;
       throw new Error(`fake guild: apparatus "${name}" not provided in test`);
     },
     tryApparatus<T>(name: string): T | null {
       if (name === 'codexes') return ctx.scriptorium as T;
+      if (name === 'stacks') return ctx.stacks.asApi() as T;
       return null;
     },
     config: () => ({}),
@@ -167,6 +172,7 @@ function setupTestEnv(): {
   guildHome: string;
   upstream: ReturnType<typeof createUpstreamRepo>;
   scriptoriumState: StubScriptoriumState;
+  stacks: StacksTestStub;
 } {
   const guildHome = makeTmpDir('lab-host-guild');
   const upstream = createUpstreamRepo();
@@ -175,11 +181,28 @@ function setupTestEnv(): {
     addCalls: [],
     removeCalls: [],
   };
+  const stacks = new StacksTestStub();
   installFakeGuild({
     home: guildHome,
     scriptorium: createStubScriptorium(scriptoriumState),
+    stacks,
   });
-  return { guildHome, upstream, scriptoriumState };
+  return { guildHome, upstream, scriptoriumState, stacks };
+}
+
+/**
+ * Seed an archive row for the trial — required to satisfy the
+ * teardown engines' archive-presence check (resolveTrialIdForTeardown
+ * + assertArchiveRowExists).
+ */
+function seedArchive(stacks: StacksTestStub, trialId: string): void {
+  const row: LabTrialArchive = {
+    id: 'lar-test-0001',
+    trialId,
+    archivedAt: new Date().toISOString(),
+    probes: [],
+  };
+  stacks.seed({ ownerId: 'laboratory', bookName: LAB_TRIAL_ARCHIVES_BOOK }, row);
 }
 
 function makeContext(over: Partial<EngineRunContext> = {}): EngineRunContext {
@@ -451,9 +474,10 @@ describe('lab.codex-setup', () => {
 // ── Tests: teardown ─────────────────────────────────────────────────
 
 describe('lab.codex-teardown', () => {
-  describe('archive-safety check', () => {
-    it('refuses to teardown when context.upstream.archive is absent', async () => {
+  describe('archive-presence check', () => {
+    it('refuses to teardown when no archive row exists for the trial', async () => {
       setupTestEnv();
+      // Note: stacks is set up but no archive row is seeded — fail loud.
       await assert.rejects(
         () =>
           codexTeardownEngine.run(
@@ -465,12 +489,13 @@ describe('lab.codex-teardown', () => {
             },
             makeContext({ engineId: 'fixture-codex-teardown', upstream: {} }),
           ),
-        /archive engine has not yielded/,
+        /no archive row exists for trialId/,
       );
     });
 
-    it('proceeds when context.upstream.archive is present', async () => {
-      const { guildHome, upstream, scriptoriumState } = setupTestEnv();
+    it('proceeds when an archive row exists for the trial', async () => {
+      const { guildHome, upstream, scriptoriumState, stacks } = setupTestEnv();
+      seedArchive(stacks, TRIAL.writId);
 
       // Seed: pretend setup ran.
       await codexSetupEngine.run(
@@ -492,7 +517,7 @@ describe('lab.codex-teardown', () => {
         },
         makeContext({
           engineId: 'fixture-codex-teardown',
-          upstream: { archive: { stub: true } },
+          upstream: {},
         }),
       );
 
@@ -502,11 +527,30 @@ describe('lab.codex-teardown', () => {
       const barePath = bareRepoPath(guildHome, 'trial-test-codex');
       assert.ok(!fs.existsSync(barePath), 'bare repo should have been removed');
     });
+
+    it('refuses to teardown when an archive row exists for a different trial', async () => {
+      const { stacks } = setupTestEnv();
+      seedArchive(stacks, 'w-some-other-trial-id');
+      await assert.rejects(
+        () =>
+          codexTeardownEngine.run(
+            {
+              upstreamRepo: '/some/path',
+              baseSha: 'a'.repeat(40),
+              codexName: 'trial-test-codex',
+              _trial: TRIAL,
+            },
+            makeContext({ engineId: 'fixture-codex-teardown', upstream: {} }),
+          ),
+        /no archive row exists for trialId/,
+      );
+    });
   });
 
   describe('happy path', () => {
     it('yields the expected shape', async () => {
-      const { guildHome, upstream } = setupTestEnv();
+      const { guildHome, upstream, stacks } = setupTestEnv();
+      seedArchive(stacks, TRIAL.writId);
 
       await codexSetupEngine.run(
         {
@@ -527,7 +571,7 @@ describe('lab.codex-teardown', () => {
         },
         makeContext({
           engineId: 'fixture-codex-teardown',
-          upstream: { archive: { stub: true } },
+          upstream: {},
         }),
       );
 
@@ -542,7 +586,8 @@ describe('lab.codex-teardown', () => {
 
     it('teardown derives the same default codexName as setup', async () => {
       // Setup with no explicit codexName — uses default.
-      const { guildHome, upstream, scriptoriumState } = setupTestEnv();
+      const { guildHome, upstream, scriptoriumState, stacks } = setupTestEnv();
+      seedArchive(stacks, TRIAL.writId);
 
       await codexSetupEngine.run(
         {
@@ -563,7 +608,7 @@ describe('lab.codex-teardown', () => {
         },
         makeContext({
           engineId: 'fixture-codex-teardown',
-          upstream: { archive: { stub: true } },
+          upstream: {},
         }),
       );
 
@@ -576,7 +621,8 @@ describe('lab.codex-teardown', () => {
 
   describe('tolerance', () => {
     it('tolerates a missing bare repo (e.g. setup never ran)', async () => {
-      const { scriptoriumState } = setupTestEnv();
+      const { scriptoriumState, stacks } = setupTestEnv();
+      seedArchive(stacks, TRIAL.writId);
 
       const result = await codexTeardownEngine.run(
         {
@@ -587,7 +633,7 @@ describe('lab.codex-teardown', () => {
         },
         makeContext({
           engineId: 'fixture-codex-teardown',
-          upstream: { archive: { stub: true } },
+          upstream: {},
         }),
       );
 
@@ -597,7 +643,8 @@ describe('lab.codex-teardown', () => {
     });
 
     it('tolerates an unregistered codex when bare exists', async () => {
-      const { guildHome, scriptoriumState } = setupTestEnv();
+      const { guildHome, scriptoriumState, stacks } = setupTestEnv();
+      seedArchive(stacks, TRIAL.writId);
       // Manually create a bare path WITHOUT registering the codex —
       // simulates setup that crashed mid-flight after creating the bare
       // but before scriptorium.add.
@@ -613,7 +660,7 @@ describe('lab.codex-teardown', () => {
         },
         makeContext({
           engineId: 'fixture-codex-teardown',
-          upstream: { archive: { stub: true } },
+          upstream: {},
         }),
       );
 
@@ -625,7 +672,8 @@ describe('lab.codex-teardown', () => {
 
   describe('givens validation', () => {
     it('rejects malformed codexName', async () => {
-      setupTestEnv();
+      const { stacks } = setupTestEnv();
+      seedArchive(stacks, TRIAL.writId);
       await assert.rejects(
         () =>
           codexTeardownEngine.run(
@@ -637,7 +685,7 @@ describe('lab.codex-teardown', () => {
             },
             makeContext({
               engineId: 'fixture-codex-teardown',
-              upstream: { archive: { stub: true } },
+              upstream: {},
             }),
           ),
         /codexName must be kebab-case/,

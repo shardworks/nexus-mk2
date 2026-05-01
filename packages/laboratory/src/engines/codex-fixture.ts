@@ -93,6 +93,10 @@ import type {
 } from '@shardworks/fabricator-apparatus';
 import type { ScriptoriumApi } from '@shardworks/codexes-apparatus';
 import type { InjectedTrialContext } from './phases.ts';
+import {
+  assertArchiveRowExists,
+  resolveTrialIdForTeardown,
+} from '../archive/presence.ts';
 
 const execFile = promisify(execFileCb);
 
@@ -313,22 +317,16 @@ export const codexSetupEngine: EngineDesign = {
 
 export const codexTeardownEngine: EngineDesign = {
   id: 'lab.codex-teardown',
-  async run(rawGivens, context: EngineRunContext): Promise<EngineRunResult> {
+  async run(rawGivens, _context: EngineRunContext): Promise<EngineRunResult> {
     const { codexName } = validateGivens(rawGivens, 'lab.codex-teardown');
 
-    // Archive-safety check. The teardown's upstream chain (built by
-    // buildTeardownGraft) is rooted at the archive engine, so its yields
-    // appear in context.upstream transitively. Missing => the rig was
-    // assembled wrong (no archive in the chain), or archive failed and
-    // the rig should not be reaching teardown anyway. Fail-loud.
-    if (context.upstream.archive === undefined || context.upstream.archive === null) {
-      throw new Error(
-        `[lab.codex-teardown] refusing to teardown codex "${codexName}": ` +
-          `archive engine has not yielded for this rig. Teardown's upstream chain ` +
-          `must include the archive engine. (When the archive engine is real, this ` +
-          `check tightens — see click c-momaa5o9.)`,
-      );
-    }
+    // Archive-presence safety check (tightened per c-momkqtn5):
+    // confirm the archive engine actually wrote an index row for this
+    // trial's id. Robust against any rig-assembly mistake that might
+    // route teardowns around the archive engine — the source of truth
+    // is the persisted archive row, not the upstream chain shape.
+    const trialId = resolveTrialIdForTeardown(rawGivens, 'lab.codex-teardown');
+    await assertArchiveRowExists(trialId, 'lab.codex-teardown', `codex "${codexName}"`);
 
     const labHost = guild();
     const barePath = bareRepoPath(labHost.home, codexName);

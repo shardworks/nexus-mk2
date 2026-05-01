@@ -56,6 +56,18 @@ import { TRIAL_WRIT_TYPE_CONFIG } from './types.ts';
 import { engines } from './engines/index.ts';
 import { rigTemplates, rigTemplateMappings } from './template.ts';
 import { tools } from './tools/index.ts';
+import {
+  LAB_TRIAL_ARCHIVES_BOOK,
+  labTrialArchivesSchema,
+} from './archive/book.ts';
+import {
+  LAB_TRIAL_STACKS_DUMPS_BOOK,
+  labTrialStacksDumpsSchema,
+} from './archive/stacks-dumps-book.ts';
+import {
+  LAB_TRIAL_CODEX_COMMITS_BOOK,
+  labTrialCodexCommitsSchema,
+} from './archive/codex-commits-book.ts';
 
 const laboratoryPlugin: Plugin = {
   apparatus: {
@@ -82,23 +94,33 @@ const laboratoryPlugin: Plugin = {
      * Kit contributions wired up:
      *
      *   - `engines`              — every Laboratory engine design
-     *                               (5 phase orchestrators + the
-     *                               work-engine stubs that get
-     *                               grafted by them). Stubs land
-     *                               their real behavior under their
-     *                               respective implementation clicks.
+     *                               (5 phase orchestrators + fixture,
+     *                               scenario, probe, and archive work
+     *                               engines).
      *   - `rigTemplates`         — `post-and-collect-default` —
      *                               enumerates the five phase
      *                               orchestrators in sequence.
      *   - `rigTemplateMappings`  — `trial` → `post-and-collect-default`.
-     *   - `tools`                — the manifest CLI surface
-     *                               (`nsg lab trial-post`).
+     *   - `tools`                — the manifest CLI surface plus the
+     *                               trial-show / extract / export-book
+     *                               retrieval tools.
+     *   - `books`                — the archive index book and the two
+     *                               built-in probe books (stacks-dumps
+     *                               and codex-commits). Probe-trial-
+     *                               context contributes no book — its
+     *                               summary is the data, persisted
+     *                               into the archive row.
      */
     supportKit: {
       engines,
       rigTemplates,
       rigTemplateMappings,
       tools,
+      books: {
+        [LAB_TRIAL_ARCHIVES_BOOK]: labTrialArchivesSchema,
+        [LAB_TRIAL_STACKS_DUMPS_BOOK]: labTrialStacksDumpsSchema,
+        [LAB_TRIAL_CODEX_COMMITS_BOOK]: labTrialCodexCommitsSchema,
+      },
     },
 
     async start() {

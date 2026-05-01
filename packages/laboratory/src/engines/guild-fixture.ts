@@ -90,6 +90,10 @@ import type {
   EngineRunResult,
 } from '@shardworks/fabricator-apparatus';
 import type { InjectedTrialContext } from './phases.ts';
+import {
+  assertArchiveRowExists,
+  resolveTrialIdForTeardown,
+} from '../archive/presence.ts';
 
 const execFile = promisify(execFileCb);
 
@@ -426,18 +430,12 @@ export const guildSetupEngine: EngineDesign = {
 
 export const guildTeardownEngine: EngineDesign = {
   id: 'lab.guild-teardown',
-  async run(rawGivens, context: EngineRunContext): Promise<EngineRunResult> {
+  async run(rawGivens, _context: EngineRunContext): Promise<EngineRunResult> {
     const { guildName, guildPath } = validateGivens(rawGivens, 'lab.guild-teardown');
 
-    // Archive-safety check — same discipline as codex-teardown.
-    if (context.upstream.archive === undefined || context.upstream.archive === null) {
-      throw new Error(
-        `[lab.guild-teardown] refusing to teardown guild "${guildName}": ` +
-          `archive engine has not yielded for this rig. Teardown's upstream chain ` +
-          `must include the archive engine. (When the archive engine is real, this ` +
-          `check tightens — see click c-momaa5o9.)`,
-      );
-    }
+    // Archive-presence safety check (tightened per c-momkqtn5).
+    const trialId = resolveTrialIdForTeardown(rawGivens, 'lab.guild-teardown');
+    await assertArchiveRowExists(trialId, 'lab.guild-teardown', `guild "${guildName}"`);
 
     // rm -rf — tolerant of "doesn't exist".
     await rm(guildPath, { recursive: true, force: true });
