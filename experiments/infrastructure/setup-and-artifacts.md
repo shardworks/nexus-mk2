@@ -1,42 +1,62 @@
 # Experimental infrastructure: setup, artifacts, lifecycle
 
-**Status:** draft (2026-04-30) — pending Sean's review.
+**Status:** draft (2026-04-30) — refined with Sean's feedback.
 
 ## Purpose
 
 This document specifies the infrastructure for running framework-side
-experiments — trials that need a controlled codex, controlled framework
+experiments — runs that need a controlled codex, controlled framework
 state, isolated session recording, and reproducible setup. The immediate
 driver is P3 (engine-pipeline-decomposition; click `c-modxxtu6`), whose
 sub-questions (orientation suppression, trigger heuristics, granularity,
-cost confirmation) all require running real implementer sessions in
+cost confirmation) all require executing real implementer sessions in
 isolated conditions before the architecture can be designed empirically.
 Subsequent experiments touching framework or commission-pipeline behavior
 will reuse the same infrastructure.
 
 The infrastructure does **not** govern paper analyses (instruments run
 against existing transcript archives) — those need no setup. It governs
-trials that **execute new commissions** under controlled conditions.
+work that **executes new commissions** under controlled conditions.
+
+## Vocabulary
+
+- **Experiment.** One piece of inquiry — a research question plus the
+  analytical frame to answer it. Lives at
+  `experiments/X<NNN>-<slug>/`.
+- **Run.** One execution of the experimental apparatus with a specific
+  set of variable settings. An experiment produces one or more runs.
+  Lives at `experiments/X<NNN>-<slug>/artifacts/run-NNN-<variant>/`.
+- **Variables.** The inputs that define a run. Split into **controlled**
+  (held constant — framework SHA, codex base, common config) and
+  **manipulated** (varied per run — prompts, plugin versions, config
+  fragments). Both kinds live in `run.yaml`.
 
 ## Design principles
 
 1. **Three-repo separation.** The sanctum, the framework (nexus), and the
    codex live in three repos with distinct persistence rules. Each artifact
    has one canonical home.
-2. **One guild per trial.** Every trial gets its own fresh guild and its
-   own short-lived codex fork. This eliminates trial-isolation problems
+2. **One guild per run.** Every run gets its own fresh guild and its
+   own short-lived codex repo. This eliminates run-isolation problems
    inside the guild's books — every row in the guild DB belongs to this
-   trial by construction.
-3. **Sanctum is the canonical record.** Methodology, briefs, prompts,
-   captured execution data, and analysis live in the sanctum. The other
-   two repos (nexus branches, codex forks) are reproducibility breadcrumbs.
+   run by construction.
+3. **Sanctum is the canonical record.** Methodology, manifests, input
+   files, captured execution data, and analysis live in the sanctum. The
+   other two repos (nexus branches, codex repos) are reproducibility
+   breadcrumbs.
 4. **Reproducibility via SHA pinning.** Every framework dep, every codex
-   base, every plugin version is pinned to a SHA in a per-trial manifest
+   base, every plugin version is pinned to a SHA in a per-run manifest
    that lives in the sanctum.
-5. **Disposable execution surfaces.** Codex forks and live guild dirs are
-   short-lived. They're created at trial start, archived to sanctum at
-   trial end, and deleted. Re-running an experiment doesn't depend on
+5. **Disposable execution surfaces.** Codex repos and live guild dirs are
+   short-lived. They're created at run start, archived to sanctum at
+   run end, and deleted. Re-running an experiment doesn't depend on
    long-lived disposable state.
+6. **Standard guild mechanisms over bespoke generation.** The setup
+   script composes existing `nsg` commands (`nsg init`, `nsg plugin
+   install`, `nsg codex add`) and Laboratory tools rather than
+   hand-generating `guild.json` / `package.json`. Custom guild
+   configuration is expressed as a partial `guild.json` merge plus a
+   list of files to copy.
 
 ## Architecture
 
@@ -44,104 +64,164 @@ trials that **execute new commissions** under controlled conditions.
 
 | repo | role | persistence |
 |---|---|---|
-| **Sanctum** (`nexus-mk2`) | methodology, manifests, prompts, captured artifacts, analysis, findings | indefinite; canonical research record |
-| **Nexus framework** | only the framework changes that produce experimental variance. One branch per experiment (not per trial) — a single experiment-wide framework state that all variants in that experiment share. | indefinite; archived branches |
-| **Codex fork** | short-lived complete fork of the codex repo, one per trial. The fork's `main` branch is the trial's working ref; commits there are the rigs' actual edits. | short-lived; captured-then-deleted |
+| **Sanctum** (`nexus-mk2`) | methodology, manifests, input files, captured artifacts, analysis, findings | indefinite; canonical research record |
+| **Nexus framework** | the framework state that produces experimental variance. Each run declares whatever branch + base SHA it needs. Runs that share framework state share a branch; runs that introduce framework variance get their own. No enforced cardinality. | indefinite; archived branches |
+| **Codex repo** | short-lived fresh repo (clone of the upstream codex, pushed as a new repo — *not* a GitHub fork, to avoid leaving fork metadata on the upstream). One per run. The repo's `main` branch is the run's working ref; commits there are the rigs' actual edits. | short-lived; captured-then-deleted |
 
-The codex fork lives in **the same GitHub org as the upstream codex** to
-avoid permission concerns. Forks are named
-`experiment-<X-num>-<slug>-trial-<NNN>-<variant>` to keep them
+The codex repo lives in **the same GitHub org as the upstream codex** to
+keep permission setup simple. Repos are named
+`experiment-<X-num>-<slug>-run-<NNN>-<variant>` to keep them
 traceable while alive.
 
 ### Lifecycle
 
 ```
-[manifest.yaml in sanctum]
+[run.yaml in sanctum]
         │
         ▼
-   experiment-init   → creates nexus branch (if needed), forks codex,
-                        creates guild dir, generates guild.json +
-                        package.json, snapshots setup to sanctum,
-                        stubs trial README
+   run-init        → creates nexus branch (if needed), clones codex into
+                      a fresh repo, creates guild dir, runs nsg init +
+                      nsg plugin install + nsg codex add, merges guild
+                      config, copies input files, writes
+                      run-status.yaml, stubs run README
         │
         ▼
-   [run trial]       → post commissions; rigs execute; sessions record
+   [execute run]   → post commissions; rigs execute; sessions record
+                      into the guild's books
         │
         ▼
-   experiment-archive → dumps stacks DB to JSON-per-table, captures
-                        codex fork commits as diffs, copies session
-                        transcripts, writes archive-manifest
+   run-archive     → invokes nsg lab export-books to dump the guild's
+                      books to JSON-per-table; invokes nsg lab git-range
+                      to capture codex commits between base and HEAD;
+                      writes status.laboratory.archive
         │
         ▼
-   experiment-cleanup → deletes codex fork (gh repo delete) and the
-                        live guild dir; refuses to run if archive
-                        wasn't completed
+   run-cleanup     → deletes codex repo (gh repo delete) and the live
+                      guild dir; refuses to run if archive wasn't
+                      completed
 ```
 
 The nexus experiment branch is **not** deleted at cleanup — it persists
 in the nexus repo as a reproducibility breadcrumb.
 
-## Trial manifest format
+## Run manifest format — `run.yaml`
 
-Each trial is parameterized by a YAML manifest stored in the sanctum
-under the experiment dir. The manifest is the canonical specification
-of the trial's experimental conditions.
+`run.yaml` is the immutable input record for one run. The setup script
+reads it; nothing should write to it after authoring.
 
 ```yaml
-# experiments/X<NNN>-<slug>/artifacts/trial-NNN-<variant>/manifest.yaml
+# experiments/X<NNN>-<slug>/artifacts/run-NNN-<variant>/run.yaml
 
 experiment: X<NNN>-<slug>      # experiment slug; matches the parent dir
-trial: NNN                     # trial number, zero-padded (001, 002, ...)
-variant: <variant-slug>        # what makes this trial different from others
+run: NNN                       # run number, zero-padded (001, 002, ...)
+variant: <variant-slug>        # what makes this run different from others
 
 nexus:
   branch: experiment/X<NNN>-<slug>     # branch in /workspace/nexus
-  base_sha: <40-char SHA>              # the SHA the branch was created from
-                                       # (for new experiments) or expected to be
-                                       # at (for additional trials in the same
-                                       # experiment)
+  base_sha: <40-char SHA>              # the SHA the branch is expected
+                                       # to be at; init refuses on drift
 
 codex:
   upstream_org: shardworks
   upstream_repo: nexus                 # or whatever the codex repo is
-  base_sha: <40-char SHA>              # codex SHA the trial starts from
-
-plugins:                               # exact plugin pinning for the
-                                       # experimental package.json
-  - name: '@shardworks/clerk-apparatus'
-    ref: <SHA>
-  - name: '@shardworks/animator-apparatus'
-    ref: <SHA>
-  # ...
+  base_sha: <40-char SHA>              # codex SHA the run starts from
 
 guild:
-  laboratory_sink: artifacts/trial-NNN-<variant>/laboratory/
-                                       # sanctum-relative; resolved to
-                                       # absolute path at init time
+  plugins:                             # exact plugin pinning for the
+                                       # experimental package.json. Each
+                                       # plugin's `version` is whatever
+                                       # `nsg plugin install` accepts —
+                                       # an npm semver, a git SHA, a
+                                       # local path. SHAs from a nexus
+                                       # experiment branch are the
+                                       # expected case.
+    - name: '@shardworks/clerk-apparatus'
+      version: <SHA-or-version>
+    - name: '@shardworks/animator-apparatus'
+      version: <SHA-or-version>
+    # ...
 
-prompts_dir: artifacts/trial-NNN-<variant>/prompts/
-                                       # sanctum-relative; copied/symlinked
-                                       # into the guild's role-instruction
-                                       # location at init time
+  config:                              # partial guild.json merged into
+                                       # the default after `nsg init`.
+                                       # Free-form; whatever the guild
+                                       # supports.
+    <arbitrary partial guild.json>
 
-archive_extras:                        # optional: tables to include beyond
-                                       # the default stacks export
-  - cdc_events
+  files:                               # files copied into the guild
+                                       # after init
+    - sourcePath: prompts/handoff-strong.md
+                                       # relative to this run.yaml
+      guildPath: animator/instructions/implement.md
+                                       # relative to the guild root
+    # ...
 ```
 
 ### Schema notes
 
 - `experiment` and `variant` slugs use lowercase kebab-case, no whitespace.
-- `trial` is zero-padded to three digits.
-- All paths in the manifest are sanctum-relative (relative to the
-  experiment dir). The init script resolves them to absolute paths.
+- `run` is zero-padded to three digits.
 - All SHAs are full 40-char (no abbreviated forms). The init script
   refuses ambiguous refs.
+- `guild.plugins[].version` is whatever `nsg plugin install` accepts.
+  Git SHAs are the expected case for nexus-side plugins (so we can
+  reference unpublished work on experiment branches), but semver
+  versions or local paths are fine for non-nexus plugins.
+- `guild.config` and `guild.files` together cover all variant
+  customization. Anything that used to be a `prompts_dir` is just a
+  file entry copying into the guild's instruction location.
 
-## Setup script — `experiment-init.sh`
+## Run status format — `run-status.yaml`
+
+`run-status.yaml` is the mutable record of the run's lifecycle. The
+init, archive, and cleanup scripts write to it. Status entries are keyed
+by plugin ID (Nexus convention); the Laboratory plugin owns this
+infrastructure, so all entries sit under `laboratory`.
+
+```yaml
+# experiments/X<NNN>-<slug>/artifacts/run-NNN-<variant>/run-status.yaml
+
+laboratory:
+  phase: new                           # new | active | completed | cancelled
+                                       # default is `new` if omitted
+
+  setup:                               # filled at run-init time
+    timestamp: 2026-...
+    invocation: 'bin/run-init.sh --manifest .../run.yaml'
+    nexus:
+      branch: experiment/X016-...
+      head_sha: <40-char>              # actual HEAD when init ran
+    codex:
+      repo_url: https://github.com/shardworks/experiment-...
+      head_sha: <40-char>
+    guild:
+      path: /workspace/experiments/...
+      plugins_resolved:                # what was actually installed
+        - { name: '...', version: '...' }
+      files_copied:
+        - { sourcePath: '...', guildPath: '...' }
+
+  archive:                             # filled at run-archive time;
+                                       # overwritten on re-archive (no
+                                       # preservation of prior runs)
+    timestamp: 2026-...
+    invocation: 'bin/run-archive.sh ...'
+    counts:
+      tables: <N>
+      rows: <N>
+      commits: <N>
+    paths:
+      stacks_export: artifacts/run-NNN-<variant>/stacks-export/
+      codex_history: artifacts/run-NNN-<variant>/codex-history/
+```
+
+`phase` is advisory — humans (or future scripts) update it as the run
+progresses. Cleanup refuses based on `archive` being present, not on
+`phase`.
+
+## Setup script — `run-init.sh`
 
 ```
-bin/experiment-init.sh --manifest <path-to-trial-manifest.yaml>
+bin/run-init.sh --manifest <path-to-run.yaml>
 ```
 
 ### Steps
@@ -149,108 +229,113 @@ bin/experiment-init.sh --manifest <path-to-trial-manifest.yaml>
 1. **Validate manifest.** Required fields present, SHAs are 40-char and
    resolve, paths exist, slug not already in use (no existing guild dir
    at the target location).
-2. **Ensure nexus branch.** If `experiment/X<NNN>-<slug>` doesn't exist
-   in `/workspace/nexus`, create it from `nexus.base_sha`. If it exists,
+2. **Ensure nexus branch.** If the manifest's branch doesn't exist in
+   `/workspace/nexus`, create it from `nexus.base_sha`. If it exists,
    verify it points at the manifest's SHA — refuse to proceed on drift.
    Push to origin if newly created.
-3. **Fork the codex.** `gh repo fork <upstream_org>/<upstream_repo>
-   --org <upstream_org> --fork-name experiment-<X-num>-<slug>-trial-<NNN>-<variant>`.
-   The fork's `main` is the trial's working branch, started at
-   `codex.base_sha`. (If the fork's `main` HEAD doesn't match `base_sha`
-   — e.g., the upstream advanced — explicitly reset the fork's `main`
-   to the manifest's SHA before proceeding.)
-4. **Create guild dir.** `/workspace/experiments/<X-num>-<slug>-trial-<NNN>-<variant>/`
-   with whatever subdirs the framework requires.
-5. **Generate `guild.json`.** Codex URL points at the fork; codex SHA
-   pinned per the manifest. Laboratory sink resolved to the absolute
-   sanctum path.
-6. **Generate `package.json`.** Plugins pinned exactly per the
-   manifest's `plugins` list. (The exact form of pinning depends on
-   the framework's package layout; the script consumes the list and
-   writes the appropriate `dependencies` block.)
-7. **Init the guild.** Run `nsg init` (or whatever the current command
-   is) against the guild dir.
-8. **Copy prompts** from the manifest's `prompts_dir` into the guild's
-   role-instruction location. Symlink rather than copy if the framework
-   supports it (so prompt edits in sanctum take effect without a
-   re-init), but verify the framework actually re-reads on each session
-   spawn before relying on this.
-9. **Snapshot to sanctum.** Write `experiments/X<NNN>-<slug>/artifacts/trial-NNN-<variant>/setup-snapshot.yaml`
-   capturing every resolved SHA, fork URL, paths, manifest copy, init
-   timestamp, and the script invocation arguments. This is the
-   methodology breadcrumb.
-10. **Generate trial README stub** at `experiments/X<NNN>-<slug>/artifacts/trial-NNN-<variant>/README.md`
-    with the **Setup** section auto-filled and the rest as headers
-    waiting for the experiment author to fill in.
-11. **Print next steps.** "Guild initialized at
+3. **Create the codex repo.** Clone the upstream codex at
+   `codex.base_sha` into a temp dir, then `gh repo create
+   <upstream_org>/experiment-<X-num>-<slug>-run-<NNN>-<variant> --private
+   --source=<temp-dir> --push`. Not a GitHub fork — a fresh repo seeded
+   from the upstream SHA. Keeps fork metadata off the upstream codex.
+4. **Create guild dir** at
+   `/workspace/experiments/<X-num>-<slug>-run-<NNN>-<variant>/`.
+5. **Initialize the guild.** Run `nsg init <guild-dir>` (verify the
+   exact command surface against framework source).
+6. **Install plugins.** For each entry in `guild.plugins`:
+   `nsg plugin install <name>@<version>` against the guild dir.
+7. **Add the codex.** `nsg codex add <repo-url> --sha <codex-base-sha>`
+   against the guild dir.
+8. **Merge guild config.** Read `guild.config` from the manifest;
+   deep-merge into `<guild-dir>/guild.json` (created by `nsg init`).
+9. **Copy files.** For each entry in `guild.files`, copy `sourcePath`
+   (resolved relative to `run.yaml`) to `guildPath` (resolved relative
+   to the guild root). Create intermediate dirs as needed.
+10. **Write `run-status.yaml`.** Capture every resolved SHA, the
+    guild path, the codex repo URL, the resolved plugin versions, and
+    the copied file list under `laboratory.setup`. Set
+    `laboratory.phase: new`.
+11. **Generate run README stub** at
+    `experiments/X<NNN>-<slug>/artifacts/run-NNN-<variant>/README.md`
+    with the **Setup** section auto-filled from `laboratory.setup` and
+    the rest as headers waiting for the experiment author to fill in.
+12. **Print next steps.** "Guild initialized at
     `/workspace/experiments/...`. Post commissions via
-    `nsg commission-post --guild ...`. When the trial is done, run
-    `bin/experiment-archive.sh <trial-dir>` to capture state, then
-    `bin/experiment-cleanup.sh <trial-dir>` to remove disposable surfaces."
+    `nsg commission-post --guild ...`. When the run is done, run
+    `bin/run-archive.sh <run-slug>` to capture state, then
+    `bin/run-cleanup.sh <run-slug>` to remove disposable surfaces."
 
 ### Idempotency
 
-Re-running init on an existing guild dir refuses to proceed (refuse with
-a clear error, do not overwrite). Force-re-init is not supported — the
+Re-running init on an existing guild dir refuses to proceed (with a
+clear error, no overwrite). Force-re-init is not supported — the
 intended flow is `archive + cleanup + re-init`, never silent overwrite.
 
-## Archive script — `experiment-archive.sh`
+## Archive script — `run-archive.sh`
 
 ```
-bin/experiment-archive.sh <trial-slug>
+bin/run-archive.sh <run-slug>
 ```
 
-Where `<trial-slug>` is the form `X<NNN>-<slug>-trial-<NNN>-<variant>`,
+Where `<run-slug>` is the form `X<NNN>-<slug>-run-<NNN>-<variant>`,
 or a path to the live guild dir. The script resolves to the
 corresponding sanctum artifact dir.
 
 ### Steps
 
-1. **Read the trial's setup-snapshot** from sanctum to find the guild
-   dir, fork URL, etc.
-2. **Dump the stacks DB.** Walk every table in the guild's stacks DB
-   and write each as JSON to `artifacts/trial-NNN-<variant>/stacks-export/<table>.json`.
-   The dump format is defined below ("Stacks export format").
-3. **Capture codex fork commits.** Walk the fork's `main` branch from
-   `codex.base_sha` to HEAD, extract each commit's diff and metadata,
-   write to `artifacts/trial-NNN-<variant>/codex-history/`. Format
-   defined below ("Codex history format").
-4. **Copy session transcripts.** Pull session jsonls from
-   `~/.claude/projects/<draft-dir>/<sessionId>.jsonl` into
-   `artifacts/trial-NNN-<variant>/transcripts/`. The session-to-rig
-   mapping comes from the stacks dump (which is captured in step 2).
-5. **Write archive manifest** at `artifacts/trial-NNN-<variant>/archive-manifest.yaml`
-   summarizing what was captured: counts per table, count of commits,
-   count of transcripts, archive timestamp, script invocation.
-6. **Print next steps.** "Archive complete. Run
-   `bin/experiment-cleanup.sh <trial-slug>` to delete disposable surfaces.
-   Verify the archive contents at `<sanctum-path>` before running cleanup."
+1. **Read `run-status.yaml`** to find the guild dir, codex repo URL,
+   and base SHAs.
+2. **Export the books.** `nsg lab export-books --guild <guild-dir>
+   --output artifacts/run-NNN-<variant>/stacks-export/`. The Laboratory
+   plugin's tool walks every book and writes JSON-per-table to the
+   output dir. (Tool to be implemented; see *Implementation
+   prerequisites*.)
+3. **Capture codex commits.** `nsg lab git-range --repo <codex-repo>
+   --base <codex-base-sha> --head <head-sha> --output
+   artifacts/run-NNN-<variant>/codex-history/`. The Laboratory tool
+   walks the commit range, writes per-commit diffs and a manifest of
+   metadata. Generic tool, useful beyond this infrastructure.
+4. **Update `run-status.yaml`.** Write `laboratory.archive` with
+   timestamp, invocation, counts, and output paths. Overwrites any
+   prior archive entry.
+5. **Print next steps.** "Archive complete. Run
+   `bin/run-cleanup.sh <run-slug>` to delete disposable surfaces.
+   Verify the archive contents at `<sanctum-path>` before running
+   cleanup."
 
-The script is idempotent: re-running overwrites the prior dump (with a
-warning). Cleanup refuses to run if archive-manifest is missing or stale
-relative to the live state.
+The script is idempotent: re-running overwrites the prior dump (no
+preservation of prior archive runs). Cleanup refuses to run if
+`laboratory.archive` is missing or stale relative to the live state.
 
-## Cleanup script — `experiment-cleanup.sh`
+### Note on transcripts
+
+Animator session transcripts are stored in the `sessions` book by
+the Animator plugin, so they come along automatically with
+`export-books`. No separate transcript-copy step. This sidesteps both
+the `~/.claude/projects/` dependency and the multi-provider question
+(any provider Animator supports lands its transcripts in the same
+book).
+
+## Cleanup script — `run-cleanup.sh`
 
 ```
-bin/experiment-cleanup.sh <trial-slug>
+bin/run-cleanup.sh <run-slug>
 ```
 
 ### Steps
 
 1. **Verify archive completion.** Refuse to run if
-   `artifacts/trial-NNN-<variant>/archive-manifest.yaml` doesn't exist
-   or its timestamp is older than the guild dir's most recent
-   modification (suggests work happened after archive — re-archive
-   before cleanup).
-2. **Delete the codex fork.** `gh repo delete <fork> --confirm`. Fail
-   loud if the fork has unmerged content the script doesn't recognize
+   `run-status.yaml` lacks a `laboratory.archive` entry, or if its
+   timestamp is older than the guild dir's most recent modification
+   (suggests work happened after archive — re-archive before cleanup).
+2. **Delete the codex repo.** `gh repo delete <repo-url> --yes`. Fail
+   loud if the repo has unmerged content the script doesn't recognize
    from the archive (rare, but the safety check matters).
-3. **Delete the guild dir.** `rm -rf /workspace/experiments/<trial-dir>`.
-4. **Print confirmation.** "Trial <slug> cleanup complete. Sanctum
+3. **Delete the guild dir.** `rm -rf /workspace/experiments/<run-dir>`.
+4. **Print confirmation.** "Run <slug> cleanup complete. Sanctum
    artifacts preserved at `<path>`."
 
-The script is **not idempotent** — re-running on a cleaned trial errors
+The script is **not idempotent** — re-running on a cleaned run errors
 ("nothing to clean up").
 
 ## Artifact layout
@@ -258,53 +343,47 @@ The script is **not idempotent** — re-running on a cleaned trial errors
 ```
 experiments/X<NNN>-<slug>/
 ├── spec.md                                # the experiment's research spec
+├── findings.md                            # cross-run consolidated findings
 └── artifacts/
-    ├── trial-001-<variant-slug>/
-    │   ├── manifest.yaml                  # the canonical trial config
-    │   ├── setup-snapshot.yaml            # init-time snapshot
-    │   ├── archive-manifest.yaml          # archive-time summary
-    │   ├── README.md                      # trial-level prose doc
-    │   ├── prompts/                       # variant-specific prompts
-    │   │   └── ...
-    │   ├── transcripts/                   # per-session jsonls
-    │   │   └── <sessionId>.jsonl
-    │   ├── stacks-export/                 # JSON dump per table
+    ├── run-001-<variant-slug>/
+    │   ├── run.yaml                       # immutable inputs
+    │   ├── run-status.yaml                # mutable status (phase, setup, archive)
+    │   ├── README.md                      # run-level prose doc
+    │   ├── files/                         # variant-specific source files
+    │   │   └── ...                        #   (whatever guild.files entries source)
+    │   ├── stacks-export/                 # nsg lab export-books output
     │   │   ├── writs.json
     │   │   ├── rigs.json
-    │   │   ├── sessions.json
+    │   │   ├── sessions.json              # transcripts live here
     │   │   ├── clicks.json
     │   │   └── schema-version.txt
-    │   ├── codex-history/                 # per-commit diffs + meta
+    │   ├── codex-history/                 # nsg lab git-range output
     │   │   ├── commits-manifest.yaml
     │   │   └── 0001-<short-sha>-<slug>.diff
-    │   ├── laboratory/                    # Laboratory's observation sink
-    │   │   └── <whatever Laboratory writes>
-    │   └── analysis/                      # trial-specific analysis (if any)
+    │   └── analysis/                      # run-specific analysis (if any)
     │       └── <date>-<slug>.md
     │
-    ├── trial-002-<variant-slug>/          # parallel structure per trial
+    ├── run-002-<variant-slug>/            # parallel structure per run
     │   └── ...
     │
-    └── analysis/                          # cross-trial analysis
+    └── analysis/                          # cross-run analysis
         └── <date>-comparison.md
 ```
 
 ### Notes
 
-- **Trial dir name is `trial-NNN-<variant-slug>`.** NNN is zero-padded;
+- **Run dir name is `run-NNN-<variant-slug>`.** NNN is zero-padded;
   variant slug is lowercase kebab-case.
-- **`trial-NNN-<variant>/analysis/`** is for analysis specific to one
-  trial; **`artifacts/analysis/`** is for cross-trial comparison.
-- **`trial-NNN-<variant>/laboratory/`** is where Laboratory writes its
-  observations during the trial. Path is captured in the manifest's
-  `guild.laboratory_sink`.
+- **`run-NNN-<variant>/analysis/`** is for analysis specific to one
+  run; **`artifacts/analysis/`** is for cross-run comparison.
 - **Findings go in `experiments/X<NNN>-<slug>/findings.md`** at the
-  experiment root, not in any trial dir. The findings doc consolidates
-  across trials and answers the experiment's research question.
+  experiment root. The findings doc consolidates across runs and
+  answers the experiment's primary research question.
 
 ## Stacks export format
 
-One JSON file per table, each containing an array of row objects.
+One JSON file per book/table, each containing an array of row objects.
+Produced by `nsg lab export-books`.
 
 ```json
 [
@@ -327,7 +406,7 @@ Per-table beats per-row for our use case:
 
 - Typical row sizes are 1-10KB; per-row overhead (filesystem blocks,
   git blob entries) eats meaningful space at this scale.
-- Row counts per trial are tens to hundreds — table files stay
+- Row counts per run are tens to hundreds — table files stay
   manageable.
 - We don't need row-level git history (dumps are snapshots, not
   append-only).
@@ -339,7 +418,8 @@ If any single row carries content >50KB (e.g., a writ body that's a
 50KB brief), the dump can extract it to `stacks-export/blobs/<sha>.<ext>`
 and replace the inline content with a reference field
 (`body_ref: "blobs/<sha>.md"`). Only do this when actually needed; the
-default is inline.
+default is inline. Session-transcript content in `sessions.json` will
+typically trigger this carve-out.
 
 ### Schema versioning
 
@@ -348,13 +428,12 @@ was taken against. Future readers use this to interpret the row schema.
 
 ### Default scope
 
-A fresh guild contains only the trial's data, so the default dump is
-**every table, every row**. No scope filtering needed. The manifest's
-optional `archive_extras` field lets a trial opt into additional tables
-beyond the framework defaults (e.g., raw CDC event log) if the
-experiment specifically needs them.
+A fresh guild contains only the run's data, so the default dump is
+**every book, every row**. No scope filtering needed.
 
 ## Codex history format
+
+Produced by `nsg lab git-range`.
 
 ```
 codex-history/
@@ -367,45 +446,47 @@ codex-history/
 ### `commits-manifest.yaml`
 
 ```yaml
-base_sha: <40-char>            # the trial's codex base
-head_sha: <40-char>            # the fork's main HEAD at archive time
+base_sha: <40-char>            # the run's codex base
+head_sha: <40-char>            # the repo's main HEAD at archive time
 commits:
-  - seq: 0001
-    sha: <40-char>
+  - sha: <40-char>
     parent: <40-char>
     short: <8-char>
     subject: 'reckoner: sweep vision-keeper references'
     author: 'implementer'
     timestamp: '2026-...'
-    rig_id: 'r-...'              # cross-ref into rigs.json
-    session_id: '<sessionId>'    # cross-ref into sessions.json + transcripts
-    writ_id: 'w-...'             # cross-ref into writs.json
     diff_file: '0001-<short>-<slug>.diff'
-  - seq: 0002
-    ...
+  - ...
 ```
+
+The list is order-preserving (oldest first). No `seq` field — YAML
+sequence position carries it. The tool is generic — no run-specific
+cross-references in the manifest. Cross-references between commits and
+guild objects (rig, session, writ) live in the books export, not here.
+The diff file's `0001-` prefix on disk preserves order for filesystem
+listing.
 
 ### Diff files
 
-Standard git format-patch / git format style; one file per commit. The
-filename's seq prefix preserves order; the short SHA + slug aids
-human navigation.
+Standard `git format-patch` output; one file per commit. The filename's
+numeric prefix preserves order; the short SHA + slug aids human
+navigation.
 
-## Trial README format
+## Run README format
 
-Each trial dir has a `README.md` capturing the trial's narrative.
+Each run dir has a `README.md` capturing the run's narrative.
 
 ```markdown
-# Trial <NNN> — <variant slug>
+# Run <NNN> — <variant slug>
 
-## What this trial tests
-<one paragraph: which hypothesis or variant config; what we expect>
+## What this run tests
+<one paragraph: which variable settings; what we're hoping to observe>
 
 ## Setup
 - Nexus branch: <branch> @ <SHA>
-- Codex fork: <URL> @ <SHA>
-- Plugin deps: see `setup-snapshot.yaml`
-- Variant config: <pointer to prompts/ or framework changes>
+- Codex repo: <URL> @ <SHA>
+- Plugin deps: see `run-status.yaml`
+- Variant config: <pointer to files/ or guild.config in run.yaml>
 
 ## Methodology
 <what commissions were posted, in what order, what was measured>
@@ -414,33 +495,60 @@ Each trial dir has a `README.md` capturing the trial's narrative.
 <metrics, comparisons, surprises; reference analysis/ files>
 
 ## Verdict
-<confirmed / refuted / inconclusive, with one-paragraph rationale>
+<answer to the run's question, with a one-paragraph rationale>
 ```
 
 The init script auto-fills **Setup** with resolved SHAs and paths. The
 experiment author fills the rest.
 
-## Trial discipline
+## Experiment discipline
 
-- **One X### = one experiment with one research question.** Use the
-  X### namespace freely. Don't overload one X### with multiple
-  experiments.
-- **Within one experiment, partition by trial.** Variants of the same
-  hypothesis live as separate trial dirs.
-- **Heuristic for trial vs. experiment:** same hypothesis → trial; new
-  hypothesis → new experiment.
-- **Old X### items with multiple experiments** stay as historical
-  exceptions. Don't rationalize. Apply the discipline going forward.
+An experiment is one piece of inquiry — a research question plus the
+analytical frame to answer it. An experiment produces one or more
+runs, each capturing what happened when the apparatus was set up
+and executed with a specific set of variable settings.
+
+### Experiments
+
+- **One experiment has one primary research question** — the verdict
+  it must answer. The findings doc resolves to that question.
+- **Secondary findings are allowed and welcome** — analyses of the
+  same captured data that illuminate other questions. Label them as
+  secondary; they don't dilute the verdict.
+- **No HARKing.** New primary questions that emerge during analysis
+  become new experiments with their own pre-registered question.
+  Don't retrofit a question to fit data you've already seen.
+- **Number of runs per experiment is whatever the analysis needs.**
+  Could be one (qualitative, observational) or many (varying
+  parameters, replicating).
+- **Old X### items with multiple primary questions** stay as
+  historical exceptions. Don't rationalize. Apply the discipline
+  going forward.
+
+### Runs
+
+- **A run is a single execution of the apparatus** with a specific set
+  of variable settings. It produces a captured-state artifact set in
+  `run-NNN-<variant>/`.
+- **Variables split into controlled and manipulated.** Controlled
+  variables are held constant across runs. Manipulated variables are
+  what each run varies. Both go in `run.yaml` — there's no special
+  field marking which is which; the variation across an experiment's
+  runs makes that visible.
+- **Replicates are runs with identical variable settings** — useful
+  when checking for non-determinism or noise. Treat as ordinary runs
+  with a `replicate-of` field if needed; don't engineer special
+  structure now.
 
 ## Naming conventions
 
 | thing | format | example |
 |---|---|---|
 | Experiment slug | `X<NNN>-<lowercase-kebab>` | `X016-p3-orientation-suppression` |
-| Nexus experiment branch | `experiment/<experiment-slug>` | `experiment/X016-p3-orientation-suppression` |
-| Codex fork repo | `experiment-<experiment-slug>-trial-<NNN>-<variant>` | `experiment-X016-p3-orientation-suppression-trial-001-strong-prompt` |
-| Trial dir slug | `<experiment-slug>-trial-<NNN>-<variant>` | (used in `/workspace/experiments/` and as the cleanup arg) |
-| Trial artifact dir | `trial-<NNN>-<variant>/` | `trial-001-strong-prompt/` |
+| Nexus experiment branch | `experiment/<experiment-slug>` (per-run variants ok) | `experiment/X016-p3-orientation-suppression` |
+| Codex repo name | `experiment-<experiment-slug>-run-<NNN>-<variant>` | `experiment-X016-p3-orientation-suppression-run-001-strong-prompt` |
+| Run dir slug | `<experiment-slug>-run-<NNN>-<variant>` | (used in `/workspace/experiments/` and as the cleanup arg) |
+| Run artifact dir | `run-<NNN>-<variant>/` | `run-001-strong-prompt/` |
 
 Variant slugs use lowercase kebab-case, descriptive but short.
 
@@ -452,101 +560,96 @@ Variant slugs use lowercase kebab-case, descriptive but short.
 
 - **Number:** X016
 - **Slug:** `X016-p3-orientation-suppression`
-- **Research question:** Can a fresh implementer session, given a
-  hand-crafted 30K-token handoff, produce productive work in <5 turns?
+- **Primary research question:** Can a fresh implementer session, given
+  a hand-crafted 30K-token handoff, produce productive work in <5 turns?
 - **Spec location:** `experiments/X016-p3-orientation-suppression/spec.md`
 
-### Trials
+### Runs
 
 Three prompt variants tested against the same brief (rig 1's docs sweep,
-handoff at T52):
+handoff at T52). Common controlled variables: nexus SHA, codex base SHA,
+plugin versions. Manipulated: the handoff prompt content (and presence).
 
-| trial | variant | what differs |
+| run | variant | what differs |
 |---|---|---|
 | 001 | `strong-prompt` | imperative anti-orientation directives ("Do NOT re-read X"), evidence anchors |
 | 002 | `mild-prompt` | permissive framing ("X is known-good") |
 | 003 | `monolithic-baseline` | no handoff; runs the brief from scratch as control |
 
-### Per-trial flow
+### Per-run flow
 
-1. Author writes `manifest.yaml` for trial-001-strong-prompt.
-2. `bin/experiment-init.sh --manifest .../trial-001-strong-prompt/manifest.yaml`
-   creates the nexus branch (if not already), forks the codex, generates
-   the guild, snapshots setup, stubs the README.
+1. Author writes `run.yaml` for run-001-strong-prompt, including the
+   shared nexus + codex SHAs and the variant-specific
+   `guild.files: [{ sourcePath: prompts/handoff-strong.md,
+   guildPath: animator/instructions/implement.md }]`.
+2. `bin/run-init.sh --manifest .../run-001-strong-prompt/run.yaml`
+   creates the nexus branch (if not already), creates the codex repo,
+   inits the guild via `nsg init`, installs plugins via `nsg plugin
+   install`, adds the codex via `nsg codex add`, merges
+   `guild.config`, copies the handoff prompt into place, writes
+   `run-status.yaml`, stubs the README.
 3. Post the brief commission via `nsg commission-post --guild
-   /workspace/experiments/X016-p3-orientation-suppression-trial-001-strong-prompt
-   --brief .../prompts/handoff-strong.md`.
-4. Rig executes; sessions record; Laboratory writes observations to
-   the trial's laboratory dir.
-5. When the trial completes, `bin/experiment-archive.sh
-   X016-p3-orientation-suppression-trial-001-strong-prompt` dumps stacks,
-   captures codex commits, copies transcripts, writes archive manifest.
-6. Author fills out the trial README with methodology + results +
+   /workspace/experiments/X016-p3-orientation-suppression-run-001-strong-prompt
+   --brief .../files/brief-docs-sweep.md`.
+4. Rig executes; sessions record into the guild's books.
+5. When the run completes, `bin/run-archive.sh
+   X016-p3-orientation-suppression-run-001-strong-prompt` invokes
+   `nsg lab export-books` (dumps books) and `nsg lab git-range`
+   (captures codex commits), updates `run-status.yaml`.
+6. Author fills out the run README with methodology + results +
    verdict.
-7. `bin/experiment-cleanup.sh X016-p3-orientation-suppression-trial-001-strong-prompt`
-   deletes the fork and guild dir.
-8. Repeat for trials 002 and 003.
+7. `bin/run-cleanup.sh X016-p3-orientation-suppression-run-001-strong-prompt`
+   deletes the codex repo and guild dir.
+8. Repeat for runs 002 and 003.
 
-### Cross-trial analysis
+### Cross-run analysis
 
 `experiments/X016-p3-orientation-suppression/artifacts/analysis/2026-MM-DD-orientation-comparison.md`
 runs an instrument that compares orientation-tax metrics across the
-three trials' transcripts and stacks dumps; produces the answer to the
-research question. Findings consolidate to
+three runs' books exports and codex histories; produces the answer to
+the primary research question. Findings consolidate to
 `experiments/X016-p3-orientation-suppression/findings.md`.
 
-## Open implementation questions
+## Implementation prerequisites
 
-These are unresolved in this draft and need addressing before the
-infrastructure is built:
+These are pieces that need to exist (or be verified) before the
+infrastructure scripts can be built:
 
-1. **`nsg init` invocation.** What does the current command look like?
-   Does it accept a path argument for the guild dir, or does it create
-   a guild in the current dir? The setup script needs the right
-   incantation.
-2. **Plugin pinning mechanism.** How does the framework's `package.json`
-   express plugin pinning today? By workspace path, by npm version, by
-   git ref? The script needs to generate the right shape.
-3. **Prompts copy vs. symlink.** Does the framework re-read role
-   instructions on each session spawn (allowing symlink-and-edit), or
-   only at guild init (requiring copy + re-init for changes)? Affects
-   how prompts variation works during a trial.
-4. **Stacks dump primitive.** Does the framework provide a clean dump
-   command that produces JSON-per-table, or does the archive script
-   need to query the DB directly? If the latter, format-stability
-   becomes a concern across framework versions.
-5. **Laboratory sink config.** How is the Laboratory's output
-   destination configured today — guild.json field, env var, plugin
-   prop? The init script needs to wire it deliberately.
-6. **Session transcript location.** The transcripts live in
-   `~/.claude/projects/<draft-dir>/<sessionId>.jsonl` for production
-   today. For experimental guilds with non-default draft locations, do
-   the transcripts still go there? Affects the archive script's
-   transcript-copy step.
-7. **`gh` org permissions.** Does the experimental setup user have
-   permissions to fork into the upstream codex's org and to create/delete
-   forks programmatically? If not, fork-creation needs human-in-loop.
-8. **Convention for `archive_extras` table names.** Should the manifest
-   reference table names directly, or is there a higher-level set of
-   "raw event log," "queue snapshots," etc. that the script knows how
-   to extract?
-
-These are pragmatic questions about how the framework's existing
-primitives map to what the script needs to do. They're each
-straightforward once we look at the framework code; surfacing them
-now so the next pass can resolve them.
+1. **Verify `nsg init` invocation.** Inspect framework source to
+   confirm the exact command surface — does it accept a target dir
+   argument, where does it create `guild.json`, etc.
+2. **Verify `nsg plugin install` invocation.** Confirm the version
+   spec accepts SHAs / git refs (not just npm semver). If not,
+   negotiate with framework before scripts can pin to experiment
+   branches.
+3. **Verify `nsg codex add` invocation.** Confirm the SHA-pinning
+   surface.
+4. **Build `nsg lab export-books`** — Laboratory tool that takes a
+   guild dir and an output dir and writes JSON-per-table for every
+   book. Promotion to the `stacks` plugin if it proves itself.
+5. **Build `nsg lab git-range`** — Laboratory tool that takes a repo
+   path, base SHA, head SHA, and output dir and writes the
+   commits-manifest + per-commit diff files. Generic tool, useful
+   beyond this infrastructure.
+6. **Confirm `gh` org permissions.** Assume the experimental setup
+   user has permission to create / delete repos in the upstream codex
+   org. If that turns out wrong at script time, surface and adjust.
 
 ## Future considerations
 
-- **Multi-fork experiments.** The current spec defaults to one fork per
-  trial. Some experiments may need multiple parallel forks (e.g.,
-  comparing prompt variants concurrently to save calendar time). Design
-  is compatible with this — just init multiple manifests.
-- **Long-lived experiments.** Some experiments may run trials over
-  weeks (e.g., observing P3 behavior across many real commissions). The
-  cleanup discipline needs adjusting for these — possibly an interim
-  "snapshot" step that captures state without deleting the fork.
+- **Multi-run experiments running in parallel.** The current spec
+  defaults to sequential runs. Some experiments may want concurrent
+  runs to save calendar time. Design is compatible — just init
+  multiple `run.yaml`s; runs are isolated by construction.
+- **Long-lived runs.** Some runs may execute over weeks (e.g.,
+  observing P3 behavior across many real commissions). The cleanup
+  discipline needs adjusting for these — possibly an interim
+  "snapshot" step that captures state without deleting the codex repo.
 - **Cross-experiment comparison.** When two experiments answer related
   questions (e.g., X016 P3 orientation, X017 P3 trigger heuristics),
-  cross-experiment analysis lives in `experiments/analysis/` (or wherever
-  the sanctum convention places it). Out of scope for this spec.
+  cross-experiment analysis lives in `experiments/analysis/` (or
+  wherever the sanctum convention places it). Out of scope for this
+  spec.
+- **Replication discipline.** If we start running replicates (same
+  variable settings, multiple runs to check for noise), the `run.yaml`
+  schema gains a `replicate-of: <run-NNN>` field. Defer until needed.
