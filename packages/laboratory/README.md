@@ -1,42 +1,51 @@
-# The Laboratory (retired)
+# The Laboratory
 
-Retired 2026-04-30. The Laboratory was an observational apparatus that watched Stacks CDC events on the Clerk's writs and links books and the Animator's sessions book, mirroring observational data into the sanctum at `experiments/data/commission-log.yaml` and `experiments/data/commissions/<id>/`. Its purpose was to feed the X013 (Commission Outcomes) research instrument with patron-subjective judgments alongside auto-collected telemetry.
+Apparatus for running trial-shaped experiments on guild configurations.
 
-## Why it was retired
+## Audiences
 
-Two pieces of the surrounding system shifted in ways that hollowed out the instrument:
+- **Nexus dev** — cost/quality tuning, prompt evaluation, plugin variant
+  comparison. Replaces the standalone-bash spec at
+  `experiments/infrastructure/setup-and-artifacts.md`.
+- **End users** — evaluate prompts, plugins, and config variants by
+  authoring trial manifests against a stable apparatus surface.
 
-- **Spec generation became automated.** The Astrolabe planning pipeline now produces every commission's spec from a brief. Spec quality no longer varies along a patron-craft axis, so `spec_quality_pre/post` ratings are constant by construction.
-- **Structured patron review was retired.** The patron stopped routinely filling in `complexity`, `outcome`, `failure_mode`, and `reviewed_at`. Per-commission review became ad-hoc as the planning workshop and static implement→review→revise rig pipeline absorbed the quality-assurance role.
+## Architecture (MVP0)
 
-Without those signals, what remained in the commission log and per-commission directories was strictly mechanical — auto-set outcome (success/abandoned), the writ body as `commission.md`, and session telemetry — all of which is fully reproducible from the guild's own books.
+- **Writ type:** `trial` — a single execution unit. Lifecycle mirrors
+  mandate (`new → open → completed | failed | cancelled`, with `stuck`
+  as a non-terminal off `open`). Trials are leaves in v1; the
+  higher-level `experiment` grouping is parked for v2.
+- **Rig template:** `post-and-collect-default` — composes
+  fixture-setup, scenario, probe, teardown, and archive engines from
+  the writ's `ext.laboratory.config`. One canonical template; extension
+  is via plugin contributions, not in-template slots.
+- **Engines:**
+  - **Fixtures** — set up and tear down disposable surfaces (codex
+    repos, test guilds). Form a dep DAG; topo-sorted at template
+    instantiation.
+  - **Scenario** — the workload. v1 uses cross-guild commission-post +
+    wait-for-writ-terminal as the canonical scenario engine pair.
+  - **Probes** — extract data from one or more fixtures (stacks dump,
+    git range capture).
+  - **Archive** — captures probe outputs for the research record.
+    Storage layout in design at click `c-momaa5o9`.
+- **Authoring:** YAML manifest via `nsg lab trial post --manifest <file>`.
+  Manifest shape mirrors `ext.laboratory.config` exactly.
 
-X013 was moved to Superseded; the Laboratory's three CDC watchers and helper code were deleted; this package was reduced to a no-op stub so existing guild.json registrations stay loadable.
+## Status
 
-## Where the data lives now
+Skeleton only. The trial writ type is registered; engine designs, the
+rig template, and the manifest CLI are added by subsequent
+implementation children under click `c-moma9llq`.
 
-| Signal | Source |
-|---|---|
-| Writ status and lifecycle | `clerk/writs` book — query via `nsg writ show` / `nsg writ list` / `nsg writ tree` |
-| Writ relationships (`fixes`, `depends-on`, etc.) | `clerk/links` book — query via `nsg writ` link tools |
-| Session telemetry (cost, tokens, duration, exit, output) | `animator/sessions` book — query via `nsg session show` / `nsg session list` |
-| Anima role and engine id per session | `animator/sessions` book — `metadata.role`, `metadata.engineId` |
-| Engine→session linkage within a rig | `spider/rigs` book — query via `nsg rig for-writ` / `nsg rig show` |
+## Background
 
-## Historical baseline
-
-The pruned commission log (150 patron-touched entries spanning 2026-03-25 → 2026-04-29) is preserved as an artifact in the experiments that reference it:
-
-- `experiments/X013-commission-outcomes/artifacts/2026-04-30-commission-log-frozen-baseline.yaml` — owned by the experiment that produced it.
-- `experiments/X008-patrons-hands/artifacts/2026-04-30-commission-log-frozen-baseline.yaml` — referenced by §Infrastructure Milestones for the H5 review-rate-cliff evidence.
-
-The 22 commission directories (out of 1246) that contained substantive patron-written `review.md` notes remain at `experiments/data/commissions/<id>/`. The other 1224 — pure auto-generated content — were deleted.
-
-## Patron-side cleanup (non-urgent)
-
-The plugin is currently a no-op. Once you are ready to fully retire the package:
-
-1. Remove the `"laboratory"` entry from `/workspace/vibers/guild.json` plugins list.
-2. Remove `@shardworks/laboratory-apparatus` from `/workspace/vibers/package.json` dependencies.
-3. Restart the guild.
-4. Delete `packages/laboratory/` from the sanctum.
+This package previously held a CDC-based observational stub (data
+mirroring of writs/sessions into the sanctum). That instrument was
+retired 2026-04-30 — its underlying signals (patron-set spec quality
+ratings, structured commission review) had been hollowed out by the
+shift to automated planning and static review pipelines. The package
+was kept as a no-op so existing `guild.json` registrations stayed
+loadable; the apparatus reshape reuses the package and the registered
+plugin id, but the old data-mirroring code and types are gone.
