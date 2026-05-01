@@ -304,7 +304,7 @@ describe('buildArchiveGraft', () => {
     );
   });
 
-  it('passes archive givens through and injects _trial context', () => {
+  it('passes archive givens through and injects _trial context + ${writ}', () => {
     const graft = buildArchiveGraft(
       trialConfig({
         slug: 'demo',
@@ -312,10 +312,30 @@ describe('buildArchiveGraft', () => {
       }),
       WRIT_ID,
     );
+    // The archive engine reads the writ via givens.writ; the orchestrator
+    // injects the Spider's `${writ}` substitution placeholder so
+    // resolveGivens (in spider.ts) substitutes the writ doc at graft-
+    // spawn time. Same mechanism the static template uses for its
+    // pre-graft engines.
     assert.deepEqual(graft[0]!.givens, {
+      writ: '${writ}',
       target: 'sanctum',
       _trial: { slug: 'demo', writId: WRIT_ID },
     });
+  });
+
+  it('lets author-supplied givens.writ override the framework injection', () => {
+    // Defensive — manifest authors who explicitly set a writ field
+    // override the default. The test pins this so a future spread-order
+    // change doesn't silently flip the precedence.
+    const graft = buildArchiveGraft(
+      trialConfig({
+        slug: 'demo',
+        archive: { engineId: 'lab.archive', givens: { writ: 'custom' } },
+      }),
+      WRIT_ID,
+    );
+    assert.equal(graft[0]!.givens!.writ, 'custom');
   });
 });
 

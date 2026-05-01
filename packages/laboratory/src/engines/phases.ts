@@ -293,11 +293,24 @@ export function buildArchiveGraft(
       id: ARCHIVE_ID,
       designId: config.archive.engineId,
       upstream,
-      givens: withTrialContext(config.archive.givens, {
-        slug: config.slug,
-        writId,
-        frameworkVersion: config.frameworkVersion,
-      }),
+      givens: withTrialContext(
+        {
+          // Pass the trial writ explicitly through Spider's
+          // ${writ} substitution — the static template uses the
+          // same mechanism for the five phase orchestrators, so
+          // grafted engines that need the writ doc get it the
+          // same way. Spider's resolveGivens substitutes at
+          // graft-spawn time (see plugins/spider/src/spider.ts
+          // around the processGrafts handler).
+          writ: '${writ}',
+          ...config.archive.givens,
+        },
+        {
+          slug: config.slug,
+          writId,
+          frameworkVersion: config.frameworkVersion,
+        },
+      ),
     },
   ];
 }

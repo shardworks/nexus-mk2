@@ -16,14 +16,19 @@
  * Probe discovery: walks `context.upstream` for entries keyed
  * `probe-<id>` (the engine-id naming convention from
  * engines/phases.ts → PROBE_ID). Pairing the probe id back to its
- * engineId requires reading the trial config off the writ — same
- * `writ` given the phase orchestrators receive.
+ * engineId requires reading the trial config off the writ, which
+ * the archive-phase orchestrator passes through as `${writ}`
+ * (Spider substitutes the writ doc for graft givens at spawn time
+ * via `resolveGivens` — the same mechanism the static template's
+ * pre-graft engines use).
  *
  * GIVENS
  * ──────
- *   writ : WritDoc   — the trial writ (passed by the archive-phase
- *                      orchestrator). Its `ext.laboratory.config.probes`
- *                      provides the {probeId → engineId} mapping.
+ *   writ : WritDoc  — the trial writ. The archive-phase orchestrator
+ *                     emits this as `'${writ}'` in the graft; the
+ *                     Spider resolves it to the writ doc at graft-
+ *                     spawn time. `writ.ext.laboratory.config.probes`
+ *                     provides the {probeId → engineId} mapping.
  *
  * SUMMARY (yields)
  * ────────────────
@@ -62,7 +67,9 @@ function validateGivens(rawGivens: Record<string, unknown>): ResolvedGivens {
   const writ = rawGivens.writ as WritDoc | undefined;
   if (!writ || typeof writ.id !== 'string') {
     throw new Error(
-      `[${DESIGN_ID}] missing required given "writ" — the rig template must pass \${writ}.`,
+      `[${DESIGN_ID}] missing required given "writ" — the archive-phase orchestrator ` +
+        `must include "writ: '\${writ}'" in its graft givens. The Spider substitutes ` +
+        `\${writ} via resolveGivens at graft-spawn time.`,
     );
   }
   const config = (writ.ext as { laboratory?: { config?: LaboratoryTrialConfig } } | undefined)

@@ -215,7 +215,7 @@ describe('archive engine run()', () => {
     );
   });
 
-  it('throws when "writ" given is missing', async () => {
+  it('throws when "writ" given is missing — the orchestrator must include ${writ}', async () => {
     await assert.rejects(
       () => archiveEngine.run({}, makeContext()),
       /missing required given "writ"/,
