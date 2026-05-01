@@ -5,8 +5,8 @@ Apparatus for running trial-shaped experiments on guild configurations.
 ## Audiences
 
 - **Nexus dev** — cost/quality tuning, prompt evaluation, plugin variant
-  comparison. Replaces the standalone-bash spec at
-  `experiments/infrastructure/setup-and-artifacts.md`.
+  comparison. Replaces the standalone-bash spec archived at
+  `docs/archive/deprecated-docs/experimental-infrastructure-setup-and-artifacts.md`.
 - **End users** — evaluate prompts, plugins, and config variants by
   authoring trial manifests against a stable apparatus surface.
 
@@ -232,22 +232,171 @@ never the same thing.
 
 For MVP, all three books and all three standard probes bundle in
 `@shardworks/laboratory`. The code organizes per-probe
-(`src/probes/<probe-name>/{engine.ts, book.ts, extractor.ts}`) and the
-probe registry is built from per-probe registrations rather than a
-hardcoded list. When a third-party probe forces the issue, lifting a
-built-in probe into its own plugin (`@shardworks/lab-probe-stacks-dump`,
-etc.) is a mechanical move — no architectural surgery. Tracked as a
-parked v2 path; no click filed yet pending a forcing function.
+(`src/probes/<probe-name>.ts` and the archive book schemas at
+`src/archive/`) so a future per-plugin lift is mechanical. Probe
+extraction-dispatch uses a structural type-guard
+(`isProbeEngineDesign`) over the existing Fabricator engine
+registry — no separate probe registry; engines that ship an
+`extract()` method are recognized as probes structurally.
+
+## Authoring trials
+
+A trial is a YAML manifest that mirrors `LaboratoryTrialConfig`
+exactly (`slug`, `fixtures`, `scenario`, `probes`, `archive`) plus
+optional `title`, `description`, `parentId`, and `codex` fields that
+land on the trial writ rather than on the config payload. The CLI
+posts the trial via:
+
+```sh
+nsg lab trial-post path/to/manifest.yaml
+nsg lab trial-post --manifest path/to/manifest.yaml --draft   # leave in 'new'
+```
+
+### Minimal manifest (single fixture, single probe)
+
+```yaml
+slug: orientation-suppression-strong
+title: P3 — orientation suppression, strong-prompt variant
+description: |
+  Tests whether an imperative anti-orientation directive in the
+  implementer handoff produces productive work in fewer than five
+  turns. Captures the test-guild's animator/sessions book for
+  cost/turn-count analysis.
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      # Any git clone source: owner/name, full URL, or absolute path.
+      # Local-bare codex flow — no GitHub round-trip.
+      upstreamRepo: /workspace/nexus-mk2
+      baseSha: 4b50b6542aa07bd7b74dca1a1d581f90788d4d47
+      # codexName auto-defaults to <slug>-<writId-tail> from
+      # framework-injected _trial. Override only when needed.
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # plugin install accepts npm semver, dist-tags, git URLs with
+      # #<sha>, and `file:<absolute-path>` for local source. `link:`
+      # is pnpm-only and trips EUNSUPPORTEDPROTOCOL on npm guilds.
+      plugins:
+        - name: '@shardworks/tools-apparatus'
+          version: 'file:/workspace/nexus/packages/plugins/tools'
+        - name: '@shardworks/codexes-apparatus'
+          version: 'file:/workspace/nexus/packages/plugins/codexes'
+        - name: '@shardworks/stacks-apparatus'
+          version: 'file:/workspace/nexus/packages/plugins/stacks'
+        - name: '@shardworks/clerk-apparatus'
+          version: 'file:/workspace/nexus/packages/plugins/clerk'
+      # Optional: deep-merged into guild.json after init.
+      config:
+        loom:
+          roles:
+            implementer:
+              prompt-overrides:
+                orientation-suppression: |
+                  Begin work immediately. Do not summarize the
+                  task before starting.
+      # Optional: per-trial file copies (sourcePath absolute in v1).
+      files: []
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X016/briefs/feature-A.md
+    # waitForTerminal=true (default) blocks until the test guild's
+    # writ reaches a terminal classification; false yields after post.
+    waitForTerminal: true
+    timeoutMs: 1800000   # 30m
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
+```
+
+### Manifest-shape rules
+
+- **`slug`**: lowercase kebab-case, alphanumeric + hyphen, must
+  start with a letter, ≤40 characters. Used in disposable-resource
+  naming (`<slug>-<writId-tail>` for codex and test-guild dirs).
+- **`fixtures[].id` / `probes[].id`**: kebab-case (`[a-z0-9-]+`,
+  ≤40 chars). Unique within their respective lists.
+- **Fixture DAG**: `dependsOn` references must resolve and form an
+  acyclic graph. The manifest CLI rejects cycles, unknown
+  references, and duplicate ids at validation time.
+- **`fixtures[].teardownEngineId`**: optional override; defaults to
+  the convention `<engineId-with-trailing -setup→-teardown>`.
+- **Givens**: opaque to the manifest CLI; each engine's docstring
+  documents what it expects. Mistyped givens fail at engine run
+  time, not validation.
+
+### After posting
+
+```sh
+# Post the trial; the rig fires immediately (writ goes new → open).
+nsg lab trial-post manifest.yaml
+
+# Watch the rig flow.
+nsg writ list --type trial
+nsg writ-show <trialId>           # writ-level view
+nsg rig list --writ <trialId>     # the rig executing it
+
+# After the trial completes:
+nsg lab trial-show <trialId>      # archive metadata + probe summaries
+nsg lab trial-extract <trialId> --to /tmp/extract  # materialize captured data
+nsg lab trial-export-book <trialId> --book animator/sessions  # streaming JSONL
+```
+
+### Authoring tips
+
+- **Codex base SHA picks the snapshot.** The codex-setup engine
+  clones the upstream repo, checks out `baseSha`, and pushes that
+  to the trial's local-bare repo. Pick the SHA you want the test
+  guild to start from — typically the head of whatever branch
+  embodies the variant under test.
+- **Plugin pins are passed through to npm.** `file:<absolute-path>`
+  is the canonical way to point at local source (the path becomes
+  a tarball-equivalent npm install). Use git+URL#<sha> to pin to a
+  specific upstream commit on a public repo. Avoid `link:` —
+  pnpm-only.
+- **Default fixtures are isolated per trial.** Codex bare repos
+  land at `<labHost>/.nexus/laboratory/codexes/<codexName>.git`;
+  test guilds at `<labHost>/.nexus/laboratory/guilds/<guildName>/`.
+  No need to author paths unless you want a specific layout.
+- **Probe order is independent.** Probes run in parallel after
+  scenario completes; the archive engine waits for all of them.
+  Skipping a probe is just leaving its declaration out — the
+  archive row will then have no entry for that probe id.
+- **Brief path is absolute in v1.** Manifest-relative resolution is
+  future polish (currently throws on relative paths). Author
+  briefs into the sanctum (e.g. under `experiments/<X-num>/briefs/`)
+  and reference by absolute path.
 
 ## Status
 
-Skeleton with stub engines. The trial writ type is registered; the rig
-template, manifest CLI, and stub engines are wired end-to-end (smoke
-tested against `vibers`). The remaining MVP work: real engine
-implementations under click `c-moma9llq` — codex fixtures, guild
-fixtures, scenario engines, probe engines (now including
-`lab.probe-trial-context`), the archive engine, and the probe registry
-+ extract dispatch (`c-momkil4p`).
+Production-ready for nexus-dev trials. The trial writ type is
+registered, the rig template is the canonical
+`post-and-collect-default`, all four fixture and scenario engine
+pairs (codex / guild / commission-post / wait) are real, the three
+standard probes are real, the archive engine is real, and the four
+CLI tools (`trial-post`, `trial-show`, `trial-extract`,
+`trial-export-book`) ship with the package. 167/167 unit tests
+passing including a codified pipeline smoke test. The first
+real-world trial port (X016 orientation suppression or similar P3
+candidate) is the next milestone — see click `c-momaab8y`.
 
 ## Background
 

@@ -5,9 +5,10 @@
  * configurations. Audiences:
  *
  *   - **Nexus dev:** cost/quality tuning (P3 work, prompt evaluation,
- *     plugin variant comparison) — automate the experimental-
- *     infrastructure spec at experiments/infrastructure/setup-and-
- *     artifacts.md.
+ *     plugin variant comparison) — automates the standalone-bash
+ *     experimental-infrastructure spec it superseded (archived at
+ *     docs/archive/deprecated-docs/experimental-infrastructure-setup-
+ *     and-artifacts.md).
  *   - **End users:** evaluate their own prompts/plugins/configs by
  *     authoring trial manifests against a stable apparatus surface.
  *
@@ -27,7 +28,7 @@
  * registration is wired. Engine designs, rig templates, and CLI tools
  * are added as their respective implementation children land.
  *
- * See: experiments/infrastructure/setup-and-artifacts.md
+ * See: packages/laboratory/README.md (canonical spec).
  */
 
 import type { Plugin } from '@shardworks/nexus-core';

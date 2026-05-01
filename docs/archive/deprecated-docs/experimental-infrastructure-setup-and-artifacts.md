@@ -1,6 +1,23 @@
 # Experimental infrastructure: setup, artifacts, lifecycle
 
-**Status:** draft (2026-04-30) — refined with Sean's feedback.
+**Status:** archived (2026-05-01) — superseded by **the Laboratory
+apparatus** at `packages/laboratory/`. This document is preserved for
+historical reference; new trial-shaped experiments should be authored
+as YAML manifests against the apparatus rather than implemented in
+standalone bash.
+
+The apparatus reuses the design principles below (three-repo
+separation, one guild per run, controlled vs. manipulated variables,
+standardized capture) but folds the moving parts — codex setup,
+test-guild bootstrap, scenario commissioning, data capture, archival
+— into typed engine designs orchestrated by Spider. See
+`packages/laboratory/README.md` for the canonical spec and
+`docs/archive/deprecated-docs/` for the historical context below.
+
+---
+
+**Original status (when the spec was authored):** draft (2026-04-30) —
+refined with Sean's feedback.
 
 ## Purpose
 

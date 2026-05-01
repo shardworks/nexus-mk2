@@ -18,8 +18,10 @@
  * The legacy `LaboratoryConfig` (data-mirroring stub) is removed — that
  * plugin's no-op phase is over.
  *
- * See: experiments/infrastructure/setup-and-artifacts.md (the standalone-bash
- * spec the apparatus supersedes; its run.yaml shape is the template here).
+ * See: packages/laboratory/README.md for the canonical spec, and
+ * docs/archive/deprecated-docs/experimental-infrastructure-setup-and-
+ * artifacts.md for the standalone-bash design this apparatus replaces
+ * (its run.yaml shape was the template for what's now LaboratoryTrialConfig).
  */
 
 import type { WritTypeConfig } from '@shardworks/clerk-apparatus';
