@@ -308,6 +308,184 @@ archive:
   });
 });
 
+describe('parseManifest — stable pin enforcement', () => {
+  it('accepts a manifest whose plugins[] all use stable pins', () => {
+    const m = parseManifest(`
+slug: ok
+fixtures:
+  - id: g
+    engineId: lab.guild-setup
+    givens:
+      plugins:
+        - { name: '@shardworks/tools-apparatus', version: '1.2.3' }
+        - { name: '@shardworks/codexes-apparatus', version: 'git+https://github.com/foo/bar.git#a1b2c3d4e5f6' }
+        - { name: '@shardworks/clerk-apparatus', version: 'shardworks/clerk#a1b2c3d4e5f6789012345678901234567890abcd' }
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`);
+    const fix = m.fixtures[0]!;
+    const plugins = (fix.givens as { plugins: { version: string }[] }).plugins;
+    assert.equal(plugins.length, 3);
+  });
+
+  it('rejects file: pins with a clear reason and the right path', () => {
+    assert.throws(
+      () =>
+        parseManifest(`
+slug: ok
+fixtures:
+  - id: g
+    engineId: lab.guild-setup
+    givens:
+      plugins:
+        - { name: '@shardworks/tools-apparatus', version: 'file:/workspace/nexus/packages/plugins/tools' }
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`),
+      (err: Error) => {
+        assert.match(err.message, /unstable pin/);
+        assert.match(err.message, /not reproducible/);
+        assert.match(err.message, /fixtures\.0\.givens\.plugins\.0\.version/);
+        return true;
+      },
+    );
+  });
+
+  it('rejects link: pins', () => {
+    assert.throws(
+      () =>
+        parseManifest(`
+slug: ok
+fixtures:
+  - id: g
+    engineId: lab.guild-setup
+    givens:
+      plugins:
+        - { name: x, version: 'link:../somewhere' }
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`),
+      /unstable pin.*pnpm-only/,
+    );
+  });
+
+  it('rejects caret ranges', () => {
+    assert.throws(
+      () =>
+        parseManifest(`
+slug: ok
+fixtures:
+  - id: g
+    engineId: lab.guild-setup
+    givens:
+      plugins:
+        - { name: x, version: '^1.2.3' }
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`),
+      /version range/,
+    );
+  });
+
+  it('rejects dist-tags', () => {
+    assert.throws(
+      () =>
+        parseManifest(`
+slug: ok
+fixtures:
+  - id: g
+    engineId: lab.guild-setup
+    givens:
+      plugins:
+        - { name: x, version: 'latest' }
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`),
+      /dist-tag/,
+    );
+  });
+
+  it('rejects git URLs with a branch fragment', () => {
+    assert.throws(
+      () =>
+        parseManifest(`
+slug: ok
+fixtures:
+  - id: g
+    engineId: lab.guild-setup
+    givens:
+      plugins:
+        - { name: x, version: 'git+https://github.com/foo/bar.git#main' }
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`),
+      /SHA, not a branch or tag/,
+    );
+  });
+
+  it('reports every unstable pin in the same parse (not just the first)', () => {
+    assert.throws(
+      () =>
+        parseManifest(`
+slug: ok
+fixtures:
+  - id: g
+    engineId: lab.guild-setup
+    givens:
+      plugins:
+        - { name: a, version: 'file:./a' }
+        - { name: b, version: '1.2.3' }
+        - { name: c, version: '^2.0.0' }
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`),
+      (err: Error) => {
+        // Both pin failures should appear in the message.
+        assert.match(err.message, /plugins\.0\.version/);
+        assert.match(err.message, /plugins\.2\.version/);
+        // The middle one passed.
+        assert.doesNotMatch(err.message, /plugins\.1\.version/);
+        return true;
+      },
+    );
+  });
+
+  it('skips pin validation for engines that do not declare plugin pins', () => {
+    // lab.guild-setup is the only engine with a registered extractor.
+    // A fixture whose engineId is something else and happens to have a
+    // `plugins` field should NOT be validated — we don't know the
+    // shape contract.
+    const m = parseManifest(`
+slug: ok
+fixtures:
+  - id: g
+    engineId: lab.something-else
+    givens:
+      plugins:
+        - { name: x, version: 'file:/this/would/normally/fail' }
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`);
+    assert.equal(m.fixtures.length, 1);
+  });
+});
+
 describe('parseManifest — probe id uniqueness', () => {
   it('rejects duplicate probe ids', () => {
     assert.throws(

@@ -278,18 +278,19 @@ fixtures:
     engineId: lab.guild-setup
     dependsOn: [codex]
     givens:
-      # plugin install accepts npm semver, dist-tags, git URLs with
-      # #<sha>, and `file:<absolute-path>` for local source. `link:`
-      # is pnpm-only and trips EUNSUPPORTEDPROTOCOL on npm guilds.
+      # Plugin pins MUST be stable identifiers (exact semver, git+url
+      # with SHA fragment, github-shorthand#sha, or registry tarball).
+      # The manifest CLI rejects file:/link:/range/dist-tag forms at
+      # load time. See "Plugin pin reproducibility" below.
       plugins:
         - name: '@shardworks/tools-apparatus'
-          version: 'file:/workspace/nexus/packages/plugins/tools'
+          version: '1.2.3'
         - name: '@shardworks/codexes-apparatus'
-          version: 'file:/workspace/nexus/packages/plugins/codexes'
+          version: '1.2.3'
         - name: '@shardworks/stacks-apparatus'
-          version: 'file:/workspace/nexus/packages/plugins/stacks'
+          version: '1.2.3'
         - name: '@shardworks/clerk-apparatus'
-          version: 'file:/workspace/nexus/packages/plugins/clerk'
+          version: 'shardworks/clerk-apparatus#a1b2c3d4e5f6789012345678901234567890abcd'
       # Optional: deep-merged into guild.json after init.
       config:
         loom:
@@ -339,9 +340,56 @@ archive:
   references, and duplicate ids at validation time.
 - **`fixtures[].teardownEngineId`**: optional override; defaults to
   the convention `<engineId-with-trailing -setup→-teardown>`.
-- **Givens**: opaque to the manifest CLI; each engine's docstring
-  documents what it expects. Mistyped givens fail at engine run
-  time, not validation.
+- **Givens**: opaque to the manifest CLI for general shape; each
+  engine's docstring documents what it expects. Mistyped givens fail
+  at engine run time, not validation. **Exception: plugin pins are
+  validated at manifest-load time** — see "Plugin pin reproducibility"
+  below.
+
+### Plugin pin reproducibility
+
+A trial manifest is a reproducibility artifact: it lands on the
+trial writ's `ext.laboratory.config`, gets snapshotted into the
+archive row by `lab.probe-trial-context`, and must re-resolve to
+the same artifacts when re-run later. The manifest CLI rejects any
+plugin pin that doesn't resolve to a stable identifier.
+
+**Accepted forms (whitelist):**
+
+| Form | Example |
+|---|---|
+| Exact npm semver | `1.2.3`, `0.7.0-alpha.2`, `1.0.0+build.5` |
+| Git URL with a SHA fragment | `git+https://github.com/foo/bar.git#a1b2c3d4e5f6...` |
+| Git URL via local-file scheme + SHA | `git+file:///workspace/nexus-mk2#a1b2c3d4...` |
+| GitHub shorthand with SHA | `foo/bar#a1b2c3d` or `github:foo/bar#a1b2c3d` |
+| Registry tarball URL | `https://registry.npmjs.org/foo/-/foo-1.2.3.tgz` |
+
+**Rejected forms (blacklist):**
+
+`file:<path>`, `link:<path>`, `workspace:*`, version ranges
+(`^1.2.3`, `~1.2.3`, `*`, `>=1.0.0`), dist-tags (`latest`, `next`,
+`beta`, `alpha`, `canary`, `rc`), git URLs with a branch or tag
+fragment (`...#main`, `...#v1.0.0`), and partial / unrecognized
+specifiers.
+
+**Dev iteration on framework source.** When you want to test a
+manifest against in-flight framework changes, commit the changes
+locally and pin via the local-file git URL form:
+
+```yaml
+plugins:
+  - name: '@shardworks/clerk-apparatus'
+    version: 'git+file:///workspace/nexus#a1b2c3d4...'
+```
+
+The SHA pins the artifact deterministically; the URL just tells the
+resolver where to fetch from. No need to push to the remote.
+
+The validator runs in `lab-trial-post`'s manifest-load step. Failed
+pins surface with the issue path (e.g.
+`fixtures.0.givens.plugins.2.version`) and a specific reason for
+each rejection — multiple bad pins in one manifest are reported
+together.
 
 ### After posting
 
@@ -367,11 +415,10 @@ nsg lab trial-export-book <trialId> --book animator/sessions  # streaming JSONL
   to the trial's local-bare repo. Pick the SHA you want the test
   guild to start from — typically the head of whatever branch
   embodies the variant under test.
-- **Plugin pins are passed through to npm.** `file:<absolute-path>`
-  is the canonical way to point at local source (the path becomes
-  a tarball-equivalent npm install). Use git+URL#<sha> to pin to a
-  specific upstream commit on a public repo. Avoid `link:` —
-  pnpm-only.
+- **Plugin pins must be stable.** See "Plugin pin reproducibility"
+  above for the accepted forms. The CLI rejects manifests with
+  `file:`, `link:`, version ranges, dist-tags, or branch/tag git
+  refs at load time.
 - **Default fixtures are isolated per trial.** Codex bare repos
   land at `<labHost>/.nexus/laboratory/codexes/<codexName>.git`;
   test guilds at `<labHost>/.nexus/laboratory/guilds/<guildName>/`.

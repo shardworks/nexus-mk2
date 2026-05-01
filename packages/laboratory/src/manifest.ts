@@ -77,6 +77,7 @@ import type {
   TrialArchiveDecl,
 } from './types.ts';
 import { topoSortFixtures } from './engines/phases.ts';
+import { isStablePin } from './stable-pin.ts';
 
 // ── Slug ──────────────────────────────────────────────────────────
 
@@ -134,19 +135,97 @@ const archiveSchema = z.object({
   givens: givensSchema,
 }) satisfies z.ZodType<TrialArchiveDecl>;
 
+// ── Stable-pin enforcement ────────────────────────────────────────
+//
+// Every plugin pin in the manifest must resolve to a stable artifact
+// — exact semver, git+<url>#<sha>, github-shorthand#<sha>, or a
+// registry tarball URL. The reproducibility contract (the manifest is
+// archived and re-runnable months later) requires it. See `stable-
+// pin.ts` for the rule set.
+//
+// Validators are keyed by engineId so the manifest layer knows which
+// givens-shape to introspect. Currently only `lab.guild-setup`'s
+// `plugins[]` array carries pins; new engines that take pin lists
+// register their validator here.
+
+interface PinSite {
+  /** Path within the givens object — e.g. `['plugins', 2, 'version']`. */
+  path: (string | number)[];
+  /** The pin value to validate. */
+  value: string;
+}
+
+type PinExtractor = (givens: Record<string, unknown>) => PinSite[];
+
+/**
+ * Extractors keyed by engineId. Each returns every pin-bearing site
+ * inside the givens object. The validator below maps each site's
+ * `isStablePin` result to a zod issue at the right path.
+ */
+const PIN_EXTRACTORS: Record<string, PinExtractor> = {
+  'lab.guild-setup': (givens) => {
+    const plugins = givens.plugins;
+    if (!Array.isArray(plugins)) return [];
+    const sites: PinSite[] = [];
+    for (let i = 0; i < plugins.length; i += 1) {
+      const p = plugins[i] as Record<string, unknown> | null | undefined;
+      if (!p || typeof p !== 'object') continue;
+      const version = p.version;
+      if (typeof version !== 'string') continue;
+      sites.push({ path: ['plugins', i, 'version'], value: version });
+    }
+    return sites;
+  },
+};
+
+function validatePinSites(
+  engineId: string,
+  givens: Record<string, unknown>,
+  ctx: z.RefinementCtx,
+  givensPath: (string | number)[],
+): void {
+  const extractor = PIN_EXTRACTORS[engineId];
+  if (!extractor) return;
+  for (const site of extractor(givens)) {
+    const result = isStablePin(site.value);
+    if (!result.ok) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [...givensPath, ...site.path],
+        message: `unstable pin "${site.value}" — ${result.reason}`,
+      });
+    }
+  }
+}
+
 // ── Top-level manifest ────────────────────────────────────────────
 
-export const manifestSchema = z.object({
-  slug: slugSchema,
-  title: z.string().min(1).optional(),
-  description: z.string().optional(),
-  parentId: z.string().min(1).optional(),
-  codex: z.string().min(1).optional(),
-  fixtures: z.array(fixtureSchema).default([]),
-  scenario: scenarioSchema,
-  probes: z.array(probeSchema).default([]),
-  archive: archiveSchema,
-});
+export const manifestSchema = z
+  .object({
+    slug: slugSchema,
+    title: z.string().min(1).optional(),
+    description: z.string().optional(),
+    parentId: z.string().min(1).optional(),
+    codex: z.string().min(1).optional(),
+    fixtures: z.array(fixtureSchema).default([]),
+    scenario: scenarioSchema,
+    probes: z.array(probeSchema).default([]),
+    archive: archiveSchema,
+  })
+  .superRefine((data, ctx) => {
+    // Walk every engine that may carry pin-shaped givens and validate.
+    // Fixtures are the only call site today; scenarios/probes/archive
+    // would be added here if a future engine takes plugin pins.
+    for (let i = 0; i < data.fixtures.length; i += 1) {
+      const fixture = data.fixtures[i]!;
+      validatePinSites(
+        fixture.engineId,
+        fixture.givens,
+        ctx,
+        ['fixtures', i, 'givens'],
+      );
+    }
+  });
 
 export type TrialManifest = z.output<typeof manifestSchema>;
 
