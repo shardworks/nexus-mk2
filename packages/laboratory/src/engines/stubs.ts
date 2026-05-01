@@ -6,7 +6,6 @@
  *
  * Remaining stubs and the click that lands their real implementation:
  *
- *   - lab.guild-setup / lab.guild-teardown          — c-momaa03d
  *   - lab.commission-post-xguild
  *     lab.wait-for-writ-terminal-xguild             — c-momaa1vt
  *   - lab.probe-stacks-dump
@@ -19,6 +18,8 @@
  * Already replaced:
  *   - lab.codex-setup / lab.codex-teardown          (c-moma9y1k)
  *     → see `engines/codex-fixture.ts`.
+ *   - lab.guild-setup / lab.guild-teardown          (c-momaa03d)
+ *     → see `engines/guild-fixture.ts`.
  */
 
 import type { EngineDesign, EngineRunResult } from '@shardworks/fabricator-apparatus';
@@ -50,16 +51,7 @@ function stubEngine(designId: string, summary: string): EngineDesign {
 // ── Fixture engines ──────────────────────────────────────────────────
 
 // lab.codex-setup / lab.codex-teardown moved to codex-fixture.ts.
-
-export const guildSetupStub = stubEngine(
-  'lab.guild-setup',
-  'nsg init + per-pin nsg plugin install + nsg codex add + deep-merge guild.json + copy files',
-);
-
-export const guildTeardownStub = stubEngine(
-  'lab.guild-teardown',
-  'rm -rf the test guild dir created by lab.guild-setup',
-);
+// lab.guild-setup / lab.guild-teardown moved to guild-fixture.ts.
 
 // ── Scenario engines ─────────────────────────────────────────────────
 

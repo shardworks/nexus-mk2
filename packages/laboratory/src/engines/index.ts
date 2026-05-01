@@ -18,11 +18,10 @@
 import type { EngineDesign } from '@shardworks/fabricator-apparatus';
 import { phaseEngines } from './phases.ts';
 import { codexSetupEngine, codexTeardownEngine } from './codex-fixture.ts';
+import { guildSetupEngine, guildTeardownEngine } from './guild-fixture.ts';
 import {
   archiveStub,
   commissionPostXguildStub,
-  guildSetupStub,
-  guildTeardownStub,
   probeGitRangeStub,
   probeStacksDumpStub,
   waitForWritTerminalXguildStub,
@@ -35,8 +34,8 @@ export const engines: Record<string, EngineDesign> = {
   // Work engines (graft targets)
   'lab.codex-setup': codexSetupEngine,
   'lab.codex-teardown': codexTeardownEngine,
-  'lab.guild-setup': guildSetupStub,
-  'lab.guild-teardown': guildTeardownStub,
+  'lab.guild-setup': guildSetupEngine,
+  'lab.guild-teardown': guildTeardownEngine,
   'lab.commission-post-xguild': commissionPostXguildStub,
   'lab.wait-for-writ-terminal-xguild': waitForWritTerminalXguildStub,
   'lab.probe-stacks-dump': probeStacksDumpStub,
