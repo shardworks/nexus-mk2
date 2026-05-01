@@ -163,8 +163,9 @@ reaching the archive step. Orphans are safe to ignore in queries
 out). Cleanup of orphan probe rows is future polish; MVP leaves them
 in place.
 
-The teardown engines (`lab.guild-teardown`, `lab.codex-teardown`)
-refuse to run unless the trial's archive row exists.
+The teardown engines (`lab.guild-teardown`, `lab.codex-teardown`,
+`lab.daemon-teardown`) refuse to run unless the trial's archive row
+exists.
 
 ### Probe registry and extraction-dispatch
 
@@ -456,6 +457,94 @@ This trades the dev-time live-source loop for trial reproducibility.
 Trials are archived as inputs you can re-run later — that's only
 possible if the artifacts they reference are content-addressed.
 
+### Driving rigs with a test-guild daemon
+
+The minimal manifest above declares a static test guild — `nsg init`
+creates one on disk, plugins install into it, and probes read its
+`.nexus/` artifacts directly. No process runs inside it. That works
+for trials that exercise apparatus plumbing or read-only-on-disk
+inspections (X016 phase 1, manifest validation), but a trial that
+posts a commission and waits for the resulting writ to reach a
+terminal classification needs the test guild to actually *execute*
+the rig — Spider's crawl loop, Clockworks dispatch, and the tool
+HTTP server all need to be running.
+
+The `lab.daemon-setup` / `lab.daemon-teardown` fixture pair adds
+that lifecycle. Wire it as a third fixture that depends on
+`test-guild`:
+
+```yaml
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens: { ... }
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      plugins:
+        # The minimum plugin set for a static test guild.
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.292' }
+        # Plus what the daemon and rig template need:
+        - { name: '@shardworks/spider-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.292' }
+        # Plus whatever runtime the trial's commissions invoke
+        # (claude-code, copilot, etc.).
+        - { name: '@shardworks/claude-code', version: '0.1.292' }
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}                # auto-allocate ports
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /abs/path/to/brief.md
+    waitForTerminal: true     # the daemon makes this real
+```
+
+**What the daemon fixture does**, in order:
+
+1. Allocates two ephemeral 127.0.0.1 ports for the tool HTTP server
+   and Oculus (overridable via `givens.toolServerPort` /
+   `givens.oculusPort`). Auto-allocation avoids collisions with
+   the lab-host's daemon (port 7470/7471 by default) and any other
+   live trial.
+2. Deep-merges `{ tools: { serverPort }, oculus: { port } }` into
+   the test guild's `guild.json`, preserving everything
+   `lab.guild-setup` already wrote.
+3. Refuses to start when a stale `.nexus/daemon.pid` exists in the
+   test guild — surfaces the prior-failed-teardown case rather than
+   silently inheriting a running daemon.
+4. Shells out `<localNsg> --guild-root <testGuild> start`. `nsg
+   start` does its own detach (re-execs self with `--foreground`
+   plus `detached: true` and `unref()`, stdio piped to
+   `<testGuild>/.nexus/logs/daemon.{out,err}`) and runs its own
+   startup-sync (polls pidfile + tool-server reachability with a
+   10-second deadline; tails the err log on failure). Returns
+   control once the daemon is ready.
+5. Yields `{ guildPath, daemonPid, toolServerPort, oculusPort,
+   pidFile, logsDir }` for downstream observation.
+
+`lab.daemon-teardown` runs in the rig's reverse-topo teardown phase
+*before* `lab.guild-teardown` (which then `rm -rf`s the guild dir).
+It shells out `<localNsg> stop` (idempotent: SIGTERM with a 10-second
+SIGKILL escalation, no-ops when no daemon is running). The daemon
+teardown does not delete files — guild-teardown owns that.
+
+**When you don't need it.** Trials that just want a snapshot of a
+test-guild's on-disk state (e.g. validating a `nsg init` shape, or
+reading static fixture data) shouldn't add the daemon fixture —
+spinning up a daemon costs ~10 seconds and adds an orphan-cleanup
+risk if teardown is interrupted. The fixture is opt-in by design.
+
 ### After posting
 
 ```sh
@@ -504,14 +593,16 @@ nsg lab trial-export-book <trialId> --book animator/sessions  # streaming JSONL
 
 Production-ready for nexus-dev trials. The trial writ type is
 registered, the rig template is the canonical
-`post-and-collect-default`, all four fixture and scenario engine
-pairs (codex / guild / commission-post / wait) are real, the three
-standard probes are real, the archive engine is real, and the four
-CLI tools (`trial-post`, `trial-show`, `trial-extract`,
-`trial-export-book`) ship with the package. 167/167 unit tests
+`post-and-collect-default`, all five fixture and scenario engine
+pairs (codex / guild / daemon / commission-post / wait) are real,
+the three standard probes are real, the archive engine is real,
+and the four CLI tools (`trial-post`, `trial-show`, `trial-extract`,
+`trial-export-book`) ship with the package. 228/228 unit tests
 passing including a codified pipeline smoke test. The first
-real-world trial port (X016 orientation suppression or similar P3
-candidate) is the next milestone — see click `c-momaab8y`.
+real-world trial (X016 phase 1, baseline apparatus validation) ran
+end-to-end against vibers as the lab-host on 2026-05-01. Phase 2
+trials with full implementer execution are unblocked by the
+`lab.daemon-setup` / `lab.daemon-teardown` fixture pair.
 
 ## Background
 
