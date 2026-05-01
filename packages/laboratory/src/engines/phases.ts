@@ -147,6 +147,35 @@ function readTrialConfig(givens: Record<string, unknown>, phaseEngineId: string)
   return { writ, config };
 }
 
+// ── Trial-context injection ────────────────────────────────────────
+
+/**
+ * Trial-level context auto-injected into every grafted work engine's
+ * givens under the `_trial` key. Engines read this for trial-aware
+ * defaulting (e.g. codex-setup deriving its codexName from slug+writId
+ * when the manifest doesn't supply one explicitly).
+ *
+ * The underscore prefix marks the key as framework-injected; manifest
+ * authors should not set `_trial` themselves. Author-supplied `_trial`
+ * (if any) is overwritten — the orchestrator's view of trial context
+ * is authoritative.
+ */
+export interface InjectedTrialContext {
+  /** The trial slug. */
+  slug: string;
+  /** The trial writ id (the canonical id for this trial). */
+  writId: string;
+  /** The fixture's id within the trial — only present on fixture engines. */
+  fixtureId?: string;
+}
+
+function withTrialContext(
+  givens: Record<string, unknown>,
+  trial: InjectedTrialContext,
+): Record<string, unknown> {
+  return { ...givens, _trial: trial };
+}
+
 // ── Per-phase graft builders (pure; tested directly) ───────────────
 
 /**
@@ -154,10 +183,14 @@ function readTrialConfig(givens: Record<string, unknown>, phaseEngineId: string)
  * order. A fixture's setup engine upstreams its dependsOn fixtures'
  * setup engines (or the head — `headEngineId` — when it has no
  * deps).
+ *
+ * Each fixture engine's givens get an injected `_trial` block carrying
+ * the trial slug, writ id, and fixture id (see InjectedTrialContext).
  */
 export function buildSetupGraft(
   config: LaboratoryTrialConfig,
   headEngineId: string,
+  writId: string,
 ): { graft: RigTemplateEngine[]; ordered: TrialFixtureDecl[] } {
   const ordered = topoSortFixtures(config.fixtures);
   const graft: RigTemplateEngine[] = [];
@@ -168,7 +201,11 @@ export function buildSetupGraft(
       id: SETUP_ID(fixture.id),
       designId: fixture.engineId,
       upstream,
-      givens: fixture.givens,
+      givens: withTrialContext(fixture.givens, {
+        slug: config.slug,
+        writId,
+        fixtureId: fixture.id,
+      }),
     });
   }
   return { graft, ordered };
@@ -183,6 +220,7 @@ export function buildSetupGraft(
 export function buildScenarioGraft(
   config: LaboratoryTrialConfig,
   headEngineId: string,
+  writId: string,
 ): RigTemplateEngine[] {
   const upstream =
     config.fixtures.length > 0
@@ -193,7 +231,10 @@ export function buildScenarioGraft(
       id: SCENARIO_ID,
       designId: config.scenario.engineId,
       upstream,
-      givens: config.scenario.givens,
+      givens: withTrialContext(config.scenario.givens, {
+        slug: config.slug,
+        writId,
+      }),
     },
   ];
 }
@@ -204,12 +245,16 @@ export function buildScenarioGraft(
  */
 export function buildProbesGraft(
   config: LaboratoryTrialConfig,
+  writId: string,
 ): RigTemplateEngine[] {
   return config.probes.map((probe) => ({
     id: PROBE_ID(probe.id),
     designId: probe.engineId,
     upstream: [SCENARIO_ID],
-    givens: probe.givens,
+    givens: withTrialContext(probe.givens, {
+      slug: config.slug,
+      writId,
+    }),
   }));
 }
 
@@ -220,6 +265,7 @@ export function buildProbesGraft(
  */
 export function buildArchiveGraft(
   config: LaboratoryTrialConfig,
+  writId: string,
 ): RigTemplateEngine[] {
   const upstream =
     config.probes.length > 0
@@ -230,7 +276,10 @@ export function buildArchiveGraft(
       id: ARCHIVE_ID,
       designId: config.archive.engineId,
       upstream,
-      givens: config.archive.givens,
+      givens: withTrialContext(config.archive.givens, {
+        slug: config.slug,
+        writId,
+      }),
     },
   ];
 }
@@ -246,6 +295,7 @@ export function buildArchiveGraft(
  */
 export function buildTeardownGraft(
   config: LaboratoryTrialConfig,
+  writId: string,
 ): { graft: RigTemplateEngine[]; tail: string } {
   const ordered = topoSortFixtures(config.fixtures);
   const graft: RigTemplateEngine[] = [];
@@ -257,7 +307,11 @@ export function buildTeardownGraft(
       id,
       designId: deriveTeardownEngineId(fixture),
       upstream: [prevTail],
-      givens: fixture.givens,
+      givens: withTrialContext(fixture.givens, {
+        slug: config.slug,
+        writId,
+        fixtureId: fixture.id,
+      }),
     });
     prevTail = id;
   }
@@ -269,8 +323,8 @@ export function buildTeardownGraft(
 const setupPhaseEngine: EngineDesign = {
   id: 'lab.setup-phase',
   async run(givens, context): Promise<EngineRunResult> {
-    const { config } = readTrialConfig(givens, 'lab.setup-phase');
-    const { graft, ordered } = buildSetupGraft(config, context.engineId);
+    const { writ, config } = readTrialConfig(givens, 'lab.setup-phase');
+    const { graft, ordered } = buildSetupGraft(config, context.engineId, writ.id);
     const result: SpiderEngineRunResult = {
       status: 'completed',
       yields: {
@@ -290,8 +344,8 @@ const setupPhaseEngine: EngineDesign = {
 const scenarioPhaseEngine: EngineDesign = {
   id: 'lab.scenario-phase',
   async run(givens, context): Promise<EngineRunResult> {
-    const { config } = readTrialConfig(givens, 'lab.scenario-phase');
-    const graft = buildScenarioGraft(config, context.engineId);
+    const { writ, config } = readTrialConfig(givens, 'lab.scenario-phase');
+    const graft = buildScenarioGraft(config, context.engineId, writ.id);
     const result: SpiderEngineRunResult = {
       status: 'completed',
       yields: { scenarioEngine: config.scenario.engineId },
@@ -304,8 +358,8 @@ const scenarioPhaseEngine: EngineDesign = {
 const probesPhaseEngine: EngineDesign = {
   id: 'lab.probes-phase',
   async run(givens): Promise<EngineRunResult> {
-    const { config } = readTrialConfig(givens, 'lab.probes-phase');
-    const graft = buildProbesGraft(config);
+    const { writ, config } = readTrialConfig(givens, 'lab.probes-phase');
+    const graft = buildProbesGraft(config, writ.id);
     const result: SpiderEngineRunResult = {
       status: 'completed',
       yields: {
@@ -321,8 +375,8 @@ const probesPhaseEngine: EngineDesign = {
 const archivePhaseEngine: EngineDesign = {
   id: 'lab.archive-phase',
   async run(givens): Promise<EngineRunResult> {
-    const { config } = readTrialConfig(givens, 'lab.archive-phase');
-    const graft = buildArchiveGraft(config);
+    const { writ, config } = readTrialConfig(givens, 'lab.archive-phase');
+    const graft = buildArchiveGraft(config, writ.id);
     const result: SpiderEngineRunResult = {
       status: 'completed',
       yields: { archiveEngine: config.archive.engineId },
@@ -335,8 +389,8 @@ const archivePhaseEngine: EngineDesign = {
 const teardownPhaseEngine: EngineDesign = {
   id: 'lab.teardown-phase',
   async run(givens): Promise<EngineRunResult> {
-    const { config } = readTrialConfig(givens, 'lab.teardown-phase');
-    const { graft, tail } = buildTeardownGraft(config);
+    const { writ, config } = readTrialConfig(givens, 'lab.teardown-phase');
+    const { graft, tail } = buildTeardownGraft(config, writ.id);
     const result: SpiderEngineRunResult = {
       status: 'completed',
       yields: { teardownCount: config.fixtures.length },

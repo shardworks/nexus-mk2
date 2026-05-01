@@ -25,8 +25,14 @@
  *       - id: codex
  *         engineId: lab.codex-setup
  *         givens:
- *           upstreamRepo: shardworks/nexus
+ *           # Any git clone source: owner/name (gh-default), full URL, or
+ *           # an absolute local path. Trial codex is a local bare repo —
+ *           # no GitHub required.
+ *           upstreamRepo: /workspace/nexus-mk2
  *           baseSha: <40-char>
+ *           # codexName is optional — defaults to <slug>-<writId-tail>,
+ *           # which is unique-by-construction and traces back to the trial.
+ *           # Override only when you want a specific name.
  *
  *       - id: test-guild
  *         engineId: lab.guild-setup

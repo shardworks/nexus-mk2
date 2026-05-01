@@ -1,16 +1,11 @@
 /**
- * Skeleton (stub) engine implementations.
+ * Skeleton (stub) engine implementations — for engines that have not yet
+ * been replaced by real code. Stubs log, yield a placeholder payload,
+ * and return `{ status: 'completed' }` so the rig template's wiring
+ * stays exercised end-to-end while implementation lands incrementally.
  *
- * Every Laboratory engine other than `lab.orchestrate` is currently a
- * no-op stub: it logs to console, yields a `{ skipped: true, ... }`
- * payload, and returns success. Stubs exist so the rig template wires
- * end-to-end — a posted trial crawls cleanly through orchestrate →
- * grafted-stubs → completion — well before any engine does real work.
+ * Remaining stubs and the click that lands their real implementation:
  *
- * Each stub will be replaced by its real implementation under the
- * matching click:
- *
- *   - lab.codex-setup / lab.codex-teardown          — c-moma9y1k
  *   - lab.guild-setup / lab.guild-teardown          — c-momaa03d
  *   - lab.commission-post-xguild
  *     lab.wait-for-writ-terminal-xguild             — c-momaa1vt
@@ -18,22 +13,25 @@
  *     lab.probe-git-range                            — c-momaa3w7
  *   - lab.archive                                    — c-momaa5o9
  *
- * When swapping a stub for its real implementation, move it to its
- * own file under `engines/`; `stubs.ts` shrinks toward empty.
+ * When swapping a stub for its real implementation, move it to its own
+ * file under `engines/`; `stubs.ts` shrinks toward empty.
+ *
+ * Already replaced:
+ *   - lab.codex-setup / lab.codex-teardown          (c-moma9y1k)
+ *     → see `engines/codex-fixture.ts`.
  */
 
 import type { EngineDesign, EngineRunResult } from '@shardworks/fabricator-apparatus';
 
-/** Build a stub engine: logs, yields a placeholder, returns completed. */
+/**
+ * Build a stub engine: yields a placeholder, returns completed. No
+ * console output — a daemon running concurrent rigs would otherwise
+ * see stub chatter dominate its logs.
+ */
 function stubEngine(designId: string, summary: string): EngineDesign {
   return {
     id: designId,
-    async run(givens, context): Promise<EngineRunResult> {
-      // eslint-disable-next-line no-console
-      console.log(
-        `[${designId}] STUB invoked (rig=${context.rigId} engine=${context.engineId}); ` +
-          `givens keys=[${Object.keys(givens).join(', ')}]; summary="${summary}"`,
-      );
+    async run(givens): Promise<EngineRunResult> {
       return {
         status: 'completed',
         yields: {
@@ -51,15 +49,7 @@ function stubEngine(designId: string, summary: string): EngineDesign {
 
 // ── Fixture engines ──────────────────────────────────────────────────
 
-export const codexSetupStub = stubEngine(
-  'lab.codex-setup',
-  'clone upstream codex at base SHA, push to fresh GH repo, register via nsg codex add',
-);
-
-export const codexTeardownStub = stubEngine(
-  'lab.codex-teardown',
-  'gh repo delete the codex repo created by lab.codex-setup',
-);
+// lab.codex-setup / lab.codex-teardown moved to codex-fixture.ts.
 
 export const guildSetupStub = stubEngine(
   'lab.guild-setup',

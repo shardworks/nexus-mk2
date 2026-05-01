@@ -22,6 +22,7 @@ import {
 import type { LaboratoryTrialConfig, TrialFixtureDecl } from '../types.ts';
 
 const HEAD = 'phase-head';
+const WRIT_ID = 'w-momen904-e8cd1359f754';
 
 function trialConfig(over: Partial<LaboratoryTrialConfig> = {}): LaboratoryTrialConfig {
   return {
@@ -119,7 +120,7 @@ describe('topoSortFixtures', () => {
 
 describe('buildSetupGraft', () => {
   it('produces empty graft for no fixtures', () => {
-    const { graft, ordered } = buildSetupGraft(trialConfig(), HEAD);
+    const { graft, ordered } = buildSetupGraft(trialConfig(), HEAD, WRIT_ID);
     assert.deepEqual(graft, []);
     assert.deepEqual(ordered, []);
   });
@@ -128,6 +129,7 @@ describe('buildSetupGraft', () => {
     const { graft } = buildSetupGraft(
       trialConfig({ fixtures: [fixture('codex'), fixture('test-guild')] }),
       HEAD,
+      WRIT_ID,
     );
     const codexSetup = graft.find((e) => e.id === 'fixture-codex-setup')!;
     const guildSetup = graft.find((e) => e.id === 'fixture-test-guild-setup')!;
@@ -144,6 +146,7 @@ describe('buildSetupGraft', () => {
         ],
       }),
       HEAD,
+      WRIT_ID,
     );
     const guildSetup = graft.find((e) => e.id === 'fixture-test-guild-setup')!;
     assert.deepEqual(guildSetup.upstream, ['fixture-codex-setup']);
@@ -158,18 +161,23 @@ describe('buildSetupGraft', () => {
         ],
       }),
       HEAD,
+      WRIT_ID,
     );
     assert.deepEqual(ordered.map((f) => f.id), ['parent', 'child']);
   });
 
-  it('passes fixture givens to the setup engine', () => {
+  it('passes fixture givens through and injects _trial context', () => {
     const givens = { name: 'codex', remoteUrl: 'git@github.com:foo/bar' };
     const { graft } = buildSetupGraft(
-      trialConfig({ fixtures: [fixture('codex', { givens })] }),
+      trialConfig({ slug: 'demo', fixtures: [fixture('codex', { givens })] }),
       HEAD,
+      WRIT_ID,
     );
     const setup = graft.find((e) => e.id === 'fixture-codex-setup')!;
-    assert.deepEqual(setup.givens, givens);
+    assert.deepEqual(setup.givens, {
+      ...givens,
+      _trial: { slug: 'demo', writId: WRIT_ID, fixtureId: 'codex' },
+    });
   });
 });
 
@@ -177,7 +185,7 @@ describe('buildSetupGraft', () => {
 
 describe('buildScenarioGraft', () => {
   it('upstreams the head engine when no fixtures', () => {
-    const graft = buildScenarioGraft(trialConfig(), HEAD);
+    const graft = buildScenarioGraft(trialConfig(), HEAD, WRIT_ID);
     assert.equal(graft.length, 1);
     assert.equal(graft[0]!.id, 'scenario');
     assert.deepEqual(graft[0]!.upstream, [HEAD]);
@@ -187,6 +195,7 @@ describe('buildScenarioGraft', () => {
     const graft = buildScenarioGraft(
       trialConfig({ fixtures: [fixture('codex'), fixture('test-guild')] }),
       HEAD,
+      WRIT_ID,
     );
     assert.deepEqual(
       [...graft[0]!.upstream!].sort(),
@@ -194,17 +203,22 @@ describe('buildScenarioGraft', () => {
     );
   });
 
-  it('passes scenario givens through unchanged', () => {
+  it('passes scenario givens through and injects _trial context', () => {
     const graft = buildScenarioGraft(
       trialConfig({
+        slug: 'demo',
         scenario: {
           engineId: 'lab.commission-post-xguild',
           givens: { briefPath: 'files/brief.md' },
         },
       }),
       HEAD,
+      WRIT_ID,
     );
-    assert.deepEqual(graft[0]!.givens, { briefPath: 'files/brief.md' });
+    assert.deepEqual(graft[0]!.givens, {
+      briefPath: 'files/brief.md',
+      _trial: { slug: 'demo', writId: WRIT_ID },
+    });
   });
 
   it('uses the scenario engine id from config', () => {
@@ -213,6 +227,7 @@ describe('buildScenarioGraft', () => {
         scenario: { engineId: 'custom.scenario', givens: {} },
       }),
       HEAD,
+      WRIT_ID,
     );
     assert.equal(graft[0]!.designId, 'custom.scenario');
   });
@@ -222,7 +237,7 @@ describe('buildScenarioGraft', () => {
 
 describe('buildProbesGraft', () => {
   it('produces empty graft for no probes', () => {
-    const graft = buildProbesGraft(trialConfig());
+    const graft = buildProbesGraft(trialConfig(), WRIT_ID);
     assert.deepEqual(graft, []);
   });
 
@@ -234,6 +249,7 @@ describe('buildProbesGraft', () => {
           { id: 'git', engineId: 'lab.probe-git-range', givens: {} },
         ],
       }),
+      WRIT_ID,
     );
     const stacks = graft.find((e) => e.id === 'probe-stacks')!;
     const git = graft.find((e) => e.id === 'probe-git')!;
@@ -241,9 +257,10 @@ describe('buildProbesGraft', () => {
     assert.deepEqual(git.upstream, ['scenario']);
   });
 
-  it('passes probe givens through unchanged', () => {
+  it('passes probe givens through and injects _trial context', () => {
     const graft = buildProbesGraft(
       trialConfig({
+        slug: 'demo',
         probes: [
           {
             id: 'stacks',
@@ -252,8 +269,12 @@ describe('buildProbesGraft', () => {
           },
         ],
       }),
+      WRIT_ID,
     );
-    assert.deepEqual(graft[0]!.givens, { outputPath: 'stacks-export/' });
+    assert.deepEqual(graft[0]!.givens, {
+      outputPath: 'stacks-export/',
+      _trial: { slug: 'demo', writId: WRIT_ID },
+    });
   });
 });
 
@@ -261,7 +282,7 @@ describe('buildProbesGraft', () => {
 
 describe('buildArchiveGraft', () => {
   it('upstreams scenario when no probes', () => {
-    const graft = buildArchiveGraft(trialConfig());
+    const graft = buildArchiveGraft(trialConfig(), WRIT_ID);
     assert.equal(graft.length, 1);
     assert.equal(graft[0]!.id, 'archive');
     assert.deepEqual(graft[0]!.upstream, ['scenario']);
@@ -275,6 +296,7 @@ describe('buildArchiveGraft', () => {
           { id: 'git', engineId: 'lab.probe-git-range', givens: {} },
         ],
       }),
+      WRIT_ID,
     );
     assert.deepEqual(
       [...graft[0]!.upstream!].sort(),
@@ -282,13 +304,18 @@ describe('buildArchiveGraft', () => {
     );
   });
 
-  it('passes archive givens through unchanged', () => {
+  it('passes archive givens through and injects _trial context', () => {
     const graft = buildArchiveGraft(
       trialConfig({
+        slug: 'demo',
         archive: { engineId: 'lab.archive', givens: { target: 'sanctum' } },
       }),
+      WRIT_ID,
     );
-    assert.deepEqual(graft[0]!.givens, { target: 'sanctum' });
+    assert.deepEqual(graft[0]!.givens, {
+      target: 'sanctum',
+      _trial: { slug: 'demo', writId: WRIT_ID },
+    });
   });
 });
 
@@ -296,7 +323,7 @@ describe('buildArchiveGraft', () => {
 
 describe('buildTeardownGraft', () => {
   it('returns archive as tail when there are no fixtures', () => {
-    const { graft, tail } = buildTeardownGraft(trialConfig());
+    const { graft, tail } = buildTeardownGraft(trialConfig(), WRIT_ID);
     assert.deepEqual(graft, []);
     assert.equal(tail, 'archive');
   });
@@ -309,6 +336,7 @@ describe('buildTeardownGraft', () => {
           fixture('test-guild', { dependsOn: ['codex'] }),
         ],
       }),
+      WRIT_ID,
     );
     const guildTeardown = graft.find((e) => e.id === 'fixture-test-guild-teardown')!;
     const codexTeardown = graft.find((e) => e.id === 'fixture-codex-teardown')!;
@@ -320,6 +348,7 @@ describe('buildTeardownGraft', () => {
   it('derives teardown engine id by replacing -setup with -teardown', () => {
     const { graft } = buildTeardownGraft(
       trialConfig({ fixtures: [fixture('codex')] }),
+      WRIT_ID,
     );
     const teardown = graft.find((e) => e.id === 'fixture-codex-teardown')!;
     assert.equal(teardown.designId, 'lab.codex-teardown');
@@ -330,6 +359,7 @@ describe('buildTeardownGraft', () => {
       trialConfig({
         fixtures: [fixture('weird', { engineId: 'lab.bootstrap' })],
       }),
+      WRIT_ID,
     );
     const teardown = graft.find((e) => e.id === 'fixture-weird-teardown')!;
     assert.equal(teardown.designId, 'lab.bootstrap-teardown');
@@ -345,18 +375,23 @@ describe('buildTeardownGraft', () => {
           }),
         ],
       }),
+      WRIT_ID,
     );
     const teardown = graft.find((e) => e.id === 'fixture-codex-teardown')!;
     assert.equal(teardown.designId, 'lab.completely-different');
   });
 
-  it('passes fixture givens to teardown engines (same as setup)', () => {
+  it('passes fixture givens to teardown engines and injects _trial context', () => {
     const givens = { name: 'codex', remoteUrl: 'git@github.com:foo/bar' };
     const { graft } = buildTeardownGraft(
-      trialConfig({ fixtures: [fixture('codex', { givens })] }),
+      trialConfig({ slug: 'demo', fixtures: [fixture('codex', { givens })] }),
+      WRIT_ID,
     );
     const teardown = graft.find((e) => e.id === 'fixture-codex-teardown')!;
-    assert.deepEqual(teardown.givens, givens);
+    assert.deepEqual(teardown.givens, {
+      ...givens,
+      _trial: { slug: 'demo', writId: WRIT_ID, fixtureId: 'codex' },
+    });
   });
 });
 
@@ -375,11 +410,11 @@ describe('staged-phase composition matches the unified flat graph', () => {
     });
 
     // What each phase orchestrator would graft:
-    const { graft: setupGraft } = buildSetupGraft(config, 'lab.setup-phase');
-    const scenarioGraft = buildScenarioGraft(config, 'lab.scenario-phase');
-    const probesGraft = buildProbesGraft(config);
-    const archiveGraft = buildArchiveGraft(config);
-    const { graft: teardownGraft, tail } = buildTeardownGraft(config);
+    const { graft: setupGraft } = buildSetupGraft(config, 'lab.setup-phase', WRIT_ID);
+    const scenarioGraft = buildScenarioGraft(config, 'lab.scenario-phase', WRIT_ID);
+    const probesGraft = buildProbesGraft(config, WRIT_ID);
+    const archiveGraft = buildArchiveGraft(config, WRIT_ID);
+    const { graft: teardownGraft, tail } = buildTeardownGraft(config, WRIT_ID);
 
     // Combined runtime engine list (ignoring the orchestrators
     // themselves; those live in the static template).
