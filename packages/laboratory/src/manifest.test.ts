@@ -486,6 +486,119 @@ archive:
   });
 });
 
+describe('parseManifest — frameworkVersion validation', () => {
+  it('accepts a manifest with no frameworkVersion (resolved at trial-post time)', () => {
+    const m = parseManifest(`
+slug: ok
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`);
+    assert.equal(m.frameworkVersion, undefined);
+  });
+
+  it('accepts a stable frameworkVersion pin', () => {
+    const m = parseManifest(`
+slug: ok
+frameworkVersion: '1.2.3'
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`);
+    assert.equal(m.frameworkVersion, '1.2.3');
+  });
+
+  it('accepts a git+file frameworkVersion pin (the dev iteration form)', () => {
+    const m = parseManifest(`
+slug: ok
+frameworkVersion: 'git+file:///workspace/nexus#a1b2c3d4e5f6'
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`);
+    assert.match(m.frameworkVersion!, /^git\+file:/);
+  });
+
+  it('rejects file: frameworkVersion', () => {
+    assert.throws(
+      () =>
+        parseManifest(`
+slug: ok
+frameworkVersion: 'file:/workspace/nexus'
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`),
+      (err: Error) => {
+        assert.match(err.message, /unstable pin.*not reproducible/);
+        assert.match(err.message, /frameworkVersion/);
+        return true;
+      },
+    );
+  });
+
+  it('rejects a caret-range frameworkVersion', () => {
+    assert.throws(
+      () =>
+        parseManifest(`
+slug: ok
+frameworkVersion: '^1.2.3'
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`),
+      /version range/,
+    );
+  });
+
+  it('rejects a dist-tag frameworkVersion', () => {
+    assert.throws(
+      () =>
+        parseManifest(`
+slug: ok
+frameworkVersion: 'latest'
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`),
+      /dist-tag/,
+    );
+  });
+});
+
+describe('manifestToWritShape — frameworkVersion pass-through', () => {
+  it('omits frameworkVersion from trialConfig when absent in manifest', () => {
+    const m = parseManifest(`
+slug: ok
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`);
+    const { trialConfig } = manifestToWritShape(m);
+    assert.equal('frameworkVersion' in trialConfig, false);
+  });
+
+  it('passes frameworkVersion through to trialConfig when present', () => {
+    const m = parseManifest(`
+slug: ok
+frameworkVersion: '1.2.3'
+scenario:
+  engineId: lab.scenario
+archive:
+  engineId: lab.archive
+`);
+    const { trialConfig } = manifestToWritShape(m);
+    assert.equal(trialConfig.frameworkVersion, '1.2.3');
+  });
+});
+
 describe('parseManifest — probe id uniqueness', () => {
   it('rejects duplicate probe ids', () => {
     assert.throws(

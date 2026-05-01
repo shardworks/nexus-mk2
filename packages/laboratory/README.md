@@ -263,6 +263,12 @@ description: |
   turns. Captures the test-guild's animator/sessions book for
   cost/turn-count analysis.
 
+# Framework version pin. Optional — when omitted, the trial-post tool
+# resolves it from the lab-host's installed @shardworks/nexus-core
+# VERSION (and fails when that's '0.0.0', i.e. dev source). Stable-pin
+# rules apply (see "Plugin pin reproducibility").
+frameworkVersion: '1.2.3'
+
 fixtures:
   - id: codex
     engineId: lab.codex-setup
@@ -391,6 +397,65 @@ pins surface with the issue path (e.g.
 each rejection — multiple bad pins in one manifest are reported
 together.
 
+### Test-guild bootstrap (no global `nsg` required)
+
+`lab.guild-setup` does not depend on a global or lab-host-local
+`nsg` install. The bootstrap sequence is:
+
+1. **`npx -p @shardworks/nexus@<frameworkVersion> nsg init <testGuild>`**
+   — runs the trial-pinned framework's `init` against the trial-pinned
+   `VERSION` constant. This mirrors how a real user creates a guild
+   from scratch and binds the test guild to the trial-pinned version.
+   On a cold cache, this is a one-time `npm install` of the framework
+   into npx's per-package cache; subsequent trials with the same pin
+   hit the cache.
+
+2. After init, the test guild has `@shardworks/nexus@<frameworkVersion>`
+   installed in `<testGuild>/node_modules`, and the binstub at
+   `<testGuild>/node_modules/.bin/nsg` is the version-true CLI.
+
+3. **All subsequent shellouts** (plugin install loop, codex add,
+   commission-post, writ-show) use that local nsg, not anything on
+   the lab-host's PATH or in the lab-host's `node_modules`.
+
+The lab-host needs only Node + npx — both ship with any standard Node
+install. No global `nsg`, no lab-host-side `@shardworks/nexus` package,
+no npm/pnpm version coordination.
+
+**Resolving `frameworkVersion`:**
+
+- **Manifest field set** → use it.
+- **Manifest field absent + lab-host has a real VERSION** → fall back
+  to the lab-host's installed `@shardworks/nexus-core` VERSION. This
+  case happens transparently in production where the lab-host is
+  npm-installed.
+- **Manifest field absent + lab-host VERSION is `0.0.0` (dev source)**
+  → fail loud. The trial-post tool tells the author to set
+  `frameworkVersion` explicitly.
+
+The resolved value is written back into the trial writ's
+`ext.laboratory.config` before the writ transitions to `open`, so the
+archive snapshot captures the actual pin used.
+
+**Dev iteration on framework source.** When pinning to a local commit
+(`git+file:///workspace/nexus#<sha>`), the framework source must be
+**built** (`dist/cli.js` exists). The `nsg` binstub in a fresh test
+guild's `node_modules` points at the package's `bin` field — the
+non-published variant is `./src/cli.ts` (TypeScript), which won't run
+with plain node. Build before posting:
+
+```sh
+cd /workspace/nexus
+pnpm build
+git commit -am 'wip: testing change X'
+# pin the trial to that sha
+nsg lab trial-post my-trial.yaml
+```
+
+This trades the dev-time live-source loop for trial reproducibility.
+Trials are archived as inputs you can re-run later — that's only
+possible if the artifacts they reference are content-addressed.
+
 ### After posting
 
 ```sh
@@ -418,7 +483,10 @@ nsg lab trial-export-book <trialId> --book animator/sessions  # streaming JSONL
 - **Plugin pins must be stable.** See "Plugin pin reproducibility"
   above for the accepted forms. The CLI rejects manifests with
   `file:`, `link:`, version ranges, dist-tags, or branch/tag git
-  refs at load time.
+  refs at load time. The same rule applies to `frameworkVersion`.
+- **Lab-host needs only Node + npx.** No global `nsg`, no lab-host-
+  side framework install. See "Test-guild bootstrap" above for the
+  details.
 - **Default fixtures are isolated per trial.** Codex bare repos
   land at `<labHost>/.nexus/laboratory/codexes/<codexName>.git`;
   test guilds at `<labHost>/.nexus/laboratory/guilds/<guildName>/`.

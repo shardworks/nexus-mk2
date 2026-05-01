@@ -10,8 +10,12 @@
  * scenarios where post is detached from wait.
  *
  * v1 cross-guild surface is shell-out via
- * `nsg --guild-root <test-guild> ...`; the real cross-guild engine
- * surface is parked at click c-mom9vm3n for v2.
+ * `<testGuild>/node_modules/.bin/nsg --guild-root <test-guild> ...` —
+ * the test guild's locally-installed CLI, version-matched to the
+ * test guild's `nexus` field. lab.guild-setup bootstraps that
+ * install via `npx -p @shardworks/nexus@<spec> nsg init …`. The
+ * real cross-guild engine surface is parked at click c-mom9vm3n for
+ * v2.
  *
  * COMMISSION-POST FLOW
  * ────────────────────
@@ -65,6 +69,7 @@
 
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
@@ -153,6 +158,29 @@ async function exec(
 }
 
 /**
+ * Resolve the test guild's locally-installed `nsg` binstub.
+ *
+ * The cross-guild shellouts always run against the test guild's own
+ * CLI — version-matched to the test guild's `nexus` field, no
+ * dependency on whatever CLI happens to be on PATH. lab.guild-setup
+ * bootstraps the install via `npx -p @shardworks/nexus@<spec> nsg
+ * init …`, so the binstub exists by the time any scenario engine
+ * runs.
+ */
+export function resolveLocalNsg(testGuildPath: string, designId: string): string {
+  const localNsg = path.join(testGuildPath, 'node_modules', '.bin', 'nsg');
+  if (!existsSync(localNsg)) {
+    throw new Error(
+      `[${designId}] no local nsg at ${localNsg}. The test guild must have been ` +
+        `bootstrapped via lab.guild-setup (which installs @shardworks/nexus locally). ` +
+        `If you're invoking this engine outside the laboratory's standard rig, ensure ` +
+        `the test guild's package.json declares @shardworks/nexus and that npm install ran.`,
+    );
+  }
+  return localNsg;
+}
+
+/**
  * Resolve the single test guild from upstream yields. Throws when zero
  * or multiple test guilds are present — explicit selection is future
  * work (v2).
@@ -204,7 +232,8 @@ export async function waitForWritTerminal(opts: {
       );
     }
 
-    const { stdout } = await exec('nsg', [
+    const localNsg = resolveLocalNsg(opts.testGuildPath, opts.designId);
+    const { stdout } = await exec(localNsg, [
       '--guild-root',
       opts.testGuildPath,
       'writ-show',
@@ -345,7 +374,8 @@ export const commissionPostXguildEngine: EngineDesign = {
       args.push('--parent-id', parentId);
     }
 
-    const { stdout } = await exec('nsg', args);
+    const localNsg = resolveLocalNsg(testGuild.guildPath, designId);
+    const { stdout } = await exec(localNsg, args);
     let writ: unknown;
     try {
       writ = JSON.parse(stdout);

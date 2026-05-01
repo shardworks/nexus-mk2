@@ -16,20 +16,33 @@
  *
  * SETUP FLOW
  * ──────────
- * 1. Validate givens; resolve guildName + guildPath.
+ * 1. Validate givens; resolve guildName, guildPath, frameworkVersion.
  * 2. Refuse if the target dir already exists (idempotency / safety).
- * 3. `nsg init <guildPath>`.
- * 4. For each plugin pin: `nsg --guild-root <guildPath> plugin install
- *    <name>@<version>`.
+ * 3. **Bootstrap (one-time, npx):**
+ *    `npx -p @shardworks/nexus@<frameworkVersion> nsg init <guildPath>
+ *    --name <guildName>`. This mirrors how a real user would create a
+ *    guild from scratch and binds the test guild to the trial-pinned
+ *    framework version (the version-true `init` runs against the
+ *    version-true `VERSION` constant). After bootstrap,
+ *    `<guildPath>/node_modules/.bin/nsg` exists.
+ * 4. For each plugin pin: `<guildPath>/node_modules/.bin/nsg
+ *    --guild-root <guildPath> plugin install <name>@<version>`.
  * 5. Discover codexes from `context.upstream`: any upstream yields with
  *    `codexName` + `remoteUrl` (the codex-fixture's yields shape) get
- *    registered via `nsg --guild-root <guildPath> codex add`. Walks all
- *    upstream entries — no manifest-level dependsOn declaration of
- *    "this is the codex" needed.
+ *    registered via the test guild's local nsg. Walks all upstream
+ *    entries — no manifest-level dependsOn declaration of "this is
+ *    the codex" needed.
  * 6. Deep-merge `givens.config` into `<guildPath>/guild.json`.
  * 7. Copy each `givens.files[]` entry from `sourcePath` (absolute only
  *    in v1) to `<guildPath>/<guildPath>` (per-entry guildPath).
  * 8. Yield guildPath, pluginsResolved, codexesAdded, filesCopied.
+ *
+ * After bootstrap (step 3), the lab-host's `nsg` is **not** invoked
+ * again for this trial. Steps 4-5 use the test guild's locally-
+ * installed CLI; the scenario engine (commission-post-xguild) and
+ * its sibling do the same. The lab-host doesn't need a global or
+ * local `nsg` install for the laboratory to work — only `npx` (which
+ * ships with Node).
  *
  * Failure handling: any error mid-setup triggers best-effort rollback
  * (rm -rf the guild dir) and re-throws.
@@ -52,10 +65,12 @@
  *                          `<labHostGuild>/.nexus/laboratory/guilds/<guildName>/`.
  *   plugins   : Array<{name, version}>?  — Optional. Plugin pins to install.
  *                          Each entry is shelled out as
- *                          `nsg plugin install <name>@<version>`. Version
- *                          accepts npm semver, dist-tags, git URLs with
- *                          `#<sha>`, and local paths — passed through to
- *                          npm unchanged.
+ *                          `nsg plugin install <name>@<version>` against the
+ *                          test guild's local nsg. **Versions must be stable
+ *                          pins** (exact semver, git+url#sha, github-shorthand
+ *                          #sha, or registry tarball) — the manifest CLI
+ *                          rejects file:/link:/range/dist-tag forms at load
+ *                          time, see `stable-pin.ts`.
  *   config    : object?   — Optional. Deep-merged into the guild's
  *                          `guild.json` after init.
  *   files     : Array<{sourcePath, guildPath}>?  — Optional. File copies.
@@ -115,6 +130,7 @@ interface ResolvedGuildFixtureGivens {
   plugins: PluginPin[];
   config: Record<string, unknown>;
   files: FileCopy[];
+  frameworkVersion?: string;
 }
 
 /**
@@ -241,7 +257,18 @@ function validateGivens(
     files.push({ sourcePath: f.sourcePath, guildPath: f.guildPath });
   }
 
-  return { guildName, guildPath, plugins, config: rawConfig, files };
+  // Pull frameworkVersion from the framework-injected _trial context.
+  // trial-post.ts resolves an undefined manifest value before stamping
+  // the writ, so on a posted trial this should always be set —
+  // teardown calls don't need it (we early-return here for
+  // teardown).
+  const trial = rawGivens._trial as InjectedTrialContext | undefined;
+  const frameworkVersion =
+    trial && typeof trial.frameworkVersion === 'string' && trial.frameworkVersion.length > 0
+      ? trial.frameworkVersion
+      : undefined;
+
+  return { guildName, guildPath, plugins, config: rawConfig, files, frameworkVersion };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -334,7 +361,17 @@ export const guildSetupEngine: EngineDesign = {
   id: 'lab.guild-setup',
   async run(rawGivens, context: EngineRunContext): Promise<EngineRunResult> {
     const givens = validateGivens(rawGivens, 'lab.guild-setup');
-    const { guildName, guildPath, plugins, config, files } = givens;
+    const { guildName, guildPath, plugins, config, files, frameworkVersion } = givens;
+
+    if (frameworkVersion === undefined) {
+      throw new Error(
+        `[lab.guild-setup] framework-injected _trial.frameworkVersion is missing. ` +
+          `The trial-post tool resolves this from the manifest or the lab-host's ` +
+          `@shardworks/nexus-core VERSION before stamping the writ; a missing value here ` +
+          `means the engine was invoked outside the laboratory's phase orchestrators or ` +
+          `against a writ posted before the resolution change landed.`,
+      );
+    }
 
     if (existsSync(guildPath)) {
       throw new Error(
@@ -346,20 +383,48 @@ export const guildSetupEngine: EngineDesign = {
     let initialized = false;
 
     try {
-      // 1. nsg init <guildPath> — creates dir, guild.json, package.json,
-      //    .gitignore. Refuses if dir is non-empty (idempotency belt-and-
-      //    suspenders alongside our own existsSync check above).
+      // 1. Bootstrap via npx — runs the trial-pinned `nsg init` against
+      //    the trial-pinned VERSION. Mirrors how a real user would
+      //    create a guild (npx-the-CLI). After this, the test guild
+      //    has @shardworks/nexus installed at the pinned version and
+      //    its node_modules/.bin/nsg is the version-true CLI.
       await mkdir(path.dirname(guildPath), { recursive: true });
-      await exec('nsg', ['init', guildPath, '--name', guildName]);
+      await exec('npx', [
+        '--yes',
+        '-p',
+        `@shardworks/nexus@${frameworkVersion}`,
+        'nsg',
+        'init',
+        guildPath,
+        '--name',
+        guildName,
+      ]);
       initialized = true;
+
+      // From here on, every shellout uses the test guild's local nsg
+      // — version-matched to the test guild, no dependency on whatever
+      // CLI happens to be on PATH.
+      const localNsg = path.join(guildPath, 'node_modules', '.bin', 'nsg');
+      if (!existsSync(localNsg)) {
+        throw new Error(
+          `[lab.guild-setup] expected ${localNsg} after bootstrap but it is missing. ` +
+            `nsg init's dev-guard skips writing the framework dep and skips npm install when ` +
+            `running from unbuilt source (VERSION=0.0.0). Pin frameworkVersion to a stable ` +
+            `spec where the source is built (dist/ exists) — e.g. an exact semver from npm, ` +
+            `or 'git+file:///path/to/built/repo#<sha>' for a local commit.`,
+        );
+      }
 
       // 2. Plugin install. Sequential, not parallel — npm install in the
       //    same dir doesn't tolerate concurrency, and order matters when
-      //    plugins declare peer/optional deps.
+      //    plugins declare peer/optional deps. Per-plugin shellout (vs.
+      //    a bulk `npm install`) preserves whatever side effects
+      //    `nsg plugin install` carries beyond the npm install (it
+      //    updates guild.json's `plugins` array, etc.).
       const pluginsResolved: PluginPin[] = [];
       for (const pin of plugins) {
         const spec = `${pin.name}@${pin.version}`;
-        await exec('nsg', ['--guild-root', guildPath, 'plugin', 'install', spec]);
+        await exec(localNsg, ['--guild-root', guildPath, 'plugin', 'install', spec]);
         pluginsResolved.push(pin);
       }
 
@@ -367,7 +432,7 @@ export const guildSetupEngine: EngineDesign = {
       const codexesAdded: DiscoveredCodex[] = [];
       const discovered = discoverCodexes(context.upstream);
       for (const codex of discovered) {
-        await exec('nsg', [
+        await exec(localNsg, [
           '--guild-root',
           guildPath,
           'codex',

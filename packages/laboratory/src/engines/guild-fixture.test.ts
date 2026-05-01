@@ -100,6 +100,12 @@ afterEach(() => {
 const TRIAL = {
   slug: 'test-guild-trial',
   writId: 'w-momen904-e8cd1359f754',
+  // trial-post.ts resolves frameworkVersion from manifest → lab-host
+  // VERSION before stamping the writ; on a posted trial _trial.framework
+  // Version is always set. Include it here so guildSetupEngine's
+  // precondition check passes through to the existsSync / validation
+  // branches the test cares about.
+  frameworkVersion: '1.0.0',
 };
 const DEFAULT_GUILD_NAME = 'test-guild-trial-e8cd1359';
 

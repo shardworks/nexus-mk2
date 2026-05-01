@@ -167,13 +167,27 @@ export interface InjectedTrialContext {
   writId: string;
   /** The fixture's id within the trial — only present on fixture engines. */
   fixtureId?: string;
+  /**
+   * Resolved framework-version pin (from `config.frameworkVersion` —
+   * trial-post.ts resolves an undefined manifest value from the
+   * lab-host's VERSION before stamping the writ, so this is always
+   * set on a posted trial). lab.guild-setup uses this for the
+   * `npx -p @shardworks/nexus@<spec> nsg init …` bootstrap.
+   */
+  frameworkVersion?: string;
 }
 
 function withTrialContext(
   givens: Record<string, unknown>,
   trial: InjectedTrialContext,
 ): Record<string, unknown> {
-  return { ...givens, _trial: trial };
+  // Strip undefined fields so engines can use plain `if (trial.x)` checks
+  // and tests can deep-equal against the minimal shape they expect.
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(trial)) {
+    if (v !== undefined) clean[k] = v;
+  }
+  return { ...givens, _trial: clean };
 }
 
 // ── Per-phase graft builders (pure; tested directly) ───────────────
@@ -205,6 +219,7 @@ export function buildSetupGraft(
         slug: config.slug,
         writId,
         fixtureId: fixture.id,
+        frameworkVersion: config.frameworkVersion,
       }),
     });
   }
@@ -234,6 +249,7 @@ export function buildScenarioGraft(
       givens: withTrialContext(config.scenario.givens, {
         slug: config.slug,
         writId,
+        frameworkVersion: config.frameworkVersion,
       }),
     },
   ];
@@ -254,6 +270,7 @@ export function buildProbesGraft(
     givens: withTrialContext(probe.givens, {
       slug: config.slug,
       writId,
+      frameworkVersion: config.frameworkVersion,
     }),
   }));
 }
@@ -279,6 +296,7 @@ export function buildArchiveGraft(
       givens: withTrialContext(config.archive.givens, {
         slug: config.slug,
         writId,
+        frameworkVersion: config.frameworkVersion,
       }),
     },
   ];
@@ -311,6 +329,7 @@ export function buildTeardownGraft(
         slug: config.slug,
         writId,
         fixtureId: fixture.id,
+        frameworkVersion: config.frameworkVersion,
       }),
     });
     prevTail = id;

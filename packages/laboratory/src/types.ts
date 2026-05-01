@@ -182,6 +182,25 @@ export interface TrialArchiveDecl {
 export interface LaboratoryTrialConfig {
   /** Trial slug (used in disposable-surface naming). */
   slug: TrialSlug;
+  /**
+   * Framework version pin used to bootstrap the test guild. Resolved
+   * at trial-post time: manifest field if specified, otherwise the
+   * lab-host's installed `@shardworks/nexus-core` VERSION (rejected
+   * when that's `'0.0.0'` because dev source isn't reproducible).
+   *
+   * The bootstrap uses `npx -p @shardworks/nexus@<spec> nsg init …`
+   * so the version-true `init` runs against the version-true
+   * `VERSION` constant. After bootstrap, all subsequent shellouts
+   * use `<testGuildPath>/node_modules/.bin/nsg` — no further
+   * dependency on the lab-host's CLI.
+   *
+   * Validated by `isStablePin` (exact semver, git+url#sha,
+   * github-shorthand#sha, or registry tarball). The resolved value
+   * is written back into the trial writ's `ext.laboratory.config`
+   * before the writ transitions to `open`, so the archive
+   * snapshot captures the pin actually used (not a missing field).
+   */
+  frameworkVersion?: string;
   /** Fixtures to set up (DAG; topo-sort happens at template time). */
   fixtures: TrialFixtureDecl[];
   /** The workload that runs after setup. */

@@ -25,11 +25,12 @@
  */
 
 import { z } from 'zod';
-import { guild } from '@shardworks/nexus-core';
+import { guild, VERSION as LAB_HOST_VERSION } from '@shardworks/nexus-core';
 import { tool } from '@shardworks/tools-apparatus';
 import type { ClerkApi } from '@shardworks/clerk-apparatus';
 import { manifestToWritShape, readManifestFile } from '../manifest.ts';
 import { TRIAL_TYPE_NAME } from '../types.ts';
+import { isStablePin } from '../stable-pin.ts';
 
 /** Plugin id for the laboratory ext slot. */
 const LABORATORY_PLUGIN_ID = 'laboratory';
@@ -70,6 +71,31 @@ export default tool({
   handler: async (params) => {
     const manifest = await readManifestFile(params.manifest);
     const { title, body, parentId, codex, trialConfig } = manifestToWritShape(manifest);
+
+    // Resolve frameworkVersion: manifest → lab-host VERSION → fail.
+    // Refuses dev source ('0.0.0') because dev artifacts aren't
+    // reproducible — manifest authors must pin explicitly when
+    // running on a dev lab-host. The resolved value is written back
+    // into the trial config so the archive snapshot captures the
+    // pin actually used.
+    if (trialConfig.frameworkVersion === undefined) {
+      if (LAB_HOST_VERSION === '0.0.0') {
+        throw new Error(
+          'lab-trial-post: frameworkVersion must be specified in the manifest when the lab host ' +
+          'is running from unbuilt source (VERSION=0.0.0). Add a top-level `frameworkVersion: ' +
+          '<stable-pin>` field to the manifest.',
+        );
+      }
+      const fallback = LAB_HOST_VERSION;
+      const stable = isStablePin(fallback);
+      if (!stable.ok) {
+        throw new Error(
+          `lab-trial-post: lab-host's @shardworks/nexus-core VERSION="${fallback}" is not a ` +
+          `stable pin (${stable.reason}). Specify frameworkVersion explicitly in the manifest.`,
+        );
+      }
+      trialConfig.frameworkVersion = fallback;
+    }
 
     const clerk = guild().apparatus<ClerkApi>('clerk');
 

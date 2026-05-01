@@ -207,15 +207,23 @@ export const manifestSchema = z
     description: z.string().optional(),
     parentId: z.string().min(1).optional(),
     codex: z.string().min(1).optional(),
+    /**
+     * Optional framework-version pin. When omitted, the trial-post
+     * tool resolves it from the lab-host's installed
+     * `@shardworks/nexus-core` VERSION; when the lab-host is dev
+     * source (VERSION='0.0.0'), the tool fails with a clear message
+     * directing the author to set this field.
+     */
+    frameworkVersion: z.string().min(1).optional(),
     fixtures: z.array(fixtureSchema).default([]),
     scenario: scenarioSchema,
     probes: z.array(probeSchema).default([]),
     archive: archiveSchema,
   })
   .superRefine((data, ctx) => {
-    // Walk every engine that may carry pin-shaped givens and validate.
-    // Fixtures are the only call site today; scenarios/probes/archive
-    // would be added here if a future engine takes plugin pins.
+    // Per-engine pin validation (currently only lab.guild-setup's
+    // plugins[]). New pin-bearing engines register their extractor
+    // in PIN_EXTRACTORS above.
     for (let i = 0; i < data.fixtures.length; i += 1) {
       const fixture = data.fixtures[i]!;
       validatePinSites(
@@ -224,6 +232,20 @@ export const manifestSchema = z
         ctx,
         ['fixtures', i, 'givens'],
       );
+    }
+
+    // Top-level frameworkVersion (if specified). Same stable-pin
+    // contract as plugin pins — exact semver, git+url#sha,
+    // github-shorthand#sha, or registry tarball.
+    if (data.frameworkVersion !== undefined) {
+      const result = isStablePin(data.frameworkVersion);
+      if (!result.ok) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['frameworkVersion'],
+          message: `unstable pin "${data.frameworkVersion}" — ${result.reason}`,
+        });
+      }
     }
   });
 
@@ -336,6 +358,13 @@ export function manifestToWritShape(manifest: TrialManifest): {
 } {
   const trialConfig: LaboratoryTrialConfig = {
     slug: manifest.slug,
+    // frameworkVersion is passed through as-authored. The trial-post
+    // tool resolves an undefined value from the lab-host's installed
+    // VERSION before stamping ext.laboratory.config — so what lands
+    // on the writ always has frameworkVersion set.
+    ...(manifest.frameworkVersion !== undefined
+      ? { frameworkVersion: manifest.frameworkVersion }
+      : {}),
     fixtures: manifest.fixtures,
     scenario: manifest.scenario,
     probes: manifest.probes,
