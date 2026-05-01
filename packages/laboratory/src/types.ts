@@ -108,9 +108,12 @@ export type TrialSlug = string;
 /**
  * One fixture declaration in a trial. Fixtures handle setup and
  * teardown of disposable surfaces (codex repos, test guilds, etc.)
- * and form a dependency DAG. The corresponding teardown engine is
- * looked up by convention (engineId + '.teardown') at template
- * instantiation time.
+ * and form a dependency DAG.
+ *
+ * Setup and teardown are paired engines. By convention the teardown
+ * engine id is the setup id with `-setup` swapped for `-teardown`
+ * (e.g. `lab.codex-setup` ↔ `lab.codex-teardown`). The `teardownEngineId`
+ * field overrides this default when the convention doesn't fit.
  *
  * MVP0 ships trial-scope only — every fixture is fresh per trial,
  * torn down at trial end. The `scope` and `mutability` hooks are
@@ -119,9 +122,11 @@ export type TrialSlug = string;
 export interface TrialFixtureDecl {
   /** Fixture id within this trial. Referenced by `dependsOn`. */
   id: string;
-  /** Engine design id to invoke for setup (e.g. `'lab.codex-setup'`). */
+  /** Setup engine design id (e.g. `'lab.codex-setup'`). */
   engineId: string;
-  /** Givens passed to the setup engine. */
+  /** Override teardown engine id. Defaults to convention (`-setup` → `-teardown`). */
+  teardownEngineId?: string;
+  /** Givens passed to BOTH the setup and teardown engines. */
   givens: Record<string, unknown>;
   /** Other fixture ids that must be set up before this one. */
   dependsOn?: string[];

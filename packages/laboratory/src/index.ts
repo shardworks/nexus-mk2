@@ -53,35 +53,50 @@ export type {
 // ── Apparatus ────────────────────────────────────────────────────────
 
 import { TRIAL_WRIT_TYPE_CONFIG } from './types.ts';
+import { engines } from './engines/index.ts';
+import { rigTemplates, rigTemplateMappings } from './template.ts';
 
 const laboratoryPlugin: Plugin = {
   apparatus: {
     /**
      * Hard requires — apparatuses whose APIs the Laboratory's startup
-     * code calls directly. Other apparatuses (spider, fabricator,
-     * codexes) are required at engine-execution time, not startup,
-     * and are checked via the `recommends` channel below so a guild
-     * missing them can still load the lab without a hard failure.
+     * code calls directly (clerk for writ-type registration), plus
+     * those whose presence is structurally needed for the lab's
+     * contributions to be useful (spider for rig-template execution,
+     * fabricator for engine-design registration). Stacks is required
+     * transitively via clerk.
      */
-    requires: ['stacks', 'clerk'],
+    requires: ['stacks', 'clerk', 'spider', 'fabricator'],
 
     /**
-     * Engines contributed by the lab call into these apparatus APIs
-     * at run time. The framework emits warnings if any are absent;
-     * trials that depend on the missing surface will fail when their
-     * engine runs, not at startup.
+     * Recommended at startup; required at engine-execution time when
+     * the relevant fixture or scenario engine actually fires. Marking
+     * them as recommends (not requires) lets a guild start the lab
+     * without these installed — the trials that touch the missing
+     * surface fail when their engine runs, not at startup.
      */
-    recommends: ['spider', 'fabricator', 'codexes'],
+    recommends: ['codexes', 'animator'],
 
     /**
-     * Kit contributions. Empty in the skeleton; engines and rig
-     * templates are added by subsequent implementation children.
+     * Kit contributions wired up:
+     *
+     *   - `engines`              — every Laboratory engine design
+     *                               (orchestrate + fixture/scenario/
+     *                               probe/archive stubs). Stubs land
+     *                               their real behavior under their
+     *                               respective implementation clicks.
+     *   - `rigTemplates`         — the single canonical
+     *                               `post-and-collect-default` template
+     *                               (head engine: orchestrate).
+     *   - `rigTemplateMappings`  — `trial` → `post-and-collect-default`.
+     *
+     * `tools` (the manifest CLI surface, `nsg lab trial post`) is
+     * added under c-moma9ty6.
      */
     supportKit: {
-      // engines:            {}  — added in c-moma9y1k / c-momaa03d / c-momaa1vt / c-momaa3w7 / c-momaa5o9
-      // rigTemplates:       {}  — added in c-moma9vrm
-      // rigTemplateMappings:{}  — added in c-moma9vrm
-      // tools:              {}  — added in c-moma9ty6 (manifest CLI)
+      engines,
+      rigTemplates,
+      rigTemplateMappings,
     },
 
     async start() {
