@@ -237,8 +237,8 @@ describe('laboratory pipeline (probe → archive → teardown gating → extract
     assert.equal(probeResult.status, 'completed');
     const probeYields = (probeResult as { yields: Record<string, unknown> }).yields;
     assert.equal(probeYields.trialId, 'w-integ-trial');
-    assert.equal(probeYields.frameworkVersion, '0.0.0-test');
-    assert.deepEqual(probeYields.pluginsInstalled, ['laboratory', 'clerk', 'stacks']);
+    assert.equal(probeYields.labHostFrameworkVersion, '0.0.0-test');
+    assert.deepEqual(probeYields.labHostPluginsInstalled, ['laboratory', 'clerk', 'stacks']);
     assert.deepEqual(probeYields.manifestSnapshot, makeTrialConfig());
 
     // ── Phase 2: archive ──────────────────────────────────────────────

@@ -5,21 +5,29 @@
  * What it captures (in `yields`, persisted into the archive row's
  * `probes[].summary`):
  *
- *   - rigId             — the rig executing this trial.
- *   - rigTemplate       — the template the rig was instantiated from.
- *   - frameworkVersion  — the `nexus` field from guild.json.
- *   - pluginsInstalled  — the lab guild's plugin list (`guildConfig.plugins`).
- *   - manifestSnapshot  — the trial writ's `ext.laboratory.config`
- *                         verbatim (preserved against future writ edits).
- *   - capturedAt        — ISO timestamp.
+ *   - rigId                    — the rig executing this trial.
+ *   - rigTemplate              — the template the rig was instantiated from.
+ *   - labHostFrameworkVersion  — the `nexus` field from the LAB-HOST's
+ *                                guild.json. Tells you what apparatus
+ *                                orchestrated the trial. Distinct from
+ *                                the trial-pinned version (which lives
+ *                                in `manifestSnapshot.frameworkVersion`
+ *                                and is what the TEST GUILD was
+ *                                bootstrapped against).
+ *   - labHostPluginsInstalled  — the LAB-HOST's plugin list. Same
+ *                                lab-host-side scope.
+ *   - manifestSnapshot         — the trial writ's `ext.laboratory.config`
+ *                                verbatim (preserved against future
+ *                                writ edits). The trial-pinned
+ *                                framework version is here at
+ *                                `manifestSnapshot.frameworkVersion`.
+ *   - capturedAt               — ISO timestamp.
  *
- * Note on "framework SHA" from the spec: the apparatus runs out of an
- * npm-installed package; the canonical version is the package's
- * `nexus` declaration in guild.json. A literal git SHA would require
- * the lab guild to know it's running from a checkout — not something
- * the apparatus can assume in production. The version string is the
- * portable identifier; deeper provenance can be added later via a
- * configurable framework-sha given.
+ * The two-version pattern is deliberate: a trial captures both the
+ * orchestration version (lab-host) and the execution version (test
+ * guild's bootstrap pin). Cross-version trials may run a v0.5 lab-host
+ * orchestrating a v0.7 test guild; analysis queries that filter by
+ * "what version was tested" should use the manifest snapshot.
  *
  * GIVENS
  * ──────
@@ -92,12 +100,14 @@ export interface TrialContextSummary {
    */
   rigTemplate: string | null;
   /**
-   * `nexus` field from the lab guild's guild.json — the framework
-   * version the apparatus is running against.
+   * `nexus` field from the LAB-HOST's guild.json — the framework
+   * version of the apparatus orchestrating the trial. Distinct from
+   * the trial-pinned version that bootstrapped the test guild
+   * (`manifestSnapshot.frameworkVersion`).
    */
-  frameworkVersion: string;
-  /** The lab guild's installed plugin list (`guildConfig.plugins`). */
-  pluginsInstalled: string[];
+  labHostFrameworkVersion: string;
+  /** The LAB-HOST's installed plugin list (`guildConfig.plugins`). */
+  labHostPluginsInstalled: string[];
   /** The trial writ's `ext.laboratory.config` verbatim. */
   manifestSnapshot: LaboratoryTrialConfig;
   /** ISO timestamp when this context was captured. */
@@ -163,8 +173,8 @@ async function runTrialContext(
     trialId,
     rigId: context.rigId,
     rigTemplate,
-    frameworkVersion: cfg.nexus,
-    pluginsInstalled: [...cfg.plugins],
+    labHostFrameworkVersion: cfg.nexus,
+    labHostPluginsInstalled: [...cfg.plugins],
     manifestSnapshot,
     capturedAt: new Date().toISOString(),
   };
