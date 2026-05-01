@@ -116,3 +116,26 @@ actually run. At that point:
 - 2026-05-01: Spec drafted. Phase 1 manifest authored
   (`manifests/baseline-apparatus-validation.yaml`). First trial
   posted as the Laboratory apparatus's first real-world use.
+
+- 2026-05-01: **Trial 1 (apparatus validation) completed.**
+  - Trial id: `w-mondjwk9-5f18bff39e29`
+  - Rig: `rig-mondjzr3-3c449c19` (14 engines, all completed in 1 attempt each)
+  - Archive: `lar-mondkc1h-ed27ba9f0587`
+  - Wallclock: ~30s end-to-end
+  - Extracted artifacts: `artifacts/2026-05-01-baseline-validation/`
+  - Two real bugs caught and fixed in the same session:
+    - `lab.probe-stacks-dump` used CommonJS `require('node:fs')` in
+      an ESM module — replaced with proper imports.
+    - `lab.archive`'s graft didn't pass `${writ}` through; the
+      Spider's `resolveGivens` does substitute it for graft givens
+      (just like static template), so `buildArchiveGraft` now emits
+      `writ: '${writ}'` alongside the trial-context injection.
+  - Apparatus pipeline validated end-to-end: npx-bootstrapped test
+    guild, per-plugin install loop via test guild's local nsg,
+    cross-guild commission post, three probes capturing real data
+    (1 writ in `clerk/writs`, 0 codex commits as expected),
+    archive row written, teardowns ran, no orphan fixtures left.
+  - Captured probe summaries make sense: `frameworkVersion: '0.1.292'`
+    on the manifest snapshot (test-guild bootstrap pin),
+    `frameworkVersion: '0.0.0'` on probe-trial-context's top-level
+    (lab-host's dev-source VERSION). Both useful and distinct.

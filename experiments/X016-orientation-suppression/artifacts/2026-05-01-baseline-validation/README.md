@@ -1,0 +1,105 @@
+# Trial extract — X016 Trial 1 — apparatus validation (baseline brief, no rig execution)
+
+- **Trial id**: `w-mondjwk9-5f18bff39e29`
+- **Archive id**: `lar-mondkc1h-ed27ba9f0587`
+- **Archived at**: 2026-05-01T20:38:11.957Z
+- **Writ phase**: completed
+- **Writ resolved at**: 2026-05-01T20:38:12.010Z
+
+## Probes
+
+### context — `lab.probe-trial-context`
+
+```yaml
+trialId: w-mondjwk9-5f18bff39e29
+rigId: rig-mondjzr3-3c449c19
+rigTemplate: null
+frameworkVersion: 0.0.0
+pluginsInstalled:
+  - animator
+  - astrolabe
+  - claude-code
+  - clerk
+  - clockworks
+  - codexes
+  - fabricator
+  - laboratory
+  - lattice
+  - lattice-discord
+  - loom
+  - oculus
+  - parlour
+  - ratchet
+  - spider
+  - stacks
+  - tools
+manifestSnapshot:
+  slug: x016-baseline-validation
+  frameworkVersion: 0.1.292
+  fixtures:
+    - id: codex
+      engineId: lab.codex-setup
+      givens:
+        upstreamRepo: /workspace/nexus-mk2
+        baseSha: 2e8a59e5f62a02594410e6a101b0141d849157a8
+    - id: test-guild
+      engineId: lab.guild-setup
+      givens:
+        plugins:
+          - name: "@shardworks/stacks-apparatus"
+            version: 0.1.292
+          - name: "@shardworks/tools-apparatus"
+            version: 0.1.292
+          - name: "@shardworks/codexes-apparatus"
+            version: 0.1.292
+          - name: "@shardworks/clerk-apparatus"
+            version: 0.1.292
+      dependsOn:
+        - codex
+  scenario:
+    engineId: lab.commission-post-xguild
+    givens:
+      briefPath: /workspace/nexus-mk2/experiments/X016-orientation-suppression/briefs/baseline-task.md
+      waitForTerminal: false
+  probes:
+    - id: context
+      engineId: lab.probe-trial-context
+      givens: {}
+    - id: stacks
+      engineId: lab.probe-stacks-dump
+      givens: {}
+    - id: commits
+      engineId: lab.probe-git-range
+      givens: {}
+  archive:
+    engineId: lab.archive
+    givens: {}
+capturedAt: 2026-05-01T20:38:11.946Z
+```
+
+### stacks — `lab.probe-stacks-dump`
+
+```yaml
+bookCounts:
+  clerk/links: 0
+  clerk/writs: 1
+totalRows: 1
+capturedAt: 2026-05-01T20:38:11.950Z
+```
+
+### commits — `lab.probe-git-range`
+
+```yaml
+codexName: x016-baseline-validation-5f18bff3
+baseSha: 2e8a59e5f62a02594410e6a101b0141d849157a8
+headSha: 2e8a59e5f62a02594410e6a101b0141d849157a8
+commitCount: 0
+totalDiffBytes: 0
+capturedAt: 2026-05-01T20:38:11.956Z
+```
+
+## Layout
+
+- `manifest.yaml` — `ext.laboratory.config` from the trial writ.
+- `README.md` — this file.
+- Per-probe subdirectories — see each probe's extractor.
