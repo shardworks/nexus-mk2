@@ -26,18 +26,221 @@ Apparatus for running trial-shaped experiments on guild configurations.
     instantiation.
   - **Scenario** — the workload. v1 uses cross-guild commission-post +
     wait-for-writ-terminal as the canonical scenario engine pair.
-  - **Probes** — extract data from one or more fixtures (stacks dump,
-    git range capture).
-  - **Archive** — captures probe outputs for the research record.
-    Storage layout in design at click `c-momaa5o9`.
+  - **Probes** — extract data from the trial. Own their own books for
+    bulk data and yield a summary that lands in the archive index.
+  - **Archive** — writes the per-trial index row and orchestrates the
+    probe set. See **Archive design** below.
 - **Authoring:** YAML manifest via `nsg lab trial post --manifest <file>`.
   Manifest shape mirrors `ext.laboratory.config` exactly.
 
+## Archive design
+
+The archive subsystem is **DB-authoritative with on-demand filesystem
+materialization.** Captured trial data lives in the lab guild's stacks
+DB; the filesystem story is provided by an extract tool that reads from
+the DB on demand. This avoids the brittleness of long-lived references
+between the lab guild's books and patron-owned filesystem trees.
+
+Resolved at click `c-momaa5o9`.
+
+### Books
+
+Three books participate. The archive engine owns one (`lab-trial-archives`,
+the index); the two built-in probes each own one (their captured data).
+
+#### `lab-trial-archives` — owned by the archive engine
+
+One row per archived trial. Tiny. Written-once at archive time. The
+archive engine has **no schema opinions about probe data** — its job is
+to record what probes ran and what each yielded as a summary.
+
+```ts
+interface LabTrialArchive {
+  id: string;                            // generated
+  trialId: string;                       // FK → clerk/writs (indexed)
+  status: 'in-progress' | 'complete' | 'failed';
+  archivedAt: string;                    // ISO
+
+  probes: Array<{
+    id: string;                          // probe id from trial config
+    engineId: string;                    // e.g. 'lab.probe-stacks-dump'
+    summary: Record<string, unknown>;    // opaque to archive engine
+  }>;
+}
+```
+
+Trial-level facts (manifest body, codex base SHA, codex upstream URL,
+plugin specifications) are **not duplicated here** — they live on the
+trial writ at `ext.laboratory.config`. Reproducibility-relevant runtime
+facts (resolved plugin pins, framework SHA, rig template name) are
+captured by `lab.probe-trial-context` and live in that probe's summary.
+
+#### `lab-trial-stacks-dumps` — owned by `lab.probe-stacks-dump`
+
+One row per source-row, across every book in the test guild. Generic
+JSON-bodied; querying is via SQLite JSON1 expressions.
+
+```ts
+interface LabTrialStacksDump {
+  id: string;                            // generated
+  trialId: string;                       // FK (indexed)
+  sourceBook: string;                    // (trialId, sourceBook) indexed
+  sourceRowId: string;
+  capturedAt: string;
+  body: Record<string, unknown>;          // the source row, verbatim
+}
+```
+
+Indexes added per hot query — e.g.
+`CREATE INDEX … ON … (trialId, json_extract(body, '$.cost'))
+ WHERE sourceBook='animator/sessions'`.
+
+#### `lab-trial-codex-commits` — owned by `lab.probe-git-range`
+
+One row per captured codex commit. Body is the diff text.
+
+```ts
+interface LabTrialCodexCommit {
+  id: string;
+  trialId: string;                       // FK (indexed)
+  sequence: number;                      // ordinal within trial
+  sha: string;                           // 40-char
+  message: string;
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+  diff: string;                          // patch text
+}
+```
+
+**Big-diff tripwire:** the archive engine fails loud if any single diff
+exceeds 10MB. Realistic diffs are <500KB; the cap is a "we'll figure
+out blob storage if it ever bites" tripwire, not a constraint we expect
+to hit.
+
+### Standard probes
+
+Three probes ship in MVP, registered with the laboratory plugin's probe
+registry:
+
+- **`lab.probe-stacks-dump`** — reads every book in the test guild,
+  writes one row per source-row to `lab-trial-stacks-dumps`. Summary
+  is `{ bookCounts: { '<plugin>/<book>': N, ... } }`.
+- **`lab.probe-git-range`** — captures commits between the codex base
+  and head SHAs, writes one row per commit to
+  `lab-trial-codex-commits`. Summary is
+  `{ headSha, commitCount, totalDiffBytes }`.
+- **`lab.probe-trial-context`** — captures rig id, rig template name,
+  framework SHA, resolved plugin pins, and a snapshot of the trial
+  manifest. Summary-as-data: no bulk book; the summary itself is the
+  captured data. Included in the default rig template; opt out by
+  authoring a custom template.
+
+### Trial-writ linkage
+
+Just the foreign key. `lab-trial-archives.trialId` references
+`clerk/writs.id`. Lookup is via FK query — there is no
+`laboratory.archived-as` clerk link, because clerk links are
+writ-to-writ and archive records are not writs.
+
+`nsg writ show <trialId>` shows the trial writ with its config. To
+surface the archive, run `nsg lab trial-show <trialId>`.
+
+### Atomicity
+
+The archive engine wraps its work in a single SQLite transaction:
+write the `lab-trial-archives` row with `status: 'in-progress'`, run
+each probe (probes write to their own books inside the same
+transaction via the engine context), update the row to
+`status: 'complete'`. Any failure rolls back the whole transaction —
+no half-state, no orphan rows.
+
+The teardown engines (`lab.guild-teardown`, `lab.codex-teardown`)
+refuse to run unless the trial's archive record exists with
+`status: 'complete'`.
+
+### Probe registry and extraction-dispatch
+
+Probes self-declare an extraction handler that materializes their
+captured data to a directory. The extract tool dispatches via the
+registry — no hardcoded probe knowledge in the tool itself. MVP
+contract:
+
+```ts
+interface ProbeEngineDesign extends EngineDesign {
+  // existing
+  run(givens, context): Promise<EngineRunResult>;
+
+  // new
+  extract(args: {
+    trialId: string;
+    targetDir: string;        // probe writes outputs here (subdir)
+    guild: GuildHandle;        // for reading the probe's books
+  }): Promise<{
+    files: Array<{ path: string; bytes: number }>;
+  }>;
+}
+```
+
+Tracked at click `c-momkil4p`. Each built-in probe ships its own
+extractor:
+
+- `lab.probe-stacks-dump` materializes to
+  `<targetDir>/stacks-export/<plugin>-<book>.json` (one JSON array
+  per source book).
+- `lab.probe-git-range` materializes to
+  `<targetDir>/codex-history/{commits-manifest.yaml,NNNN-<sha>.patch}`.
+- `lab.probe-trial-context` materializes to
+  `<targetDir>/trial-context.yaml`.
+
+The extract tool composes per-probe outputs and additionally generates
+`manifest.yaml` (from the trial writ's `ext.laboratory.config`) and
+`README.md` (from archive metadata + probe summaries) at the top
+level.
+
+### CLI surface
+
+- **`nsg lab trial-show <trialId>`** — print archive metadata + probe
+  summaries from `lab-trial-archives`.
+- **`nsg lab trial-extract <trialId> --to <path> [--force]`** —
+  materialize all captured data to a directory. Refuses to overwrite
+  unless `--force`. Probe registry dispatches per-probe extractors.
+- **`nsg lab trial-export-book <trialId> --book <name> [--format jsonl|json]`** —
+  stream one source book for analysis pipelines. Default `jsonl`.
+
+For programmatic analysis without going through extract: scripts can
+attach the lab guild's stacks DB directly (DuckDB reads SQLite
+natively) and query `lab-trial-stacks-dumps` / `lab-trial-codex-commits`
+with JSON1 expressions.
+
+### Annotations live sanctum-side
+
+Analysis notes, findings, and human-authored interpretation of trial
+data live in sanctum markdown that references `trialId` as the join
+key — not in any laboratory book. The captured data in books is
+immutable apparatus output; analysis is a sanctum activity. They were
+never the same thing.
+
+### Plugin packaging
+
+For MVP, all three books and all three standard probes bundle in
+`@shardworks/laboratory`. The code organizes per-probe
+(`src/probes/<probe-name>/{engine.ts, book.ts, extractor.ts}`) and the
+probe registry is built from per-probe registrations rather than a
+hardcoded list. When a third-party probe forces the issue, lifting a
+built-in probe into its own plugin (`@shardworks/lab-probe-stacks-dump`,
+etc.) is a mechanical move — no architectural surgery. Tracked as a
+parked v2 path; no click filed yet pending a forcing function.
+
 ## Status
 
-Skeleton only. The trial writ type is registered; engine designs, the
-rig template, and the manifest CLI are added by subsequent
-implementation children under click `c-moma9llq`.
+Skeleton with stub engines. The trial writ type is registered; the rig
+template, manifest CLI, and stub engines are wired end-to-end (smoke
+tested against `vibers`). The remaining MVP work: real engine
+implementations under click `c-moma9llq` — codex fixtures, guild
+fixtures, scenario engines, probe engines (now including
+`lab.probe-trial-context`), the archive engine, and the probe registry
++ extract dispatch (`c-momkil4p`).
 
 ## Background
 
