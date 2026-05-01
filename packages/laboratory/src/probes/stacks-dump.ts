@@ -44,6 +44,7 @@
  *   array of source-row bodies, sorted by sourceRowId.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
 import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -152,25 +153,21 @@ interface PluginsJsonShape {
   plugins?: string[];
 }
 
+/**
+ * Read the test guild's installed plugin ids from its guild.json
+ * synchronously. Returns an empty array if the file is missing or
+ * malformed — the source-book resolver tolerates the empty case
+ * (falls back to raw table names).
+ *
+ * Synchronous on purpose: the caller is enumerating books_* tables
+ * via better-sqlite3's sync API; mixing async here would just add
+ * await chains for no benefit.
+ */
 function readTestGuildPluginIds(testGuildPath: string): string[] {
-  // Lazy-read the test guild's guild.json so the probe doesn't need
-  // an active Guild handle on the test side.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const guildJsonPath = path.join(testGuildPath, 'guild.json');
-  // Read synchronously via a fresh fs handle — keeps the probe
-  // strictly read-only on the test guild.
-  // node:fs is plenty here.
-  // (The method is exported so tests can stub it.)
-  return readPluginsFromGuildJson(guildJsonPath);
-}
-
-function readPluginsFromGuildJson(guildJsonPath: string): string[] {
-  // Inlined — kept simple so unit tests can patch via a fixture file.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const fs = require('node:fs') as typeof import('node:fs');
-  if (!fs.existsSync(guildJsonPath)) return [];
+  if (!existsSync(guildJsonPath)) return [];
   try {
-    const raw = JSON.parse(fs.readFileSync(guildJsonPath, 'utf8')) as PluginsJsonShape;
+    const raw = JSON.parse(readFileSync(guildJsonPath, 'utf8')) as PluginsJsonShape;
     return Array.isArray(raw.plugins) ? raw.plugins.filter((v) => typeof v === 'string') : [];
   } catch {
     return [];

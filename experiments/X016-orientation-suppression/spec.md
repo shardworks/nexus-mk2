@@ -1,0 +1,118 @@
+# X016 — Orientation Suppression
+
+**Status:** Draft, Trial 1 (apparatus validation) authored 2026-05-01.
+
+**Parent click:** `c-mok4qh81` — Idea #17 from the cost-optimization
+landscape.
+
+## Research question
+
+When a fresh implementer session enters mid-flow (i.e., after a
+handoff from a prior session), how many turns elapse before it
+produces productive work? Does an imperative anti-orientation
+directive in the brief reduce that turn count to <5?
+
+## Background
+
+The X010 H1 piece-session experiment (per-task implementer
+checkpointing) failed because each fresh session paid an
+"orientation tax": re-read the spec, re-grep the codebase, re-state
+the plan, re-validate prior commits before producing any new output.
+Total turn count expanded 3.5×, and the savings from cache-read
+accumulation were swamped.
+
+For idea #15 (checkpoint-and-fresh-session implement architecture)
+to win, total turn count post-handoff must stay under ~1.3×
+monolithic, which means each post-handoff session must produce
+productive work in <5 turns. This experiment measures whether an
+imperative directive in the implementer's prompt suppresses the
+orientation tax.
+
+## Hypothesis
+
+**H1.** Adding an imperative directive ("Begin work immediately. Do
+not summarize the task before starting. Make your first turn a code
+change.") to the implementer's brief reduces median turns-to-first-
+productive-edit from N (baseline) to fewer than 5.
+
+## Variants
+
+| variant | description |
+|---|---|
+| baseline | implementer brief carries no orientation-suppression directive |
+| strong-prompt | brief carries the imperative directive above |
+
+## Apparatus
+
+This is the first real-world trial running through the **Laboratory
+apparatus** (`packages/laboratory/`). Trial manifests live under
+`manifests/`; archived data lives in vibers' `lab-trial-*` books;
+extracted directories under `artifacts/<trial-slug>/`.
+
+## Design notes
+
+### Phase 1 — apparatus validation (this trial)
+
+The first run validates the apparatus pipeline end-to-end without
+attempting to execute a full implementer session. The test guild
+posts a commission via `lab.commission-post-xguild` with
+`waitForTerminal: false` — the writ lands but no rig is driven to
+completion.
+
+**Why phase 1 doesn't measure orientation behavior**: a full
+implementer rig requires the test guild's Spider crawl loop to be
+running, which currently means a clockworks daemon. The Laboratory
+does not yet manage daemon lifecycle for test guilds; adding that is
+a follow-up. Phase 1 instead validates:
+
+- Codex setup (npx-bootstrapped local-bare flow)
+- Test-guild bootstrap via `npx -p @shardworks/nexus@<v> nsg init`
+- Plugin install loop via `<testGuild>/node_modules/.bin/nsg`
+- Commission post lands (writ in `clerk/writs`)
+- Probes capture: `lab.probe-stacks-dump` against the test guild's
+  books, `lab.probe-trial-context` for rig metadata,
+  `lab.probe-git-range` for codex commits (will be empty since no
+  rig sealed)
+- Archive engine writes `lab-trial-archives` row
+- Teardown safety check passes (archive row exists)
+- `nsg lab trial-extract` materializes captured data
+
+### Phase 2 — full execution (future)
+
+Once daemon lifecycle is added to `lab.guild-setup`, the manifest
+can switch to `waitForTerminal: true` and the implementer rig will
+actually run. At that point:
+
+- baseline + strong-prompt variants both run as separate trials
+- `lab.probe-stacks-dump` captures `animator/sessions` rows
+  (turn counts, cost, durations) for each variant
+- `lab.probe-git-range` captures the implementer's commits to
+  measure productive-output timing
+- Comparative analysis happens sanctum-side via
+  `nsg lab trial-export-book <trialId> --book animator/sessions`
+  piped into a DuckDB query
+
+## Trial-shape constraints
+
+- **Codex base SHA**: pinned to a specific sanctum SHA at trial
+  authoring time (locks the test guild against a stable code state).
+- **Framework version**: pinned to a published `@shardworks/nexus`
+  version (currently `0.1.292`).
+- **Plugin set**: vibers' standard set minus optional plugins
+  (lattice/lattice-discord/oculus/parlour/sentinel are not
+  installed in the test guild).
+
+## References
+
+- `docs/archive/deprecated-docs/experimental-infrastructure-setup-and-artifacts.md`
+  — predecessor design that the apparatus replaces.
+- `packages/laboratory/README.md` — apparatus authoring guide.
+- Click `c-mok4nke6` — cost-optimization landscape (parent of #17).
+- Click `c-mok4qh81` — idea #17, this experiment's parent.
+- Click `c-modxxtu6` — idea #15, the architecture this binds to.
+
+## Status log
+
+- 2026-05-01: Spec drafted. Phase 1 manifest authored
+  (`manifests/baseline-apparatus-validation.yaml`). First trial
+  posted as the Laboratory apparatus's first real-world use.

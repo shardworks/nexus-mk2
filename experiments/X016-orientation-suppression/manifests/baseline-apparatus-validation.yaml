@@ -1,0 +1,67 @@
+slug: x016-baseline-validation
+title: X016 Trial 1 — apparatus validation (baseline brief, no rig execution)
+# The lab-host (vibers) has multiple codexes registered; pick `nexus`
+# explicitly. This is the codex the TRIAL WRIT is associated with on
+# the lab-host for tracking purposes — distinct from the per-trial
+# disposable codex that lab.codex-setup creates inside the test guild.
+codex: nexus
+description: |
+  First real-world Laboratory trial. Validates the apparatus pipeline
+  end-to-end against vibers as the lab-host, posting a real
+  commission into a fresh test guild via the npx-bootstrapped flow.
+
+  waitForTerminal=false because the test guild has no running daemon
+  to drive the rig; the trial validates apparatus mechanics, not
+  implementer behavior. Full execution (phase 2) deferred pending
+  daemon-lifecycle support in lab.guild-setup.
+
+  See experiments/X016-orientation-suppression/spec.md for the full
+  research design.
+
+frameworkVersion: '0.1.292'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      # Local-bare codex flow — vibers clones from this path, checks
+      # out the pinned SHA, and pushes to a per-trial bare repo.
+      upstreamRepo: /workspace/nexus-mk2
+      baseSha: 2e8a59e5f62a02594410e6a101b0141d849157a8
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # Minimum plugin set for a test guild that can post a writ via
+      # `nsg --guild-root <X> commission-post`. Stacks + clerk are the
+      # backbone (writ persistence); codexes registers the trial codex;
+      # tools dispatches the commission-post tool.
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.292' }
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X016-orientation-suppression/briefs/baseline-task.md
+    # No rig execution in phase 1 — the writ lands and we capture the
+    # apparatus output without waiting on a session.
+    waitForTerminal: false
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

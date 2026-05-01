@@ -10,6 +10,7 @@ Maintained by Coco. Update when experiments are created, activated, or closed.
 | [X008](X008-patrons-hands/spec.md) | The Patron's Hands | How does the bootstrap period (Coco doing implementation) shape patron expectations when autonomous agents come online? |
 | [X010](X010-staged-sessions/spec.md) | Staged Sessions | What is the relationship between session length, cost, and output quality for autonomous commissions? Phase 1 (cost curve) complete at original scale; Apr 29 addendum sharpens H4 into H4a/H4b/H4c sub-hypotheses (cost model + handoff thresholds) and adds H5 (inventory pure-read bloat). |
 | [X011](X011-context-debt/spec.md) | Context Debt | How much context window is consumed by tool output never referenced again, and can we reduce it? Activated 2026-04-29 with the read-utilization instrument as its first artifact. |
+| [X016](X016-orientation-suppression/spec.md) | Orientation Suppression | When a fresh implementer session enters mid-flow, how many turns elapse before it produces productive work? Does an imperative anti-orientation directive in the brief reduce that turn count to <5? Phase 1 (apparatus validation) authored 2026-05-01 — first real-world Laboratory apparatus trial. |
 
 ## Ready (approved, not yet started)
 
