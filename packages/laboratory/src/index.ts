@@ -55,6 +55,7 @@ export type {
 import { TRIAL_WRIT_TYPE_CONFIG } from './types.ts';
 import { engines } from './engines/index.ts';
 import { rigTemplates, rigTemplateMappings } from './template.ts';
+import { tools } from './tools/index.ts';
 
 const laboratoryPlugin: Plugin = {
   apparatus: {
@@ -81,22 +82,23 @@ const laboratoryPlugin: Plugin = {
      * Kit contributions wired up:
      *
      *   - `engines`              — every Laboratory engine design
-     *                               (orchestrate + fixture/scenario/
-     *                               probe/archive stubs). Stubs land
+     *                               (5 phase orchestrators + the
+     *                               work-engine stubs that get
+     *                               grafted by them). Stubs land
      *                               their real behavior under their
      *                               respective implementation clicks.
-     *   - `rigTemplates`         — the single canonical
-     *                               `post-and-collect-default` template
-     *                               (head engine: orchestrate).
+     *   - `rigTemplates`         — `post-and-collect-default` —
+     *                               enumerates the five phase
+     *                               orchestrators in sequence.
      *   - `rigTemplateMappings`  — `trial` → `post-and-collect-default`.
-     *
-     * `tools` (the manifest CLI surface, `nsg lab trial post`) is
-     * added under c-moma9ty6.
+     *   - `tools`                — the manifest CLI surface
+     *                               (`nsg lab trial-post`).
      */
     supportKit: {
       engines,
       rigTemplates,
       rigTemplateMappings,
+      tools,
     },
 
     async start() {
