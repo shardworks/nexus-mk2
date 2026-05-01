@@ -20,11 +20,13 @@ import { phaseEngines } from './phases.ts';
 import { codexSetupEngine, codexTeardownEngine } from './codex-fixture.ts';
 import { guildSetupEngine, guildTeardownEngine } from './guild-fixture.ts';
 import {
+  commissionPostXguildEngine,
+  waitForWritTerminalXguildEngine,
+} from './scenario-xguild.ts';
+import {
   archiveStub,
-  commissionPostXguildStub,
   probeGitRangeStub,
   probeStacksDumpStub,
-  waitForWritTerminalXguildStub,
 } from './stubs.ts';
 
 export const engines: Record<string, EngineDesign> = {
@@ -36,8 +38,8 @@ export const engines: Record<string, EngineDesign> = {
   'lab.codex-teardown': codexTeardownEngine,
   'lab.guild-setup': guildSetupEngine,
   'lab.guild-teardown': guildTeardownEngine,
-  'lab.commission-post-xguild': commissionPostXguildStub,
-  'lab.wait-for-writ-terminal-xguild': waitForWritTerminalXguildStub,
+  'lab.commission-post-xguild': commissionPostXguildEngine,
+  'lab.wait-for-writ-terminal-xguild': waitForWritTerminalXguildEngine,
   'lab.probe-stacks-dump': probeStacksDumpStub,
   'lab.probe-git-range': probeGitRangeStub,
   'lab.archive': archiveStub,

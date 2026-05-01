@@ -6,8 +6,6 @@
  *
  * Remaining stubs and the click that lands their real implementation:
  *
- *   - lab.commission-post-xguild
- *     lab.wait-for-writ-terminal-xguild             — c-momaa1vt
  *   - lab.probe-stacks-dump
  *     lab.probe-git-range                            — c-momaa3w7
  *   - lab.archive                                    — c-momaa5o9
@@ -20,6 +18,9 @@
  *     → see `engines/codex-fixture.ts`.
  *   - lab.guild-setup / lab.guild-teardown          (c-momaa03d)
  *     → see `engines/guild-fixture.ts`.
+ *   - lab.commission-post-xguild
+ *     lab.wait-for-writ-terminal-xguild             (c-momaa1vt)
+ *     → see `engines/scenario-xguild.ts`.
  */
 
 import type { EngineDesign, EngineRunResult } from '@shardworks/fabricator-apparatus';
@@ -55,15 +56,8 @@ function stubEngine(designId: string, summary: string): EngineDesign {
 
 // ── Scenario engines ─────────────────────────────────────────────────
 
-export const commissionPostXguildStub = stubEngine(
-  'lab.commission-post-xguild',
-  'shell out to nsg commission-post --guild-root <test-guild> --brief <path>',
-);
-
-export const waitForWritTerminalXguildStub = stubEngine(
-  'lab.wait-for-writ-terminal-xguild',
-  'poll writ status across guilds via nsg --guild-root <other> writ show',
-);
+// lab.commission-post-xguild / lab.wait-for-writ-terminal-xguild moved
+// to scenario-xguild.ts.
 
 // ── Probe engines ────────────────────────────────────────────────────
 
