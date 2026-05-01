@@ -58,7 +58,6 @@ to record what probes ran and what each yielded as a summary.
 interface LabTrialArchive {
   id: string;                            // generated
   trialId: string;                       // FK → clerk/writs (indexed)
-  status: 'in-progress' | 'complete' | 'failed';
   archivedAt: string;                    // ISO
 
   probes: Array<{
@@ -68,6 +67,11 @@ interface LabTrialArchive {
   }>;
 }
 ```
+
+Row existence is the success signal — there is no in-progress / failed
+row state. The archive engine writes the row atomically on success;
+trials whose rigs failed before reaching archive simply have no
+matching row.
 
 Trial-level facts (manifest body, codex base SHA, codex upstream URL,
 plugin specifications) are **not duplicated here** — they live on the
@@ -148,16 +152,19 @@ surface the archive, run `nsg lab trial-show <trialId>`.
 
 ### Atomicity
 
-The archive engine wraps its work in a single SQLite transaction:
-write the `lab-trial-archives` row with `status: 'in-progress'`, run
-each probe (probes write to their own books inside the same
-transaction via the engine context), update the row to
-`status: 'complete'`. Any failure rolls back the whole transaction —
-no half-state, no orphan rows.
+Per-engine, not per-trial. The rig grafts probes ahead of the archive
+engine; each probe writes its data atomically inside its own SQLite
+transaction. The archive engine runs after all probes complete and
+writes the `lab-trial-archives` index row atomically once. The index
+row is the join key for queries — probe-book rows without a matching
+archive-index row are orphan data from trials whose rigs failed before
+reaching the archive step. Orphans are safe to ignore in queries
+(every analytical query starts from `lab-trial-archives` and joins
+out). Cleanup of orphan probe rows is future polish; MVP leaves them
+in place.
 
 The teardown engines (`lab.guild-teardown`, `lab.codex-teardown`)
-refuse to run unless the trial's archive record exists with
-`status: 'complete'`.
+refuse to run unless the trial's archive row exists.
 
 ### Probe registry and extraction-dispatch
 
