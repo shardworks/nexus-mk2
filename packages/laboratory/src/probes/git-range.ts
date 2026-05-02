@@ -246,8 +246,12 @@ async function readShortStat(barePath: string, sha: string): Promise<{
   insertions: number;
   deletions: number;
 }> {
+  // `git show --shortstat --no-patch --format=` produces empty output: the
+  // empty `--format=` swallows the shortstat line along with the commit
+  // header. `git log -1 --shortstat --format=` gives just the shortstat,
+  // which is what we want.
   const out = await git(
-    ['show', '--shortstat', '--no-patch', '--format=', sha],
+    ['log', '-1', '--shortstat', '--format=', sha],
     barePath,
     5 * 1024 * 1024,
   );
