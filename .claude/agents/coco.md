@@ -17,7 +17,7 @@ At the start of every session:
 
    Don't eagerly read every click — just scan the goals so you know what's in flight. When the conversation turns toward a specific area, reach for `nsg click extract --id <id>` to load the full subtree as narrative context — this is your primary tool for orienting on a particular line of inquiry. Use `nsg click show <id>` only for single-click inspection; **don't walk a subtree by calling `show` on each child** — that's exactly what `extract` is for. See the **Clicks** section below for the workflow.
 
-2. **Resolve your Claude session ID** for use in commits and the coco-log:
+2. **Resolve your Claude session ID** for use in commits:
 
        jq -r .sessionId ~/.claude/sessions/$PPID.json
 
@@ -148,39 +148,13 @@ Example commit:
 
     Session: 905f54f8-fd5c-49df-9294-b856202a7740
 
-## Coco Log
-
-Coco maintains `experiments/data/coco-log.yaml` — a running log of every unit of work handled directly rather than dispatched as an autonomous commission. This is a standing research instrument tracking the patron-side work stream.
-
-**When to log:** Every commit you make gets a coco-log entry. Bundle the log update into the same commit as the work.
-
-**What counts as one entry:** One commit, or a tight cluster of commits toward a single goal. If you make 3 commits that are all part of "build the integration scorer," that's one entry — log it on the last commit of the cluster.
-
-**Schema fields:**
-- `session` — your Claude session ID
-- `date` — today's date (YYYY-MM-DD)
-- `item` — one-line description of the work
-- `commissionable` — boolean: could this work have been an autonomous commission?
-- `justification` — required when `commissionable: false`. Pick from: 
-  - `sanctum`: any changes to /workspace/nexus-mk2 should use this
-  - **NO OTHER JUSTIFICATIONS ARE ALLOWED**
-
-Commits are recoverable from the git log via the Session trailer — no need to record SHAs in the log.
-
-**The commissionable judgment:**
-- `false` — Work that *can't* be commissioned: interactive/decisional work requiring real-time iteration with Sean, sanctum/experiment/meta work, or work whose output is a decision rather than an artifact.
-- `true` — Work that *could* have been a commission but wasn't. No further annotation needed — the bare fact is the data point. Session logs and commit history provide the context if the "why" matters later.
-
-Pick from the justification list honestly. Having to choose from a constrained set keeps the classification rigorous — you can't rationalize everything as "interactive" when it was really just convenient.
-
 ## Commit Process
 
 When making a git commit:
 
 1. **Use Coco's git identity** via environment variables (see Git Identity section).
 2. **Include the Session trailer** with your Claude session ID.
-3. **Append a coco-log entry** to `experiments/data/coco-log.yaml` describing the work. Stage the log update alongside the work files so they land in the same commit.
-4. **Commit format:**
+3. **Commit format:**
 
        GIT_AUTHOR_NAME=Coco GIT_AUTHOR_EMAIL=coco@nexus.local \
        git commit -m "$(cat <<'EOF'
@@ -189,8 +163,6 @@ When making a git commit:
        Session: <session-id>
        EOF
        )"
-
-If multiple commits form a single logical unit of work, add the coco-log entry on the last commit of the cluster.
 
 ## Output
 
