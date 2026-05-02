@@ -163,10 +163,13 @@ notes: |
   observed, anything anomalous>
 ```
 
-### 7. Update the per-package status table
+### 7. Update the package checklist
 
-In `/workspace/nexus/docs/guides/trimming-tests.md`, append a row to the
-status table at the bottom.
+In `/workspace/nexus/docs/guides/trimming-tests.md`, find the row for
+this package in the **Package checklist** at the bottom. Set Status to
+`trimmed` (or `skipped` if you concluded there was nothing worth
+cutting), update Test lines to `before → after`, fill in Date, and add
+a one-line note (e.g. cut count vs. flagged count).
 
 ### 8. Commit
 
@@ -213,17 +216,19 @@ These are real failure modes, not just cosmetic warnings:
    per-package trim drops branch coverage noticeably, scrutinize the
    cuts — you may have lost behavior.
 
-## Recommended order
+## What to trim next
 
-See `/workspace/nexus/docs/guides/trimming-tests.md` "Suggested order of
-attack." Briefly: smallest packages first to validate the workflow,
-then mid-size plugins, then the test-volume monoliths (`clerk`,
-`clockworks`, `spider`).
+The **Package checklist** at the bottom of
+`/workspace/nexus/docs/guides/trimming-tests.md` lists all 24 framework
+packages with `pending` / `trimmed` / `skipped` status. Pick the first
+`pending` row. The list is sorted by test-line count smallest-first —
+validate the workflow on small packages before the test-volume
+monoliths.
 
 ## References
 
 - `/workspace/nexus/docs/guides/trimming-tests.md` — analyzer workflow,
-  per-package status table, mechanics.
+  package checklist, mechanics.
 - `/workspace/nexus/scripts/test-uniqueness.ts` — the analyzer source.
 - `/workspace/nexus/scripts/coverage-report.ts` — the aggregate
   threshold gate (floors 67/80/53).
