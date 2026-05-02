@@ -143,7 +143,7 @@ Both `--label` and `--kind` are required — `--label` is the casual relationshi
 
 "Dispatch" means the writ enters the Spider's queue — at post time for open-phase writs, at publish time for draft-phase writs. The bookkeeping fires on the actual dispatch moment.
 
-Three things follow:
+Two things follow:
 
 1. **Conclude the parent design click.** The click whose subtree drove the design is now resolved by the act of dispatch. Conclude it with a short summary of the final shape and the dispatched writ id(s). Example conclusion:
 
@@ -151,8 +151,6 @@ Three things follow:
        Final shape: <one-paragraph summary of the locked-in design>.
 
 2. **Delete any scratch file.** If the offline-review exception was used and a `.scratch/brief-*.md` file was created, delete it after dispatch — the writ carries the content now. In the default direct-to-system flow, there's nothing to delete.
-
-3. **Coco-log entry.** The dispatch is part of a session of work; the coco-log entry covers the design conversation and the act of dispatching. Reference the writ id(s) in the log so future sessions can join the design session to the resulting commission(s).
 
 For multi-commission batches, conclude the parent click once (naming all dispatched writ ids) rather than per-commission.
 
