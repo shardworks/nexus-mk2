@@ -1,0 +1,148 @@
+package: framework/core
+date: 2026-05-02
+session: 8f1960a6-d8b0-45bd-99b9-ea61425c039a
+
+# Pre-trim state
+test_files_before: 3
+test_lines_before: 311
+tests_before: 39
+pure_redundant_count: 29
+pure_redundant_pct: 74.4
+
+# Aggregate coverage (pre-trim)
+line_coverage_before: 67.96
+branch_coverage_before: 80.05
+func_coverage_before: 53.05
+
+# Per-package coverage (pre-trim) — from before this session; per-file values
+# unchanged in post-trim because cuts didn't remove any unique lines
+package_line_coverage_before: 86.02
+package_branch_coverage_before: 94.12
+package_func_coverage_before: 81.82
+
+# Review pass
+candidates_reviewed: 29
+candidates_deleted: 6
+candidates_kept: 23
+
+# Per-cut breakdown
+deletions:
+  - file: src/id.test.ts
+    test: "generateId > includes prefix verbatim"
+    reason: subsumed_by_regex_test
+    note: "The 'returns a string matching {prefix}-...' test already asserts the prefix appears via the regex anchor."
+  - file: src/id.test.ts
+    test: "shortId > round-trips as the shape resolveId() accepts as a unique prefix"
+    reason: belt_and_suspenders
+    note: "Other shortId tests cover three-segment, single-token, empty, and lone-hyphen exhaustively. The integration round-trip is structural insurance with no new assertion."
+  - file: src/resolve-package.test.ts
+    test: "resolvePackageNameForPluginId > resolves @shardworks-scoped package with -apparatus suffix"
+    reason: parameter_sweep_over_derivePluginId
+    note: "Function just calls derivePluginId on each dep and matches; suffix variants are derivePluginId tests in disguise."
+  - file: src/resolve-package.test.ts
+    test: "resolvePackageNameForPluginId > resolves @shardworks-scoped package with -kit suffix"
+    reason: parameter_sweep_over_derivePluginId
+  - file: src/resolve-package.test.ts
+    test: "resolvePackageNameForPluginId > resolves @shardworks-scoped package with -plugin suffix"
+    reason: parameter_sweep_over_derivePluginId
+  - file: src/resolve-package.test.ts
+    test: "resolvePackageNameForPluginId > resolves unscoped package with -kit suffix"
+    reason: parameter_sweep_over_derivePluginId
+
+# Sampled "kept" tests with reason categories — covers the major patterns
+# of false-positive redundancy in this package
+kept_samples:
+  - test: "generateId > default random suffix is 12 hex characters (6 bytes)"
+    reason_category: representative
+    note: "Asserts the documented default behavior; distinct contract."
+  - test: "generateId > custom randomByteCount produces 2×N hex characters"
+    reason_category: parameter_sweep
+    note: "Tests the parameterized API surface explicitly. Coverage-redundant w/ regex test but asserts the byte-count contract."
+  - test: "generateId > two calls produce different IDs"
+    reason_category: representative
+    note: "Uniqueness contract — cheap insurance for a critical invariant."
+  - test: "shortId > returns a single-token id unchanged"
+    reason_category: edge_case
+    note: "No-hyphen input. Distinct from the multi-segment happy path."
+  - test: "shortId > returns the empty string for an empty input"
+    reason_category: edge_case
+  - test: "derivePluginId > strips -kit suffix"
+    reason_category: parameter_sweep
+    note: "One of three suffix-regex alternations. Each tests a distinct branch in the regex's alternation."
+  - test: "derivePluginId > strips -apparatus suffix"
+    reason_category: parameter_sweep
+  - test: "derivePluginId > strips -plugin suffix"
+    reason_category: parameter_sweep
+  - test: "derivePluginId > drops @ only for third-party scopes"
+    reason_category: representative
+    note: "Distinct from @shardworks-scope and unscoped — third branch of the scope-handling logic."
+  - test: "derivePluginId > passes through unscoped names"
+    reason_category: representative
+    note: "Identity case for the no-scope, no-suffix path."
+  - test: "isProcessAlive > returns true for our own process"
+    reason_category: representative
+    note: "Happy-path probe. The 'returns false for a pid that does not exist' test is its required pair."
+  - test: "readPidFile > returns the parsed pid for a valid pidfile"
+    reason_category: representative
+  - test: "readPidFile > returns null for a malformed pidfile"
+    reason_category: error_path
+    note: "NaN-input branch in Number.isFinite check."
+  - test: "readPidFile > returns null for a non-positive pidfile"
+    reason_category: error_path
+    note: "Zero-input branch in pid > 0 check — distinct logic from NaN."
+  - test: "tryUnlink > removes an existing file"
+    reason_category: representative
+  - test: "waitForExit > returns true once the process exits"
+    reason_category: representative
+    note: "Success-polling path; paired with the timeout test."
+
+# Post-trim state
+test_files_after: 3
+test_lines_after: 275
+tests_after: 33
+
+# Aggregate coverage (post-trim)
+line_coverage_after: 67.97
+branch_coverage_after: 80.04
+func_coverage_after: 53.05
+
+# Per-package coverage (post-trim) — unchanged because no unique lines lost
+package_line_coverage_after: 86.02
+package_branch_coverage_after: 94.12
+package_func_coverage_after: 81.82
+
+# Re-run analyzer post-trim
+pure_redundant_count_after: 23
+pure_redundant_pct_after: 69.7
+
+# Effort
+trim_duration_min: 25
+notes: |
+  First real trim on a small package — proof of workflow.
+
+  Survival rate observation (Q2 data point): of 29 flagged candidates,
+  6 deleted (21%) and 23 kept (79%). Notably *below* H2's predicted
+  ≥50% deletion rate. The kept set clusters into three patterns:
+    - Parameter sweep over a regex alternation or scope branch (e.g.
+      derivePluginId's three suffix-strip tests). Each alternation is
+      a distinct branch even though line coverage doesn't distinguish.
+    - Edge case (empty input, NaN input, zero input). Coverage flags
+      these as redundant w/ happy paths because the same lines execute,
+      but they assert distinct invalid-input contracts.
+    - Representative identity case (e.g. shortId on a single-token
+      input). One per behavioral category.
+
+  H2 calibration note: at least on this small package, the analyzer's
+  pure-redundant count substantially overestimates deletable tests.
+  The 74% → 21% gap is the "false-positive redundancy" rate Q3 asks
+  about. If this pattern holds across packages, it shifts the H2
+  framing — agents do over-test, but most of the over-testing is
+  parameter sweeps that humans value.
+
+  The 6 deletions were genuine duplicates: assertions identical to
+  another test's assertion modulo input string (`includes prefix
+  verbatim` vs the regex test) or one-step-removed test of an
+  already-tested helper (`resolves ... with -X suffix` vs derivePluginId
+  suffix tests).
+
+# commit_sha filled in by the commit itself
