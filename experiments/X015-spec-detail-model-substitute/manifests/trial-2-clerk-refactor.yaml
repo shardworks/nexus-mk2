@@ -1,0 +1,136 @@
+slug: x015-trial-2-clerk-refactor-sonnet-n1
+title: X015 trial 2 — Sonnet implementer + Opus reviewer on Clerk refactor (N=1, full pipeline)
+codex: nexus
+
+description: |
+  Re-run of trial 1 with two corrections that should let the rig run
+  to completion through review/revise/seal:
+
+  (1) Artificer role permissions narrowed from `clerk:*` to `clerk:read`.
+      Trial 1 exposed that `clerk:*` includes write-tier tools — including
+      `writ-complete` — which Sonnet (lacking the implicit pipeline frame
+      that role-instructions provide) reached for after finishing its
+      work. The narrow tactical fix is to remove the escape hatch; the
+      wider design question (when may anima touch writ lifecycle?) lives
+      in click c-moof5nig and is unresolved.
+
+  (2) Test-guild now ships the same role-instruction files vibers carries.
+      Trial 1's artificer role had only `permissions:` — no `instructions`,
+      no `instructionsFile`. Vibers's artificer has roles/artificer.md
+      establishing the pipeline metaphor ("at the patron's request..."),
+      and historical vibers Sonnet sessions never called writ-complete
+      (0/50). Today's Sonnet (no role file) called it on the first try.
+      Hypothesis: the role file is doing real behavioral work — Opus is
+      robust to its absence; Sonnet needs it. Anecdotal finding written
+      up at experiments/X009-metaphor-as-instruction/artifacts/.
+
+  Everything else identical to trial 1: same codex baseSha, same brief,
+  same plugin set, same framework version, same per-role model
+  assignment (artificer=sonnet, reviewer=opus).
+
+  Expected behavior: the implement engine runs to its session terminal
+  rather than hijacking the writ. Review fires (Opus) and emits PASS or
+  FAIL with findings. If FAIL, revise fires (Sonnet) and addresses the
+  findings. Seal grafts the work to the bare repo. The rig completes
+  with commits captured by lab.probe-git-range — diff comparison can
+  run cleanly.
+
+  Cost / time expectation: implement same as trial 1 (~$20 / ~63min).
+  Plus review (~$2-5 Opus, short session). Plus revise if needed (~$5-10
+  Sonnet). Plus seal. Total ~$30-40, ~90-120 min wall.
+
+  ANTHROPIC_API_KEY flows through to the test guild's daemon via
+  process.env inheritance.
+
+frameworkVersion: '0.1.294'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: d871dd76cd56f9236a8866952081b22f8dbcfa30
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.294' }
+      config:
+        loom:
+          roles:
+            artificer:
+              model: sonnet
+              # FIX 1: narrowed from clerk:* to clerk:read. Removes the
+              # writ-complete / writ-edit / writ-fail / writ-cancel /
+              # writ-publish / commission-post / step-add escape hatches.
+              # writ-show / writ-list / writ-tree remain available for
+              # context-gathering. tools:* unchanged — that grants
+              # tool-discovery (loom-roles, loom-weave, etc.) which is
+              # benign.
+              permissions:
+                - 'clerk:read'
+                - 'tools:*'
+            reviewer:
+              model: opus
+              permissions: []
+        animator:
+          sessionProvider: 'claude-code'
+        spider:
+          variables:
+            role: 'artificer'
+            buildCommand: 'pnpm -w typecheck'
+            testCommand: 'pnpm -w test'
+
+      # FIX 2: copy role-instruction files into the test guild. Vibers
+      # has roles/artificer.md (the implementer-role identity narrative)
+      # and roles/patron.md. Loom reads `home/roles/{role}.md` at startup
+      # for every configured guild role. Trial 1 omitted these files —
+      # Sonnet got tools but no narrative frame. Vibers has no charter
+      # file; if one is ever added, an additional `files` entry should
+      # copy it from the staged fixtures dir.
+      files:
+        - sourcePath: /workspace/nexus-mk2/experiments/X015-spec-detail-model-substitute/fixtures/test-guild/roles/artificer.md
+          guildPath: roles/artificer.md
+        - sourcePath: /workspace/nexus-mk2/experiments/X015-spec-detail-model-substitute/fixtures/test-guild/roles/patron.md
+          guildPath: roles/patron.md
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X015-spec-detail-model-substitute/briefs/trial-1-clerk-refactor.md
+    waitForTerminal: true
+    # 3h cap — the full pipeline includes review + revise + seal beyond
+    # implement. Trial 1's implement alone was 63 min; allow headroom
+    # for review (short) + a possible revise pass + seal.
+    timeoutMs: 10800000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
