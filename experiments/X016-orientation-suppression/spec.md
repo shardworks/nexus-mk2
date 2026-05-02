@@ -77,20 +77,112 @@ a follow-up. Phase 1 instead validates:
 - Teardown safety check passes (archive row exists)
 - `nsg lab trial-extract` materializes captured data
 
-### Phase 2 — full execution (future)
+### Phase 2 — full execution
 
-Once daemon lifecycle is added to `lab.guild-setup`, the manifest
-can switch to `waitForTerminal: true` and the implementer rig will
-actually run. At that point:
+#### Phase 2a (apparatus daemon-lifecycle smoke test)
 
-- baseline + strong-prompt variants both run as separate trials
-- `lab.probe-stacks-dump` captures `animator/sessions` rows
-  (turn counts, cost, durations) for each variant
-- `lab.probe-git-range` captures the implementer's commits to
-  measure productive-output timing
-- Comparative analysis happens sanctum-side via
-  `nsg lab trial-export-book <trialId> --book animator/sessions`
-  piped into a DuckDB query
+Daemon lifecycle added to the lab via `lab.daemon-setup` /
+`lab.daemon-teardown` fixture pair. Phase-2a manifest came up cleanly
+without an implementer (no astrolabe in test guild), proving the
+daemon-lifecycle path against a real environment.
+
+#### Phase 2b (first implementer-driven trial)
+
+End-to-end trial running a sonnet implementer through draft → implement
+→ review → revise → seal. Used a trivial brief (multiplySafely) to
+calibrate the apparatus, not measure orientation tax. 16/16 engines
+green, ~$0.28, ~2.5 min wallclock.
+
+#### Phase 2c (the actual orientation-suppression A/B)
+
+**Codex source: rig 2 from the cost-investigation.** The reckoner-tick
+commission `w-moiy8hkv` (rig `rig-moj12h4o-19af85f4`) — the substantive
+cross-package code change that read-utilization analysis identified
+as paying visible orientation tax. The seal commit `7bed456` carries
+the entire change in one squashed commit (the implementer batched all
+work; see click `c-montlkvj`).
+
+**Synthesized midpoint via partition.** Since the implementer's draft
+branch produced only one mega-commit (no recoverable intermediate
+states — confirmed via fsck on the codex bare repo), phase 2c uses a
+**partition** of the seal commit's diff:
+
+- **Done by prior session** (~58% of touch surface):
+  reckoner core source (types.ts, tick.ts new file, reckoner.ts
+  refactor), reckoner package metadata, reckoner-cdc.test.ts
+  (deleted), reckoner-tick.test.ts (new file), reckoner.test.ts.
+  Build green at this checkpoint; primary reckoner test surface
+  passes.
+- **Remaining** (~42%): peripheral test cascades
+  (reckoner-scheduler.test.ts, reckoner-depends-on.test.ts,
+  integration.test.ts, vision-keeper integration.test.ts,
+  vision-keeper.test.ts) and all four documentation files
+  (apparatus/reckoner.md, petitioner-registration.md,
+  reckonings-book.md, reckoner/README.md).
+
+The "done" subset gets applied as a single synthetic commit on top
+of `7bed456~1`. That commit's SHA becomes phase 2c's codex `baseSha`.
+
+**Brief structure (single markdown per variant, posted as
+`writ.body`):**
+
+```
+# Continuing: <writ title>
+
+[STRONG-PROMPT ONLY: abstract anti-orientation directives at top]
+
+[HANDOFF NOTE — honest summary of done/remaining]
+
+---
+
+[ORIGINAL WRIT BODY VERBATIM]
+```
+
+**Variants:**
+
+| variant | description |
+|---|---|
+| baseline | handoff context + original writ body, no directives |
+| strong-prompt | same + abstract imperative directives at top: "Begin work immediately. Do not summarize the task before starting. Make your first turn a code change." |
+
+Strong-prompt directives are **abstract / generic**, not file-level
+specific — testing the harder version of H1 (does the imperative
+work without telling the agent what NOT to read).
+
+**Outcome metric: turns-to-first-productive-edit.**
+
+Definition: the turn ordinal of the implementer's first assistant
+message containing an `Edit`, `Write`, or `MultiEdit` tool call
+targeting a file inside the codex working directory. Bash, Read,
+Grep, Glob, LS, TodoWrite, etc. do NOT count. Per-session, machine-
+extractable from `animator/transcripts`.
+
+Secondary metrics: total turns, readonly tool calls before first
+productive edit (the orientation-cost measure), readonly calls
+total, the file targeted by the first productive edit (sanity
+check: did the implementer respect the partition?).
+
+**Analysis: sanctum-side script** at
+`scripts/extract-orientation-metrics.py`, run after `nsg lab
+trial-extract`. Reads the extracted `animator/transcripts` and
+emits one row per session with the metrics above.
+
+**N: adaptive, starting from N=1 calibration.** Run baseline N=1
+first to (a) measure per-trial cost on rig-2-shaped work and (b)
+establish whether orientation tax is even visible at this size of
+brief. Decide N from there.
+
+**Quality control:** randomize variant order across runs, pin the
+model snapshot, save full transcripts. Defer formal noise-floor
+work until N>1.
+
+#### Phase 2 plumbing
+
+- `lab.probe-stacks-dump` captures `animator/sessions` and
+  `animator/transcripts` rows.
+- `lab.probe-git-range` captures the implementer's commits.
+- Comparative analysis happens via the orientation-metrics script
+  + standard DuckDB queries against the exported books.
 
 ## Trial-shape constraints
 
@@ -229,3 +321,37 @@ actually run. At that point:
     commit even when the patch contains content. Diff-stat
     extraction in the probe is broken; cosmetic but worth fixing
     before phase 2c so we have proper summary stats.
+
+- 2026-05-02: **Phase 2c design pass.** Locked the design choices that
+  govern the actual orientation-suppression A/B. Headlines:
+  - **Codex source:** rig 2 from the cost-investigation
+    (`w-moiy8hkv`, the reckoner-tick rig). Real substantive
+    cross-package work that the read-utilization analysis already
+    documented as paying visible orientation tax.
+  - **Synthesized midpoint:** the implementer made a single mega-
+    commit, so we partition `7bed456`'s diff into "done by prior
+    session" (~58%: reckoner core source + new tick.ts +
+    reckoner-tick.test.ts + cdc.test.ts deletion) and "remaining"
+    (~42%: peripheral test cascades + four documentation files).
+    Filed click `c-montlkvj` on the per-task-commit non-compliance
+    observation (parented under `c-modxxtu6`/idea-#15).
+  - **Brief structure:** single markdown per variant, posted as
+    `writ.body`. Layout: handoff context → original writ verbatim,
+    with strong-prompt directives prepended to the strong variant.
+  - **Strong-prompt directives are abstract/generic** — testing the
+    harder H1 (does the imperative work without file-level
+    specifics).
+  - **Outcome metric:** turns-to-first-productive-edit, defined as
+    the turn ordinal of the first Edit/Write/MultiEdit tool call
+    targeting a codex file. Bash/Read/Grep/etc. don't count.
+  - **Probe approach:** sanctum-side analysis script
+    (`scripts/extract-orientation-metrics.py`), not a probe
+    extension — keeps probe surface small and lets the metric
+    definition evolve.
+  - **N strategy:** adaptive, starting at N=1 baseline calibration.
+    Decide expansion based on observed cost + signal strength.
+  - **QC:** randomize variant order, pin model snapshot, save full
+    transcripts (defer formal noise-floor analysis until N>1).
+  - **Pre-flight:** `lab.probe-git-range` diff-stats fixed
+    (`c-monnvxkz` → `20b857ee`); spider apparatus.requires fixed
+    upstream (`c-monniwt3` → `acd2037`). Both blockers cleared.

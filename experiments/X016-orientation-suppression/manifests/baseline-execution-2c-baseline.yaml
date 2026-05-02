@@ -1,0 +1,117 @@
+slug: x016-baseline-2c-baseline-n1
+title: X016 Phase 2c — baseline variant N=1 calibration
+codex: nexus
+
+description: |
+  Phase 2c — first run of the actual orientation-suppression A/B.
+  This is the BASELINE variant (no anti-orientation directives), N=1
+  calibration trial.
+
+  Codex pinned to the synthetic mid-flow checkpoint commit
+  c047e29e — a partition of rig 2's seal commit (7bed456,
+  w-moiy8hkv, the reckoner-tick rig) that puts ~58% of the touch
+  surface "done by prior session" (reckoner core source + tick.ts
+  new file + replacement test surface) and leaves ~42% remaining
+  (peripheral test cascades + four documentation files). At this
+  checkpoint, reckoner-tick.test.ts passes (13/13) but the cascade
+  tests in reckoner-scheduler/depends-on/integration are red, and
+  the vision-keeper collateral tests are red, and the four docs
+  are unchanged — exactly the mid-flow state the implementer is
+  expected to fix.
+
+  Brief: phase-2c-baseline.md, which packages the handoff context
+  + the original w-moiy8hkv writ body verbatim. No anti-orientation
+  directives.
+
+  Outcome metric: turns-to-first-productive-edit, extracted from
+  animator/transcripts post-hoc via
+  scripts/extract-orientation-metrics.py.
+
+  Cost expectation: unknown — this trial is the calibration. Rig 2
+  in vibers cost $47.26 across all engines, but X016 phase 2c uses
+  none of the planning engines (no astrolabe), so the cost is just
+  implement + review + revise + seal. Expecting on the order of
+  $5-15 per trial; this run will tell us whether to scale to N=10
+  or N=20 per variant.
+
+  waitForTerminal=true with a 30-min cap (longer than 2b's 15 min
+  because the brief is meaningfully bigger and the work is real).
+
+  ANTHROPIC_API_KEY flows through to the test guild's daemon via
+  process.env inheritance (same as 2b).
+
+frameworkVersion: '0.1.292'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      # Synthetic mid-flow checkpoint commit on /workspace/nexus,
+      # branch x016-phase-2c-checkpoint. The local-bare flow tolerates
+      # commits not on origin/main.
+      upstreamRepo: /workspace/nexus
+      baseSha: c047e29e331c65dba47338045d0ba91291e9eece
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # Same plugin set as phase 2b. Plugin order matters: spider's
+      # 0.1.292 start() resolves animator via g.apparatus(), so
+      # animator must precede spider in the topo (the apparatus.requires
+      # fix landed in framework HEAD but is not in 0.1.292).
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.292' }
+      config:
+        loom:
+          roles:
+            artificer:
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+        animator:
+          sessionProvider: 'claude-code'
+        spider:
+          variables:
+            role: 'artificer'
+            # Phase 2c targets the reckoner + vision-keeper packages
+            # via package-scoped pnpm filters. Both packages need test
+            # runs to verify the full cascade.
+            buildCommand: 'pnpm --filter @shardworks/reckoner-apparatus build && pnpm --filter @shardworks/vision-keeper-apparatus build'
+            testCommand: 'pnpm --filter @shardworks/reckoner-apparatus test && pnpm --filter @shardworks/vision-keeper-apparatus test'
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X016-orientation-suppression/briefs/phase-2c-baseline.md
+    waitForTerminal: true
+    timeoutMs: 1800000   # 30 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
