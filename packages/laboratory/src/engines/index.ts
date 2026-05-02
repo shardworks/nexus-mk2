@@ -19,6 +19,7 @@ import { guildSetupEngine, guildTeardownEngine } from './guild-fixture.ts';
 import { daemonSetupEngine, daemonTeardownEngine } from './daemon-fixture.ts';
 import {
   commissionPostXguildEngine,
+  waitForRigTerminalXguildEngine,
   waitForWritTerminalXguildEngine,
 } from './scenario-xguild.ts';
 import { archiveEngine } from '../archive/engine.ts';
@@ -41,6 +42,7 @@ export const engines: Record<string, EngineDesign> = {
   // Scenario work engines
   'lab.commission-post-xguild': commissionPostXguildEngine,
   'lab.wait-for-writ-terminal-xguild': waitForWritTerminalXguildEngine,
+  'lab.wait-for-rig-terminal-xguild': waitForRigTerminalXguildEngine,
 
   // Probe work engines
   'lab.probe-stacks-dump': stacksDumpEngine,

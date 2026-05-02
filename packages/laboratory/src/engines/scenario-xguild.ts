@@ -1,13 +1,21 @@
 /**
- * lab.commission-post-xguild / lab.wait-for-writ-terminal-xguild —
- * cross-guild scenario engines for trial workloads.
+ * lab.commission-post-xguild / lab.wait-for-writ-terminal-xguild /
+ * lab.wait-for-rig-terminal-xguild — cross-guild scenario engines for
+ * trial workloads.
  *
  * The canonical trial scenario is "post a commission to the test guild
  * and wait for it to complete." `lab.commission-post-xguild` does both
  * inline by default (single engine fits the rig template's single-
- * scenario-engine slot), and `lab.wait-for-writ-terminal-xguild` is the
- * standalone wait building block — useful for future multi-step
- * scenarios where post is detached from wait.
+ * scenario-engine slot). The two standalone wait engines are the
+ * detached building blocks.
+ *
+ * **Two waiter modes — writ vs rig.** For full-pipeline trials the writ
+ * reaches a terminal classification when `seal` runs and transitions
+ * the mandate to `completed`. For spec-only / planning-only rigs (no
+ * seal stage), the writ stays in `open` indefinitely; the rig itself
+ * is the only signal that the trial is done. `waitForRigTerminal`
+ * selects the rig waiter; `waitForTerminal` selects the writ waiter.
+ * Exactly one wait mode runs per invocation (mutually exclusive).
  *
  * v1 cross-guild surface is shell-out via
  * `<testGuild>/node_modules/.bin/nsg --guild-root <test-guild> ...` —
@@ -28,32 +36,54 @@
  * 4. Shell out: `nsg --guild-root <testGuild> commission-post --title
  *    <title> --body <body> --type <type> [--parent-id <parentId>]`.
  *    Parse JSON response, extract writ id.
- * 5. If `waitForTerminal !== false` (default true), poll until the writ
- *    reaches a terminal state. Otherwise return immediately after post.
+ * 5. Choose wait mode:
+ *    - `waitForRigTerminal: true` → poll the spider rig dispatched
+ *      from the writ until it reaches a terminal RigStatus
+ *      (`completed`/`failed`/`cancelled`). Use this for spec-only
+ *      and other rigs whose writ never seals.
+ *    - `waitForTerminal !== false` (default true) → poll the writ
+ *      until it reaches a terminal classification. Use this for
+ *      full-pipeline rigs where seal transitions the writ.
+ *    - Both false → return immediately after post.
  *
  * GIVENS (commission-post)
  * ────────────────────────
- *   briefPath        : string  — absolute path to the brief markdown.
- *   title            : string? — optional explicit title; defaults to
- *                                first H1 of the brief, or
- *                                "Commission from <basename>".
- *   type             : string? — writ type, default 'mandate'.
- *   parentId         : string? — optional parent writ id (in the test
- *                                guild's namespace).
- *   waitForTerminal  : bool?   — default true. When true, the engine
- *                                polls until writ terminal before
- *                                returning. When false, returns
- *                                immediately after post.
- *   pollIntervalMs   : number? — only meaningful when waiting; default
- *                                5000.
- *   timeoutMs        : number? — only meaningful when waiting; default
- *                                1_800_000 (30 minutes).
+ *   briefPath          : string  — absolute path to the brief markdown.
+ *   title              : string? — optional explicit title; defaults to
+ *                                  first H1 of the brief, or
+ *                                  "Commission from <basename>".
+ *   type               : string? — writ type, default 'mandate'.
+ *   parentId           : string? — optional parent writ id (in the test
+ *                                  guild's namespace).
+ *   waitForTerminal    : bool?   — default true. When true and
+ *                                  waitForRigTerminal is not set,
+ *                                  polls the writ until terminal. When
+ *                                  false, returns immediately after
+ *                                  post (unless waitForRigTerminal is
+ *                                  set, in which case the rig waiter
+ *                                  runs instead).
+ *   waitForRigTerminal : bool?   — default false. When true, polls the
+ *                                  spider rig dispatched from the writ
+ *                                  until terminal. Mutually exclusive
+ *                                  with waitForTerminal=true (engine
+ *                                  throws if both true).
+ *   pollIntervalMs     : number? — only meaningful when waiting; default
+ *                                  5000.
+ *   timeoutMs          : number? — only meaningful when waiting; default
+ *                                  1_800_000 (30 minutes).
+ *   rigDiscoveryTimeoutMs : number? — only meaningful when
+ *                                  waitForRigTerminal=true; how long to
+ *                                  wait for the rig to appear after post
+ *                                  (rig dispatch is async); default
+ *                                  60_000 (1 minute).
  *
  * YIELDS (commission-post)
  * ────────────────────────
- *   waitForTerminal=true:
+ *   waitForTerminal=true (default):
  *     { writId, postedAt, finalState, resolution, resolvedAt }
- *   waitForTerminal=false:
+ *   waitForRigTerminal=true:
+ *     { writId, postedAt, rigId, rigStatus, rigResolvedAt }
+ *   neither (early return):
  *     { writId, postedAt }
  *
  * GIVENS (wait-for-writ-terminal — standalone)
@@ -65,6 +95,17 @@
  * YIELDS (wait-for-writ-terminal)
  * ───────────────────────────────
  *   { writId, finalState, resolution, resolvedAt }
+ *
+ * GIVENS (wait-for-rig-terminal — standalone)
+ * ───────────────────────────────────────────
+ *   writId                : string  — the writ id whose rig to poll.
+ *   pollIntervalMs        : number? — default 5000.
+ *   timeoutMs             : number? — default 1_800_000 (30 minutes).
+ *   rigDiscoveryTimeoutMs : number? — default 60_000 (1 minute).
+ *
+ * YIELDS (wait-for-rig-terminal)
+ * ──────────────────────────────
+ *   { writId, rigId, rigStatus, rigResolvedAt }
  */
 
 import { execFile as execFileCb } from 'node:child_process';
@@ -84,7 +125,9 @@ const execFile = promisify(execFileCb);
 
 export const DEFAULT_POLL_INTERVAL_MS = 5_000;
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000; // 30 minutes
+export const DEFAULT_RIG_DISCOVERY_TIMEOUT_MS = 60_000; // 1 minute
 const TERMINAL_CLASSIFICATION = 'terminal';
+const RIG_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -103,6 +146,13 @@ interface TerminalSnapshot {
   finalState: string;
   resolution: string | null;
   resolvedAt: string;
+}
+
+interface RigTerminalSnapshot {
+  writId: string;
+  rigId: string;
+  rigStatus: 'completed' | 'failed' | 'cancelled';
+  rigResolvedAt: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -284,6 +334,149 @@ export async function waitForWritTerminal(opts: {
   }
 }
 
+/**
+ * Resolve the spider rig dispatched from a writ. Polls
+ * `nsg rig for-writ <writId>` until a rig appears or the discovery
+ * timeout elapses — rig dispatch is async after writ creation, so
+ * the rig may not exist for a few seconds after `commission-post`
+ * returns. Returns the rig id once found.
+ *
+ * The Spider's `rig for-writ` command returns `null` when no rig is
+ * yet bound to the writ; that's the wait condition.
+ */
+export async function discoverRigForWrit(opts: {
+  testGuildPath: string;
+  writId: string;
+  pollIntervalMs: number;
+  timeoutMs: number;
+  designId: string;
+}): Promise<string> {
+  const startedAt = Date.now();
+  const localNsg = resolveLocalNsg(opts.testGuildPath, opts.designId);
+
+  while (true) {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > opts.timeoutMs) {
+      throw new Error(
+        `[${opts.designId}] timed out after ${opts.timeoutMs}ms waiting for a rig ` +
+          `to be dispatched from writ ${opts.writId} (test guild ${opts.testGuildPath}).`,
+      );
+    }
+
+    // `nsg rig for-writ` requires the FULL writ id (no prefix resolution
+    // in the rig book today). Caller must pass the full id.
+    const { stdout } = await exec(localNsg, [
+      '--guild-root',
+      opts.testGuildPath,
+      'rig',
+      'for-writ',
+      opts.writId,
+    ]);
+
+    const trimmed = stdout.trim();
+    if (trimmed && trimmed !== 'null') {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (err) {
+        throw new Error(
+          `[${opts.designId}] rig for-writ JSON parse failed for writ ${opts.writId}: ` +
+            `${(err as Error).message}; stdout=${trimmed.slice(0, 200)}`,
+        );
+      }
+      if (typeof parsed === 'object' && parsed !== null) {
+        const obj = parsed as Record<string, unknown>;
+        if (typeof obj.id === 'string' && obj.id.length > 0) {
+          return obj.id;
+        }
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, opts.pollIntervalMs));
+  }
+}
+
+/**
+ * Poll until the target writ's dispatched spider rig reaches a terminal
+ * RigStatus (`completed` | `failed` | `cancelled`). Throws on timeout.
+ *
+ * Use this for rigs whose mandate writ never seals — spec-only /
+ * planning-only trials, etc. — where the rig itself is the only
+ * "trial done" signal. Each poll shells out
+ * `nsg --guild-root <test-guild> rig show --id <rigId> --format json`.
+ */
+export async function waitForRigTerminal(opts: {
+  testGuildPath: string;
+  writId: string;
+  pollIntervalMs: number;
+  timeoutMs: number;
+  rigDiscoveryTimeoutMs: number;
+  designId: string;
+}): Promise<RigTerminalSnapshot> {
+  // First find the rig (may not exist immediately after writ creation).
+  const rigId = await discoverRigForWrit({
+    testGuildPath: opts.testGuildPath,
+    writId: opts.writId,
+    pollIntervalMs: opts.pollIntervalMs,
+    timeoutMs: opts.rigDiscoveryTimeoutMs,
+    designId: opts.designId,
+  });
+
+  const startedAt = Date.now();
+  const localNsg = resolveLocalNsg(opts.testGuildPath, opts.designId);
+
+  while (true) {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > opts.timeoutMs) {
+      throw new Error(
+        `[${opts.designId}] timed out after ${opts.timeoutMs}ms waiting for rig ` +
+          `${rigId} (writ ${opts.writId}, test guild ${opts.testGuildPath}) to ` +
+          `reach a terminal RigStatus.`,
+      );
+    }
+
+    const { stdout } = await exec(localNsg, [
+      '--guild-root',
+      opts.testGuildPath,
+      'rig',
+      'show',
+      '--id',
+      rigId,
+      '--format',
+      'json',
+    ]);
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch (err) {
+      throw new Error(
+        `[${opts.designId}] rig show JSON parse failed for rig ${rigId}: ` +
+          `${(err as Error).message}; stdout=${stdout.slice(0, 200)}`,
+      );
+    }
+    if (typeof parsed !== 'object' || parsed === null) {
+      throw new Error(
+        `[${opts.designId}] rig show response was not an object for rig ${rigId}.`,
+      );
+    }
+
+    const obj = parsed as Record<string, unknown>;
+    const status = obj.status;
+    if (typeof status === 'string' && RIG_TERMINAL_STATUSES.has(status)) {
+      return {
+        writId: opts.writId,
+        rigId,
+        rigStatus: status as RigTerminalSnapshot['rigStatus'],
+        rigResolvedAt:
+          typeof obj.resolvedAt === 'string' ? obj.resolvedAt : new Date().toISOString(),
+      };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, opts.pollIntervalMs));
+  }
+}
+
 // ── Validation helpers ────────────────────────────────────────────────
 
 function requireAbsolutePath(
@@ -338,7 +531,20 @@ export const commissionPostXguildEngine: EngineDesign = {
     const explicitTitle = optionalString(rawGivens.title, designId, 'title');
     const type = optionalString(rawGivens.type, designId, 'type') ?? 'mandate';
     const parentId = optionalString(rawGivens.parentId, designId, 'parentId');
-    const waitForTerminal = rawGivens.waitForTerminal !== false; // default true
+    const shouldWaitForRig = rawGivens.waitForRigTerminal === true;
+    // waitForTerminal defaults to true ONLY when waitForRigTerminal is
+    // not set — a manifest specifying just `waitForRigTerminal: true`
+    // should not also implicitly run the writ waiter.
+    const explicitWaitForTerminal = rawGivens.waitForTerminal;
+    const shouldWaitForWrit =
+      explicitWaitForTerminal === true ||
+      (explicitWaitForTerminal !== false && !shouldWaitForRig);
+    if (shouldWaitForRig && explicitWaitForTerminal === true) {
+      throw new Error(
+        `[${designId}] waitForTerminal and waitForRigTerminal are mutually exclusive; ` +
+          `pick one wait mode (writ vs rig) per invocation.`,
+      );
+    }
     const pollIntervalMs = optionalPositiveNumber(
       rawGivens.pollIntervalMs,
       designId,
@@ -350,6 +556,12 @@ export const commissionPostXguildEngine: EngineDesign = {
       designId,
       'timeoutMs',
       DEFAULT_TIMEOUT_MS,
+    );
+    const rigDiscoveryTimeoutMs = optionalPositiveNumber(
+      rawGivens.rigDiscoveryTimeoutMs,
+      designId,
+      'rigDiscoveryTimeoutMs',
+      DEFAULT_RIG_DISCOVERY_TIMEOUT_MS,
     );
 
     const testGuild = resolveTestGuild(context.upstream, designId);
@@ -411,7 +623,22 @@ export const commissionPostXguildEngine: EngineDesign = {
       postedAt: new Date().toISOString(),
     };
 
-    if (!waitForTerminal) {
+    if (shouldWaitForRig) {
+      const rigTerminal = await waitForRigTerminal({
+        testGuildPath: testGuild.guildPath,
+        writId: posted.writId,
+        pollIntervalMs,
+        timeoutMs,
+        rigDiscoveryTimeoutMs,
+        designId,
+      });
+      return {
+        status: 'completed',
+        yields: { ...posted, ...rigTerminal },
+      };
+    }
+
+    if (!shouldWaitForWrit) {
       return {
         status: 'completed',
         yields: posted,
@@ -465,6 +692,54 @@ export const waitForWritTerminalXguildEngine: EngineDesign = {
       writId,
       pollIntervalMs,
       timeoutMs,
+      designId,
+    });
+
+    return {
+      status: 'completed',
+      yields: terminal,
+    };
+  },
+};
+
+// ── Standalone rig-wait engine ────────────────────────────────────────
+
+export const waitForRigTerminalXguildEngine: EngineDesign = {
+  id: 'lab.wait-for-rig-terminal-xguild',
+  async run(rawGivens, context: EngineRunContext): Promise<EngineRunResult> {
+    const designId = 'lab.wait-for-rig-terminal-xguild';
+    const writId = optionalString(rawGivens.writId, designId, 'writId');
+    if (writId === undefined || writId.length === 0) {
+      throw new Error(
+        `[${designId}] givens.writId is required (the writ id whose dispatched rig to poll).`,
+      );
+    }
+    const pollIntervalMs = optionalPositiveNumber(
+      rawGivens.pollIntervalMs,
+      designId,
+      'pollIntervalMs',
+      DEFAULT_POLL_INTERVAL_MS,
+    );
+    const timeoutMs = optionalPositiveNumber(
+      rawGivens.timeoutMs,
+      designId,
+      'timeoutMs',
+      DEFAULT_TIMEOUT_MS,
+    );
+    const rigDiscoveryTimeoutMs = optionalPositiveNumber(
+      rawGivens.rigDiscoveryTimeoutMs,
+      designId,
+      'rigDiscoveryTimeoutMs',
+      DEFAULT_RIG_DISCOVERY_TIMEOUT_MS,
+    );
+
+    const testGuild = resolveTestGuild(context.upstream, designId);
+    const terminal = await waitForRigTerminal({
+      testGuildPath: testGuild.guildPath,
+      writId,
+      pollIntervalMs,
+      timeoutMs,
+      rigDiscoveryTimeoutMs,
       designId,
     });
 

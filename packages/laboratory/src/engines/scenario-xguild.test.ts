@@ -24,6 +24,7 @@ import {
   commissionPostXguildEngine,
   discoverTestGuilds,
   extractH1Title,
+  waitForRigTerminalXguildEngine,
   waitForWritTerminalXguildEngine,
 } from './scenario-xguild.ts';
 
@@ -253,6 +254,36 @@ describe('lab.commission-post-xguild — validation', () => {
       /failed to read brief/,
     );
   });
+
+  it('rejects when both waitForTerminal and waitForRigTerminal are true', async () => {
+    const briefPath = path.join(makeTmpDir('brief-dir'), 'b.md');
+    fs.writeFileSync(briefPath, '# Brief\n\nbody');
+    await assert.rejects(
+      () =>
+        commissionPostXguildEngine.run(
+          { briefPath, waitForTerminal: true, waitForRigTerminal: true },
+          makeContext({
+            upstream: { g: { guildName: 'g', guildPath: '/some/path' } },
+          }),
+        ),
+      /mutually exclusive/,
+    );
+  });
+
+  it('rejects malformed rigDiscoveryTimeoutMs', async () => {
+    const briefPath = path.join(makeTmpDir('brief-dir'), 'b.md');
+    fs.writeFileSync(briefPath, '# Brief\n\nbody');
+    await assert.rejects(
+      () =>
+        commissionPostXguildEngine.run(
+          { briefPath, rigDiscoveryTimeoutMs: 0 },
+          makeContext({
+            upstream: { g: { guildName: 'g', guildPath: '/some/path' } },
+          }),
+        ),
+      /rigDiscoveryTimeoutMs must be a positive number/,
+    );
+  });
 });
 
 // ── lab.wait-for-writ-terminal-xguild — validation ──────────────────
@@ -309,6 +340,77 @@ describe('lab.wait-for-writ-terminal-xguild — validation', () => {
           }),
         ),
       /pollIntervalMs must be a positive number/,
+    );
+  });
+});
+
+// ── lab.wait-for-rig-terminal-xguild — validation ───────────────────
+
+describe('lab.wait-for-rig-terminal-xguild — validation', () => {
+  beforeEach(() => {
+    installFakeGuild(makeTmpDir('lab-host'));
+  });
+
+  it('rejects missing writId', async () => {
+    await assert.rejects(
+      () =>
+        waitForRigTerminalXguildEngine.run(
+          {},
+          makeContext({
+            upstream: { g: { guildName: 'g', guildPath: '/p' } },
+          }),
+        ),
+      /writId is required/,
+    );
+  });
+
+  it('rejects empty writId', async () => {
+    await assert.rejects(
+      () =>
+        waitForRigTerminalXguildEngine.run(
+          { writId: '' },
+          makeContext({
+            upstream: { g: { guildName: 'g', guildPath: '/p' } },
+          }),
+        ),
+      /writId is required/,
+    );
+  });
+
+  it('rejects when no test guild in upstream', async () => {
+    await assert.rejects(
+      () =>
+        waitForRigTerminalXguildEngine.run(
+          { writId: 'w-foo-bar' },
+          makeContext(),
+        ),
+      /no test guild found in context\.upstream/,
+    );
+  });
+
+  it('rejects malformed pollIntervalMs', async () => {
+    await assert.rejects(
+      () =>
+        waitForRigTerminalXguildEngine.run(
+          { writId: 'w-foo', pollIntervalMs: -1 },
+          makeContext({
+            upstream: { g: { guildName: 'g', guildPath: '/p' } },
+          }),
+        ),
+      /pollIntervalMs must be a positive number/,
+    );
+  });
+
+  it('rejects malformed rigDiscoveryTimeoutMs', async () => {
+    await assert.rejects(
+      () =>
+        waitForRigTerminalXguildEngine.run(
+          { writId: 'w-foo', rigDiscoveryTimeoutMs: 'bad' },
+          makeContext({
+            upstream: { g: { guildName: 'g', guildPath: '/p' } },
+          }),
+        ),
+      /rigDiscoveryTimeoutMs must be a positive number/,
     );
   });
 });
