@@ -1,0 +1,255 @@
+package: plugins/clockworks-stacks-signals
+date: 2026-05-02
+session: be88fec8-ff84-4b5a-b392-37a64f2e89c7
+status: skipped
+
+# Pre-trim state
+test_files_before: 1
+test_lines_before: 567
+tests_before: 13
+pure_redundant_count: 12
+pure_redundant_pct: 92.3
+
+# Aggregate coverage (pre-trim)
+line_coverage_before: 67.96
+branch_coverage_before: 80.06
+func_coverage_before: 53.08
+
+# Per-package coverage (pre-trim) — from `pnpm test:coverage` "all files"
+# row (which inflates the surface with dependency packages: stacks core,
+# clockworks core, tools — only `clockworks-stacks-signals.ts` is the
+# under-test source, and that file alone is 88.16% line / 100.00 branch
+# / 75.00 func).
+package_line_coverage_before: 57.95
+package_branch_coverage_before: 77.27
+package_func_coverage_before: 35.91
+
+# Review pass
+candidates_reviewed: 12
+candidates_deleted: 0
+candidates_kept: 12
+
+# No deletions held the gate.
+deletions: []
+
+# The single deletable candidate (gate-blocked) and a sample of kept
+# tests covering the redundant categories observed.
+attempted_then_restored:
+  - file: src/clockworks-stacks-signals.test.ts
+    test: "clockworks-stacks-signals — CDC auto-wiring (book.* events) > emits exactly one book.<owner>.<book>.updated on a patch()"
+    reason: subsumed_by_other_test
+    note: |
+      Strict subset of the put-over-existing update test on the same
+      bridge code path. The bridge's contract is "CDC type=update event
+      → emit `updated` bridge event" — independent of whether the CDC
+      event was caused by a put-over-existing or a patch(). The
+      put-over-existing test asserts strictly more (rows[0].name=created
+      AND rows[1].name=updated, emitter=framework, ownerId, book,
+      payload.entry deepEqual, payload.prev deepEqual). The patch test
+      asserts only entry+type. Same code path, weaker assertions —
+      runbook's prototype "strict subset within an equivalence group"
+      deletable.
+
+      Restored after the aggregate `pnpm coverage` gate failed:
+      function coverage 53.08% → 52.99% (floor 53%). The 0.08pp margin
+      is gone immediately. The cut removed 5 transitively-covered
+      functions in the Stacks `patch()` chain (denominator dropped by 1
+      — the `it` callback itself — and 5 functions lost their last
+      attestation). No other test in the bridge suite reaches those
+      Stacks helpers, and Stacks's own tests do not exercise them under
+      the merged-lcov view used by the aggregate gate.
+
+      This is a real X017 finding: the greedy reducer is line-only and
+      is blind to the function dimension of the aggregate gate. A
+      line-redundant test can still be the load-bearing attestation
+      for a function in the merged coverage. See notes section below.
+
+# Sampled "kept" tests with reason categories — covers the redundancy
+# patterns flagged in this 92.3% package.
+kept_samples:
+  - test: "CDC auto-wiring > emits exactly one book.<owner>.<book>.created on a put() of a new row"
+    reason_category: parameter_sweep
+    note: |
+      Distinct event-name branch ('created'). The bridge has a switch
+      over CDC event type — each output name is its own arm.
+  - test: "CDC auto-wiring > emits exactly one book.<owner>.<book>.updated on a put() over an existing row"
+    reason_category: parameter_sweep
+    note: |
+      Distinct event-name branch ('updated'). Strongest of the update
+      tests — asserts entry+prev+emitter+ownerId+book.
+  - test: "CDC auto-wiring > emits exactly one book.<owner>.<book>.deleted on a delete() of an existing row"
+    reason_category: parameter_sweep
+    note: |
+      Distinct event-name branch ('deleted'). Asserts payload.id and
+      payload.prev — the delete CDC contract.
+  - test: "CDC auto-wiring > delete() of a non-existent row produces no event (no CDC fire)"
+    reason_category: edge_case
+    note: |
+      Negative-space contract — silent no-op produces no CDC event.
+      Catches accidental over-emission on the empty-delete path.
+  - test: "CDC auto-wiring > emits exactly one book.<owner>.<book>.book-dropped on dropBook() of an existing book"
+    reason_category: parameter_sweep
+    note: |
+      Distinct event-name branch ('book-dropped'). Verifies
+      payload.type='delete-book' contract that no other test reaches.
+  - test: "CDC auto-wiring > dropBook() of a book never written to still emits exactly one book-dropped event"
+    reason_category: edge_case
+    note: |
+      Drop-without-prior-writes edge case — verifies the watcher fires
+      independent of the book's row history. Real regression vector
+      (Stacks could have required at-least-one-row to register a book).
+  - test: "CDC auto-wiring > clockworks/event_dispatches IS auto-wired (only events is excluded)"
+    reason_category: edge_case
+    note: |
+      Pins the carve-out invariant: events is the carve-out, NOT the
+      entire clockworks namespace. Catches a regression where the
+      exclusion widened to `book.startsWith('clockworks.')` or similar.
+  - test: "recursion guard > emit() writes exactly one row to clockworks/events with no echo"
+    reason_category: error_path
+    note: |
+      The headline regression test for the bridge — explicitly cited
+      in the file-level docstring. Pins "no book.clockworks.events.*
+      echo on direct emit" via a dedicated filter assertion. Cannot
+      be cut.
+  - test: "recursion guard > multiple emit() calls each produce exactly one row (no compounding echo)"
+    reason_category: edge_case
+    note: |
+      Distinct from the single-emit guard test — pins that the guard
+      doesn't compound state (e.g. the second emit doesn't echo because
+      of the first). A guard with state-leak between calls would pass
+      the single-emit test and fail this one.
+  - test: "kit-entry tolerance > silently skips books-kit entries whose value is null"
+    reason_category: edge_case
+    note: |
+      Pins one branch of the input-validation guard (value !== null).
+  - test: "kit-entry tolerance > silently skips books-kit entries whose value is a non-object"
+    reason_category: edge_case
+    note: |
+      Pins the other branch of the input-validation guard
+      (typeof === 'object'). Tests both string and number values, so
+      it covers two non-object subcases in one test.
+  - test: "kit-entry tolerance > starts cleanly with zero books-kit contributions (only clockworks own books wired)"
+    reason_category: edge_case
+    note: |
+      Empty-contribs baseline — verifies the apparatus starts and the
+      events book remains reachable when no synthetic plugins
+      contribute books. One of the file's stated invariants.
+
+# Post-trim state — IDENTICAL to pre-trim. No cuts held.
+test_files_after: 1
+test_lines_after: 567
+tests_after: 13
+
+line_coverage_after: 67.96
+branch_coverage_after: 80.06
+func_coverage_after: 53.08
+
+package_line_coverage_after: 57.95
+package_branch_coverage_after: 77.27
+package_func_coverage_after: 35.91
+
+pure_redundant_count_after: 12
+pure_redundant_pct_after: 92.3
+
+# Effort
+trim_duration_min: 30
+notes: |
+  Fourth X017 data point. First `skipped` outcome on grounds the
+  runbook didn't anticipate: the only deletable candidate took down
+  the aggregate function-coverage floor.
+
+  Rolling calibration:
+    - framework/core:                  29 flagged,  6 deleted (21.0%)
+    - plugins/fabricator:              13 flagged,  1 deleted ( 7.7%)
+    - plugins/lattice-discord:          8 flagged,  1 deleted (12.5%)
+    - plugins/clockworks-stacks-signals: 12 flagged, 0 deleted (0.0%)
+
+  The flag rate hit a new high (92.3% — 12 of 13 tests flagged) while
+  the deletion rate hit a new low (0%). H2's "≥50% deletable" continues
+  to be sharply refuted; the analyzer is increasingly noisy on
+  packages where a heavyweight fixture dominates the coverage matrix.
+
+  ## Why so few cuts on clockworks-stacks-signals
+
+  Single test file, 13 tests, all running through the same heavyweight
+  buildFixture() (full Stacks + Clockworks + bridge apparatus startup
+  with synthetic plugin kits). The fixture path covers ~268 source
+  lines; almost any test that finishes startup hits the same lines.
+  All 9 members of the equivalence-class group share that signature.
+
+  But the tests themselves verify behaviorally distinct outputs:
+
+    - 5 distinct CDC event-name branches: created / updated /
+      deleted / book-dropped / event_dispatches.
+    - 2 negative-space contracts: empty-delete produces nothing,
+      direct emit doesn't echo.
+    - 3 edge cases on inputs: drop-without-writes, null kit value,
+      non-object kit value.
+    - 1 carve-out invariant: events is excluded, event_dispatches is
+      not.
+    - 1 baseline: empty-contribs startup path.
+
+  Per the runbook's "patterns usually kept" table, all of these are
+  keepers — distinct branches, edge cases, negative-space contracts.
+  Only the patch() update test was a strict subset of another (the
+  put-over-existing update test asserts strictly more on the same
+  code path, in the bridge's view).
+
+  ## New X017 finding: line-redundant ≠ function-redundant
+
+  Cutting the patch() update test dropped aggregate function coverage
+  from 53.08% → 52.99% (floor: 53%). The greedy reducer is line-only
+  — it doesn't know the patch test was the load-bearing attestation
+  for 5 transitively-covered functions in the Stacks patch() chain.
+
+  Mechanism: per-test coverage is run in isolation, so each test's
+  per-test lcov shows the call chain it traversed. The greedy reducer
+  builds equivalence classes on line-set signatures only; a test
+  whose lines are all covered by other tests is flagged redundant
+  even if its functions are uniquely covered (because the function
+  signature isn't part of the redundancy hash).
+
+  This isn't a per-package issue (the per-package coverage delta was
+  modest: 57.95 → 57.34 line, 35.91 → 34.11 func). It's an aggregate
+  gate issue: the merged lcov across all 24 packages had 5 functions
+  whose ONLY coverage came from this bridge test's transitive call
+  through Stacks's patch() implementation, even though Stacks has its
+  own tests. (Stacks's own tests presumably exercise patch() through
+  a different lcov merge pattern that doesn't credit the same 5
+  helper functions, or those helpers are dead code that only the
+  patch path lights up.)
+
+  Operational rule for future trim sessions: before cutting, eyeball
+  the per-package function-coverage delta. If a candidate cut drops
+  package-level function coverage by a non-trivial amount AND the
+  aggregate floor margin is thin (<1pp), expect the gate to fail.
+  Restore the test and mark `skipped` with the reason — don't sacrifice
+  other branches/edge-cases looking for "something else to cut" to
+  recoup the margin; that path destroys behaviorally-distinct tests
+  to compensate for an analyzer blind spot.
+
+  ## Aggregate gate behavior on the failed cut
+
+  Pre-cut:  113865/167540 lines, 9293/11608 branches, 2830/5332 functions
+  Post-cut: 113814/167540 lines, 9301/11611 branches, 2825/5331 functions
+  Restored: 113857/167540 lines, 9286/11604 branches, 2830/5332 functions
+
+  The branch denominator and function denominator both moved when the
+  test was cut and restored — measurement noise from the test file
+  itself contributing to the coverage surface (the it() callback
+  function, branches inside its body). The signal is the function
+  numerator drop: 5 functions lost their last attestation, dropping
+  to 52.99% < 53% floor.
+
+  ## Calibration summary
+
+  - flag rate: 92.3%, deletion rate: 0.0%, false-positive rate: 100%.
+  - The high-flag/low-deletion pattern continues; this package is the
+    extreme case so far. The pattern is driven by heavyweight fixtures
+    that flatten line coverage across most tests in a suite.
+  - The new finding (function-coverage blast from a line-redundant
+    cut) suggests the analyzer should also report function-redundancy
+    as a separate dimension. Out of scope for this trim session;
+    captured as an X017 spec H2 sub-finding.
+
+# commit_sha filled in by the commit itself
