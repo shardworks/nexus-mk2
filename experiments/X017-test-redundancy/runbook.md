@@ -39,7 +39,10 @@ Subsequent runs are near-instant (mtime-keyed cache).
 
 Record (used in the X017 artifact, step 6):
 - `tests_before`, `pure_redundant_count`, `pure_redundant_pct` — from
-  the analyzer's summary.
+  the analyzer's summary. (`pure_redundant_count` is the total redundant
+  count across both equivalence-class and subsumed categories — this
+  metric is preserved across the report-format refactor for
+  cross-package comparability.)
 - `test_files_before`, `test_lines_before` — `wc -l packages/<pkg>/src/**/*.test.ts`.
 - Aggregate `line/branch/func` coverage — run `pnpm coverage` at the
   monorepo root and record the `TOTAL` row.
@@ -48,30 +51,50 @@ Record (used in the X017 artifact, step 6):
 
 ### 3. Review the candidates
 
-Open `coverage/uniqueness/<pkg-flat>.md` and decide keep/delete for each
-**pure-redundant** entry. Decision rule:
+Open `coverage/uniqueness/<pkg-flat>.md`. The report has two
+redundancy sections:
+
+- **Coverage-equivalent groups** — sets of tests with identical line
+  coverage. The greedy reducer's required-vs-redundant labeling within
+  a group is arbitrary. Compare assertion peeks across all members and
+  pick the strongest to keep; the rest are deletable.
+- **Coverage-subsumed tests** — redundant tests with unique line-set
+  signature, no swap candidate. Either they pin a unique contract
+  (keep) or they don't (cut).
+
+Decision rule:
 
 > **Cut only when the test asserts the same input→output pair as
 > another test, modulo trivial variation.** Keep when the test asserts
 > a distinct behavioral case, even if line coverage doesn't distinguish
 > it.
 
-In practice the analyzer's `pure-redundant` list contains three patterns
-that should usually be **kept**, not cut:
+Patterns that should usually be **kept**, not cut:
 
 | Pattern | Example | Why kept |
 |---|---|---|
 | Parameter sweep over a regex/scope branch | three tests for `-plugin`/`-apparatus`/`-kit` suffix-strip | Each is a distinct branch in the alternation. |
 | Edge-case input | empty string, NaN, zero, missing file | Same lines execute, distinct invalid-input contracts. |
 | Representative identity case | `foo('x')` returns `'x'` for the no-op path | One canonical happy-path per behavior. |
+| Negative-space contract | "no Engine fields when engineFailure is absent" | Verifies *absence* of behavior; catches accidental additions. |
 
 Genuinely-deletable cases:
+- **Within an equivalence group**, a test whose assertion is a strict
+  subset of another group member's (e.g., 5xx test asserts only the
+  status, 4xx test asserts status + body — same code path, the 4xx is
+  strictly stronger).
 - Same assertion shape as another test, only the input string differs
   (e.g. `expect(foo('a')).toBe('A')` vs `expect(foo('b')).toBe('B')` when
   one already documents the contract).
 - Test of a helper that's covered transitively by tests of its only caller.
 - Belt-and-suspenders integration test where the unit tests already
   exhaustively cover the surface.
+
+**On equivalence groups:** the reducer's "required" pick within a group
+is arbitrary (whichever it iterated to first). Don't bias toward
+keeping the reducer's pick — pick on assertion strength. If the
+strongest assertion is in the "redundant" column, cut a different
+group member instead.
 
 ### 4. Delete
 
