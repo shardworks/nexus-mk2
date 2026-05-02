@@ -1,0 +1,3125 @@
+
+
+diff --git a/packages/plugins/astrolabe/src/engines.test.ts b/packages/plugins/astrolabe/src/engines.test.ts
+index c6d6604..2264b07 100644
+--- a/packages/plugins/astrolabe/src/engines.test.ts
++++ b/packages/plugins/astrolabe/src/engines.test.ts
+@@ -1348,7 +1348,7 @@ describe('observation-lift engine', () => {
+ 
+   // ── Flat mode: exactly one observation ─────────────────────────────
+ 
+-  it('flat mode — single observation posts one top-level draft mandate with both lifted-from and spider.follows edges', async () => {
++  it('flat mode — single observation posts one top-level mandate (initial phase) with both lifted-from and spider.follows edges', async () => {
+     const engine = createObservationLiftEngine(() => plansBook);
+     const observations: Observation[] = [
+       {
+@@ -1388,14 +1388,13 @@ describe('observation-lift engine', () => {
+     const yields = (result as { status: 'completed'; yields: { writIds: string[] } }).yields;
+     assert.deepEqual(yields.writIds, ['w-obs-flat-1']);
+ 
+-    // Exactly one post — a top-level draft mandate (no parentId).
++    // Exactly one post — a top-level mandate in initial ('new') phase (no parentId).
+     assert.equal(postCalls.length, 1);
+     const call = postCalls[0];
+     assert.equal(call.type, 'mandate');
+     assert.equal(call.title, observations[0].title);
+     assert.equal(call.body, observations[0].body);
+     assert.equal(call.codex, 'my-codex');
+-    assert.equal(call.draft, true);
+     assert.equal('parentId' in call, false, 'flat-mode writ must be top-level (no parentId)');
+ 
+     // Two outbound edges, both from the new draft to the originating mandate:
+@@ -1499,7 +1498,7 @@ describe('observation-lift engine', () => {
+ 
+   // ── Grouped mode: two or more observations ─────────────────────────
+ 
+-  it('grouped mode — creates an observation-set parent plus N draft mandate children with the correct edges', async () => {
++  it('grouped mode — creates an observation-set parent plus N mandate children (initial phase) with the correct edges', async () => {
+     const engine = createObservationLiftEngine(() => plansBook);
+     const observations: Observation[] = [
+       {
+@@ -1562,7 +1561,6 @@ describe('observation-lift engine', () => {
+     const groupPost = postCalls[0];
+     assert.equal(groupPost.type, 'observation-set');
+     assert.equal(groupPost.codex, 'my-codex');
+-    assert.equal(groupPost.draft, true);
+     assert.equal('parentId' in groupPost, false, 'group parent must be top-level');
+     assert.equal(groupPost.title, 'Observations from "Mandate for w-mandate-grouped"');
+     const body = groupPost.body as string;
+@@ -1575,8 +1573,8 @@ describe('observation-lift engine', () => {
+     assert.ok(body.includes(`2. ${observations[1].title}`), 'group body must include numbered child 2');
+     assert.ok(body.includes(`3. ${observations[2].title}`), 'group body must include numbered child 3');
+ 
+-    // Each child post is a draft mandate whose parentId is the group
+-    // parent's id, with title/body from the matching observation.
++    // Each child post is a mandate (initial phase) whose parentId is the
++    // group parent's id, with title/body from the matching observation.
+     for (let i = 0; i < observations.length; i++) {
+       const call = postCalls[i + 1];
+       const obs = observations[i];
+@@ -1585,7 +1583,6 @@ describe('observation-lift engine', () => {
+       assert.equal(call.body, obs.body);
+       assert.equal(call.codex, 'my-codex');
+       assert.equal(call.parentId, 'w-obs-group');
+-      assert.equal(call.draft, true);
+     }
+ 
+     // Edges: exactly 1 group-parent lifted-from + N child spider.follows
+diff --git a/packages/plugins/astrolabe/src/engines/observation-lift.ts b/packages/plugins/astrolabe/src/engines/observation-lift.ts
+index ad3e59e..68a4e9e 100644
+--- a/packages/plugins/astrolabe/src/engines/observation-lift.ts
++++ b/packages/plugins/astrolabe/src/engines/observation-lift.ts
+@@ -2,17 +2,18 @@
+  * observation-lift clockwork engine.
+  *
+  * Walks the plan's `observations` array once it has reached its final
+- * state and creates one draft writ per record, placed as top-level
+- * siblings of the originating mandate rather than as its children. This
+- * turns the sage's "things we noticed but didn't action" output from an
+- * inert note into commissionable drafts visible in the same writ
+- * surfaces as any other mandate — a downstream curator (human or
+- * automated) promotes each draft to `open` by hand or via writ-publish.
++ * state and creates one writ per record in its initial phase ('new'),
++ * placed as top-level siblings of the originating mandate rather than
++ * as its children. This turns the sage's "things we noticed but didn't
++ * action" output from an inert note into commissionable writs visible in
++ * the same writ surfaces as any other mandate — a downstream curator
++ * (human or automated) promotes each writ to `open` by hand or via
++ * writ-publish.
+  *
+  * The engine runs in one of two modes, selected by record count:
+  *
+  *   - Flat mode (exactly one observation record):
+- *       * Post a single top-level draft mandate writ (no `parentId`).
++ *       * Post a single top-level mandate writ in initial phase (no `parentId`).
+  *       * Install two outbound edges from that writ → originating
+  *         mandate:
+  *           - `astrolabe.lifted-from` (label "lifted from") carrying
+@@ -21,21 +22,21 @@
+  *             precedence-dependency gate.
+  *
+  *   - Grouped mode (two or more observation records):
+- *       * Post a single top-level draft writ of type `observation-set`
+- *         whose title embeds the originating mandate's title
+- *         (`Observations from "{title}"`) and whose body is a short
+- *         preamble naming the originating writ followed by a numbered
+- *         list of the child titles.
++ *       * Post a single top-level writ of type `observation-set` in
++ *         initial phase, whose title embeds the originating mandate's
++ *         title (`Observations from "{title}"`) and whose body is a
++ *         short preamble naming the originating writ followed by a
++ *         numbered list of the child titles.
+  *       * Install exactly one outbound `astrolabe.lifted-from` edge
+  *         from the group parent → originating mandate. The group parent
+  *         carries no `spider.follows` edge (it is non-dispatchable by
+  *         type, so a precedence edge on it would be dead data).
+- *       * For each observation record in record order, post a draft
+- *         mandate writ with `parentId` set to the group parent's id and
+- *         install exactly one outbound `spider.follows` edge from that
+- *         child → originating mandate. Children do not carry
+- *         `astrolabe.lifted-from`; their provenance is implied by the
+- *         group parent's edge plus the parent-child relationship.
++ *       * For each observation record in record order, post a mandate
++ *         writ in initial phase with `parentId` set to the group
++ *         parent's id and install exactly one outbound `spider.follows`
++ *         edge from that child → originating mandate. Children do not
++ *         carry `astrolabe.lifted-from`; their provenance is implied by
++ *         the group parent's edge plus the parent-child relationship.
+  *
+  * Both modes preserve the existing `spider.follows` gate: the
+  * originating mandate is still the blocker, so Spider's `trySpawn` gate
+@@ -63,9 +64,10 @@
+  *     the audit trail.
+  *
+  * Yields:
+- *   `{ writIds }` — the ids of the draft observation writs created, in
+- *   the same order as the observation records. The group parent id
+- *   (when one exists) is NOT included. Empty when the engine no-ops.
++ *   `{ writIds }` — the ids of the observation writs created (in their
++ *   initial 'new' phase), in the same order as the observation records.
++ *   The group parent id (when one exists) is NOT included. Empty when
++ *   the engine no-ops.
+  */
+ 
+ import { guild } from '@shardworks/nexus-core';
+@@ -143,7 +145,6 @@ export function createObservationLiftEngine(getPlansBook: () => Book<PlanDoc>):
+           title: `Observations from "${originatingTitle}"`,
+           body: buildGroupBody(originatingTitle, planId, observations),
+           codex: plan.codex,
+-          draft: true,
+         });
+         groupParentId = groupParent.id;
+ 
+@@ -170,7 +171,6 @@ export function createObservationLiftEngine(getPlansBook: () => Book<PlanDoc>):
+           title: observation.title,
+           body: observation.body,
+           codex: plan.codex,
+-          draft: true,
+         };
+         if (groupParentId !== undefined) {
+           postRequest.parentId = groupParentId;
+diff --git a/packages/plugins/clerk/src/clerk.test.ts b/packages/plugins/clerk/src/clerk.test.ts
+index 1cdf915..eb8c419 100644
+--- a/packages/plugins/clerk/src/clerk.test.ts
++++ b/packages/plugins/clerk/src/clerk.test.ts
+@@ -20,6 +20,8 @@ import type { StacksApi } from '@shardworks/stacks-apparatus';
+ import { createClerk } from './clerk.ts';
+ import type { ClerkApi, ClerkConfig, WritDoc, WritLinkDoc, LinkKindDoc } from './types.ts';
+ import type { WritLinks } from './index.ts';
++import type { WritTypeConfig } from './writ-type-config.ts';
++import { makeWritTypeApparatus } from './testing.ts';
+ import writShow from './tools/writ-show.ts';
+ import writTree from './tools/writ-tree.ts';
+ import writEdit from './tools/writ-edit.ts';
+@@ -174,6 +176,16 @@ async function setup(options: SetupOptions = {}) {
+   await setupCore(options);
+ }
+ 
++/**
++ * Helper for tests that need a mandate writ already in 'open' phase.
++ * After the T6 refactor, clerk.post() always returns the declared initial
++ * state ('new' for mandate); auto-advance to 'open' lives in commission-post.
++ */
++async function postOpen(request: Omit<import('./types.ts').PostCommissionRequest, 'draft'>): Promise<import('./types.ts').WritDoc> {
++  const writ = await clerk.post(request);
++  return clerk.transition(writ.id, 'open');
++}
++
+ // ── Tests ────────────────────────────────────────────────────────────
+ 
+ describe('Clerk', () => {
+@@ -186,14 +198,14 @@ describe('Clerk', () => {
+   describe('post()', () => {
+     beforeEach(async () => { await setup(); });
+ 
+-    it('creates a writ with open status and mandate type by default', async () => {
++    it('creates a writ in new (initial) phase by default', async () => {
+       const writ = await clerk.post({ title: 'Fix the bug', body: 'Details here' });
+ 
+       assert.ok(writ.id.startsWith('w-'));
+       assert.equal(writ.type, 'mandate');
+       assert.equal(writ.title, 'Fix the bug');
+       assert.equal(writ.body, 'Details here');
+-      assert.equal(writ.phase, 'open');
++      assert.equal(writ.phase, 'new');
+       assert.ok(writ.createdAt);
+       assert.ok(writ.updatedAt);
+       assert.equal(writ.resolvedAt, undefined);
+@@ -272,20 +284,24 @@ describe('Clerk', () => {
+       assert.equal(writ.createdAt, writ.updatedAt);
+     });
+ 
+-    it('creates a writ in new (draft) status when draft: true', async () => {
+-      const writ = await clerk.post({ title: 'Draft writ', body: 'Details', draft: true });
++    it('creates a writ in new (initial) phase', async () => {
++      const writ = await clerk.post({ title: 'New writ', body: 'Details' });
+       assert.equal(writ.phase, 'new');
+       assert.equal(writ.resolvedAt, undefined);
+     });
+ 
+-    it('creates a writ in open status when draft: false (explicit)', async () => {
+-      const writ = await clerk.post({ title: 'Explicit open', body: 'Body', draft: false });
+-      assert.equal(writ.phase, 'open');
++    it('commission-post tool auto-advances mandate to open when draft is not set', async () => {
++      // commission-post tool handles auto-advance; clerk.post() always returns initial state
++      // Testing that mandate auto-advance is in the tool layer, not post() API
++      const writ = await clerk.post({ title: 'Mandate', body: 'Body' });
++      assert.equal(writ.phase, 'new', 'clerk.post() returns initial state');
++      const openWrit = await clerk.transition(writ.id, 'open');
++      assert.equal(openWrit.phase, 'open');
+     });
+ 
+-    it('creates a writ in open status when draft is omitted (backward compat)', async () => {
++    it('creates a mandate writ in new phase regardless of draft flag (api is type-agnostic)', async () => {
+       const writ = await clerk.post({ title: 'Default open', body: 'Body' });
+-      assert.equal(writ.phase, 'open');
++      assert.equal(writ.phase, 'new');
+     });
+   });
+ 
+@@ -307,7 +323,7 @@ describe('Clerk', () => {
+ 
+       assert.equal(fetched.id, posted.id);
+       assert.equal(fetched.title, 'Show me');
+-      assert.equal(fetched.phase, 'open');
++      assert.equal(fetched.phase, 'new');
+     });
+   });
+ 
+@@ -394,8 +410,8 @@ describe('Clerk', () => {
+     });
+ 
+     it('filters by status', async () => {
+-      const w1 = await clerk.post({ title: 'Open writ', body: 'Body' });
+-      const w2 = await clerk.post({ title: 'New writ', body: 'Body', draft: true });
++      const w1 = await postOpen({ title: 'Open writ', body: 'Body' });
++      const w2 = await clerk.post({ title: 'New writ', body: 'Body' });
+ 
+       const openWrits = await clerk.list({ phase: 'open' });
+       const newWrits = await clerk.list({ phase: 'new' });
+@@ -466,8 +482,8 @@ describe('Clerk', () => {
+     });
+ 
+     it('filters by new status', async () => {
+-      await clerk.post({ title: 'Draft writ', body: 'Body', draft: true });
+-      await clerk.post({ title: 'Open writ', body: 'Body' });
++      await clerk.post({ title: 'Draft writ', body: 'Body' });
++      await postOpen({ title: 'Open writ', body: 'Body' });
+ 
+       const newWrits = await clerk.list({ phase: 'new' });
+       const openWrits = await clerk.list({ phase: 'open' });
+@@ -479,9 +495,9 @@ describe('Clerk', () => {
+     });
+ 
+     it('filters by multiple statuses (OR)', async () => {
+-      const w1 = await clerk.post({ title: 'Open writ', body: 'Body' });
+-      const w2 = await clerk.post({ title: 'New writ', body: 'Body', draft: true });
+-      const w3 = await clerk.post({ title: 'Completed writ', body: 'Body' });
++      const w1 = await postOpen({ title: 'Open writ', body: 'Body' });
++      const w2 = await clerk.post({ title: 'New writ', body: 'Body' });
++      const w3 = await postOpen({ title: 'Completed writ', body: 'Body' });
+       await clerk.transition(w3.id, 'completed');
+ 
+       const result = await clerk.list({ phase: ['open', 'new'] });
+@@ -493,9 +509,9 @@ describe('Clerk', () => {
+     });
+ 
+     it('filters by stuck status', async () => {
+-      const writ = await clerk.post({ title: 'Stuck writ', body: 'Body' });
++      const writ = await postOpen({ title: 'Stuck writ', body: 'Body' });
+       await clerk.transition(writ.id, 'stuck');
+-      await clerk.post({ title: 'Open writ', body: 'Body' });
++      await postOpen({ title: 'Open writ', body: 'Body' });
+ 
+       const result = await clerk.list({ phase: 'stuck' });
+       assert.equal(result.length, 1);
+@@ -503,8 +519,8 @@ describe('Clerk', () => {
+     });
+ 
+     it('single-element status array behaves like a scalar filter', async () => {
+-      await clerk.post({ title: 'Open writ', body: 'Body' });
+-      const w2 = await clerk.post({ title: 'New writ', body: 'Body', draft: true });
++      await postOpen({ title: 'Open writ', body: 'Body' });
++      const w2 = await clerk.post({ title: 'New writ', body: 'Body' });
+ 
+       const result = await clerk.list({ phase: ['open'] });
+       assert.equal(result.length, 1);
+@@ -528,7 +544,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('filters by status', async () => {
+-      const w = await clerk.post({ title: 'Writ', body: 'Body' });
++      const w = await postOpen({ title: 'Writ', body: 'Body' });
+       await clerk.transition(w.id, 'completed');
+ 
+       assert.equal(await clerk.count({ phase: 'completed' }), 1);
+@@ -610,12 +626,12 @@ describe('Clerk', () => {
+     });
+ 
+     it('filters by phase with prune semantics', async () => {
+-      const root = await clerk.post({ title: 'Root', body: 'Body' });
+-      const open = await clerk.post({ title: 'Open child', body: 'Body', parentId: root.id });
+-      const completed = await clerk.post({ title: 'Completed child', body: 'Body', parentId: root.id });
++      const root = await postOpen({ title: 'Root', body: 'Body' });
++      const open = await postOpen({ title: 'Open child', body: 'Body', parentId: root.id });
++      const completed = await postOpen({ title: 'Completed child', body: 'Body', parentId: root.id });
+       // Add the grandchild *before* transitioning its parent — the post
+       // path rejects parents in terminal phases.
+-      const grand = await clerk.post({ title: 'Grand of completed', body: 'Body', parentId: completed.id });
++      const grand = await postOpen({ title: 'Grand of completed', body: 'Body', parentId: completed.id });
+       // Transition the completed child after grand exists. `completed` does
+       // not auto-cancel non-terminal children — `handleParentTerminal` only
+       // warns when reaching `completed` with non-terminal children.
+@@ -636,9 +652,9 @@ describe('Clerk', () => {
+     it('filters by multiple phases (OR)', async () => {
+       // No parents — the cascade machinery only cares about parent/child
+       // failures, so flat roots keep this test clean.
+-      const a = await clerk.post({ title: 'A', body: 'Body' });
+-      const b = await clerk.post({ title: 'B', body: 'Body' });
+-      const c = await clerk.post({ title: 'C (open)', body: 'Body' });
++      const a = await postOpen({ title: 'A', body: 'Body' });
++      const b = await postOpen({ title: 'B', body: 'Body' });
++      const c = await postOpen({ title: 'C (open)', body: 'Body' });
+       await clerk.transition(a.id, 'completed');
+       await clerk.transition(b.id, 'failed', { resolution: 'nope' });
+ 
+@@ -762,40 +778,40 @@ describe('Clerk', () => {
+     });
+ 
+     it('updates the title of a draft writ', async () => {
+-      const writ = await clerk.post({ title: 'Old title', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Old title', body: 'Body' });
+       const edited = await clerk.edit({ id: writ.id, title: 'New title' });
+       assert.equal(edited.title, 'New title');
+       assert.equal(edited.body, 'Body'); // unchanged
+     });
+ 
+     it('updates the body of a draft writ', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Old body', draft: true });
++      const writ = await clerk.post({ title: 'Title', body: 'Old body' });
+       const edited = await clerk.edit({ id: writ.id, body: 'New body' });
+       assert.equal(edited.body, 'New body');
+       assert.equal(edited.title, 'Title'); // unchanged
+     });
+ 
+     it('updates the type of a draft writ', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Title', body: 'Body' });
+       assert.equal(writ.type, 'mandate');
+       const edited = await clerk.edit({ id: writ.id, type: 'errand' });
+       assert.equal(edited.type, 'errand');
+     });
+ 
+     it('updates the codex of a draft writ', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body', codex: 'alpha', draft: true });
++      const writ = await clerk.post({ title: 'Title', body: 'Body', codex: 'alpha' });
+       const edited = await clerk.edit({ id: writ.id, codex: 'beta' });
+       assert.equal(edited.codex, 'beta');
+     });
+ 
+     it('clears codex when empty string is passed', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body', codex: 'alpha', draft: true });
++      const writ = await clerk.post({ title: 'Title', body: 'Body', codex: 'alpha' });
+       const edited = await clerk.edit({ id: writ.id, codex: '' });
+       assert.equal(edited.codex, undefined);
+     });
+ 
+     it('updates multiple fields at once', async () => {
+-      const writ = await clerk.post({ title: 'Old', body: 'Old body', draft: true });
++      const writ = await clerk.post({ title: 'Old', body: 'Old body' });
+       const edited = await clerk.edit({
+         id: writ.id,
+         title: 'New',
+@@ -810,33 +826,33 @@ describe('Clerk', () => {
+     });
+ 
+     it('updates updatedAt timestamp', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Title', body: 'Body' });
+       const edited = await clerk.edit({ id: writ.id, title: 'Updated' });
+       assert.ok(edited.updatedAt >= writ.updatedAt);
+     });
+ 
+     it('preserves status as new', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Title', body: 'Body' });
+       const edited = await clerk.edit({ id: writ.id, title: 'Updated' });
+       assert.equal(edited.phase, 'new');
+     });
+ 
+     it('allows editing title of a writ in open status', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body' }); // open
++      const writ = await postOpen({ title: 'Title', body: 'Body' }); // open
+       const edited = await clerk.edit({ id: writ.id, title: 'Changed' });
+       assert.equal(edited.title, 'Changed');
+       assert.equal(edited.phase, 'open');
+     });
+ 
+     it('allows editing body of an open writ', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body' });
++      const writ = await postOpen({ title: 'Title', body: 'Body' });
+       const edited = await clerk.edit({ id: writ.id, body: 'New body' });
+       assert.equal(edited.body, 'New body');
+       assert.equal(edited.phase, 'open');
+     });
+ 
+     it('allows editing title of a completed writ', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body' });
++      const writ = await postOpen({ title: 'Title', body: 'Body' });
+       await clerk.transition(writ.id, 'completed', { resolution: 'Done' });
+       const edited = await clerk.edit({ id: writ.id, title: 'Changed' });
+       assert.equal(edited.title, 'Changed');
+@@ -844,7 +860,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('rejects changing type on a non-draft writ', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body' }); // open
++      const writ = await postOpen({ title: 'Title', body: 'Body' }); // open
+       await assert.rejects(
+         () => clerk.edit({ id: writ.id, type: 'errand' }),
+         /Cannot change type.*phase is "open"/,
+@@ -852,7 +868,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('rejects changing codex on a non-draft writ', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body' }); // open
++      const writ = await postOpen({ title: 'Title', body: 'Body' }); // open
+       await assert.rejects(
+         () => clerk.edit({ id: writ.id, codex: 'gamma' }),
+         /Cannot change codex.*phase is "open"/,
+@@ -867,7 +883,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('rejects an invalid writ type', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Title', body: 'Body' });
+       await assert.rejects(
+         () => clerk.edit({ id: writ.id, type: 'nonexistent' }),
+         /Unknown writ type/,
+@@ -875,7 +891,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('persists edits so show() returns updated values', async () => {
+-      const writ = await clerk.post({ title: 'Original', body: 'Original body', draft: true });
++      const writ = await clerk.post({ title: 'Original', body: 'Original body' });
+       await clerk.edit({ id: writ.id, title: 'Edited', body: 'Edited body' });
+       const fetched = await clerk.show(writ.id);
+       assert.equal(fetched.title, 'Edited');
+@@ -889,7 +905,7 @@ describe('Clerk', () => {
+     beforeEach(async () => { await setup(); });
+ 
+     it('publishes a new (draft) writ to open status', async () => {
+-      const writ = await clerk.post({ title: 'Draft writ', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Draft writ', body: 'Body' });
+       assert.equal(writ.phase, 'new');
+ 
+       const published = await clerk.transition(writ.id, 'open');
+@@ -898,14 +914,14 @@ describe('Clerk', () => {
+     });
+ 
+     it('updates updatedAt on publish', async () => {
+-      const writ = await clerk.post({ title: 'Draft', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Draft', body: 'Body' });
+       await new Promise(r => setTimeout(r, 2));
+       const published = await clerk.transition(writ.id, 'open');
+       assert.ok(published.updatedAt >= writ.updatedAt);
+     });
+ 
+     it('throws when publishing a writ that is already open', async () => {
+-      const writ = await clerk.post({ title: 'Already open', body: 'Body' });
++      const writ = await await postOpen({ title: 'Already open', body: 'Body' });
+       await assert.rejects(
+         () => clerk.transition(writ.id, 'open'),
+         /Cannot transition/,
+@@ -913,7 +929,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('throws when publishing a cancelled writ', async () => {
+-      const writ = await clerk.post({ title: 'Cancelled', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Cancelled', body: 'Body' });
+       await clerk.transition(writ.id, 'cancelled');
+       await assert.rejects(
+         () => clerk.transition(writ.id, 'open'),
+@@ -928,7 +944,7 @@ describe('Clerk', () => {
+     beforeEach(async () => { await setup(); });
+ 
+     it('transitions an open writ to completed', async () => {
+-      const writ = await clerk.post({ title: 'Complete me', body: 'Body' });
++      const writ = await postOpen({ title: 'Complete me', body: 'Body' });
+       const completed = await clerk.transition(writ.id, 'completed', { resolution: 'All done' });
+ 
+       assert.equal(completed.phase, 'completed');
+@@ -937,7 +953,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('sets resolution on completed', async () => {
+-      const writ = await clerk.post({ title: 'With resolution', body: 'Body' });
++      const writ = await postOpen({ title: 'With resolution', body: 'Body' });
+       const completed = await clerk.transition(writ.id, 'completed', { resolution: 'Task fulfilled' });
+       assert.equal(completed.resolution, 'Task fulfilled');
+     });
+@@ -959,7 +975,7 @@ describe('Clerk', () => {
+     beforeEach(async () => { await setup(); });
+ 
+     it('transitions an open writ to failed', async () => {
+-      const writ = await clerk.post({ title: 'Fail me', body: 'Body' });
++      const writ = await postOpen({ title: 'Fail me', body: 'Body' });
+       const failed = await clerk.transition(writ.id, 'failed', { resolution: 'Ran out of time' });
+ 
+       assert.equal(failed.phase, 'failed');
+@@ -968,13 +984,13 @@ describe('Clerk', () => {
+     });
+ 
+     it('sets resolution on failed', async () => {
+-      const writ = await clerk.post({ title: 'Will fail', body: 'Body' });
++      const writ = await postOpen({ title: 'Will fail', body: 'Body' });
+       const failed = await clerk.transition(writ.id, 'failed', { resolution: 'Something broke' });
+       assert.equal(failed.resolution, 'Something broke');
+     });
+ 
+     it('throws when failing a new writ', async () => {
+-      const writ = await clerk.post({ title: 'Not open', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Not open', body: 'Body' });
+ 
+       await assert.rejects(
+         () => clerk.transition(writ.id, 'failed'),
+@@ -983,7 +999,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('throws when failing a completed writ', async () => {
+-      const writ = await clerk.post({ title: 'Already done', body: 'Body' });
++      const writ = await postOpen({ title: 'Already done', body: 'Body' });
+       await clerk.transition(writ.id, 'completed', { resolution: 'Done' });
+ 
+       await assert.rejects(
+@@ -999,7 +1015,7 @@ describe('Clerk', () => {
+     beforeEach(async () => { await setup(); });
+ 
+     it('cancels a new (draft) writ', async () => {
+-      const writ = await clerk.post({ title: 'Cancel me (new)', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Cancel me (new)', body: 'Body' });
+       const cancelled = await clerk.transition(writ.id, 'cancelled');
+ 
+       assert.equal(cancelled.phase, 'cancelled');
+@@ -1007,7 +1023,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('cancels an open writ', async () => {
+-      const writ = await clerk.post({ title: 'Cancel me (open)', body: 'Body' });
++      const writ = await postOpen({ title: 'Cancel me (open)', body: 'Body' });
+       const cancelled = await clerk.transition(writ.id, 'cancelled');
+ 
+       assert.equal(cancelled.phase, 'cancelled');
+@@ -1015,13 +1031,13 @@ describe('Clerk', () => {
+     });
+ 
+     it('sets resolution on cancelled when provided', async () => {
+-      const writ = await clerk.post({ title: 'Cancel with reason', body: 'Body' });
++      const writ = await postOpen({ title: 'Cancel with reason', body: 'Body' });
+       const cancelled = await clerk.transition(writ.id, 'cancelled', { resolution: 'No longer needed' });
+       assert.equal(cancelled.resolution, 'No longer needed');
+     });
+ 
+     it('throws when cancelling a completed writ', async () => {
+-      const writ = await clerk.post({ title: 'Done', body: 'Body' });
++      const writ = await postOpen({ title: 'Done', body: 'Body' });
+       await clerk.transition(writ.id, 'completed', { resolution: 'Done' });
+ 
+       await assert.rejects(
+@@ -1031,7 +1047,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('throws when cancelling a failed writ', async () => {
+-      const writ = await clerk.post({ title: 'Failed', body: 'Body' });
++      const writ = await postOpen({ title: 'Failed', body: 'Body' });
+       await clerk.transition(writ.id, 'failed', { resolution: 'Broke' });
+ 
+       await assert.rejects(
+@@ -1041,7 +1057,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('throws when cancelling an already-cancelled writ', async () => {
+-      const writ = await clerk.post({ title: 'Cancelled twice', body: 'Body' });
++      const writ = await postOpen({ title: 'Cancelled twice', body: 'Body' });
+       await clerk.transition(writ.id, 'cancelled');
+ 
+       await assert.rejects(
+@@ -1057,7 +1073,7 @@ describe('Clerk', () => {
+     beforeEach(async () => { await setup(); });
+ 
+     it('transitions an open writ to stuck', async () => {
+-      const writ = await clerk.post({ title: 'Stuck writ', body: 'Body' });
++      const writ = await postOpen({ title: 'Stuck writ', body: 'Body' });
+       const stuck = await clerk.transition(writ.id, 'stuck', { resolution: 'Engine failure' });
+ 
+       assert.equal(stuck.phase, 'stuck');
+@@ -1067,13 +1083,13 @@ describe('Clerk', () => {
+     });
+ 
+     it('stuck is non-terminal — resolvedAt is not set', async () => {
+-      const writ = await clerk.post({ title: 'Non-terminal', body: 'Body' });
++      const writ = await postOpen({ title: 'Non-terminal', body: 'Body' });
+       const stuck = await clerk.transition(writ.id, 'stuck');
+       assert.equal(stuck.resolvedAt, undefined);
+     });
+ 
+     it('throws when transitioning new → stuck', async () => {
+-      const writ = await clerk.post({ title: 'Draft', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Draft', body: 'Body' });
+       await assert.rejects(
+         () => clerk.transition(writ.id, 'stuck'),
+         /Cannot transition/,
+@@ -1081,7 +1097,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('throws when transitioning completed → stuck', async () => {
+-      const writ = await clerk.post({ title: 'Done', body: 'Body' });
++      const writ = await postOpen({ title: 'Done', body: 'Body' });
+       await clerk.transition(writ.id, 'completed', { resolution: 'Done' });
+       await assert.rejects(
+         () => clerk.transition(writ.id, 'stuck'),
+@@ -1090,7 +1106,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('throws when transitioning failed → stuck', async () => {
+-      const writ = await clerk.post({ title: 'Failed', body: 'Body' });
++      const writ = await postOpen({ title: 'Failed', body: 'Body' });
+       await clerk.transition(writ.id, 'failed', { resolution: 'Broke' });
+       await assert.rejects(
+         () => clerk.transition(writ.id, 'stuck'),
+@@ -1099,7 +1115,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('throws when transitioning cancelled → stuck', async () => {
+-      const writ = await clerk.post({ title: 'Cancelled', body: 'Body' });
++      const writ = await postOpen({ title: 'Cancelled', body: 'Body' });
+       await clerk.transition(writ.id, 'cancelled');
+       await assert.rejects(
+         () => clerk.transition(writ.id, 'stuck'),
+@@ -1114,7 +1130,7 @@ describe('Clerk', () => {
+     beforeEach(async () => { await setup(); });
+ 
+     it('transitions stuck → open (recovery)', async () => {
+-      const writ = await clerk.post({ title: 'Recoverable', body: 'Body' });
++      const writ = await postOpen({ title: 'Recoverable', body: 'Body' });
+       await clerk.transition(writ.id, 'stuck');
+       const reopened = await clerk.transition(writ.id, 'open');
+       assert.equal(reopened.phase, 'open');
+@@ -1122,7 +1138,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('transitions stuck → failed (abandon)', async () => {
+-      const writ = await clerk.post({ title: 'Abandoned', body: 'Body' });
++      const writ = await postOpen({ title: 'Abandoned', body: 'Body' });
+       await clerk.transition(writ.id, 'stuck');
+       const failed = await clerk.transition(writ.id, 'failed', { resolution: 'Giving up' });
+       assert.equal(failed.phase, 'failed');
+@@ -1131,7 +1147,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('transitions stuck → cancelled (withdrawn)', async () => {
+-      const writ = await clerk.post({ title: 'Withdrawn', body: 'Body' });
++      const writ = await postOpen({ title: 'Withdrawn', body: 'Body' });
+       await clerk.transition(writ.id, 'stuck');
+       const cancelled = await clerk.transition(writ.id, 'cancelled', { resolution: 'No longer needed' });
+       assert.equal(cancelled.phase, 'cancelled');
+@@ -1139,7 +1155,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('throws when transitioning stuck → completed', async () => {
+-      const writ = await clerk.post({ title: 'Cannot complete from stuck', body: 'Body' });
++      const writ = await postOpen({ title: 'Cannot complete from stuck', body: 'Body' });
+       await clerk.transition(writ.id, 'stuck');
+       await assert.rejects(
+         () => clerk.transition(writ.id, 'completed'),
+@@ -1148,7 +1164,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('throws when transitioning stuck → stuck (no self-transition)', async () => {
+-      const writ = await clerk.post({ title: 'Already stuck', body: 'Body' });
++      const writ = await postOpen({ title: 'Already stuck', body: 'Body' });
+       await clerk.transition(writ.id, 'stuck');
+       await assert.rejects(
+         () => clerk.transition(writ.id, 'stuck'),
+@@ -1163,7 +1179,7 @@ describe('Clerk', () => {
+     beforeEach(async () => { await setup(); });
+ 
+     it('happy path: open → completed', async () => {
+-      const writ = await clerk.post({ title: 'Full lifecycle', body: 'Do it all' });
++      const writ = await postOpen({ title: 'Full lifecycle', body: 'Do it all' });
+       assert.equal(writ.phase, 'open');
+ 
+       const done = await clerk.transition(writ.id, 'completed', { resolution: 'All finished' });
+@@ -1176,7 +1192,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('failure path: open → failed', async () => {
+-      const writ = await clerk.post({ title: 'Will fail', body: 'Body' });
++      const writ = await postOpen({ title: 'Will fail', body: 'Body' });
+       const failed = await clerk.transition(writ.id, 'failed', { resolution: 'Something broke' });
+ 
+       assert.equal(failed.phase, 'failed');
+@@ -1187,13 +1203,13 @@ describe('Clerk', () => {
+     });
+ 
+     it('cancellation path: open → cancelled', async () => {
+-      const writ = await clerk.post({ title: 'Cancelled early', body: 'Body' });
++      const writ = await postOpen({ title: 'Cancelled early', body: 'Body' });
+       const cancelled = await clerk.transition(writ.id, 'cancelled');
+       assert.equal(cancelled.phase, 'cancelled');
+     });
+ 
+     it('stuck path: open → stuck → failed', async () => {
+-      const writ = await clerk.post({ title: 'Stuck then failed', body: 'Body' });
++      const writ = await postOpen({ title: 'Stuck then failed', body: 'Body' });
+       const stuck = await clerk.transition(writ.id, 'stuck', { resolution: 'Engine failure' });
+       assert.equal(stuck.phase, 'stuck');
+       assert.equal(stuck.resolvedAt, undefined, 'stuck is non-terminal');
+@@ -1204,7 +1220,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('stuck recovery path: open → stuck → open → completed', async () => {
+-      const writ = await clerk.post({ title: 'Recovered', body: 'Body' });
++      const writ = await postOpen({ title: 'Recovered', body: 'Body' });
+       await clerk.transition(writ.id, 'stuck');
+       await clerk.transition(writ.id, 'open');
+       const completed = await clerk.transition(writ.id, 'completed', { resolution: 'Recovered and done' });
+@@ -1213,7 +1229,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('updatedAt changes on each mutation', async () => {
+-      const writ = await clerk.post({ title: 'Track updates', body: 'Body' });
++      const writ = await postOpen({ title: 'Track updates', body: 'Body' });
+       const t0 = writ.updatedAt;
+ 
+       await new Promise(r => setTimeout(r, 2));
+@@ -1224,7 +1240,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('transition() strips managed fields from caller-supplied fields', async () => {
+-      const writ = await clerk.post({ title: 'Sanitize test', body: 'Body' });
++      const writ = await postOpen({ title: 'Sanitize test', body: 'Body' });
+ 
+       // D29: phase is no longer silently stripped — it is rejected (tested
+       // separately below). Other managed fields continue to be stripped.
+@@ -1248,7 +1264,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('transition() throws (D29) when phase is passed in the fields argument', async () => {
+-      const writ = await clerk.post({ title: 'Phase override attempt', body: 'Body' });
++      const writ = await postOpen({ title: 'Phase override attempt', body: 'Body' });
+ 
+       await assert.rejects(
+         () => clerk.transition(writ.id, 'completed', {
+@@ -1300,7 +1316,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('survives terminal transitions — slot is not cleared on completed/failed/cancelled', async () => {
+-      const writ = await clerk.post({ title: 'Terminal survivor', body: 'Body' });
++      const writ = await postOpen({ title: 'Terminal survivor', body: 'Body' });
+       await clerk.setWritStatus(writ.id, 'spider', { lastRig: 'rig-1' });
+ 
+       const done = await clerk.transition(writ.id, 'completed', { resolution: 'ok' });
+@@ -1319,7 +1335,7 @@ describe('Clerk', () => {
+       // in its body (the same treatment as the other managed fields) so
+       // that a smuggled slot-write through the generic shallow-merge
+       // path cannot clobber sibling sub-slots.
+-      const writ = await clerk.post({ title: 'Strip status on transition', body: 'Body' });
++      const writ = await postOpen({ title: 'Strip status on transition', body: 'Body' });
+       await clerk.setWritStatus(writ.id, 'spider', { stuckCause: 'original' });
+       await clerk.setWritStatus(writ.id, 'ratchet', { progress: 0.2 });
+ 
+@@ -2668,13 +2684,13 @@ describe('Clerk', () => {
+     });
+ 
+     it('edits title of a draft writ via the tool handler', async () => {
+-      const writ = await clerk.post({ title: 'Old', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Old', body: 'Body' });
+       const result = await writEdit.handler({ id: writ.id, title: 'New' }) as { title: string };
+       assert.equal(result.title, 'New');
+     });
+ 
+     it('edits multiple fields via the tool handler', async () => {
+-      const writ = await clerk.post({ title: 'Old', body: 'Old body', draft: true });
++      const writ = await clerk.post({ title: 'Old', body: 'Old body' });
+       const result = await writEdit.handler({
+         id: writ.id,
+         title: 'New',
+@@ -2690,7 +2706,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('rejects when no editable fields are provided', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body', draft: true });
++      const writ = await clerk.post({ title: 'Title', body: 'Body' });
+       await assert.rejects(
+         () => writEdit.handler({ id: writ.id }),
+         /At least one field/,
+@@ -2698,14 +2714,14 @@ describe('Clerk', () => {
+     });
+ 
+     it('allows editing title/body of a non-draft writ via the tool handler', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body' }); // open
++      const writ = await postOpen({ title: 'Title', body: 'Body' }); // open
+       const edited = await writEdit.handler({ id: writ.id, title: 'Changed', body: 'New body' });
+       assert.equal(edited.title, 'Changed');
+       assert.equal(edited.body, 'New body');
+     });
+ 
+     it('rejects changing type on a non-draft writ via the tool handler', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body' }); // open
++      const writ = await postOpen({ title: 'Title', body: 'Body' }); // open
+       await assert.rejects(
+         () => writEdit.handler({ id: writ.id, type: 'errand' }),
+         /Cannot change type/,
+@@ -2713,7 +2729,7 @@ describe('Clerk', () => {
+     });
+ 
+     it('rejects changing codex on a non-draft writ via the tool handler', async () => {
+-      const writ = await clerk.post({ title: 'Title', body: 'Body' }); // open
++      const writ = await postOpen({ title: 'Title', body: 'Body' }); // open
+       await assert.rejects(
+         () => writEdit.handler({ id: writ.id, codex: 'gamma' }),
+         /Cannot change codex/,
+@@ -2804,6 +2820,61 @@ describe('Clerk', () => {
+       assert.equal(writ.type, 'mandate');
+     });
+ 
++    it('throws on late registration (post-seal)', async () => {
++      const { ctx, fire } = buildClerkCtx([]);
++      await setupCore({}, ctx);
++      // Seal the registry by firing phase:started
++      await fire('phase:started');
++      assert.throws(
++        () => clerk.registerWritType({
++          name: 'late-type',
++          states: [
++            { name: 'open', classification: 'initial' as const, allowedTransitions: ['done'] },
++            { name: 'done', classification: 'terminal' as const, allowedTransitions: [] },
++          ],
++        }),
++        /\[clerk\] registerWritType: registration window has closed/,
++      );
++    });
++
++    it('propagates validator errors verbatim', async () => {
++      await setup();
++      // A config with no states — validator should error
++      assert.throws(
++        () => clerk.registerWritType({
++          name: 'bad-type',
++          states: [],
++        } as unknown as import('./writ-type-config.ts').WritTypeConfig),
++        // The validator error propagates verbatim (not wrapped with registerWritType prefix)
++        (err: Error) => !err.message.startsWith('[clerk] registerWritType:'),
++      );
++    });
++
++    it('rejects child creation when parent is terminal', async () => {
++      await setup();
++      const parent = await postOpen({ title: 'Parent', body: 'Body' });
++      await clerk.transition(parent.id, 'completed', { resolution: 'Done' });
++      await assert.rejects(
++        () => clerk.post({ title: 'Child', body: 'Body', parentId: parent.id }),
++        /terminal/,
++      );
++    });
++
++    it('makeWritTypeApparatus registers types via guild apparatus lookup', async () => {
++      await setup();
++      const fixture = makeWritTypeApparatus([{
++        name: 'ticket',
++        states: [
++          { name: 'open', classification: 'initial' as const, allowedTransitions: ['closed'] },
++          { name: 'closed', classification: 'terminal' as const, allowedTransitions: [] },
++        ],
++      }]);
++      fixture.start();
++      const writ = await clerk.post({ title: 'Ticket', body: 'Issue', type: 'ticket' });
++      assert.equal(writ.type, 'ticket');
++      assert.equal(writ.phase, 'open');
++    });
++
+     it('isInitial/isActive/isTerminal work for registered types', async () => {
+       await setup();
+       clerk.registerWritType({
+@@ -3098,8 +3169,8 @@ describe('Parent/child relationships', () => {
+     beforeEach(async () => { await setup(); });
+ 
+     it('creates a child writ with parentId set', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Parent body' });
+-      const child = await clerk.post({ title: 'Child', body: 'Child body', parentId: parent.id });
++      const parent = await postOpen({ title: 'Parent', body: 'Parent body' });
++      const child = await postOpen({ title: 'Child', body: 'Child body', parentId: parent.id });
+ 
+       assert.equal(child.parentId, parent.id);
+       assert.ok(child.id.startsWith('w-'));
+@@ -3107,7 +3178,7 @@ describe('Parent/child relationships', () => {
+     });
+ 
+     it('parent stays in open when child is added', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
++      const parent = await postOpen({ title: 'Parent', body: 'Body' });
+       assert.equal(parent.phase, 'open');
+ 
+       await clerk.post({ title: 'Child', body: 'Body', parentId: parent.id });
+@@ -3117,7 +3188,7 @@ describe('Parent/child relationships', () => {
+     });
+ 
+     it('parent stays in new when child is added', async () => {
+-      const parent = await clerk.post({ title: 'Draft parent', body: 'Body', draft: true });
++      const parent = await clerk.post({ title: 'Draft parent', body: 'Body' });
+       assert.equal(parent.phase, 'new');
+ 
+       await clerk.post({ title: 'Child', body: 'Body', parentId: parent.id });
+@@ -3127,7 +3198,7 @@ describe('Parent/child relationships', () => {
+     });
+ 
+     it('parent stays in open when a second child is added', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
++      const parent = await postOpen({ title: 'Parent', body: 'Body' });
+       await clerk.post({ title: 'Child 1', body: 'Body', parentId: parent.id });
+ 
+       const midState = await clerk.show(parent.id);
+@@ -3179,7 +3250,7 @@ describe('Parent/child relationships', () => {
+     });
+ 
+     it('rejects child creation when parent is completed', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
++      const parent = await postOpen({ title: 'Parent', body: 'Body' });
+       await clerk.transition(parent.id, 'completed', { resolution: 'Done' });
+ 
+       await assert.rejects(
+@@ -3193,7 +3264,7 @@ describe('Parent/child relationships', () => {
+     });
+ 
+     it('rejects child creation when parent is failed', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
++      const parent = await postOpen({ title: 'Parent', body: 'Body' });
+       await clerk.transition(parent.id, 'failed', { resolution: 'Broke' });
+ 
+       await assert.rejects(
+@@ -3207,7 +3278,7 @@ describe('Parent/child relationships', () => {
+     });
+ 
+     it('rejects child creation when parent is cancelled', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
++      const parent = await postOpen({ title: 'Parent', body: 'Body' });
+       await clerk.transition(parent.id, 'cancelled');
+ 
+       await assert.rejects(
+@@ -3221,7 +3292,7 @@ describe('Parent/child relationships', () => {
+     });
+ 
+     it('allows child creation when parent is stuck', async () => {
+-      const parent = await clerk.post({ title: 'Stuck parent', body: 'Body' });
++      const parent = await postOpen({ title: 'Stuck parent', body: 'Body' });
+       await clerk.transition(parent.id, 'stuck');
+ 
+       const child = await clerk.post({ title: 'Child of stuck', body: 'Body', parentId: parent.id });
+@@ -3235,10 +3306,10 @@ describe('Parent/child relationships', () => {
+     beforeEach(async () => { await setup(); });
+ 
+     it('parent flows: open → completed (children do not change parent status)', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
++      const parent = await postOpen({ title: 'Parent', body: 'Body' });
+       assert.equal(parent.phase, 'open');
+ 
+-      const child = await clerk.post({ title: 'Child', body: 'B', parentId: parent.id });
++      const child = await postOpen({ title: 'Child', body: 'B', parentId: parent.id });
+       const p1 = await clerk.show(parent.id);
+       assert.equal(p1.phase, 'open');
+ 
+@@ -3253,8 +3324,8 @@ describe('Parent/child relationships', () => {
+     });
+ 
+     it('children already terminal are not cancelled when parent completes normally', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const child = await clerk.post({ title: 'Child', body: 'B', parentId: parent.id });
++      const parent = await postOpen({ title: 'Parent', body: 'Body' });
++      const child = await postOpen({ title: 'Child', body: 'B', parentId: parent.id });
+ 
+       // Complete child — parent stays open
+       await clerk.transition(child.id, 'completed', { resolution: 'Done' });
+@@ -3274,8 +3345,8 @@ describe('Parent/child relationships', () => {
+     beforeEach(async () => { await setup(); });
+ 
+     it('transition does not change parentId even if passed in fields', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const child = await clerk.post({ title: 'Child', body: 'B', parentId: parent.id });
++      const parent = await postOpen({ title: 'Parent', body: 'Body' });
++      const child = await postOpen({ title: 'Child', body: 'B', parentId: parent.id });
+ 
+       const updated = await clerk.transition(child.id, 'completed', { parentId: 'w-other' } as Partial<import('./types.ts').WritDoc>);
+       assert.equal(updated.parentId, parent.id);
+@@ -3310,7 +3381,7 @@ describe('Parent/child relationships', () => {
+     beforeEach(async () => { await setup(); });
+ 
+     it('includes parent context for a child writ', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
++      const parent = await postOpen({ title: 'Parent', body: 'Body' });
+       const child = await clerk.post({ title: 'Child', body: 'B', parentId: parent.id });
+ 
+       const result = await writShow.handler({ id: child.id });
+@@ -3319,9 +3390,9 @@ describe('Parent/child relationships', () => {
+     });
+ 
+     it('includes children context for a parent writ', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const c1 = await clerk.post({ title: 'C1', body: 'B', parentId: parent.id });
+-      const c2 = await clerk.post({ title: 'C2', body: 'B', parentId: parent.id });
++      const parent = await postOpen({ title: 'Parent', body: 'Body' });
++      const c1 = await postOpen({ title: 'C1', body: 'B', parentId: parent.id });
++      const c2 = await postOpen({ title: 'C2', body: 'B', parentId: parent.id });
+ 
+       const result = await writShow.handler({ id: parent.id });
+       assert.equal(result.parent, null);
+@@ -3346,11 +3417,11 @@ describe('Parent/child relationships', () => {
+       //   │  ├─ g1 (open)    — grandchild
+       //   │  └─ g2 (stuck)   — grandchild
+       //   └─ c2 (open)       — direct child
+-      const root = await clerk.post({ title: 'Root', body: 'Body' });
+-      const c1 = await clerk.post({ title: 'C1', body: 'B', parentId: root.id });
+-      const c2 = await clerk.post({ title: 'C2', body: 'B', parentId: root.id });
+-      const g1 = await clerk.post({ title: 'G1', body: 'B', parentId: c1.id });
+-      const g2 = await clerk.post({ title: 'G2', body: 'B', parentId: c1.id });
++      const root = await postOpen({ title: 'Root', body: 'Body' });
++      const c1 = await postOpen({ title: 'C1', body: 'B', parentId: root.id });
++      const c2 = await postOpen({ title: 'C2', body: 'B', parentId: root.id });
++      const g1 = await postOpen({ title: 'G1', body: 'B', parentId: c1.id });
++      const g2 = await postOpen({ title: 'G2', body: 'B', parentId: c1.id });
+       // Nudge g2 into stuck so phases diverge across the subtree.
+       await clerk.transition(g2.id, 'stuck');
+ 
+@@ -3369,9 +3440,9 @@ describe('Parent/child relationships', () => {
+     });
+ 
+     it('ClerkApi.countDescendantsByPhase returns subtree-wide phase counts', async () => {
+-      const root = await clerk.post({ title: 'Root', body: 'B' });
+-      const c1 = await clerk.post({ title: 'C1', body: 'B', parentId: root.id });
+-      const g1 = await clerk.post({ title: 'G1', body: 'B', parentId: c1.id });
++      const root = await postOpen({ title: 'Root', body: 'B' });
++      const c1 = await postOpen({ title: 'C1', body: 'B', parentId: root.id });
++      const g1 = await postOpen({ title: 'G1', body: 'B', parentId: c1.id });
+       await clerk.transition(g1.id, 'completed', { resolution: 'done' });
+ 
+       const counts = await clerk.countDescendantsByPhase(root.id);
+diff --git a/packages/plugins/clerk/src/clerk.ts b/packages/plugins/clerk/src/clerk.ts
+index 146f0d5..f1de873 100644
+--- a/packages/plugins/clerk/src/clerk.ts
++++ b/packages/plugins/clerk/src/clerk.ts
+@@ -442,12 +442,6 @@ export function createClerk(): Plugin {
+           return writ;
+         });
+ 
+-        // Auto-advance mandate writs from initial state ('new') to 'open'
+-        // unless the caller explicitly requested a draft. The `draft` flag is
+-        // deprecated (D23); this auto-advance lives here only until T6.
+-        if (type === MANDATE_TYPE_NAME && request.draft !== true) {
+-          return api.transition(created.id, 'open');
+-        }
+         return created;
+       }
+ 
+@@ -464,12 +458,6 @@ export function createClerk(): Plugin {
+ 
+       await writs.put(writ);
+ 
+-      // Auto-advance mandate writs from initial state ('new') to 'open'
+-      // unless the caller explicitly requested a draft. The `draft` flag is
+-      // deprecated (D23); this auto-advance lives here only until T6.
+-      if (type === MANDATE_TYPE_NAME && request.draft !== true) {
+-        return api.transition(childId, 'open');
+-      }
+       return writ;
+     },
+ 
+@@ -823,8 +811,8 @@ export function createClerk(): Plugin {
+           // produce a clean "none" message.
+           const allowed = currentState.allowedTransitions;
+           throw new Error(
+-            `Cannot transition writ "${id}" to "${to}": current phase "${writ.phase}" → ` +
+-            `not in allowed [${allowed.length > 0 ? allowed.join(', ') : 'none — terminal state'}].`,
++            `Cannot transition writ "${id}" from "${writ.phase}" to "${to}": ` +
++            `legal transitions from "${writ.phase}" are ${allowed.length > 0 ? allowed.join(', ') : 'none (terminal state)'}.`,
+           );
+         }
+ 
+@@ -968,6 +956,13 @@ export function createClerk(): Plugin {
+         // registrations are expected.
+         ctx.on('phase:started', () => {
+           writTypeRegistrySealed = true;
++          const config = resolveClerkConfig();
++          if (config.defaultType && !writTypeRegistry.has(config.defaultType)) {
++            throw new Error(
++              `[clerk] defaultType "${config.defaultType}" is not registered. ` +
++              `Registered types: ${[...writTypeRegistry.keys()].sort().join(', ')}.`,
++            );
++          }
+         });
+ 
+         // Register mandate as a first-class writ type in the new registry.
+diff --git a/packages/plugins/clerk/src/testing.ts b/packages/plugins/clerk/src/testing.ts
+new file mode 100644
+index 0000000..07d2fa0
+--- /dev/null
++++ b/packages/plugins/clerk/src/testing.ts
+@@ -0,0 +1,37 @@
++/**
++ * Test helpers for the Clerk apparatus.
++ *
++ * These helpers are intended for use in tests that need to register writ types
++ * with the Clerk. They mirror the production path (a plugin apparatus calling
++ * `registerWritType` in its own `start()`), so that ordering bugs the framework
++ * would catch stay caught in tests.
++ *
++ * Usage:
++ *   const fixture = makeWritTypeApparatus([ERRAND_CONFIG, TASK_CONFIG]);
++ *   fixture.start(); // call after clerk.start() but before phase:started seals
++ */
++
++import { guild } from '@shardworks/nexus-core';
++import type { WritTypeConfig } from './writ-type-config.ts';
++import type { ClerkApi } from './types.ts';
++
++/**
++ * Creates a minimal apparatus-like object whose `start()` method registers
++ * the given writ types with the Clerk via `guild().apparatus<ClerkApi>('clerk')`.
++ *
++ * This mirrors the production path (e.g. astrolabe's `start()` calls
++ * `registerWritType`), so ordering bugs the framework would catch stay
++ * caught in tests.
++ */
++export function makeWritTypeApparatus(types: WritTypeConfig[]): {
++  start(): void;
++} {
++  return {
++    start(): void {
++      const clerk = guild().apparatus<ClerkApi>('clerk');
++      for (const config of types) {
++        clerk.registerWritType(config);
++      }
++    },
++  };
++}
+diff --git a/packages/plugins/clerk/src/tools/commission-post.ts b/packages/plugins/clerk/src/tools/commission-post.ts
+index 0155b9b..33a87a2 100644
+--- a/packages/plugins/clerk/src/tools/commission-post.ts
++++ b/packages/plugins/clerk/src/tools/commission-post.ts
+@@ -40,13 +40,19 @@ export default tool({
+     const resolvedParentId = params.parentId
+       ? await clerk.resolveId(params.parentId)
+       : undefined;
+-    return clerk.post({
++    const writ = await clerk.post({
+       title: params.title,
+       body: params.body,
+       type: params.type,
+       codex: params.codex,
+-      draft: params.draft,
+       parentId: resolvedParentId,
+     });
++    // D23: Auto-advance mandate writs from initial state ('new') to 'open'
++    // unless the caller requested a draft. This UX concern lives in the tool
++    // layer; post() is a single-responsibility creator (D19).
++    if (params.draft !== true && writ.type === 'mandate') {
++      return clerk.transition(writ.id, 'open');
++    }
++    return writ;
+   },
+ });
+diff --git a/packages/plugins/clerk/src/types.ts b/packages/plugins/clerk/src/types.ts
+index fef1b72..b30311f 100644
+--- a/packages/plugins/clerk/src/types.ts
++++ b/packages/plugins/clerk/src/types.ts
+@@ -120,15 +120,6 @@ export interface PostCommissionRequest {
+   body: string;
+   /** Optional target codex name. */
+   codex?: string;
+-  /**
+-   * When true, the writ is created in its type's declared initial state without
+-   * any auto-advance. For mandate writs the `commission-post` tool auto-advances
+-   * from 'new' to 'open' unless `draft` is true.
+-   *
+-   * @deprecated Kept for backward compatibility. The `draft` concern belongs in
+-   * the `commission-post` tool (D23); removed from this API in T6.
+-   */
+-  draft?: boolean;
+   /**
+    * Create this writ as a child of the specified parent writ.
+    * The parent must not be in a terminal state.
+diff --git a/packages/plugins/clockworks-retry/src/clockworks-retry.integration.test.ts b/packages/plugins/clockworks-retry/src/clockworks-retry.integration.test.ts
+index d421e45..eb504ff 100644
+--- a/packages/plugins/clockworks-retry/src/clockworks-retry.integration.test.ts
++++ b/packages/plugins/clockworks-retry/src/clockworks-retry.integration.test.ts
+@@ -336,7 +336,10 @@ function buildFixture(template: RigTemplate): Fixture {
+ }
+ 
+ async function postMandate(clerk: ClerkApi, title = 'integration writ'): Promise<WritDoc> {
+-  return clerk.post({ title, body: 'body', type: 'mandate' });
++  const writ = await clerk.post({ title, body: 'body', type: 'mandate' });
++  // clerk.post() always returns the initial state ('new' for mandate).
++  // Transition to 'open' so spider can dispatch the writ.
++  return clerk.transition(writ.id, 'open');
+ }
+ 
+ // ── Tests ─────────────────────────────────────────────────────────────
+diff --git a/packages/plugins/clockworks-retry/src/clockworks-retry.test.ts b/packages/plugins/clockworks-retry/src/clockworks-retry.test.ts
+index 179d933..824c674 100644
+--- a/packages/plugins/clockworks-retry/src/clockworks-retry.test.ts
++++ b/packages/plugins/clockworks-retry/src/clockworks-retry.test.ts
+@@ -212,7 +212,10 @@ async function stuckWith(
+ }
+ 
+ async function postOpenWrit(fix: Fixture): Promise<WritDoc> {
+-  return fix.clerk.post({ title: 'test', body: 'test body' });
++  const writ = await fix.clerk.post({ title: 'test', body: 'test body' });
++  // clerk.post() always returns the initial state ('new' for mandate).
++  // Transition to 'open' so tests can subsequently transition to 'stuck'.
++  return fix.clerk.transition(writ.id, 'open');
+ }
+ 
+ // ── Tests ─────────────────────────────────────────────────────────────
+diff --git a/packages/plugins/lattice/src/tools/tools.test.ts b/packages/plugins/lattice/src/tools/tools.test.ts
+index 5201585..752eb1a 100644
+--- a/packages/plugins/lattice/src/tools/tools.test.ts
++++ b/packages/plugins/lattice/src/tools/tools.test.ts
+@@ -259,6 +259,7 @@ describe('pulse-list — --live filtering', () => {
+   it('excludes drain pulses (null writId) entirely', async () => {
+     const fix = await buildFixture();
+     const writ = await fix.clerk.post({ title: 'w', body: 'b' });
++    await fix.clerk.transition(writ.id, 'open');
+     await fix.clerk.transition(writ.id, 'stuck', { resolution: 'test' });
+ 
+     await seedPulseFor(fix, 'reckoner.queue-drained', null, 'drained');
+@@ -271,8 +272,10 @@ describe('pulse-list — --live filtering', () => {
+   it('includes pulses whose writ is currently stuck or failed', async () => {
+     const fix = await buildFixture();
+     const stuckWrit = await fix.clerk.post({ title: 's', body: 'b' });
++    await fix.clerk.transition(stuckWrit.id, 'open');
+     await fix.clerk.transition(stuckWrit.id, 'stuck', { resolution: 'test' });
+     const failedWrit = await fix.clerk.post({ title: 'f', body: 'b' });
++    await fix.clerk.transition(failedWrit.id, 'open');
+     await fix.clerk.transition(failedWrit.id, 'failed', { resolution: 'test' });
+ 
+     const stuckPulse = await seedPulseFor(fix, 'reckoner.writ-stuck', stuckWrit.id);
+@@ -288,6 +291,7 @@ describe('pulse-list — --live filtering', () => {
+   it('excludes pulses whose writ has since moved to a non-live phase', async () => {
+     const fix = await buildFixture();
+     const writ = await fix.clerk.post({ title: 'w', body: 'b' });
++    await fix.clerk.transition(writ.id, 'open');
+     await fix.clerk.transition(writ.id, 'stuck', { resolution: 'test' });
+     await seedPulseFor(fix, 'reckoner.writ-stuck', writ.id);
+ 
+diff --git a/packages/plugins/reckoner/src/drain.test.ts b/packages/plugins/reckoner/src/drain.test.ts
+index 8dbff7b..8caebab 100644
+--- a/packages/plugins/reckoner/src/drain.test.ts
++++ b/packages/plugins/reckoner/src/drain.test.ts
+@@ -153,6 +153,7 @@ describe('Reckoner — queue-drained emission', () => {
+ 
+   it('fires on the terminal transition that takes open to zero', async () => {
+     const writ = await fix.clerk.post({ title: 'w', body: 'b' });
++    await fix.clerk.transition(writ.id, 'open');
+     // Starts in `open`. Complete it → open count becomes 0.
+     await fix.clerk.transition(writ.id, 'completed', { resolution: 'done' });
+     const pulses = await fix.pulsesOf(TRIGGER_QUEUE_DRAINED);
+@@ -164,6 +165,8 @@ describe('Reckoner — queue-drained emission', () => {
+   it('does not fire while open > 0 (another writ is still runnable)', async () => {
+     const writA = await fix.clerk.post({ title: 'A', body: '' });
+     const _writB = await fix.clerk.post({ title: 'B', body: '' });
++    await fix.clerk.transition(writA.id, 'open');
++    await fix.clerk.transition(_writB.id, 'open');
+     await fix.clerk.transition(writA.id, 'completed', { resolution: 'done' });
+     const pulses = await fix.pulsesOf(TRIGGER_QUEUE_DRAINED);
+     assert.equal(pulses.length, 0);
+@@ -172,6 +175,8 @@ describe('Reckoner — queue-drained emission', () => {
+   it('does not fire while active rigs remain (running or blocked)', async () => {
+     const writA = await fix.clerk.post({ title: 'A', body: '' });
+     const writB = await fix.clerk.post({ title: 'B', body: '' });
++    await fix.clerk.transition(writA.id, 'open');
++    await fix.clerk.transition(writB.id, 'open');
+     await fix.seedRig(writB.id, 'running');
+     // Finish A; B is in `open` phase with a running rig → not drained.
+     await fix.clerk.transition(writA.id, 'completed', { resolution: 'done' });
+@@ -185,8 +190,10 @@ describe('Reckoner — queue-drained emission', () => {
+ 
+   it('fires even when stuck writs are present (stuck is not runnable)', async () => {
+     const stuck = await fix.clerk.post({ title: 'stuck', body: '' });
++    await fix.clerk.transition(stuck.id, 'open');
+     await fix.clerk.transition(stuck.id, 'stuck', { resolution: 'no progress' });
+     const good = await fix.clerk.post({ title: 'good', body: '' });
++    await fix.clerk.transition(good.id, 'open');
+     await fix.clerk.transition(good.id, 'completed', { resolution: 'done' });
+     const pulses = await fix.pulsesOf(TRIGGER_QUEUE_DRAINED);
+     assert.equal(pulses.length, 1, 'stuck writs do not count as runnable');
+@@ -194,6 +201,7 @@ describe('Reckoner — queue-drained emission', () => {
+ 
+   it('also fires on a cancel transition that drains the queue', async () => {
+     const writ = await fix.clerk.post({ title: 'w', body: '' });
++    await fix.clerk.transition(writ.id, 'open');
+     await fix.clerk.transition(writ.id, 'cancelled', { resolution: 'withdrawn' });
+     const pulses = await fix.pulsesOf(TRIGGER_QUEUE_DRAINED);
+     assert.equal(pulses.length, 1);
+diff --git a/packages/plugins/reckoner/src/integration.test.ts b/packages/plugins/reckoner/src/integration.test.ts
+index a5fa2d9..5bb52b3 100644
+--- a/packages/plugins/reckoner/src/integration.test.ts
++++ b/packages/plugins/reckoner/src/integration.test.ts
+@@ -275,6 +275,7 @@ describe('Lattice + Reckoner + Discord — end-to-end', () => {
+     const fix = await buildGuild();
+     try {
+       const writ = await fix.clerk.post({ title: 'root mandate', body: 'b' });
++      await fix.clerk.transition(writ.id, 'open');
+       await fix.clerk.transition(writ.id, 'failed', { resolution: 'abandoned' });
+ 
+       // Exactly one pulse (failed). Drain may or may not have fired; assert
+@@ -306,6 +307,7 @@ describe('Lattice + Reckoner + Discord — end-to-end', () => {
+     const fix = await buildGuild();
+     try {
+       const writ = await fix.clerk.post({ title: 'stuck mandate', body: 'b' });
++      await fix.clerk.transition(writ.id, 'open');
+       await fix.seedRig(writ.id, 'stuck');
+       await stuckWith(fix, writ.id, {
+         stuckCause: 'engine-failure',
+@@ -329,6 +331,7 @@ describe('Lattice + Reckoner + Discord — end-to-end', () => {
+     const fix = await buildGuild();
+     try {
+       const writ = await fix.clerk.post({ title: 'capped mandate', body: 'b' });
++      await fix.clerk.transition(writ.id, 'open');
+       // Two prior rigs → cap hit → clockworks-retry will not requeue.
+       await fix.seedRig(writ.id, 'stuck');
+       await fix.seedRig(writ.id, 'stuck');
+@@ -351,6 +354,7 @@ describe('Lattice + Reckoner + Discord — end-to-end', () => {
+     try {
+       // Create a root writ and transition it to stuck (non-retryable → terminal).
+       const writ = await fix.clerk.post({ title: 'live test', body: 'b' });
++      await fix.clerk.transition(writ.id, 'open');
+       await stuckWith(fix, writ.id, {
+         stuckCause: 'engine-failure',
+         retryable: false,
+diff --git a/packages/plugins/reckoner/src/reckoner.test.ts b/packages/plugins/reckoner/src/reckoner.test.ts
+index 27b4a8e..eec97eb 100644
+--- a/packages/plugins/reckoner/src/reckoner.test.ts
++++ b/packages/plugins/reckoner/src/reckoner.test.ts
+@@ -234,6 +234,7 @@ describe('Reckoner — writ-stuck emission', () => {
+ 
+   it('emits nothing when a retryable stuck is under the cap', async () => {
+     const writ = await fix.clerk.post({ title: 'w', body: 'b' });
++    await fix.clerk.transition(writ.id, 'open');
+     await fix.seedRig(writ.id, 'stuck');
+     await stuckWith(fix, writ.id, {
+       stuckCause: 'engine-failure',
+@@ -246,6 +247,7 @@ describe('Reckoner — writ-stuck emission', () => {
+ 
+   it('emits exactly one pulse when a retryable stuck is at cap', async () => {
+     const writ = await fix.clerk.post({ title: 'w', body: 'b' });
++    await fix.clerk.transition(writ.id, 'open');
+     // Pre-load cap-many rigs.
+     await fix.seedRig(writ.id, 'stuck');
+     await fix.seedRig(writ.id, 'stuck');
+@@ -263,6 +265,7 @@ describe('Reckoner — writ-stuck emission', () => {
+ 
+   it('emits for non-retryable stuck regardless of rig count', async () => {
+     const writ = await fix.clerk.post({ title: 'w', body: 'b' });
++    await fix.clerk.transition(writ.id, 'open');
+     await fix.seedRig(writ.id, 'stuck');
+     await stuckWith(fix, writ.id, {
+       stuckCause: 'engine-failure',
+@@ -275,6 +278,7 @@ describe('Reckoner — writ-stuck emission', () => {
+ 
+   it('emits for a stuck with no retryable flag (fail-safe terminal)', async () => {
+     const writ = await fix.clerk.post({ title: 'w', body: 'b' });
++    await fix.clerk.transition(writ.id, 'open');
+     await fix.seedRig(writ.id, 'stuck');
+     // Stuck with a spider slot that lacks `retryable`.
+     await stuckWith(fix, writ.id, { stuckCause: 'cycle' });
+@@ -284,6 +288,7 @@ describe('Reckoner — writ-stuck emission', () => {
+ 
+   it('emits for a stuck with no spider slot at all', async () => {
+     const writ = await fix.clerk.post({ title: 'w', body: 'b' });
++    await fix.clerk.transition(writ.id, 'open');
+     await fix.clerk.transition(writ.id, 'stuck', { resolution: 'raw' });
+     const pulses = await fix.pulsesOf(TRIGGER_WRIT_STUCK);
+     assert.equal(pulses.length, 1);
+@@ -292,6 +297,7 @@ describe('Reckoner — writ-stuck emission', () => {
+   it('does not emit for a child writ transition (roots-only)', async () => {
+     const parent = await fix.clerk.post({ title: 'parent', body: 'p' });
+     const child = await fix.clerk.post({ title: 'child', body: 'c', parentId: parent.id });
++    await fix.clerk.transition(child.id, 'open');
+     await stuckWith(fix, child.id, { retryable: false });
+     const pulses = await fix.pulsesOf(TRIGGER_WRIT_STUCK);
+     assert.equal(pulses.length, 0, 'children must not emit their own stuck pulse');
+@@ -309,6 +315,7 @@ describe('Reckoner — writ-failed emission', () => {
+ 
+   it('always emits when a root writ enters failed', async () => {
+     const writ = await fix.clerk.post({ title: 'w', body: 'b' });
++    await fix.clerk.transition(writ.id, 'open');
+     await fix.clerk.transition(writ.id, 'failed', { resolution: 'abandoned' });
+     const pulses = await fix.pulsesOf(TRIGGER_WRIT_FAILED);
+     assert.equal(pulses.length, 1);
+@@ -321,7 +328,12 @@ describe('Reckoner — writ-failed emission', () => {
+     const parent = await fix.clerk.post({ title: 'parent', body: 'p' });
+     const child = await fix.clerk.post({ title: 'child', body: 'c', parentId: parent.id });
+     // Cascade path: child → parent via the clerk's CDC cascade handler.
++    await fix.clerk.transition(child.id, 'open');
+     await fix.clerk.transition(child.id, 'failed', { resolution: 'engine crashed' });
++    // Manually cascade: transition the parent to failed with the child's id embedded
++    // in the resolution string so parseChildFailures can surface it.
++    await fix.clerk.transition(parent.id, 'open');
++    await fix.clerk.transition(parent.id, 'failed', { resolution: `Child "${child.id}" failed: engine crashed` });
+ 
+     const pulses = await fix.pulsesOf(TRIGGER_WRIT_FAILED);
+     assert.equal(pulses.length, 1, 'root failed emits one pulse; child emits none');
+@@ -338,7 +350,11 @@ describe('Reckoner — writ-failed emission', () => {
+     const parent = await fix.clerk.post({ title: 'parent', body: 'p' });
+     const child = await fix.clerk.post({ title: 'child', body: 'c', parentId: parent.id });
+     // Only the parent should emit, regardless of the cascade originating from the child.
++    await fix.clerk.transition(child.id, 'open');
+     await fix.clerk.transition(child.id, 'failed', { resolution: 'engine crashed' });
++    // Manually cascade: transition the parent to failed so only the root emits a pulse.
++    await fix.clerk.transition(parent.id, 'open');
++    await fix.clerk.transition(parent.id, 'failed', { resolution: `Child "${child.id}" failed: engine crashed` });
+ 
+     const failedPulses = await fix.pulsesOf(TRIGGER_WRIT_FAILED);
+     assert.equal(failedPulses.length, 1);
+@@ -352,6 +368,7 @@ describe('Reckoner — clockworks-retry optional', () => {
+   it('treats every stuck as terminal when clockworks-retry is not installed', async () => {
+     const fix = await buildFixture({ withRetry: false });
+     const writ = await fix.clerk.post({ title: 'w', body: 'b' });
++    await fix.clerk.transition(writ.id, 'open');
+     // retryable: true should STILL emit — no retry runs, so every stuck
+     // is terminal from the Reckoner's viewpoint.
+     await stuckWith(fix, writ.id, { retryable: true, stuckCause: 'engine-failure' });
+diff --git a/packages/plugins/reckoner/src/replay.test.ts b/packages/plugins/reckoner/src/replay.test.ts
+index 7397c45..774023c 100644
+--- a/packages/plugins/reckoner/src/replay.test.ts
++++ b/packages/plugins/reckoner/src/replay.test.ts
+@@ -281,6 +281,7 @@ describe('Reckoner — idempotency under CDC replay', () => {
+     // snapshot the pulses book and then replay the synthetic event —
+     // the second delivery must NOT add a second drain pulse.
+     const writ = await fix.clerk.post({ title: 'draining mandate', body: 'b' });
++    await fix.clerk.transition(writ.id, 'open');
+     await fix.clerk.transition(writ.id, 'completed', { resolution: 'done' });
+ 
+     // After the real CDC ran once, there should be exactly one drain
+diff --git a/packages/plugins/spider/src/engine-retry.test.ts b/packages/plugins/spider/src/engine-retry.test.ts
+index 47a99a7..99cf3c7 100644
+--- a/packages/plugins/spider/src/engine-retry.test.ts
++++ b/packages/plugins/spider/src/engine-retry.test.ts
+@@ -259,6 +259,7 @@ describe('Engine-level retry — new invariants', () => {
+   it('maxAttempts=0 (no retry) fails the engine terminally on first error', async () => {
+     fix = buildFixture({ retryMaxAttempts: 0 });
+     const writ = await fix.clerk.post({ title: 'no retry' });
++    await fix.clerk.transition(writ.id, 'open');
+ 
+     // Spawn the rig.
+     await fix.spider.crawl();
+@@ -285,7 +286,8 @@ describe('Engine-level retry — new invariants', () => {
+ 
+   it('retryable attempt increments attemptCount and puts engine in pending+holdReason="retry-backoff"', async () => {
+     fix = buildFixture({ retryMaxAttempts: 2 });
+-    await fix.clerk.post({ title: 'retries inline' });
++    const retriesWrit = await fix.clerk.post({ title: 'retries inline' });
++    await fix.clerk.transition(retriesWrit.id, 'open');
+ 
+     // Spawn.
+     await fix.spider.crawl();
+@@ -315,7 +317,8 @@ describe('Engine-level retry — new invariants', () => {
+ 
+   it('attemptCount increments only on retryable branches (NOT on rate-limit)', async () => {
+     fix = buildFixture({ retryMaxAttempts: 3 });
+-    await fix.clerk.post({ title: 'rate-limit-no-budget' });
++    const rateLimitWrit = await fix.clerk.post({ title: 'rate-limit-no-budget' });
++    await fix.clerk.transition(rateLimitWrit.id, 'open');
+     await fix.spider.crawl();
+ 
+     const writs = await fix.clerk.list({ limit: 1 });
+@@ -336,6 +339,7 @@ describe('Engine-level retry — new invariants', () => {
+   it('exhausting the retry budget transitions the rig to "failed" and the writ to phase="failed"', async () => {
+     fix = buildFixture({ retryMaxAttempts: 1 });
+     const writ = await fix.clerk.post({ title: 'exhaust budget' });
++    await fix.clerk.transition(writ.id, 'open');
+ 
+     // Spawn
+     await fix.spider.crawl();
+@@ -369,6 +373,7 @@ describe('Engine-level retry — new invariants', () => {
+   it('downstream engines stay pending during retry and cascade-cancel only on exhaustion', async () => {
+     fix = buildFixture({ retryMaxAttempts: 1 });
+     const writ = await fix.clerk.post({ title: 'downstream cascade' });
++    await fix.clerk.transition(writ.id, 'open');
+ 
+     await fix.spider.crawl();
+     await fix.spider.crawl(); // retryable
+@@ -393,6 +398,7 @@ describe('Engine-level retry — new invariants', () => {
+     fix = buildFixture({ retryMaxAttempts: 2 });
+     fix.setFlakeyBehaviour('fails-first-n', 1); // fails attempt 1, succeeds on 2
+     const writ = await fix.clerk.post({ title: 'retry-then-succeed' });
++    await fix.clerk.transition(writ.id, 'open');
+ 
+     await fix.spider.crawl(); // spawn
+     await fix.spider.crawl(); // first attempt → retryable
+@@ -422,6 +428,7 @@ describe('Engine-level retry — new invariants', () => {
+   it('rig status is a projection — deriving from engine state not set independently', async () => {
+     fix = buildFixture({ retryMaxAttempts: 0 });
+     const writ = await fix.clerk.post({ title: 'projection test' });
++    await fix.clerk.transition(writ.id, 'open');
+ 
+     await fix.spider.crawl();
+ 
+@@ -439,7 +446,8 @@ describe('Engine-level retry — new invariants', () => {
+ 
+   it('engines never persist status="blocked" on the new write paths', async () => {
+     fix = buildFixture({ retryMaxAttempts: 0 });
+-    await fix.clerk.post({ title: 'no blocked status' });
++    const noBlockedWrit = await fix.clerk.post({ title: 'no blocked status' });
++    await fix.clerk.transition(noBlockedWrit.id, 'open');
+     await fix.spider.crawl();
+     await fix.spider.crawl();
+ 
+diff --git a/packages/plugins/spider/src/engines/piece-session.ts b/packages/plugins/spider/src/engines/piece-session.ts
+index e826790..a1881a5 100644
+--- a/packages/plugins/spider/src/engines/piece-session.ts
++++ b/packages/plugins/spider/src/engines/piece-session.ts
+@@ -12,8 +12,9 @@
+  *
+  * Note on failure: Spider's tryCollect() calls failEngine() directly for
+  * failed/timeout sessions and never invokes collect(). Piece writ failure
+- * relies on Clerk's parent/child cascade when the mandate reaches a
+- * terminal state (stuck → child pieces get cancelled).
++ * is not cascaded — Clerk's parent/child cascade was removed in T5 (D9).
++ * When the mandate writ fails, child piece writs remain in their current
++ * state. Callers that need piece cleanup must handle it explicitly.
+  *
+  * Givens:
+  *   - writ: WritDoc (the mandate writ)
+@@ -41,6 +42,9 @@ import type { SpiderCollectResult, RigTemplateEngine, RigDoc } from '../types.ts
+  */
+ function isAlreadyTerminalTransitionError(err: unknown): boolean {
+   const message = err instanceof Error ? err.message : String(err);
++  // New error format (D5): "legal transitions from "<phase>" are none (terminal state)"
++  if (message.includes('terminal state')) return true;
++  // Legacy format (kept for forward compatibility during transition)
+   if (message.includes('already terminal')) return true;
+   return (
+     message.includes('phase is "cancelled"') ||
+diff --git a/packages/plugins/spider/src/piece-pipeline.test.ts b/packages/plugins/spider/src/piece-pipeline.test.ts
+index 950da78..5b89582 100644
+--- a/packages/plugins/spider/src/piece-pipeline.test.ts
++++ b/packages/plugins/spider/src/piece-pipeline.test.ts
+@@ -113,9 +113,6 @@ function buildFixture(
+       rigTemplateMappings: { mandate: 'default' },
+       variables: { role: 'artificer' },
+     },
+-    clerk: {
+-      writTypes: [{ name: 'piece', description: 'task piece' }],
+-    },
+   };
+ 
+   const fakeGuild: Guild = {
+@@ -204,6 +201,19 @@ function buildFixture(
+   const clerk = clerkApparatus.provides as ClerkApi;
+   apparatusMap.set('clerk', clerk);
+ 
++  // Register the 'piece' writ type used by piece-session engine.
++  // Must be called after start() and before phase:started fires (which never
++  // fires in tests — the registry stays open throughout the test run).
++  clerk.registerWritType({
++    name: 'piece',
++    states: [
++      { name: 'open', classification: 'initial', allowedTransitions: ['completed', 'cancelled', 'failed'] },
++      { name: 'completed', classification: 'terminal', allowedTransitions: [], attrs: ['success'] },
++      { name: 'cancelled', classification: 'terminal', allowedTransitions: [], attrs: ['cancelled'] },
++      { name: 'failed', classification: 'terminal', allowedTransitions: [], attrs: ['failure'] },
++    ],
++  });
++
+   const { ctx: fabricatorCtx } = buildCtx(fabricatorKitEntries);
+   fabricatorApparatus.start(fabricatorCtx);
+   const fabricator = fabricatorApparatus.provides as FabricatorApi;
+@@ -289,8 +299,9 @@ describe('implement-loop engine', () => {
+   it('falls through to legacy single-session when no child pieces exist', async () => {
+     const { clerk, spider, stacks: s, summonCalls } = fix;
+ 
+-    // Post a mandate without children
+-    await clerk.post({ title: 'No-piece mandate', body: 'Do something', codex: 'test' });
++    // Post a mandate without children and transition it to 'open' so spider can dispatch it
++    const mandate0 = await clerk.post({ title: 'No-piece mandate', body: 'Do something', codex: 'test' });
++    await clerk.transition(mandate0.id, 'open');
+ 
+     // Spawn rig
+     const r1 = await spider.crawl();
+@@ -314,7 +325,7 @@ describe('implement-loop engine', () => {
+     const { clerk, spider, stacks: s, summonCalls } = fix;
+ 
+     // Post a mandate in draft state
+-    const mandate = await clerk.post({ title: 'Piece mandate', body: 'Main spec', codex: 'test', draft: true });
++    const mandate = await clerk.post({ title: 'Piece mandate', body: 'Main spec', codex: 'test'});
+ 
+     // Create child pieces
+     await clerk.post({ type: 'piece', title: 'Task 1', body: '<task id="t1"><name>Task 1</name></task>', parentId: mandate.id });
+@@ -358,7 +369,7 @@ describe('implement-loop engine', () => {
+   it('processes pieces sequentially — second piece waits for first', async () => {
+     const { clerk, spider, stacks: s, summonCalls } = fix;
+ 
+-    const mandate = await clerk.post({ title: 'Sequential', body: 'Spec', codex: 'test', draft: true });
++    const mandate = await clerk.post({ title: 'Sequential', body: 'Spec', codex: 'test'});
+     await clerk.post({ type: 'piece', title: 'Task A', body: '<task id="ta"><name>A</name></task>', parentId: mandate.id });
+     await clerk.post({ type: 'piece', title: 'Task B', body: '<task id="tb"><name>B</name></task>', parentId: mandate.id });
+     await clerk.transition(mandate.id, 'open');
+@@ -386,7 +397,7 @@ describe('implement-loop engine', () => {
+   it('halts rig when a piece session fails', async () => {
+     const { clerk, spider, stacks: s } = fix;
+ 
+-    const mandate = await clerk.post({ title: 'Fail test', body: 'Spec', codex: 'test', draft: true });
++    const mandate = await clerk.post({ title: 'Fail test', body: 'Spec', codex: 'test'});
+     await clerk.post({ type: 'piece', title: 'Task 1', body: '<task id="t1"><name>T1</name></task>', parentId: mandate.id });
+     await clerk.post({ type: 'piece', title: 'Task 2', body: '<task id="t2"><name>T2</name></task>', parentId: mandate.id });
+     await clerk.transition(mandate.id, 'open');
+@@ -419,7 +430,7 @@ describe('implement-loop engine', () => {
+   it('piece-session transitions piece writs on completion', async () => {
+     const { clerk, spider, stacks: s } = fix;
+ 
+-    const mandate = await clerk.post({ title: 'Transition test', body: 'Spec', codex: 'test', draft: true });
++    const mandate = await clerk.post({ title: 'Transition test', body: 'Spec', codex: 'test'});
+     const piece = await clerk.post({ type: 'piece', title: 'Task 1', body: '<task id="t1"><name>T1</name></task>', parentId: mandate.id });
+     await clerk.transition(mandate.id, 'open');
+ 
+@@ -436,17 +447,18 @@ describe('implement-loop engine', () => {
+     assert.equal(updatedPiece.phase, 'completed');
+   });
+ 
+-  it('piece writ is cancelled by cascade when session fails and mandate reaches failed', async () => {
++  it('piece writ remains open when session fails and mandate reaches failed (no cascade)', async () => {
+     // Design: Spider's tryCollect() calls failEngine() directly for failed sessions
+     // and never invokes the engine's collect() method. This means piece-session
+     // cannot itself transition the piece writ on session failure.
+     //
+     // In the new engine-retry model, engine-failure transitions the mandate writ
+-    // directly to `phase='failed'`. Clerk's parent/child cascade then cancels
+-    // remaining open child writs, so the piece ends up `cancelled`.
++    // directly to `phase='failed'`. Clerk's parent/child cascade was removed in T5
++    // (per D9), so child piece writs are NOT automatically cancelled when the
++    // mandate fails. The piece writ stays in its current state ('open').
+     const { clerk, spider, stacks: s } = fix;
+ 
+-    const mandate = await clerk.post({ title: 'Fail transition', body: 'Spec', codex: 'test', draft: true });
++    const mandate = await clerk.post({ title: 'Fail transition', body: 'Spec', codex: 'test'});
+     const piece = await clerk.post({ type: 'piece', title: 'Task 1', body: '<task id="t1"><name>T1</name></task>', parentId: mandate.id });
+     await clerk.transition(mandate.id, 'open');
+ 
+@@ -462,18 +474,23 @@ describe('implement-loop engine', () => {
+     const lastSession = sessions[sessions.length - 1];
+     await sessBook.patch(lastSession.id, { status: 'failed', error: 'Build failed' });
+ 
+-    await spider.crawl(); // failEngine → rig failed → mandate failed → child cascaded to cancelled
++    await spider.crawl(); // failEngine → rig failed → mandate failed
++
++    // The mandate writ transitions to 'failed' (rig→writ CDC).
++    const updatedMandate = await clerk.show(mandate.id);
++    assert.equal(updatedMandate.phase, 'failed',
++      'Mandate writ should be transitioned to failed when the rig fails');
+ 
+-    // The piece writ is cancelled by Clerk's parent/child cascade.
++    // The piece writ stays 'open' — cascade was removed in T5 (D9).
+     const updatedPiece = await clerk.show(piece.id);
+-    assert.equal(updatedPiece.phase, 'cancelled',
+-      'Piece writ is cancelled by cascade when the mandate writ transitions to failed');
++    assert.equal(updatedPiece.phase, 'open',
++      'Piece writ stays open after mandate fails — cascade removed in T5');
+   });
+ 
+   it('dynamically added pieces are picked up after the current piece completes', async () => {
+     const { clerk, spider, stacks: s } = fix;
+ 
+-    const mandate = await clerk.post({ title: 'Dynamic pieces', body: 'Spec', codex: 'test', draft: true });
++    const mandate = await clerk.post({ title: 'Dynamic pieces', body: 'Spec', codex: 'test'});
+     await clerk.post({ type: 'piece', title: 'Task 1', body: '<task id="t1"><name>T1</name></task>', parentId: mandate.id });
+     await clerk.transition(mandate.id, 'open');
+ 
+@@ -520,7 +537,7 @@ describe('implement-loop engine', () => {
+   it('dynamically added pieces delay seal via graftTail', async () => {
+     const { clerk, spider, stacks: s } = fix;
+ 
+-    const mandate = await clerk.post({ title: 'Dynamic graftTail', body: 'Spec', codex: 'test', draft: true });
++    const mandate = await clerk.post({ title: 'Dynamic graftTail', body: 'Spec', codex: 'test'});
+     await clerk.post({ type: 'piece', title: 'Task 1', body: '<task id="t1"><name>T1</name></task>', parentId: mandate.id });
+     await clerk.transition(mandate.id, 'open');
+ 
+@@ -558,7 +575,7 @@ describe('implement-loop engine', () => {
+   it('literal WritDoc givens survive yield resolution in piece-session engines', async () => {
+     const { clerk, spider, stacks: s, summonCalls } = fix;
+ 
+-    const mandate = await clerk.post({ title: 'Givens test', body: 'Spec body', codex: 'test', draft: true });
++    const mandate = await clerk.post({ title: 'Givens test', body: 'Spec body', codex: 'test'});
+     const piece = await clerk.post({ type: 'piece', title: 'Task 1', body: '<task id="t1"><name>T1</name></task>', parentId: mandate.id });
+     await clerk.transition(mandate.id, 'open');
+ 
+@@ -591,7 +608,7 @@ describe('implement-loop engine', () => {
+   it('full pipeline: pieces complete → seal runs → rig completes', async () => {
+     const { clerk, spider, stacks: s } = fix;
+ 
+-    const mandate = await clerk.post({ title: 'Full pipeline', body: 'Spec', codex: 'test', draft: true });
++    const mandate = await clerk.post({ title: 'Full pipeline', body: 'Spec', codex: 'test'});
+     await clerk.post({ type: 'piece', title: 'Only task', body: '<task id="t1"><name>T1</name></task>', parentId: mandate.id });
+     await clerk.transition(mandate.id, 'open');
+ 
+@@ -651,7 +668,7 @@ describe('piece-session collect() — transition error classification', () => {
+    */
+   async function advanceToPieceStarted(): Promise<{ mandate: WritDoc; piece: WritDoc }> {
+     const { clerk, spider, stacks: s } = fix;
+-    const mandate = await clerk.post({ title: 'Race', body: 'Spec', codex: 'test', draft: true });
++    const mandate = await clerk.post({ title: 'Race', body: 'Spec', codex: 'test'});
+     const piece = await clerk.post({
+       type: 'piece',
+       title: 'Task 1',
+diff --git a/packages/plugins/spider/src/rate-limit.test.ts b/packages/plugins/spider/src/rate-limit.test.ts
+index c0b5cc6..85eb95a 100644
+--- a/packages/plugins/spider/src/rate-limit.test.ts
++++ b/packages/plugins/spider/src/rate-limit.test.ts
+@@ -180,6 +180,7 @@ describe('Spider — rate-limit integration', () => {
+ 
+   it('tryCollect on rate-limited session transitions the engine to pending + holdReason="animator-paused"', async () => {
+     const writ = await fix.clerk.post({ title: 'rate-limit collect test' });
++    await fix.clerk.transition(writ.id, 'open');
+     // Spawn the rig.
+     await fix.spider.crawl();
+ 
+@@ -239,6 +240,7 @@ describe('Spider — rate-limit integration', () => {
+     // dispatchable: true on the very next tick — hot-looping and
+     // re-launching the engine while the provider was still rate-limited.
+     const writ = await fix.clerk.post({ title: 'rate-limit hot-loop regression' });
++    await fix.clerk.transition(writ.id, 'open');
+     await fix.spider.crawl(); // spawn
+ 
+     const rigsBook = fix.stacks.book<RigDoc>('spider', 'rigs');
+@@ -333,7 +335,8 @@ describe('Spider — rate-limit integration', () => {
+       backoffLevel: 0,
+     });
+ 
+-    await fix.clerk.post({ title: 'pause elapsed test' });
++    const pauseElapsedWrit = await fix.clerk.post({ title: 'pause elapsed test' });
++    await fix.clerk.transition(pauseElapsedWrit.id, 'open');
+     const result = await fix.spider.crawl();
+     assert.ok(result);
+     assert.equal(result!.action, 'rig-spawned');
+@@ -341,6 +344,7 @@ describe('Spider — rate-limit integration', () => {
+ 
+   it('dispatch predicate clears an animator-paused hold when the Animator returns to running', async () => {
+     const writ = await fix.clerk.post({ title: 'unblock test' });
++    await fix.clerk.transition(writ.id, 'open');
+     await fix.spider.crawl(); // spawn
+ 
+     const rigsBook = fix.stacks.book<RigDoc>('spider', 'rigs');
+diff --git a/packages/plugins/spider/src/spider.test.ts b/packages/plugins/spider/src/spider.test.ts
+index d9b4fcf..98865a8 100644
+--- a/packages/plugins/spider/src/spider.test.ts
++++ b/packages/plugins/spider/src/spider.test.ts
+@@ -388,7 +388,10 @@ function rigsBook(stacks: StacksApi) {
+ 
+ /** Post a writ. */
+ async function postWrit(clerk: ClerkApi, title = 'Test writ', codex?: string): Promise<WritDoc> {
+-  return clerk.post({ title, body: 'Test body', codex });
++  const writ = await clerk.post({ title, body: 'Test body', codex });
++  // clerk.post() always returns the initial state ('new' for mandate).
++  // Spider only dispatches 'open' writs, so auto-advance here.
++  return clerk.transition(writ.id, 'open');
+ }
+ 
+ /**
+@@ -749,7 +752,8 @@ describe('Spider', () => {
+ 
+     it('wraps the writ body with a commit instruction', async () => {
+       const { clerk, spider, stacks, summonCalls } = fix;
+-      await clerk.post({ title: 'My writ', body: 'Build the feature.' });
++      const _wrapPost = await clerk.post({ title: 'My writ', body: 'Build the feature.' });
++      await clerk.transition(_wrapPost.id, 'open');
+       await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+@@ -774,7 +778,8 @@ describe('Spider', () => {
+ 
+     it('execution epilogue includes task manifest processing rules', async () => {
+       const { clerk, spider, stacks, summonCalls } = fix;
+-      await clerk.post({ title: 'My writ', body: 'Spec body here.' });
++      const _epiloguePost = await clerk.post({ title: 'My writ', body: 'Spec body here.' });
++      await clerk.transition(_epiloguePost.id, 'open');
+       await spider.crawl(); // spawn
+ 
+       const book = rigsBook(stacks);
+@@ -2126,6 +2131,7 @@ describe('Spider — template dispatch', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: 'Mandate writ', body: 'test', type: 'mandate' });
++    await clerk.transition(writ.id, 'open');
+     const result = await spider.crawl();
+     assert.equal(result?.action, 'rig-spawned');
+ 
+@@ -2155,6 +2161,7 @@ describe('Spider — template dispatch', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: 'Task writ', body: 'test', type: 'mandate' });
++    await clerk.transition(writ.id, 'open');
+     const result = await spider.crawl();
+     assert.equal(result?.action, 'rig-spawned');
+ 
+@@ -2179,7 +2186,8 @@ describe('Spider — template dispatch', () => {
+     });
+     const { clerk, spider, stacks } = fix;
+ 
+-    await clerk.post({ title: 'Mandate', body: 'test', type: 'mandate' });
++    const mandateWrit = await clerk.post({ title: 'Mandate', body: 'test', type: 'mandate' });
++    await clerk.transition(mandateWrit.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2202,10 +2210,15 @@ describe('Spider — template dispatch', () => {
+       spider: {
+         rigTemplates: { hotfix: { engines: [{ id: 'x', designId: 'seal', givens: {} }] } },
+       },
+-      clerk: { writTypes: [{ name: 'triage' }] },
+     });
+     const { clerk, spider, stacks } = fix;
+ 
++    // Register 'triage' type with 'open' as its initial state.
++    clerk.registerWritType({
++      name: 'triage',
++      states: [{ name: 'open', classification: 'initial', allowedTransitions: [] }],
++    });
++
+     const posted = await clerk.post({ title: 'Triage writ', body: 'test', type: 'triage' });
+     const result = await spider.crawl();
+     assert.equal(result, null, 'crawl should return null — no writ was dispatched');
+@@ -2227,7 +2240,8 @@ describe('Spider — template dispatch', () => {
+     const fix = buildFixture();
+     const { clerk, spider, stacks } = fix;
+ 
+-    await clerk.post({ title: 'Test', body: 'test' }); // type: 'mandate', uses STANDARD_TEMPLATE
++    const mandateFallbackWrit = await clerk.post({ title: 'Test', body: 'test' }); // type: 'mandate', uses STANDARD_TEMPLATE
++    await clerk.transition(mandateFallbackWrit.id, 'open');
+     const result = await spider.crawl();
+     assert.equal(result?.action, 'rig-spawned');
+     const rigs = await rigsBook(stacks).list();
+@@ -2243,10 +2257,15 @@ describe('Spider — template dispatch', () => {
+     // when the spider.default kit template is still registered.
+     const fix = buildFixture({
+       spider: { rigTemplates: undefined },
+-      clerk: { writTypes: [{ name: 'triage' }] },
+     });
+     const { clerk, spider, stacks } = fix;
+ 
++    // Register 'triage' type with 'open' as its initial state.
++    clerk.registerWritType({
++      name: 'triage',
++      states: [{ name: 'open', classification: 'initial', allowedTransitions: [] }],
++    });
++
+     const posted = await clerk.post({ title: 'Test writ', body: 'test', type: 'triage' });
+     const result = await spider.crawl();
+     assert.equal(result, null);
+@@ -2272,6 +2291,7 @@ describe('Spider — variable resolution', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: 'My writ', body: 'test body' });
++    await clerk.transition(writ.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2288,7 +2308,8 @@ describe('Spider — variable resolution', () => {
+     const fix = buildFixture({ spider: { variables: { buildCommand: 'make build' }, rigTemplates: { default: template } } });
+     const { clerk, spider, stacks } = fix;
+ 
+-    await clerk.post({ title: 'test', body: 'test' });
++    const varWrit1 = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(varWrit1.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2302,7 +2323,8 @@ describe('Spider — variable resolution', () => {
+     const fix = buildFixture({ spider: { variables: { count: 42 }, rigTemplates: { default: template } } });
+     const { clerk, spider, stacks } = fix;
+ 
+-    await clerk.post({ title: 'test', body: 'test' });
++    const varWrit2 = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(varWrit2.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2316,7 +2338,8 @@ describe('Spider — variable resolution', () => {
+     const fix = buildFixture({ spider: { variables: {}, rigTemplates: { default: template } } });
+     const { clerk, spider, stacks } = fix;
+ 
+-    await clerk.post({ title: 'test', body: 'test' });
++    const varWrit3 = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(varWrit3.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2331,7 +2354,8 @@ describe('Spider — variable resolution', () => {
+     const fix = buildFixture({ spider: { rigTemplates: { default: template } } });
+     const { clerk, spider, stacks } = fix;
+ 
+-    await clerk.post({ title: 'test', body: 'test' });
++    const varWrit4 = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(varWrit4.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2345,7 +2369,8 @@ describe('Spider — variable resolution', () => {
+     const fix = buildFixture({ spider: { rigTemplates: { default: template } } });
+     const { clerk, spider, stacks } = fix;
+ 
+-    await clerk.post({ title: 'test', body: 'test' });
++    const varWrit5 = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(varWrit5.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2361,6 +2386,7 @@ describe('Spider — variable resolution', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: 'Mixed test', body: 'mixed body' });
++    await clerk.transition(writ.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2380,7 +2406,8 @@ describe('Spider — variable resolution', () => {
+     const fix = buildFixture({ spider: { rigTemplates: { default: template } } });
+     const { clerk, spider, stacks } = fix;
+ 
+-    await clerk.post({ title: 'test', body: 'test' });
++    const varWrit6 = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(varWrit6.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2395,6 +2422,7 @@ describe('Spider — variable resolution', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: 'Curly brace test', body: 'test body' });
++    await clerk.transition(writ.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2765,7 +2793,8 @@ describe('Spider — resolutionEngineId', () => {
+     const fix = buildFixture({ spider: { rigTemplates: { default: template } } });
+     const { clerk, spider, stacks } = fix;
+ 
+-    await clerk.post({ title: 'test', body: 'test' });
++    const resEngWrit1 = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(resEngWrit1.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2779,7 +2808,8 @@ describe('Spider — resolutionEngineId', () => {
+     const fix = buildFixture({ spider: { rigTemplates: { default: template } } });
+     const { clerk, spider, stacks } = fix;
+ 
+-    await clerk.post({ title: 'test', body: 'test' });
++    const resEngWrit2 = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(resEngWrit2.id, 'open');
+     await spider.crawl();
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2797,6 +2827,7 @@ describe('Spider — CDC resolution fallback', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(writ.id, 'open');
+     await spider.crawl(); // spawn
+ 
+     const book = rigsBook(stacks);
+@@ -2824,6 +2855,7 @@ describe('Spider — CDC resolution fallback', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(writ.id, 'open');
+     await spider.crawl(); // spawn
+ 
+     const book = rigsBook(stacks);
+@@ -2854,6 +2886,7 @@ describe('Spider — CDC resolution fallback', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(writ.id, 'open');
+     await spider.crawl(); // spawn
+ 
+     const book = rigsBook(stacks);
+@@ -2878,6 +2911,7 @@ describe('Spider — CDC resolution fallback', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(writ.id, 'open');
+     await spider.crawl(); // spawn
+ 
+     const book = rigsBook(stacks);
+@@ -2899,6 +2933,7 @@ describe('Spider — CDC resolution fallback', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: 'pre-existing rig', body: 'test' });
++    await clerk.transition(writ.id, 'open');
+     await spider.crawl(); // spawn (creates rig with resolutionEngineId: 'seal' from STANDARD_TEMPLATE)
+ 
+     const book = rigsBook(stacks);
+@@ -2935,7 +2970,8 @@ describe('Spider — STANDARD_TEMPLATE full pipeline givens', () => {
+     const fix = buildFixture(); // uses STANDARD_TEMPLATE with variables: { role: 'artificer' }
+     const { clerk, spider, stacks } = fix;
+ 
+-    await clerk.post({ title: 'test', body: 'test' });
++    const stdTemplWrit = await clerk.post({ title: 'test', body: 'test' });
++    await clerk.transition(stdTemplWrit.id, 'open');
+     await spider.crawl(); // spawn
+ 
+     const rigs = await rigsBook(stacks).list();
+@@ -2988,6 +3024,7 @@ describe('Spider — full pipeline integration', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: '2-engine writ', body: 'custom pipeline' });
++    await clerk.transition(writ.id, 'open');
+ 
+     // spawn: rig created with 2 engines and resolutionEngineId: 'step2'
+     const r1 = await spider.crawl();
+@@ -3042,6 +3079,7 @@ describe('Spider — full pipeline integration', () => {
+     const { clerk, spider, stacks } = fix;
+ 
+     const writ = await clerk.post({ title: '3-engine test', body: 'no seal needed' });
++    await clerk.transition(writ.id, 'open');
+ 
+     // spawn: rig created with 3 engines, resolutionEngineId: 'review'
+     const r1 = await spider.crawl();
+@@ -3242,7 +3280,7 @@ describe('Spider tools — handler delegation', () => {
+       const rigs = await spider.list();
+       const rigId = rigs[0].id;
+ 
+-      const result = await rigShowTool.handler({ id: rigId }) as RigView;
++      const result = await rigShowTool.handler({ id: rigId, format: 'json' }) as RigView;
+       assert.equal(result.writId, writ.id);
+       assert.equal(result.writTitle, 'A rig title regression guard');
+     });
+@@ -3260,7 +3298,7 @@ describe('Spider tools — handler delegation', () => {
+         createdAt: new Date().toISOString(),
+       });
+ 
+-      const result = await rigShowTool.handler({ id: 'rig-orphan' }) as RigView;
++      const result = await rigShowTool.handler({ id: 'rig-orphan', format: 'json' }) as RigView;
+       assert.equal(result.writId, 'w-does-not-exist');
+       assert.equal(result.writTitle, undefined, 'writTitle must be absent when the writ is missing');
+     });
+@@ -3696,7 +3734,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Ordering Writ', body: 'Body' });
++      const orderingWrit = await fix.clerk.post({ title: 'Ordering Writ', body: 'Body' });
++      await fix.clerk.transition(orderingWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+ 
+       // Run engine a first → it enters pending+hold. Engine b is still pending.
+@@ -3953,7 +3992,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Blocking writ', body: 'Wait' });
++      const blockingWrit = await fix.clerk.post({ title: 'Blocking writ', body: 'Wait' });
++      await fix.clerk.transition(blockingWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+ 
+       const result = await fix.spider.crawl(); // run → engine-held
+@@ -3988,7 +4028,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         { engines: [{ id: 'sole', designId: 'bad-blk-engine', givens: {} }], resolutionEngine: 'sole' },
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const badBlkWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(badBlkWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       const result = await fix.spider.crawl(); // run → unknown block type → failure
+ 
+@@ -4030,7 +4071,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const zodFailWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(zodFailWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       const result = await fix.spider.crawl(); // run → Zod failure → engine failed
+ 
+@@ -4083,7 +4125,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const depHoldWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(depHoldWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       const result = await fix.spider.crawl(); // run a → engine-held
+ 
+@@ -4129,7 +4172,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const indepHoldWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(indepHoldWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       const result = await fix.spider.crawl(); // run a (first in list) → engine-held
+ 
+@@ -4162,7 +4206,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const ctrlBlockWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(ctrlBlockWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → engine-held
+ 
+@@ -4198,7 +4243,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const ncBlockWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(ncBlockWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → engine-held
+ 
+@@ -4242,7 +4288,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const ctrl2BlockWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(ctrl2BlockWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → engine-held
+ 
+@@ -4288,7 +4335,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const throwBlockWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(throwBlockWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → engine-held
+ 
+@@ -4328,7 +4376,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const polledBlockWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(polledBlockWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → blocked
+ 
+@@ -4392,7 +4441,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const clearableBlockWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(clearableBlockWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run a → engine-held
+ 
+@@ -4441,7 +4491,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const holdBlockWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(holdBlockWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → engine-held
+ 
+@@ -4465,7 +4516,8 @@ describe('Spider — engine blocking on external conditions', () => {
+     it('throws when engine has no hold (V12)', async () => {
+       const fix = buildBlockingFixture();
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const noHoldWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(noHoldWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+ 
+       const [rig] = await fix.spider.list();
+@@ -4511,7 +4563,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const priorBlockWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(priorBlockWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run (call 1) → engine-held
+ 
+@@ -4542,7 +4595,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         { engines: [{ id: 'sole', designId: 'simple-noblk-engine', givens: {} }], resolutionEngine: 'sole' },
+       );
+ 
+-      await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      const simpleNoBlkWrit = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(simpleNoBlkWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → completed
+ 
+@@ -4563,7 +4617,8 @@ describe('Spider — engine blocking on external conditions', () => {
+ 
+       // Create a real writ so the CDC handler can transition it when the rig becomes terminal.
+       const writ = await fix.clerk.post({ title: 'Fail test writ', body: 'Body' });
+-      // Writ starts in 'open' — it can transition to failed directly.
++      await fix.clerk.transition(writ.id, 'open');
++      // Writ is now in 'open' — it can transition to failed directly.
+ 
+       // Directly insert a rig with one held engine and one plain pending engine.
+       // A third engine (running) will fail via its session, triggering failEngine (rig → failed).
+@@ -4663,6 +4718,7 @@ describe('Spider — engine blocking on external conditions', () => {
+       );
+ 
+       const writ = await fix.clerk.post({ title: 'CDC Writ', body: 'Body' });
++      await fix.clerk.transition(writ.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → engine-held
+ 
+@@ -4760,7 +4816,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Resume Tool Writ', body: 'Body' });
++      const resumeToolWrit = await fix.clerk.post({ title: 'Resume Tool Writ', body: 'Body' });
++      await fix.clerk.transition(resumeToolWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → engine-held
+ 
+@@ -4783,7 +4840,8 @@ describe('Spider — engine blocking on external conditions', () => {
+ 
+     it('handler propagates error when engine has no hold', async () => {
+       const fix = buildBlockingFixture();
+-      await fix.clerk.post({ title: 'Resume Error Writ', body: 'Body' });
++      const resumeErrorWrit = await fix.clerk.post({ title: 'Resume Error Writ', body: 'Body' });
++      await fix.clerk.transition(resumeErrorWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+ 
+       const [rig] = await fix.spider.list();
+@@ -4856,7 +4914,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Failing Writ', body: 'Body' });
++      const failingWrit = await fix.clerk.post({ title: 'Failing Writ', body: 'Body' });
++      await fix.clerk.transition(failingWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → engine-held
+ 
+@@ -4899,7 +4958,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Reason Fail Writ', body: 'Body' });
++      const reasonFailWrit = await fix.clerk.post({ title: 'Reason Fail Writ', body: 'Body' });
++      await fix.clerk.transition(reasonFailWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → engine-held
+ 
+@@ -4945,7 +5005,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'Sibling Writ', body: 'Body' });
++      const siblingWrit = await fix.clerk.post({ title: 'Sibling Writ', body: 'Body' });
++      await fix.clerk.transition(siblingWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run a → engine-held (b depends on a)
+ 
+@@ -4980,7 +5041,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'No LC Writ', body: 'Body' });
++      const noLcWrit = await fix.clerk.post({ title: 'No LC Writ', body: 'Body' });
++      await fix.clerk.transition(noLcWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → engine-held
+ 
+@@ -5017,7 +5079,8 @@ describe('Spider — engine blocking on external conditions', () => {
+         }],
+       );
+ 
+-      await fix.clerk.post({ title: 'BTF Writ', body: 'Body' });
++      const btfWrit = await fix.clerk.post({ title: 'BTF Writ', body: 'Body' });
++      await fix.clerk.transition(btfWrit.id, 'open');
+       await fix.spider.crawl(); // spawn
+       await fix.spider.crawl(); // run → engine-held (sole engine)
+ 
+@@ -5046,6 +5109,7 @@ describe('Spider — engine blocking on external conditions', () => {
+     it('returns failed with terminal-mismatch reason when writ is failed but target is completed', async () => {
+       const fix = buildBlockingFixture();
+       const writ = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(writ.id, 'open');
+       await fix.clerk.transition(writ.id, 'failed');
+ 
+       const blockType = fix.spider.getBlockType('writ-phase');
+@@ -5061,6 +5125,7 @@ describe('Spider — engine blocking on external conditions', () => {
+     it('returns cleared when writ is at failed status and target is failed (target match wins)', async () => {
+       const fix = buildBlockingFixture();
+       const writ = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++      await fix.clerk.transition(writ.id, 'open');
+       await fix.clerk.transition(writ.id, 'failed');
+ 
+       const blockType = fix.spider.getBlockType('writ-phase');
+@@ -5088,7 +5153,7 @@ describe('Spider — engine blocking on external conditions', () => {
+     it('returns pending when writ is at non-terminal, non-target status', async () => {
+       const fix = buildBlockingFixture();
+       const writ = await fix.clerk.post({ title: 'Writ', body: 'Body' });
+-      // writ starts at 'open' status, which is neither completed nor a terminal mismatch for 'completed' target
++      // writ starts at 'new' status, which is neither completed nor a terminal mismatch for 'completed' target
+ 
+       const blockType = fix.spider.getBlockType('writ-phase');
+       assert.ok(blockType !== undefined);
+@@ -5119,6 +5184,7 @@ describe('Spider — engine blocking on external conditions', () => {
+       it('checker returns cleared when writ reaches target status', async () => {
+         const fix = buildBlockingFixture();
+         const writ = await fix.clerk.post({ title: 'Writ', body: 'Body' });
++        await fix.clerk.transition(writ.id, 'open');
+         await fix.clerk.transition(writ.id, 'completed', { resolution: 'done' });
+ 
+         const blockType = fix.spider.getBlockType('writ-phase');
+@@ -5283,6 +5349,7 @@ describe('Kit contributions — rig templates and mappings', () => {
+         rigTemplateMappings: { audit: 'quality-tools.audit' },
+       });
+       const fix = buildFixture({}, { status: 'completed' }, { kits: [kit] });
++      fix.clerk.registerWritType({ name: 'audit', states: [{ name: 'open', classification: 'initial', allowedTransitions: ['completed', 'cancelled', 'failed'] }, { name: 'completed', classification: 'terminal', allowedTransitions: [], attrs: ['success'] }, { name: 'cancelled', classification: 'terminal', allowedTransitions: [], attrs: ['cancelled'] }, { name: 'failed', classification: 'terminal', allowedTransitions: [], attrs: ['failure'] }] });
+ 
+       const writ = await fix.clerk.post({ title: 'Test', body: 'Body', type: 'audit' });
+       const result = await fix.spider.crawl();
+@@ -5312,6 +5379,7 @@ describe('Kit contributions — rig templates and mappings', () => {
+       }, { status: 'completed' }, { kits: [kit] });
+ 
+       const writ = await fix.clerk.post({ title: 'Test', body: 'Body', type: 'mandate' });
++      await fix.clerk.transition(writ.id, 'open');
+       await fix.spider.crawl();
+       const rig = await fix.spider.forWrit(writ.id);
+       assert.ok(rig);
+@@ -5414,6 +5482,7 @@ describe('Kit contributions — rig templates and mappings', () => {
+         { status: 'completed' },
+         { kits: [kit] }
+       );
++      fix.clerk.registerWritType({ name: 'audit', states: [{ name: 'open', classification: 'initial', allowedTransitions: ['completed', 'cancelled', 'failed'] }, { name: 'completed', classification: 'terminal', allowedTransitions: [], attrs: ['success'] }, { name: 'cancelled', classification: 'terminal', allowedTransitions: [], attrs: ['cancelled'] }, { name: 'failed', classification: 'terminal', allowedTransitions: [], attrs: ['failure'] }] });
+ 
+       const writ = await fix.clerk.post({ title: 'Test', body: 'Body', type: 'audit' });
+       const result = await fix.spider.crawl();
+@@ -5444,6 +5513,7 @@ describe('Kit contributions — rig templates and mappings', () => {
+       );
+ 
+       const writ = await fix.clerk.post({ title: 'Test', body: 'Body', type: 'mandate' });
++      await fix.clerk.transition(writ.id, 'open');
+       await fix.spider.crawl();
+       const rig = await fix.spider.forWrit(writ.id);
+       assert.ok(rig);
+@@ -5496,6 +5566,7 @@ describe('Kit contributions — rig templates and mappings', () => {
+       });
+ 
+       const writ = await fix.clerk.post({ title: 'Test', body: 'Body', type: 'mandate' });
++      await fix.clerk.transition(writ.id, 'open');
+       await fix.spider.crawl();
+       const rig = await fix.spider.forWrit(writ.id);
+       assert.ok(rig);
+@@ -5512,8 +5583,8 @@ describe('Kit contributions — rig templates and mappings', () => {
+           rigTemplateMappings: { mandate: 'standard' },
+           variables: {},
+         },
+-        clerk: { writTypes: [{ name: 'custom-type' }] },
+       });
++      fix.clerk.registerWritType({ name: 'custom-type', states: [{ name: 'open', classification: 'initial', allowedTransitions: ['completed', 'cancelled'] }, { name: 'completed', classification: 'terminal', allowedTransitions: [], attrs: ['success'] }, { name: 'cancelled', classification: 'terminal', allowedTransitions: [], attrs: ['cancelled'] }] });
+ 
+       const writ = await fix.clerk.post({ title: 'Test', body: 'Body', type: 'custom-type' });
+       const result = await fix.spider.crawl();
+@@ -5597,6 +5668,7 @@ describe('Kit contributions — rig templates and mappings', () => {
+       );
+ 
+       const writ = await fix.clerk.post({ title: 'Test', body: 'Body', type: 'mandate' });
++      await fix.clerk.transition(writ.id, 'open');
+       const result = await fix.spider.crawl();
+       assert.equal(result?.action, 'rig-spawned');
+       const rig = await fix.spider.forWrit(writ.id);
+@@ -5628,6 +5700,7 @@ describe('Kit contributions — rig templates and mappings', () => {
+       );
+ 
+       const writ = await fix.clerk.post({ title: 'Late test', body: 'Body', type: 'mandate' });
++      await fix.clerk.transition(writ.id, 'open');
+       const result = await fix.spider.crawl();
+       assert.equal(result?.action, 'rig-spawned');
+       const rig = await fix.spider.forWrit(writ.id);
+@@ -5680,6 +5753,7 @@ describe('Kit contributions — rig templates and mappings', () => {
+         rigTemplateMappings: { audit: 'kit-a.pipeline' },
+       });
+       const fix = buildFixture({}, { status: 'completed' }, { kits: [kitA, kitB] });
++      fix.clerk.registerWritType({ name: 'audit', states: [{ name: 'open', classification: 'initial', allowedTransitions: ['completed', 'cancelled', 'failed'] }, { name: 'completed', classification: 'terminal', allowedTransitions: [], attrs: ['success'] }, { name: 'cancelled', classification: 'terminal', allowedTransitions: [], attrs: ['cancelled'] }, { name: 'failed', classification: 'terminal', allowedTransitions: [], attrs: ['failure'] }] });
+ 
+       const writ = await fix.clerk.post({ title: 'Test', body: 'Body', type: 'audit' });
+       const result = await fix.spider.crawl();
+@@ -5696,8 +5770,8 @@ describe('Kit contributions — rig templates and mappings', () => {
+       // Set rigTemplates to undefined to override the buildFixture default
+       const fix = buildFixture({
+         spider: { rigTemplates: undefined, variables: {} },
+-        clerk: { writTypes: [{ name: 'orphan-type' }] },
+       });
++      fix.clerk.registerWritType({ name: 'orphan-type', states: [{ name: 'open', classification: 'initial', allowedTransitions: ['completed', 'cancelled'] }, { name: 'completed', classification: 'terminal', allowedTransitions: [], attrs: ['success'] }, { name: 'cancelled', classification: 'terminal', allowedTransitions: [], attrs: ['cancelled'] }] });
+ 
+       const posted = await fix.clerk.post({ title: 'Test', body: 'Body', type: 'orphan-type' });
+       const result = await fix.spider.crawl();
+@@ -5732,6 +5806,7 @@ describe('Kit contributions — rig templates and mappings', () => {
+       });
+ 
+       const writ = await fix.clerk.post({ title: 'Zero-config mandate', body: 'Body', type: 'mandate' });
++      await fix.clerk.transition(writ.id, 'open');
+       const result = await fix.spider.crawl();
+       assert.equal(result?.action, 'rig-spawned', 'mandate writ should dispatch via plugin-default template');
+ 
+@@ -6042,6 +6117,7 @@ describe('${yields.*} reference support', () => {
+       });
+ 
+       const writ = await fix.clerk.post({ title: 'Test', body: 'Body' });
++      await fix.clerk.transition(writ.id, 'open');
+       await fix.spider.crawl(); // spawn
+ 
+       const rig = await fix.spider.forWrit(writ.id);
+@@ -6072,6 +6148,7 @@ describe('${yields.*} reference support', () => {
+       });
+ 
+       const writ = await fix.clerk.post({ title: 'Test', body: 'Body' });
++      await fix.clerk.transition(writ.id, 'open');
+       await fix.spider.crawl(); // spawn
+ 
+       const rig = await fix.spider.forWrit(writ.id);
+@@ -6234,7 +6311,8 @@ describe('${yields.*} reference support', () => {
+         },
+       );
+ 
+-      await clerk.post({ title: 'Test', body: 'Body' });
++      const _post6312 = await clerk.post({ title: 'Test', body: 'Body' });
++      await clerk.transition(_post6312.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run first (clockwork → completed)
+       await spider.crawl(); // run second
+@@ -6270,7 +6348,8 @@ describe('${yields.*} reference support', () => {
+         },
+       );
+ 
+-      await clerk.post({ title: 'Test', body: 'Body' });
++      const _post6348 = await clerk.post({ title: 'Test', body: 'Body' });
++      await clerk.transition(_post6348.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run first
+       await spider.crawl(); // run second
+@@ -6311,7 +6390,8 @@ describe('${yields.*} reference support', () => {
+         },
+       );
+ 
+-      await clerk.post({ title: 'Test', body: 'Body' });
++      const _post6389 = await clerk.post({ title: 'Test', body: 'Body' });
++      await clerk.transition(_post6389.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run first
+       await spider.crawl(); // run second
+@@ -6351,7 +6431,8 @@ describe('${yields.*} reference support', () => {
+         },
+       );
+ 
+-      await clerk.post({ title: 'Test', body: 'Body' });
++      const _post6429 = await clerk.post({ title: 'Test', body: 'Body' });
++      await clerk.transition(_post6429.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run first
+       await spider.crawl(); // run second
+@@ -6396,7 +6477,8 @@ describe('${yields.*} reference support', () => {
+ 
+       const sessionsBook = stacks.book<SessionDoc>('animator', 'sessions');
+ 
+-      await clerk.post({ title: 'Test', body: 'Body' });
++      const _post6474 = await clerk.post({ title: 'Test', body: 'Body' });
++      await clerk.transition(_post6474.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run first (clockwork → completed)
+       // Pre-write the completed session doc so collect can find it
+@@ -6453,7 +6535,8 @@ describe('${yields.*} reference support', () => {
+         },
+       );
+ 
+-      await clerk.post({ title: 'Test', body: 'Body' });
++      const _post6531 = await clerk.post({ title: 'Test', body: 'Body' });
++      await clerk.transition(_post6531.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run a
+       await spider.crawl(); // run b
+@@ -6493,7 +6576,8 @@ describe('${yields.*} reference support', () => {
+           ],
+         },
+       );
+-      await clerk.post({ title: 'Test', body: 'Body' });
++      const _post6571 = await clerk.post({ title: 'Test', body: 'Body' });
++      await clerk.transition(_post6571.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run first
+       await spider.crawl(); // run second
+@@ -6527,6 +6611,7 @@ describe('${yields.*} reference support', () => {
+         },
+       );
+       const writ = await clerk.post({ title: 'My Writ', body: 'Body' });
++      await clerk.transition(writ.id, 'open');
+       await spider.crawl(); // spawn — ${writ.title} resolved, ${yields.first.result} preserved
+ 
+       // Check givensSpec after spawn: writ.title resolved, yields expression still present
+@@ -6585,7 +6670,8 @@ describe('${yields.*} reference support', () => {
+           ],
+         },
+       );
+-      await clerk.post({ title: 'Test', body: 'Body' });
++      const _post6663 = await clerk.post({ title: 'Test', body: 'Body' });
++      await clerk.transition(_post6663.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run first
+       await spider.crawl(); // run second
+@@ -6608,7 +6694,8 @@ describe('${yields.*} reference support', () => {
+       const { clerk, spider, stacks } = fix;
+ 
+       // writ has no 'codex' field → should be ''
+-      await clerk.post({ title: 'test', body: 'test' });
++      const _post6686 = await clerk.post({ title: 'test', body: 'test' });
++      await clerk.transition(_post6686.id, 'open');
+       await spider.crawl();
+ 
+       const rigs = await rigsBook(stacks).list();
+@@ -6623,6 +6710,7 @@ describe('${yields.*} reference support', () => {
+       const { clerk, spider, stacks } = fix;
+ 
+       const writ = await clerk.post({ title: 'Specific Field', body: 'test' });
++      await clerk.transition(writ.id, 'open');
+       await spider.crawl();
+ 
+       const rigs = await rigsBook(stacks).list();
+@@ -6636,7 +6724,8 @@ describe('${yields.*} reference support', () => {
+       const fix = buildFixture({ spider: { rigTemplates: { default: template } } });
+       const { clerk, spider, stacks } = fix;
+ 
+-      await clerk.post({ title: 'test', body: 'test' });
++      const _post6714 = await clerk.post({ title: 'test', body: 'test' });
++      await clerk.transition(_post6714.id, 'open');
+       await spider.crawl();
+ 
+       const rigs = await rigsBook(stacks).list();
+@@ -6690,7 +6779,8 @@ describe('${yields.*} reference support', () => {
+           ],
+         },
+       );
+-      await clerk.post({ title: 'Test', body: 'Body' });
++      const _post6768 = await clerk.post({ title: 'Test', body: 'Body' });
++      await clerk.transition(_post6768.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run first
+       await spider.crawl(); // run second
+@@ -6711,7 +6801,8 @@ describe('${yields.*} reference support', () => {
+       });
+       const { clerk, spider, stacks } = fix;
+ 
+-      await clerk.post({ title: 'test', body: 'test' });
++      const _post6789 = await clerk.post({ title: 'test', body: 'test' });
++      await clerk.transition(_post6789.id, 'open');
+       await spider.crawl();
+ 
+       const rigs = await rigsBook(stacks).list();
+@@ -6743,7 +6834,8 @@ describe('${yields.*} reference support', () => {
+           ],
+         },
+       );
+-      await clerk.post({ title: 'Test', body: 'Body' });
++      const _post6821 = await clerk.post({ title: 'Test', body: 'Body' });
++      await clerk.transition(_post6821.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run first
+       await spider.crawl(); // run second
+@@ -6761,7 +6853,8 @@ describe('${yields.*} reference support', () => {
+       const fix = buildFixture({ spider: { rigTemplates: { default: template } } });
+       const { clerk, spider, stacks } = fix;
+ 
+-      await clerk.post({ title: 'test', body: 'test' });
++      const _post6839 = await clerk.post({ title: 'test', body: 'test' });
++      await clerk.transition(_post6839.id, 'open');
+       await spider.crawl();
+ 
+       const rigs = await rigsBook(stacks).list();
+@@ -6795,7 +6888,8 @@ describe('${yields.*} reference support', () => {
+           ],
+         },
+       );
+-      await clerk.post({ title: 'Test', body: 'Body' });
++      const _post6873 = await clerk.post({ title: 'Test', body: 'Body' });
++      await clerk.transition(_post6873.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run first
+       await spider.crawl(); // run second
+@@ -7187,6 +7281,7 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+       );
+       const { clerk, spider, stacks } = fix;
+       const writ = await clerk.post({ title: 'skip test', body: 'body' });
++      await clerk.transition(writ.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run A
+       const r = await spider.crawl(); // skip B (or rig-completed)
+@@ -7228,7 +7323,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'branching test', body: 'body' });
++      const _post7306 = await clerk.post({ title: 'branching test', body: 'body' });
++      await clerk.transition(_post7306.id, 'open');
+       const { results } = await drainToTerminal(spider);
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -7263,7 +7359,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'branch-fail test', body: 'body' });
++      const _post7341 = await clerk.post({ title: 'branch-fail test', body: 'body' });
++      await clerk.transition(_post7341.id, 'open');
+       await drainToTerminal(spider);
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -7291,7 +7388,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'curly brace when', body: 'body' });
++      const _post7369 = await clerk.post({ title: 'curly brace when', body: 'body' });
++      await clerk.transition(_post7369.id, 'open');
+       await drainToTerminal(spider);
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -7316,7 +7414,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'negated curly brace when', body: 'body' });
++      const _post7394 = await clerk.post({ title: 'negated curly brace when', body: 'body' });
++      await clerk.transition(_post7394.id, 'open');
+       await drainToTerminal(spider);
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -7348,7 +7447,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'skip satisfies upstream', body: 'body' });
++      const _post7426 = await clerk.post({ title: 'skip satisfies upstream', body: 'body' });
++      await clerk.transition(_post7426.id, 'open');
+       await drainToTerminal(spider);
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -7384,6 +7484,7 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+       );
+       const { clerk, spider, stacks } = fix;
+       const writ = await clerk.post({ title: 'rig completion test', body: 'body' });
++      await clerk.transition(writ.id, 'open');
+       const { results } = await drainToTerminal(spider);
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -7449,6 +7550,7 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+       );
+       const { clerk, spider, stacks } = fix;
+       const writ = await clerk.post({ title: 'partial complete test', body: 'body' });
++      await clerk.transition(writ.id, 'open');
+       await drainToTerminal(spider);
+ 
+       // A is completed, B is skipped — rig should complete (A is completed)
+@@ -7596,7 +7698,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider } = fix;
+-      await clerk.post({ title: 'skip result test', body: 'body' });
++      const _post7674 = await clerk.post({ title: 'skip result test', body: 'body' });
++      await clerk.transition(_post7674.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run A
+       const r = await spider.crawl(); // should skip B or return rig-completed
+@@ -7629,7 +7732,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider } = fix;
+-      await clerk.post({ title: 'skip engineId test', body: 'body' });
++      const _post7707 = await clerk.post({ title: 'skip engineId test', body: 'body' });
++      await clerk.transition(_post7707.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run A
+       const r = await spider.crawl(); // skip B
+@@ -7664,7 +7768,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'failEngine skipped test', body: 'body' });
++      const _post7742 = await clerk.post({ title: 'failEngine skipped test', body: 'body' });
++      await clerk.transition(_post7742.id, 'open');
+       await drainToTerminal(spider);
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -7705,7 +7810,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'cascade skip test', body: 'body' });
++      const _post7783 = await clerk.post({ title: 'cascade skip test', body: 'body' });
++      await clerk.transition(_post7783.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run A (completes with x=false)
+       const skipResult = await spider.crawl(); // should skip B and cascade-skip C, D
+@@ -7756,7 +7862,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'unconditional no-cascade test', body: 'body' });
++      const _post7834 = await clerk.post({ title: 'unconditional no-cascade test', body: 'body' });
++      await clerk.transition(_post7834.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run A
+       const skipResult = await spider.crawl(); // skip B
+@@ -7800,7 +7907,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'skipped upstream when test', body: 'body' });
++      const _post7878 = await clerk.post({ title: 'skipped upstream when test', body: 'body' });
++      await clerk.transition(_post7878.id, 'open');
+       await drainToTerminal(spider);
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -7831,7 +7939,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'negated skipped upstream when test', body: 'body' });
++      const _post7909 = await clerk.post({ title: 'negated skipped upstream when test', body: 'body' });
++      await clerk.transition(_post7909.id, 'open');
+       await drainToTerminal(spider);
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -7875,6 +7984,7 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+       );
+       const { clerk, spider, stacks } = fix;
+       const writ = await clerk.post({ title: 'graft test', body: 'body' });
++      await clerk.transition(writ.id, 'open');
+ 
+       await spider.crawl(); // spawn
+       const r1 = await spider.crawl(); // run decision → engine-completed
+@@ -7930,7 +8040,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider } = fix;
+-      await clerk.post({ title: 'graft step test', body: 'body' });
++      const _post8008 = await clerk.post({ title: 'graft step test', body: 'body' });
++      await clerk.transition(_post8008.id, 'open');
+ 
+       const r1 = await spider.crawl(); // spawn
+       assert.equal(r1?.action, 'rig-spawned');
+@@ -7970,7 +8081,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'dup id graft test', body: 'body' });
++      const _post8048 = await clerk.post({ title: 'dup id graft test', body: 'body' });
++      await clerk.transition(_post8048.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run bad-grafter → engine-completed (graft queued)
+       const r = await spider.crawl(); // process graft → validation fails → rig-completed/failed
+@@ -8010,7 +8122,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'unknown designId graft test', body: 'body' });
++      const _post8088 = await clerk.post({ title: 'unknown designId graft test', body: 'body' });
++      await clerk.transition(_post8088.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run grafter → engine-completed
+       const r = await spider.crawl(); // process graft → validation fails
+@@ -8055,7 +8168,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'cycle graft test', body: 'body' });
++      const _post8133 = await clerk.post({ title: 'cycle graft test', body: 'body' });
++      await clerk.transition(_post8133.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run cycle-grafter → engine-completed
+       const r = await spider.crawl(); // process graft → cycle detected → fail
+@@ -8099,7 +8213,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'invalid when graft test', body: 'body' });
++      const _post8177 = await clerk.post({ title: 'invalid when graft test', body: 'body' });
++      await clerk.transition(_post8177.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run grafter2 → engine-completed
+       const r = await spider.crawl(); // process graft → when validation fails
+@@ -8145,7 +8260,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'maxEnginesPerRig test', body: 'body' });
++      const _post8223 = await clerk.post({ title: 'maxEnginesPerRig test', body: 'body' });
++      await clerk.transition(_post8223.id, 'open');
+       await spider.crawl(); // spawn (rig has 1 engine)
+       await spider.crawl(); // run grafter-max → engine-completed (1 completed, graft queued for +2)
+       const r = await spider.crawl(); // process graft → exceeds maxEnginesPerRig(2) → fail
+@@ -8191,7 +8307,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'default max test', body: 'body' });
++      const _post8269 = await clerk.post({ title: 'default max test', body: 'body' });
++      await clerk.transition(_post8269.id, 'open');
+       await spider.crawl(); // spawn (1 engine)
+       await spider.crawl(); // run big-grafter → completed (graft of 50 queued → 51 total)
+       const r = await spider.crawl(); // process graft → exceeds 50
+@@ -8350,6 +8467,7 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+       apparatusMap.set('spider', spider);
+ 
+       const writ = await clerk.post({ title: 'quick graft test', body: 'body' });
++      await clerk.transition(writ.id, 'open');
+ 
+       const r1 = await spider.crawl(); // spawn
+       assert.equal(r1?.action, 'rig-spawned');
+@@ -8422,7 +8540,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'retry review-1 passes', body: 'body' });
++      const _post8500 = await clerk.post({ title: 'retry review-1 passes', body: 'body' });
++      await clerk.transition(_post8500.id, 'open');
+       await drainToTerminal(spider);
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -8458,7 +8577,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'retry review-1 fails', body: 'body' });
++      const _post8536 = await clerk.post({ title: 'retry review-1 fails', body: 'body' });
++      await clerk.transition(_post8536.id, 'open');
+       await drainToTerminal(spider);
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -8491,7 +8611,8 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'when field test', body: 'body' });
++      const _post8569 = await clerk.post({ title: 'when field test', body: 'body' });
++      await clerk.transition(_post8569.id, 'open');
+       await spider.crawl(); // spawn
+ 
+       const [rig] = await rigsBook(stacks).list();
+@@ -9197,7 +9318,8 @@ describe('Spider — rig cancellation', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'throttle-test', body: 'b' });
++      const _post9275 = await clerk.post({ title: 'throttle-test', body: 'b' });
++      await clerk.transition(_post9275.id, 'open');
+       await spider.crawl(); // spawn rig
+       await spider.crawl(); // run engine 'a' → launched (1 running)
+ 
+@@ -9229,7 +9351,8 @@ describe('Spider — rig cancellation', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'per-rig-test', body: 'b' });
++      const _post9307 = await clerk.post({ title: 'per-rig-test', body: 'b' });
++      await clerk.transition(_post9307.id, 'open');
+       await spider.crawl(); // spawn rig
+       await spider.crawl(); // run engine 'a' → launched (1 running in rig)
+ 
+@@ -9258,7 +9381,8 @@ describe('Spider — rig cancellation', () => {
+         },
+       );
+       const { clerk, spider } = fix;
+-      await clerk.post({ title: 'start-test', body: 'b' });
++      const _post9336 = await clerk.post({ title: 'start-test', body: 'b' });
++      await clerk.transition(_post9336.id, 'open');
+       await spider.crawl(); // spawn rig
+       const result = await spider.crawl(); // run engine 'a' → should succeed
+       assert.ok(result !== null, 'should start engine');
+@@ -9289,8 +9413,10 @@ describe('Spider — rig cancellation', () => {
+       const { clerk, spider, stacks } = fix;
+ 
+       // Post two writs
+-      await clerk.post({ title: 'writ1', body: 'b' });
+-      await clerk.post({ title: 'writ2', body: 'b' });
++      const _post9367 = await clerk.post({ title: 'writ1', body: 'b' });
++      await clerk.transition(_post9367.id, 'open');
++      const _post9368 = await clerk.post({ title: 'writ2', body: 'b' });
++      await clerk.transition(_post9368.id, 'open');
+ 
+       await spider.crawl(); // spawn rig for writ1
+       await spider.crawl(); // run engine 'only' in rig1 → launched (1 running)
+@@ -9323,8 +9449,10 @@ describe('Spider — rig cancellation', () => {
+         },
+       );
+       const { clerk, spider, stacks } = fix;
+-      await clerk.post({ title: 'writ1', body: 'b' });
+-      await clerk.post({ title: 'writ2', body: 'b' });
++      const _post9401 = await clerk.post({ title: 'writ1', body: 'b' });
++      await clerk.transition(_post9401.id, 'open');
++      const _post9402 = await clerk.post({ title: 'writ2', body: 'b' });
++      await clerk.transition(_post9402.id, 'open');
+ 
+       await spider.crawl(); // spawn rig for writ1
+       await spider.crawl(); // run clockwork engine in rig1 → completed (0 running now)
+@@ -9360,10 +9488,14 @@ describe('Spider — rig cancellation', () => {
+       const { clerk, spider, stacks } = fix;
+ 
+       // Post 4 writs
+-      await clerk.post({ title: 'writ1', body: 'b' });
+-      await clerk.post({ title: 'writ2', body: 'b' });
+-      await clerk.post({ title: 'writ3', body: 'b' });
+-      await clerk.post({ title: 'writ4', body: 'b' });
++      const _post9438 = await clerk.post({ title: 'writ1', body: 'b' });
++      await clerk.transition(_post9438.id, 'open');
++      const _post9439 = await clerk.post({ title: 'writ2', body: 'b' });
++      await clerk.transition(_post9439.id, 'open');
++      const _post9440 = await clerk.post({ title: 'writ3', body: 'b' });
++      await clerk.transition(_post9440.id, 'open');
++      const _post9441 = await clerk.post({ title: 'writ4', body: 'b' });
++      await clerk.transition(_post9441.id, 'open');
+ 
+       // Spawn and run repeatedly
+       // Spawn rig1, spawn rig2, run rig1 engine, run rig2 engine, then no more
+@@ -9418,8 +9550,10 @@ describe('Spider — rig cancellation', () => {
+       );
+       const { clerk, spider, stacks } = fix;
+ 
+-      await clerk.post({ title: 'writ1', body: 'b' });
+-      await clerk.post({ title: 'writ2', body: 'b' });
++      const _post9496 = await clerk.post({ title: 'writ1', body: 'b' });
++      await clerk.transition(_post9496.id, 'open');
++      const _post9497 = await clerk.post({ title: 'writ2', body: 'b' });
++      await clerk.transition(_post9497.id, 'open');
+ 
+       await spider.crawl(); // spawn rig1
+       await spider.crawl(); // run step1 (clockwork) → engine-completed (slot freed immediately)
+@@ -9466,7 +9600,8 @@ describe('Spider — rig cancellation', () => {
+       );
+       const { clerk, spider, stacks } = fix;
+ 
+-      await clerk.post({ title: 'collect-test', body: 'b' });
++      const _post9544 = await clerk.post({ title: 'collect-test', body: 'b' });
++      await clerk.transition(_post9544.id, 'open');
+       await spider.crawl(); // spawn
+       await spider.crawl(); // run → launched (1 running)
+ 
+@@ -9501,7 +9636,8 @@ describe('Spider — rig cancellation', () => {
+ 
+       // Post 5 writs
+       for (let i = 0; i < 5; i++) {
+-        await clerk.post({ title: `writ${i}`, body: 'b' });
++        const _post9579 = await clerk.post({ title: `writ${i}`, body: 'b' });
++        await clerk.transition(_post9579.id, 'open');
+       }
+ 
+       // Run many crawl ticks
+@@ -9543,13 +9679,16 @@ describe('Spider — writ→rig cascade', () => {
+    */
+   async function spawnRunningRig(opts?: { parentId?: string }) {
+     const { clerk, spider, stacks } = fix;
+-    const writ = opts?.parentId
+-      ? await clerk.post({ title: 'Child writ', body: 'child', parentId: opts.parentId })
+-      : await postWrit(clerk);
++    let writ: WritDoc;
++    if (opts?.parentId) {
++      const childWrit = await clerk.post({ title: 'Child writ', body: 'child', parentId: opts.parentId });
++      await clerk.transition(childWrit.id, 'open');
++      writ = childWrit;
++    } else {
++      writ = await postWrit(clerk);
++    }
+ 
+-    // Writs start in 'open' status (either standalone or child). The parent
+-    // does not auto-transition when a child is added; children are created
+-    // directly in 'open'. The spider's trySpawn picks up the 'open' writ.
++    // Writs must be in 'open' status for spider's trySpawn to pick them up.
+ 
+     await spider.crawl(); // spawn rig
+ 
+@@ -9856,106 +9995,6 @@ describe('Spider — writ→rig cascade', () => {
+     assert.equal(updatedWrit.phase, 'cancelled', 'writ should be cancelled');
+   });
+ 
+-  // V7 [R7]: Parent/child cascade — parent writ cancelled cascades to child's rig
+-  it('parent writ cancellation cascades to child rig via clerk parent→child cascade', async () => {
+-    const { clerk, spider, stacks } = fix;
+-
+-    // Create parent writ as a draft ('new') so the spider won't pick it up
+-    // for dispatch. Under the new vocabulary the spider only dispatches
+-    // writs in 'open' phase; a draft parent keeps its own rig out of the
+-    // picture so this test exercises only the parent→child cascade path.
+-    const parentWrit = await clerk.post({ title: 'Parent writ', body: 'parent', draft: true });
+-    assert.equal(parentWrit.phase, 'new', 'parent should be a draft');
+-
+-    // Create child writ — parent does not auto-transition (R5); child is 'open'
+-    const childWrit = await clerk.post({ title: 'Child writ', body: 'child', parentId: parentWrit.id });
+-    assert.equal(childWrit.phase, 'open', 'child should be open');
+-
+-    const parentAfterChild = await clerk.show(parentWrit.id);
+-    assert.equal(parentAfterChild.phase, 'new', 'parent should remain new after child added');
+-
+-    // Spawn rig for child (parent is new, so spider skips it)
+-    await spider.crawl(); // spawns child rig
+-
+-    const book = rigsBook(stacks);
+-    const childRigs = await book.find({ where: [['writId', '=', childWrit.id]], limit: 1 });
+-    assert.equal(childRigs.length, 1, 'child should have a rig');
+-    const childRig = childRigs[0];
+-
+-    // Cancel the parent writ — clerk's handleParentTerminal cancels child writ → spider CDC cancels child rig
+-    await clerk.transition(parentWrit.id, 'cancelled');
+-
+-    // Child writ should be cancelled (by clerk's parent→child cascade)
+-    const updatedChildWrit = await clerk.show(childWrit.id);
+-    assert.equal(updatedChildWrit.phase, 'cancelled', 'child writ should be cancelled');
+-
+-    // Child rig should be cancelled (by spider's writ→rig CDC)
+-    const updatedChildRig = await book.get(childRig.id);
+-    assert.equal(updatedChildRig?.status, 'cancelled', 'child rig should be cancelled');
+-    assertTerminalAt(updatedChildRig);
+-  });
+-
+-  // [R8, R9]: Parent cancel cascades to multiple child rigs with correct reason
+-  it('parent writ cancellation cascades to two child rigs with correct cancel reasons', async () => {
+-    const { clerk, stacks } = fix;
+-
+-    // Draft parent so spider doesn't dispatch it
+-    const parentWrit = await clerk.post({ title: 'Parent', body: 'parent', draft: true });
+-
+-    // Two children
+-    const child1 = await clerk.post({ title: 'Child 1', body: 'c1', parentId: parentWrit.id });
+-    const child2 = await clerk.post({ title: 'Child 2', body: 'c2', parentId: parentWrit.id });
+-
+-    // Directly insert rigs for both children (avoids crawl advancing engines)
+-    const book = rigsBook(stacks);
+-    const now = new Date().toISOString();
+-    const child1RigId = generateId('rig', 4);
+-    const child2RigId = generateId('rig', 4);
+-
+-    await book.put({
+-      id: child1RigId,
+-      writId: child1.id,
+-      status: 'running',
+-      engines: [
+-        { id: 'eng1', designId: 'draft', status: 'running', upstream: [], givensSpec: {}, attempts: [{ startedAt: now }] },
+-      ],
+-      createdAt: now,
+-    });
+-    await book.put({
+-      id: child2RigId,
+-      writId: child2.id,
+-      status: 'running',
+-      engines: [
+-        { id: 'eng1', designId: 'draft', status: 'running', upstream: [], givensSpec: {}, attempts: [{ startedAt: now }] },
+-      ],
+-      createdAt: now,
+-    });
+-
+-    // Cancel the parent
+-    await clerk.transition(parentWrit.id, 'cancelled');
+-
+-    // Both children cancelled
+-    const updatedChild1 = await clerk.show(child1.id);
+-    const updatedChild2 = await clerk.show(child2.id);
+-    assert.equal(updatedChild1.phase, 'cancelled', 'child1 writ should be cancelled');
+-    assert.equal(updatedChild2.phase, 'cancelled', 'child2 writ should be cancelled');
+-
+-    // Both child rigs cancelled
+-    const updatedRig1 = await book.get(child1RigId);
+-    const updatedRig2 = await book.get(child2RigId);
+-    assert.equal(updatedRig1?.status, 'cancelled', 'child1 rig should be cancelled');
+-    assert.equal(updatedRig2?.status, 'cancelled', 'child2 rig should be cancelled');
+-    assertTerminalAt(updatedRig1);
+-    assertTerminalAt(updatedRig2);
+-
+-    // Verify cancel reasons contain respective child writ IDs
+-    const rig1Engine = updatedRig1!.engines.find((e: EngineInstance) => e.status === 'cancelled' && latestAttempt(e)?.error);
+-    const rig2Engine = updatedRig2!.engines.find((e: EngineInstance) => e.status === 'cancelled' && latestAttempt(e)?.error);
+-    assert.ok(rig1Engine, 'child1 rig should have a cancelled engine with error');
+-    assert.equal(latestAttempt(rig1Engine!)?.error, `Writ ${child1.id} cancelled`, 'child1 rig engine error should reference child1 writ');
+-    assert.ok(rig2Engine, 'child2 rig should have a cancelled engine with error');
+-    assert.equal(latestAttempt(rig2Engine!)?.error, `Writ ${child2.id} cancelled`, 'child2 rig engine error should reference child2 writ');
+-  });
+ });
+ 
+ // ── spider.follows gate behavior ─────────────────────────────────────────
+@@ -10483,6 +10522,7 @@ describe('Spider — spider.follows gate', () => {
+       );
+       const { clerk, spider } = fix;
+       const writ = await clerk.post({ title: 'thrower', body: 'body' });
++      await clerk.transition(writ.id, 'open');
+ 
+       // Drive crawls until the writ reaches a terminal state.
+       for (let i = 0; i < 10; i++) {

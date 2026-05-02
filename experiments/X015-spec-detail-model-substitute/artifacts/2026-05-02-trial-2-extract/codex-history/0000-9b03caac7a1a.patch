@@ -1,0 +1,2962 @@
+
+
+diff --git a/docs/architecture/apparatus/clerk.md b/docs/architecture/apparatus/clerk.md
+index cebb112..2d6f656 100644
+--- a/docs/architecture/apparatus/clerk.md
++++ b/docs/architecture/apparatus/clerk.md
+@@ -14,7 +14,7 @@ The Clerk owns the boundary between "what is asked for" and "how it gets done."
+ 
+ The Clerk does **not** execute work. It does not launch sessions, manage rigs, or orchestrate engines. It tracks obligations: what has been commissioned, what state each obligation is in, and whether the guild has fulfilled its commitments. When the Clockworks and rigging system exist, the Clerk will integrate with them via lifecycle events and signals.
+ 
+-Writs can be organized into parent/child hierarchies for decomposing complex work. A parent writ stays in `open` phase while its children are being processed. Failure cascades upward (child failure fails the parent) and cancellation cascades downward when a parent reaches `failed` or `cancelled` (its non-terminal children are auto-cancelled). When a parent reaches `completed`, any still-open children are left as-is and a warning is logged — see [CDC Cascade Behavior](#cdc-cascade-behavior).
++Writs can be organized into parent/child hierarchies for decomposing complex work. Children are created with a `parentId` and inherit the parent's codex. The `parentId` field is immutable after creation.
+ 
+ Writ documents follow a Kubernetes-style spec/status split: **`phase`** is the Clerk-owned lifecycle state (the phase machine below), and **`status`** is a plugin-owned observation slot — a `Record<string, unknown>` keyed by plugin id where apparatuses like Spider record side-channel observations (last rig, stuck cause, progress ratchets). See [Spec/Status Convention](#specstatus-convention).
+ 
+@@ -34,10 +34,10 @@ recommends: ['oculus']
+ 
+ ## Kit Interface
+ 
+-The Clerk consumes `writTypes` and `linkKinds` kit contributions. Kits may declare writ types that are merged into the guild's type vocabulary at startup, and link kinds that seed the kit-contributed link-kind registry.
++The Clerk consumes `linkKinds` kit contributions. Link kinds seed the kit-contributed link-kind registry. Writ types are registered programmatically via `ClerkApi.registerWritType()` in each plugin's `start()` method.
+ 
+ ```typescript
+-consumes: ['writTypes', 'linkKinds']
++consumes: ['linkKinds']
+ ```
+ 
+ ### `linkKinds` registry
+@@ -178,19 +178,52 @@ interface ClerkApi {
+   // ── Commission Intake ─────────────────────────────────────────
+ 
+   /**
+-   * Post a commission — create a writ in open phase (or new if draft: true).
++   * Post a commission — create a writ in its type's initial state.
+    *
+    * This is the primary entry point for patron-originated work.
+    * Creates a WritDoc and persists it to the writs book.
+-   * Draft writs (new phase) are invisible to the Spider until published.
++   * For the mandate type, the writ is auto-advanced to 'open' after creation
++   * unless draft: true is passed (deprecated).
+    *
+    * When parentId is provided:
+-   * - The parent must be in new or open phase.
++   * - The parent must not be in a terminal phase.
+    * - The child inherits the parent's codex if none is specified.
+    * - The entire operation is atomic (single transaction).
++   *
++   * Throws if the writ type is not registered.
+    */
+   post(request: PostCommissionRequest): Promise<WritDoc>
+ 
++  // ── Writ Type Registry ─────────────────────────────────────────
++
++  /**
++   * Register a plugin writ type with the Clerk.
++   *
++   * Must be called from the plugin's start() method. The registration
++   * window closes when phase:started fires; late calls throw.
++   *
++   * Throws on: duplicate type name, structural validation failure, or
++   * call after the registration window has closed.
++   */
++  registerWritType(config: WritTypeConfig): void
++
++  /**
++   * Return the WritTypeConfig for the named type.
++   * Throws if the type is not registered.
++   */
++  getWritTypeConfig(name: string): WritTypeConfig
++
++  /**
++   * Classify a writ's current phase.
++   * Throws if the writ type is not registered or its phase is undeclared.
++   */
++  isInitial(writ: WritDoc): boolean
++  isActive(writ: WritDoc): boolean
++  isTerminal(writ: WritDoc): boolean
++
++  /** List all registered writ types with metadata. */
++  listWritTypes(): WritTypeInfo[]
++
+   // ── Writ Queries ──────────────────────────────────────────────
+ 
+   /** Read a single writ by id. Throws if not found. */
+@@ -205,37 +238,27 @@ interface ClerkApi {
+   // ── Writ Lifecycle ────────────────────────────────────────────
+ 
+   /**
+-   * Transition a writ to a new phase.
++   * Transition a writ to a new state.
+    *
+-   * Enforces the phase machine — invalid transitions throw.
++   * Enforces the type's registered state machine — invalid transitions throw.
+    * Updates the writ document and sets timestamp fields.
+    *
+-   * Valid transitions:
+-   *   new   → open       (publish — enter the queue)
+-   *   new   → cancelled
+-   *   open  → completed
+-   *   open  → failed
+-   *   open  → cancelled
+-   *   open  → stuck      (engine failure cascade)
+-   *   stuck → open       (recovery/retry resumes execution)
+-   *   stuck → failed     (obligation abandoned)
+-   *   stuck → cancelled  (obligation withdrawn)
+-   *
+    * The `fields` parameter allows setting additional fields
+    * atomically with the transition (e.g. `resolution`).
+    * Managed fields (id, phase, timestamps, parentId, status) are
+-   * stripped. The observation slot `status` is plugin-owned and
++   * stripped from `fields`. The observation slot `status` is plugin-owned and
+    * must be written via setWritStatus() — transition() silently
+    * strips any caller-supplied status field.
+    *
+-   * CDC cascade behavior:
+-   * - Child failed → parent: failure propagates up
+-   * - Parent failed/cancelled → children: non-terminal children are cancelled
+-   * - Parent completed → children: non-terminal children are left as-is
+-   *   and a warning is logged (their existence indicates an upstream
+-   *   bookkeeping gap that should be investigated)
++   * Passing `phase` in `fields` throws — use the `to` parameter.
++   *
++   * Throws if:
++   * - The writ does not exist
++   * - The writ type is not registered
++   * - The current state is not declared in the type config (data integrity)
++   * - The target state is not in the current state's allowedTransitions
+    */
+-  transition(id: string, to: WritPhase, fields?: Partial<WritDoc>): Promise<WritDoc>
++  transition(id: string, to: string, fields?: Partial<WritDoc>): Promise<WritDoc>
+ 
+   /**
+    * Write (or overwrite) a plugin-owned sub-slot inside the writ's
+@@ -272,10 +295,10 @@ interface ClerkApi {
+ interface WritDoc {
+   /** Unique writ id (prefixed, sortable: `w-{base36_timestamp}-{hex_random}`). */
+   id: string
+-  /** Writ type — guild vocabulary. e.g. "mandate", "task", "bug". */
++  /** Writ type — registered vocabulary. e.g. "mandate", "piece". */
+   type: string
+-  /** Clerk-owned lifecycle state — the phase machine. */
+-  phase: WritPhase
++  /** Clerk-owned lifecycle state — type-specific; declared in WritTypeConfig. */
++  phase: string
+   /** Short description. */
+   title: string
+   /** Full spec — what to do, acceptance criteria, context. */
+@@ -309,6 +332,9 @@ interface WritDoc {
+   status?: Record<string, unknown>
+ }
+ 
++// WritPhase is the mandate-specific state union. WritDoc.phase is `string`
++// to accommodate custom types with non-mandate state names. Callers that
++// know they are working with mandate writs may downcast.
+ type WritPhase =
+   | "new"         // Draft — held out of the queue, not yet published
+   | "open"        // In the queue, available for dispatch
+@@ -322,12 +348,13 @@ interface PostCommissionRequest {
+   body: string
+   codex?: string          // inherited from parent if omitted
+   type?: string           // default: "mandate"
+-  draft?: boolean         // When true, create in 'new' phase (default: false → 'open')
++  /** @deprecated Use writ-publish after posting to control timing. */
++  draft?: boolean
+   parentId?: string       // Create as child of this writ
+ }
+ 
+ interface WritFilters {
+-  phase?: WritPhase | WritPhase[]
++  phase?: string | string[]
+   type?: string | string[]
+   parentId?: string       // Filter to children of this parent writ
+   limit?: number
+@@ -344,11 +371,6 @@ All Clerk configuration lives under the `clerk` key in `guild.json`. The Clerk u
+ ```json
+ {
+   "clerk": {
+-    "writTypes": [
+-      { "name": "mandate" },
+-      { "name": "task", "description": "A concrete unit of implementation work" },
+-      { "name": "bug", "description": "A defect to investigate and fix" }
+-    ],
+     "defaultType": "mandate"
+   }
+ }
+@@ -356,15 +378,9 @@ All Clerk configuration lives under the `clerk` key in `guild.json`. The Clerk u
+ 
+ ```typescript
+ interface ClerkConfig {
+-  writTypes?: WritTypeEntry[]
+   defaultType?: string
+ }
+ 
+-interface WritTypeEntry {
+-  name: string
+-  description?: string
+-}
+-
+ // Module augmentation — typed access via guild().guildConfig().clerk
+ declare module '@shardworks/nexus-core' {
+   interface GuildConfig {
+@@ -375,18 +391,17 @@ declare module '@shardworks/nexus-core' {
+ 
+ | Field | Type | Default | Description |
+ |-------|------|---------|-------------|
+-| `writTypes` | `WritTypeEntry[]` | `[]` | Additional writ type declarations. Each entry has a `name` and optional `description`. The built-in type `"mandate"` is always valid regardless of this list. |
+ | `defaultType` | `string` | `"mandate"` | Default type when `commission-post` is called without a type. |
+ 
+-Both fields are optional. A guild with no `clerk` config (or an empty one) gets only the built-in `mandate` type with `defaultType: "mandate"` — enough to post commissions with no configuration.
++The `clerk` config section is optional. A guild with no config gets only the built-in `mandate` type with `defaultType: "mandate"` — enough to post commissions with no configuration.
+ 
+-Writ types are the guild's vocabulary — not a framework-imposed hierarchy. A guild that does only implementation work might use only `mandate`. A guild with planning animas might add `task`, `step`, `bug`, `spike`. The Clerk validates that posted writs use a declared type but assigns no behavioral semantics to the type name — that meaning lives in role instructions and (when available) standing orders and engine designs.
++Writ types are registered at runtime by plugins via `registerWritType()` in their `start()` methods. The built-in `mandate` type is always available. Additional types (e.g. `piece`, `observation-set`) are registered by the plugins that own them. The Clerk validates that posted writs use a registered type but assigns no behavioral semantics to the type name — that meaning lives in role instructions, engine designs, and the type's declared state machine.
+ 
+ ---
+ 
+-## Phase Machine
++## Mandate Phase Machine
+ 
+-The writ phase machine governs all lifecycle transitions. The Clerk enforces this — invalid transitions throw.
++Each writ type declares its own state machine via `registerWritType()`. The built-in `mandate` type uses the six-state machine described below. The Clerk enforces the declared transitions for each type — invalid transitions throw.
+ 
+ ```
+             ┌──────────────┐
+@@ -483,11 +498,9 @@ The spec/status split is guild-wide in intent, not a writs-only pattern. Other r
+ 
+ ## Parent/Child Hierarchies
+ 
+-Writs form a tree. A writ may be decomposed into child writs (tasks, steps, etc.) by creating children with `parentId`. The hierarchy enables:
++Writs form a tree. A writ may be decomposed into child writs by creating children with `parentId`. The hierarchy enables:
+ 
+ - **Decomposition** — a broad commission broken into concrete tasks
+-- **Failure propagation** — child failure cascades upward, failing the parent
+-- **Cancellation cascade** — when a parent terminates as `failed` or `cancelled`, its non-terminal children are auto-cancelled (a `completed` parent leaves them in place and warns instead)
+ - **Scope tracking** — the patron sees one mandate; the guild sees the tree
+ 
+ ### Hierarchy Rules
+@@ -496,22 +509,7 @@ Writs form a tree. A writ may be decomposed into child writs (tasks, steps, etc.
+ - A writ may have zero or many children.
+ - Depth is not limited (but deep hierarchies are a design smell).
+ - Children inherit the parent's `codex` unless explicitly overridden.
+-- Parents must be in `new`, `open`, or `stuck` phase to accept new children.
+-
+-### CDC Cascade Behavior
+-
+-The Clerk registers a Phase 1 CDC watcher on the `clerk/writs` book. When a writ's phase changes:
+-
+-**Upward cascade (child → parent):** When a child reaches a terminal phase:
+-- If the child **failed** and the parent is in `open` or `stuck` phase: the parent transitions to `failed` with resolution `'Child "<childId>" failed: <childResolution>'`. The parent's failure triggers downward cascade, cancelling remaining siblings.
+-
+-**Downward cascade (parent → children):** When a writ reaches a terminal phase, behavior depends on which terminal phase the parent reached:
+-- If the parent reached **`failed`** or **`cancelled`**: all non-terminal children are cancelled with resolution `'Automatically cancelled due to parent termination'` (exported from `clerk.ts` as `CASCADE_PARENT_TERMINATION_RESOLUTION`).
+-- If the parent reached **`completed`**: non-terminal children are **not** cancelled. Their existence at this point indicates an upstream bookkeeping gap (typically a child-writ transition that lost a race against the parent's terminal write); the cascade logs a warning naming the parent and each non-terminal child rather than masking the discrepancy with a cancellation.
+-
+-### Cascade Depth
+-
+-A failure at leaf level cascades as: child fails (depth 1) → parent fails (depth 2) → siblings cancelled (depth 3 each) → each sibling's upward check returns early (depth 4). Well within the Stacks CDC cascade depth limit for reasonable hierarchies.
++- Parents must not be in a terminal phase to accept new children.
+ 
+ ---
+ 
+@@ -521,13 +519,12 @@ Commission intake is a single synchronous step:
+ 
+ ```
+ ├─ 1. Patron calls commission-post (or ClerkApi.post())
+-├─ 2. Clerk validates input, generates ULID, creates WritDoc
+-├─ 3a. draft: false (default) → Clerk writes WritDoc with phase: open
++├─ 2. Clerk validates type is registered, generates ULID, creates WritDoc
++│       └─ Writ starts in the type's declared initial state
++├─ 3. mandate type: auto-advances new → open (unless draft: true)
+ │       └─ Spider will pick up on next crawl tick
+-├─ 3b. draft: true → Clerk writes WritDoc with phase: new
+-│       └─ Held out of queue; patron calls writ-publish to enter queue
+-└─ 3c. parentId provided → Clerk validates parent, creates child atomically
+-        └─ Parent stays in its current phase (new or open)
++└─ 4. parentId provided → Clerk validates parent is non-terminal, creates child atomically
++        └─ Parent stays in its current phase
+ ```
+ 
+ ---
+@@ -618,16 +615,17 @@ The patron's experience doesn't change — they still call `commission-post`. Th
+ 
+ - **Should `commission-post` be a permissionless tool?** It represents patron authority — commissions come from outside the guild. But Coco (running inside a session) needs to call it. Current thinking: gate it with `clerk:write` and grant that to the steward role.
+ 
+-- **Writ type validation — strict or advisory?** The Clerk validates against `clerk.writTypes` in config. But this means adding a new type requires a config change. Alternative: accept any string, use the config list only for documentation/tooling hints. Current thinking: strict validation — the guild should know its own vocabulary.
++- **Writ type validation — strict or advisory?** Resolved: strict. Types must be registered via `registerWritType()` before use. Unknown types throw at `post()` time. This was previously resolved via a `clerk.writTypes` config list; that list has been replaced by the runtime registry.
+ 
+ ---
+ 
+ ## Implementation Notes
+ 
+ - Standalone apparatus package at `packages/plugins/clerk/`. Requires only the Stacks.
+-- `WritDoc.type` uses a guild-defined vocabulary, not a framework enum. The Clerk validates against `clerk.writTypes` in the apparatus config section but the framework imposes no meaning on the type name.
++- `WritDoc.type` uses a registered vocabulary. Writ types are registered at runtime by plugins via `registerWritType()` in their `start()` methods. The framework imposes no meaning on the type name.
++- `WritDoc.phase` is typed as `string` to accommodate custom types with non-mandate state names. The `WritPhase` union type is kept exported for callers that know they are working with mandate writs and want to downcast.
+ - Writ ids use the format `w-{base36_timestamp}-{hex_random}`, produced by `generateId('w', 6)` — sortable by creation time, unique without coordination. Not a formal ULID, but provides the same useful properties (temporal ordering, no coordination).
+-- The `transition()` method is the single choke point for all phase changes. All tools and future integrations go through it. This is where validation, timestamp setting, event emission, and hierarchy cascade happen. The observation slot `status` is a managed field stripped from the body alongside `id`, `phase`, timestamps, and `parentId`; the one sanctioned slot-write path is `setWritStatus()`, which performs a transactional read-modify-write on the sub-slot keyed by `pluginId` so sibling sub-slots are preserved under concurrent writers.
++- The `transition()` method is the single choke point for all phase changes. All tools and future integrations go through it. This is where validation, timestamp setting, and event emission happen. The observation slot `status` is a managed field stripped from the body alongside `id`, `phase`, timestamps, and `parentId`; the one sanctioned slot-write path is `setWritStatus()`, which performs a transactional read-modify-write on the sub-slot keyed by `pluginId` so sibling sub-slots are preserved under concurrent writers.
+ - When the Clockworks is eventually added as a recommended dependency, resolve it at emit time via `guild().apparatus()`, not at startup — so the Clerk functions with or without it.
+-- Parent/child cascade uses a Phase 1 CDC watcher (`failOnError: true`) so cascade operations are transactional — if a cascade step fails, the triggering transition rolls back.
+ - `parentId` is immutable: stripped from managed fields in `transition()`, preventing mutation through the API.
++- The writ-type registry is sealed when `phase:started` fires (after every apparatus `start()` has completed). Late calls to `registerWritType()` throw. This ensures all type state machines are declared before any writ is posted.
+diff --git a/packages/plugins/astrolabe/src/astrolabe.ts b/packages/plugins/astrolabe/src/astrolabe.ts
+index 49b6871..e06d091 100644
+--- a/packages/plugins/astrolabe/src/astrolabe.ts
++++ b/packages/plugins/astrolabe/src/astrolabe.ts
+@@ -13,6 +13,7 @@ import { guild } from '@shardworks/nexus-core';
+ import { tool } from '@shardworks/tools-apparatus';
+ import type { StacksApi, Book, WhereClause } from '@shardworks/stacks-apparatus';
+ import type { KitRoleDefinition } from '@shardworks/loom-apparatus';
++import type { ClerkApi, WritTypeConfig } from '@shardworks/clerk-apparatus';
+ import { z } from 'zod';
+ 
+ import type {
+@@ -54,6 +55,99 @@ function resolvePatronRole(): string {
+   return typeof config.patronRole === 'string' ? config.patronRole.trim() : '';
+ }
+ 
++// ── Writ type configs ────────────────────────────────────────────────
++
++/**
++ * Astrolabe's two writ types, declared as proper WritTypeConfigs and
++ * registered with the Clerk via `registerWritType()` in `start()`.
++ *
++ * Previously contributed via `supportKit.writTypes` (name + description
++ * only). The registry path gives each type a real state machine so
++ * `ClerkApi.isInitial/isActive/isTerminal` and the registry-driven
++ * `transition()` path work correctly for these types.
++ */
++
++/**
++ * Piece — an atomic, sequentially-executed task child of a mandate.
++ *
++ * Lifecycle: single-arc initial → terminal (no intermediate states).
++ * Spider never dispatches this type directly; pieces are advanced to
++ * terminal states by the implement engine that owns them.
++ *
++ *   open (initial) → completed, failed, cancelled
++ */
++const PIECE_CONFIG: WritTypeConfig = {
++  name: 'piece',
++  states: [
++    {
++      name: 'open',
++      classification: 'initial',
++      allowedTransitions: ['completed', 'failed', 'cancelled'],
++    },
++    {
++      name: 'completed',
++      classification: 'terminal',
++      attrs: ['success'],
++      allowedTransitions: [],
++    },
++    {
++      name: 'failed',
++      classification: 'terminal',
++      attrs: ['failure'],
++      allowedTransitions: [],
++    },
++    {
++      name: 'cancelled',
++      classification: 'terminal',
++      attrs: ['cancelled'],
++      allowedTransitions: [],
++    },
++  ],
++};
++
++/**
++ * Observation-set — a non-dispatchable container grouping writs lifted
++ * from a single planning run. Spider never dispatches this type. Curators
++ * triage the child mandates and promote or cancel the container manually.
++ *
++ *   new  (initial) → open, cancelled
++ *   open (active)  → completed, failed, cancelled
++ *   completed, failed, cancelled (terminal)
++ */
++const OBSERVATION_SET_CONFIG: WritTypeConfig = {
++  name: 'observation-set',
++  states: [
++    {
++      name: 'new',
++      classification: 'initial',
++      allowedTransitions: ['open', 'cancelled'],
++    },
++    {
++      name: 'open',
++      classification: 'active',
++      allowedTransitions: ['completed', 'failed', 'cancelled'],
++    },
++    {
++      name: 'completed',
++      classification: 'terminal',
++      attrs: ['success'],
++      allowedTransitions: [],
++    },
++    {
++      name: 'failed',
++      classification: 'terminal',
++      attrs: ['failure'],
++      allowedTransitions: [],
++    },
++    {
++      name: 'cancelled',
++      classification: 'terminal',
++      attrs: ['cancelled'],
++      allowedTransitions: [],
++    },
++  ],
++};
++
+ // ── Factory ──────────────────────────────────────────────────────────
+ 
+ export function createAstrolabe(): Plugin {
+@@ -279,15 +373,6 @@ export function createAstrolabe(): Plugin {
+           plans: { indexes: ['status', 'codex', 'createdAt'] },
+         },
+ 
+-        writTypes: [
+-          { name: 'piece', description: 'An atomic task piece within a mandate, executed sequentially' },
+-          {
+-            name: 'observation-set',
+-            description:
+-              'A non-dispatchable container grouping writs lifted from a single planning run. Spider never dispatches this type (no rig-template mapping); it exists so curators can triage related lifted observations as a batch.',
+-          },
+-        ],
+-
+         linkKinds: [
+           {
+             id: 'astrolabe.lifted-from',
+@@ -360,8 +445,17 @@ export function createAstrolabe(): Plugin {
+       provides: api,
+ 
+       start(_ctx: StartupContext): void {
+-        const stacks = guild().apparatus<StacksApi>('stacks');
++        const g = guild();
++        const stacks = g.apparatus<StacksApi>('stacks');
+         plansBook = stacks.book<PlanDoc>('astrolabe', 'plans');
++
++        // Register astrolabe's writ types with the Clerk. These were
++        // previously contributed via supportKit.writTypes (name + description
++        // only); the registry path gives each type a proper state machine.
++        // Clerk is listed in `requires` so it is always started before us.
++        const clerk = g.apparatus<ClerkApi>('clerk');
++        clerk.registerWritType(PIECE_CONFIG);
++        clerk.registerWritType(OBSERVATION_SET_CONFIG);
+       },
+     },
+   };
+diff --git a/packages/plugins/astrolabe/src/supportkit.test.ts b/packages/plugins/astrolabe/src/supportkit.test.ts
+index ba33663..62dde50 100644
+--- a/packages/plugins/astrolabe/src/supportkit.test.ts
++++ b/packages/plugins/astrolabe/src/supportkit.test.ts
+@@ -2,7 +2,9 @@
+  * Astrolabe supportKit shape tests.
+  *
+  * Verifies that the apparatus's supportKit declares the correct books,
+- * writTypes, roles, engines, rigTemplates, rigTemplateMappings, and tools.
++ * roles, engines, rigTemplates, rigTemplateMappings, and tools.
++ * Writ types (piece, observation-set) are now registered via
++ * clerk.registerWritType() in start() rather than in supportKit.
+  */
+ 
+ import { describe, it } from 'node:test';
+@@ -57,21 +59,16 @@ describe('Astrolabe supportKit shape', () => {
+     assert.deepEqual(books.plans.indexes, ['status', 'codex', 'createdAt']);
+   });
+ 
+-  // ── R5: writTypes ──────────────────────────────────────────────────
++  // ── R5: writTypes (removed — types are now registry-registered) ──────
+ 
+-  it('contributes piece and observation-set writTypes and does not contribute brief', () => {
++  it('does not contribute writTypes via supportKit (piece and observation-set use registerWritType)', () => {
+     const kit = getKit(plugin);
+-    const writTypes = kit.writTypes as Array<{ name: string; description?: string }>;
+-    assert.ok(Array.isArray(writTypes), 'writTypes must be an array');
+-    assert.equal(writTypes.length, 2, 'must have exactly two writ types');
+-    const piece = writTypes.find(w => w.name === 'piece');
+-    assert.ok(piece, 'piece writType must exist');
+-    assert.ok(piece.description);
+-    const observationSet = writTypes.find(w => w.name === 'observation-set');
+-    assert.ok(observationSet, 'observation-set writType must exist');
+-    assert.ok(observationSet.description);
+-    const brief = writTypes.find(w => w.name === 'brief');
+-    assert.equal(brief, undefined, 'brief writType must not be contributed');
++    assert.equal(
++      kit.writTypes,
++      undefined,
++      'writTypes must not be in supportKit; astrolabe registers piece and observation-set ' +
++      'via clerk.registerWritType() in start() instead',
++    );
+   });
+ 
+   // ── linkKinds ──────────────────────────────────────────────────────
+@@ -460,10 +457,11 @@ describe('Astrolabe supportKit shape', () => {
+     assert.equal(mappings['brief-mra'], undefined, 'brief-mra mapping must not exist');
+   });
+ 
+-  it('old identifiers do not appear in writTypes', () => {
++  it('old writTypes identifiers are absent from supportKit', () => {
++    // writTypes was removed from supportKit in T4; types are now
++    // registered via clerk.registerWritType() in start(). The legacy
++    // brief-mra type should not appear anywhere in the kit.
+     const kit = getKit(plugin);
+-    const writTypes = kit.writTypes as Array<{ name: string }>;
+-    const briefMra = writTypes.find(w => w.name === 'brief-mra');
+-    assert.equal(briefMra, undefined, 'brief-mra writ type must not exist');
++    assert.equal(kit.writTypes, undefined, 'writTypes must not be in supportKit');
+   });
+ });
+diff --git a/packages/plugins/astrolabe/src/tools.test.ts b/packages/plugins/astrolabe/src/tools.test.ts
+index 5d7c3fa..2753c42 100644
+--- a/packages/plugins/astrolabe/src/tools.test.ts
++++ b/packages/plugins/astrolabe/src/tools.test.ts
+@@ -76,6 +76,12 @@ function setup() {
+     indexes: ['status', 'codex', 'createdAt'],
+   });
+ 
++  // Provide a minimal clerk mock so astrolabe.start() can call
++  // clerk.registerWritType() without needing a full Clerk apparatus.
++  apparatusMap.set('clerk', {
++    registerWritType: () => {},
++  });
++
+   // Start astrolabe
+   const astrolabeApparatus = (astrolabePlugin as {
+     apparatus: { start: (ctx: StartupContext) => void; provides: unknown };
+diff --git a/packages/plugins/clerk/README.md b/packages/plugins/clerk/README.md
+index a9bbc01..488979a 100644
+--- a/packages/plugins/clerk/README.md
++++ b/packages/plugins/clerk/README.md
+@@ -1,6 +1,6 @@
+ # `@shardworks/clerk-apparatus`
+ 
+-The Clerk manages the lifecycle of **writs** — lightweight work orders that flow through a fixed phase machine. Writs are created as commissions and ultimately completed, failed, or cancelled. Writs may also enter a `stuck` phase when their rig encounters an engine failure — a non-terminal "needs attention" phase that preserves the obligation for future retry. Writs can be organized into parent/child hierarchies for decomposing complex work.
++The Clerk manages the lifecycle of **writs** — lightweight work orders that flow through a type-specific state machine. Writs are created as commissions and ultimately completed, failed, or cancelled. The built-in `mandate` type uses a six-state machine: writs may also enter a `stuck` phase when their rig encounters an engine failure — a non-terminal "needs attention" phase that preserves the obligation for future retry. Plugins register their own writ types via `registerWritType()`, each declaring its own state machine. Writs can be organized into parent/child hierarchies for decomposing complex work.
+ 
+ Writ documents follow a Kubernetes-style spec/status split: **`phase`** is the Clerk-owned lifecycle state (the phase machine below), and **`status`** is a plugin-owned observation slot keyed by plugin id — a place for apparatuses like Spider to record side-channel observations (last rig, stuck cause, progress ratchets) without mutating the phase. See [Spec/Status Convention](#specstatus-convention) below.
+ 
+@@ -34,7 +34,7 @@ const clerk = guild().apparatus<ClerkApi>('clerk');
+ 
+ ### `post(request): Promise<WritDoc>`
+ 
+-Post a new commission, creating a writ in `open` phase.
++Post a new commission, creating a writ in its type's initial state (mandate writs begin in `open` phase by default).
+ 
+ ```typescript
+ const writ = await clerk.post({
+@@ -50,16 +50,16 @@ const writ = await clerk.post({
+ |---|---|---|
+ | `title` | `string` | Short human-readable title |
+ | `body` | `string` | Detail text (required) |
+-| `type` | `string` | Writ type — must be declared or built-in (optional) |
++| `type` | `string` | Writ type — must be registered via `registerWritType()` (optional) |
+ | `codex` | `string` | Target codex name (optional, inherited from parent if omitted) |
+ | `parentId` | `string` | Parent writ id for hierarchical decomposition (optional) |
+ 
+ When `parentId` is provided:
+-- The parent must exist and be in `new`, `open`, or `stuck` phase.
++- The parent must exist and not be in a terminal phase.
+ - The child inherits the parent's `codex` if no explicit codex is provided.
+ - The entire operation is atomic.
+ 
+-Throws if the writ type is not declared in the guild config and is not a built-in type (`mandate`, `summon`).
++Throws if the writ type is not registered.
+ 
+ ### `show(id): Promise<WritDoc>`
+ 
+@@ -76,7 +76,7 @@ const children = await clerk.list({ parentId: parent.id });
+ 
+ | Filter | Type | Description |
+ |---|---|---|
+-| `phase` | `WritPhase \| WritPhase[]` | Filter by phase (single or array — multiple values OR together) |
++| `phase` | `string \| string[]` | Filter by phase (single or array — multiple values OR together) |
+ | `type` | `string` | Filter by writ type |
+ | `parentId` | `string` | Filter to children of this parent writ |
+ | `limit` | `number` | Maximum results (default: 20) |
+@@ -100,7 +100,7 @@ const page = await clerk.tree({ phase: ['open', 'stuck'], rootLimit: 100, rootOf
+ | Parameter | Type | Description |
+ |---|---|---|
+ | `rootId` | `string` | Restrict to the subtree rooted at this writ id (optional) |
+-| `phase` | `WritPhase \| WritPhase[]` | Filter by phase with **prune semantics** — a non-matching node is dropped together with its entire subtree |
++| `phase` | `string \| string[]` | Filter by phase with **prune semantics** — a non-matching node is dropped together with its entire subtree |
+ | `type` | `string \| string[]` | Filter by writ type with prune semantics |
+ | `depth` | `number` | Maximum recursion depth (0 = roots only). Node at the cap is included; its children are not. |
+ | `rootLimit` | `number` | Maximum number of roots in forest mode (ignored with `rootId`) |
+@@ -118,14 +118,14 @@ const total = await clerk.count({ phase: 'open' });
+ 
+ ### `listWritTypes(): WritTypeInfo[]`
+ 
+-List all registered writ types with full metadata — descriptions, source tracking, and default flag.
++List all registered writ types with full metadata — source tracking and default flag.
+ 
+ ```typescript
+ const types = clerk.listWritTypes();
+ // [
+ //   { name: 'mandate', description: null, source: 'builtin', isDefault: true },
+-//   { name: 'task', description: 'A task', source: 'guild', isDefault: false },
+-//   { name: 'quality-audit', description: 'Code quality audit', source: 'my-kit', isDefault: false },
++//   { name: 'piece', description: null, source: 'plugin', isDefault: false },
++//   { name: 'observation-set', description: null, source: 'plugin', isDefault: false },
+ // ]
+ ```
+ 
+@@ -135,10 +135,37 @@ Each entry includes:
+ |---|---|---|
+ | `name` | `string` | The writ type name |
+ | `description` | `string \| null` | Human-readable description, or `null` if none was provided |
+-| `source` | `string` | Origin: `"builtin"`, `"guild"`, or the contributing plugin's id |
++| `source` | `string` | Origin: `"builtin"` (for mandate) or `"plugin"` (for all plugin-registered types) |
+ | `isDefault` | `boolean` | Whether this is the guild's default writ type |
+ 
+-Source precedence: guild config entries fully shadow kit contributions with the same name (including description).
++### `registerWritType(config): void`
++
++Register a plugin writ type with the Clerk. Must be called from the plugin's `start()` method — the registration window closes when `phase:started` fires, and late calls throw.
++
++```typescript
++clerk.registerWritType({
++  name: 'piece',
++  states: [
++    { name: 'open', classification: 'initial', allowedTransitions: ['completed', 'failed', 'cancelled'] },
++    { name: 'completed', classification: 'terminal', attrs: ['success'], allowedTransitions: [] },
++    { name: 'failed', classification: 'terminal', attrs: ['failure'], allowedTransitions: [] },
++    { name: 'cancelled', classification: 'terminal', attrs: ['cancelled'], allowedTransitions: [] },
++  ],
++});
++```
++
++Throws on:
++- Duplicate type name (each name must be unique across all registered types)
++- Structural validation failure (invalid state machine config)
++- Call after the registration window has closed
++
++### `getWritTypeConfig(name): WritTypeConfig`
++
++Return the `WritTypeConfig` for the named type. Throws if the type is not registered.
++
++### `isInitial(writ) / isActive(writ) / isTerminal(writ): boolean`
++
++Classify a writ's current phase using its registered state machine. Throws if the writ's type is not registered or its phase is not declared in the type config.
+ 
+ ### `link(sourceId, targetId, label, kind?): Promise<WritLinkDoc>`
+ 
+@@ -219,11 +246,11 @@ await clerk.transition(id, 'failed', { resolution: 'Build pipeline broke' });
+ await clerk.transition(id, 'cancelled', { resolution: 'No longer needed' });
+ ```
+ 
+-Throws if the transition is not legal for the writ's current phase.
++Throws if the transition is not legal for the writ's current phase per the type's registered state machine.
+ 
+ `transition()` silently strips the phase machine's managed fields from the body — `id`, `phase`, `status`, `createdAt`, `updatedAt`, `resolvedAt`, and `parentId`. The observation slot `status` is writable only via `setWritStatus()` (the one sanctioned slot-write path), which performs a transactional read-modify-write on the sub-slot keyed by `pluginId` so sibling sub-slots are preserved under concurrent writers. See [Spec/Status Convention](#specstatus-convention).
+ 
+-**Cascade behavior:** When a writ with children transitions to `failed` or `cancelled`, all non-terminal children are automatically cancelled with resolution `'Automatically cancelled due to parent termination'` (exported as `CASCADE_PARENT_TERMINATION_RESOLUTION`). When a parent transitions to `completed`, non-terminal children are **not** cancelled — instead a warning is logged (their existence indicates an upstream bookkeeping gap). When a child fails and its parent is `open` or `stuck`, the parent is failed and remaining siblings are cancelled.
++Passing `phase` in the `fields` argument throws — use the `to` parameter to name the target state.
+ 
+ ### `setWritStatus(writId, pluginId, value): Promise<WritDoc>`
+ 
+@@ -243,7 +270,9 @@ Throws if `writId` or `pluginId` is missing, or if the writ does not exist.
+ 
+ ---
+ 
+-## Phase Machine
++## Mandate Phase Machine
++
++The `mandate` type uses the built-in six-state machine. Other plugin-registered types declare their own state machines via `registerWritType()`.
+ 
+ ```
+ new ──► open ──┬──► completed
+@@ -263,7 +292,7 @@ new ──► open ──┬──► completed
+ - `completed`, `failed`, and `cancelled` are **terminal** — no transitions out.
+ - `stuck` is **non-terminal** — a "needs attention" phase for writs whose rig hit an engine failure. Recovery (future retry) transitions back to `open`; giving up transitions to `failed` or `cancelled`.
+ 
+-### Allowed transitions
++### Allowed transitions (mandate)
+ 
+ | To | From |
+ |---|---|
+@@ -279,9 +308,7 @@ new ──► open ──┬──► completed
+ 
+ Writs can be organized into parent/child relationships for decomposing complex work:
+ 
+-- **Creating children:** Pass `parentId` to `post()`. The parent stays in its current phase. Parents in `new`, `open`, or `stuck` phase accept children.
+-- **Failure cascade:** When a child fails and the parent is `open` or `stuck`, the parent is failed and remaining non-terminal siblings are cancelled.
+-- **Cancellation cascade:** When a parent reaches `failed` or `cancelled`, all non-terminal children are cancelled. When a parent reaches `completed` with non-terminal children still present, the Clerk logs a warning and leaves the children alone — this signals an upstream bookkeeping gap rather than normal flow.
++- **Creating children:** Pass `parentId` to `post()`. The parent stays in its current phase. Parents in any non-terminal phase accept children.
+ - **Codex inheritance:** Children inherit the parent's codex if none is specified.
+ - **Immutability:** `parentId` cannot be changed after creation.
+ 
+@@ -347,18 +374,11 @@ Configure The Clerk under the `"clerk"` key in your guild config:
+ }
+ ```
+ 
+-Writ types are declared at the top level of the guild config:
+-
+-```json
+-{
+-  "writTypes": {
+-    "epic": { "description": "A significant multi-step task" },
+-    "errand": { "description": "A small one-off task" }
+-  }
+-}
+-```
++| Field | Type | Default | Description |
++|---|---|---|---|
++| `defaultType` | `string` | `"mandate"` | Default type when `commission-post` is called without a type |
+ 
+-The built-in types `mandate` and `summon` are always available without declaration.
++Writ types are registered at runtime by plugins via `registerWritType()` in their `start()` methods. The built-in `mandate` type is always available without configuration.
+ 
+ ---
+ 
+@@ -390,19 +410,21 @@ The Clerk contributes books, tools, and pages to the guild:
+ | `writ-unlink` | `clerk:write` | Remove a labeled link between writs |
+ | `writ-link-kinds` | `clerk:read` | List registered link kinds (`--json` for raw array) |
+ | `writ-link-kinds-show` | `clerk:read` | Show a single link kind by id |
+-| `writ-types` | `clerk:read` | List available writ types |
++| `writ-types` | `clerk:read` | List registered writ types (name, source, and default flag) |
+ 
+ ---
+ 
+ ## Key Types
+ 
+ ```typescript
++// WritPhase — the mandate-specific phase union. WritDoc.phase is typed as
++// `string` to support custom types with non-mandate state names.
+ type WritPhase = 'new' | 'open' | 'stuck' | 'completed' | 'failed' | 'cancelled';
+ 
+ interface WritDoc {
+   id: string;           // ULID-like, prefixed "w-"
+-  type: string;         // declared or built-in type
+-  phase: WritPhase;     // Clerk-owned lifecycle state
++  type: string;         // registered type name
++  phase: string;        // Clerk-owned lifecycle state (type-specific)
+   title: string;
+   body: string;
+   codex?: string;       // target codex name
+@@ -420,18 +442,20 @@ interface PostCommissionRequest {
+   type?: string;        // defaults to guild defaultType or "mandate"
+   codex?: string;       // inherited from parent if omitted
+   parentId?: string;    // create as child of this writ
++  /** @deprecated Use writ-publish tool after posting to control timing. */
++  draft?: boolean;
+ }
+ 
+ interface EditWritRequest {
+   id: string;           // writ to edit
+   title?: string;       // new title
+   body?: string;        // new body text
+-  type?: string;        // new type (must be valid)
++  type?: string;        // new type (must be registered)
+   codex?: string;       // new codex (empty string to clear)
+ }
+ 
+ interface WritFilters {
+-  phase?: WritPhase | WritPhase[];
++  phase?: string | string[];
+   type?: string;
+   parentId?: string;    // filter to children of this parent
+   limit?: number;
+@@ -445,18 +469,18 @@ interface WritTree {
+ }
+ 
+ interface WritTreeParams {
+-  rootId?: string;                  // restrict to a single subtree
+-  phase?: WritPhase | WritPhase[];  // prune-semantics filter
+-  type?: string | string[];         // prune-semantics filter
+-  depth?: number;                   // 0 = roots only; node at cap included
+-  rootLimit?: number;               // forest mode: page across roots
+-  rootOffset?: number;              // forest mode: skip this many roots
++  rootId?: string;           // restrict to a single subtree
++  phase?: string | string[]; // prune-semantics filter
++  type?: string | string[];  // prune-semantics filter
++  depth?: number;            // 0 = roots only; node at cap included
++  rootLimit?: number;        // forest mode: page across roots
++  rootOffset?: number;       // forest mode: skip this many roots
+ }
+ 
+ interface WritTypeInfo {
+   name: string;              // writ type name
+   description: string | null; // human-readable description
+-  source: string;            // "builtin", "guild", or plugin id
++  source: string;            // "builtin" or "plugin"
+   isDefault: boolean;        // whether this is the default type
+ }
+ 
+@@ -504,7 +528,7 @@ The default export is a pre-built plugin instance, ready for guild installation.
+ 
+ ### Writ-type configuration
+ 
+-The package also exports the structural shape that describes a writ type's state machine and lifecycle behavior, plus a pure structural validator. These primitives are the foundation for plugin-registered writ types; they do not yet participate in the runtime lifecycle.
++The package also exports the structural shape that describes a writ type's state machine and lifecycle behavior, plus a pure structural validator. These primitives are the input to `registerWritType()`.
+ 
+ ```typescript
+ import {
+diff --git a/packages/plugins/clerk/src/clerk.test.ts b/packages/plugins/clerk/src/clerk.test.ts
+index 52afd4c..1cdf915 100644
+--- a/packages/plugins/clerk/src/clerk.test.ts
++++ b/packages/plugins/clerk/src/clerk.test.ts
+@@ -17,8 +17,7 @@ import { createStacksApparatus } from '@shardworks/stacks-apparatus';
+ import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
+ import type { StacksApi } from '@shardworks/stacks-apparatus';
+ 
+-import { createClerk, CASCADE_PARENT_TERMINATION_RESOLUTION } from './clerk.ts';
+-import type { ClerkKit } from './clerk.ts';
++import { createClerk } from './clerk.ts';
+ import type { ClerkApi, ClerkConfig, WritDoc, WritLinkDoc, LinkKindDoc } from './types.ts';
+ import type { WritLinks } from './index.ts';
+ import writShow from './tools/writ-show.ts';
+@@ -242,14 +241,20 @@ describe('Clerk', () => {
+       );
+     });
+ 
+-    it('accepts a type declared in clerk writTypes config', async () => {
+-      await setup({ clerkConfig: { writTypes: [{ name: 'errand', description: 'A small errand' }] } });
++    it('accepts a type declared via registerWritType', async () => {
++      clerk.registerWritType({
++        name: 'errand',
++        states: [
++          { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed', 'cancelled'] },
++          { name: 'completed', classification: 'terminal' as const, attrs: ['success'], allowedTransitions: [] },
++          { name: 'cancelled', classification: 'terminal' as const, attrs: ['cancelled'], allowedTransitions: [] },
++        ],
++      });
+       const writ = await clerk.post({ title: 'Run errand', body: 'Do it', type: 'errand' });
+       assert.equal(writ.type, 'errand');
+     });
+ 
+-    it('rejects a type that is not in clerk writTypes', async () => {
+-      await setup({ clerkConfig: { writTypes: [{ name: 'errand', description: 'A small errand' }] } });
++    it('rejects a type that is not registered', async () => {
+       await assert.rejects(
+         () => clerk.post({ title: 'Test', body: 'Body', type: 'epic' }),
+         /Unknown writ type/,
+@@ -368,7 +373,15 @@ describe('Clerk', () => {
+ 
+   describe('list()', () => {
+     beforeEach(async () => {
+-      await setup({ clerkConfig: { writTypes: [{ name: 'errand', description: 'A small errand' }] } });
++      await setup();
++      clerk.registerWritType({
++        name: 'errand',
++        states: [
++          { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed', 'cancelled'] },
++          { name: 'completed', classification: 'terminal' as const, attrs: ['success'], allowedTransitions: [] },
++          { name: 'cancelled', classification: 'terminal' as const, attrs: ['cancelled'], allowedTransitions: [] },
++        ],
++      });
+     });
+ 
+     it('returns all writs when no filters given', async () => {
+@@ -523,7 +536,15 @@ describe('Clerk', () => {
+     });
+ 
+     it('filters by type', async () => {
+-      await setup({ clerkConfig: { writTypes: [{ name: 'errand', description: 'A small errand' }] } });
++      await setup();
++      clerk.registerWritType({
++        name: 'errand',
++        states: [
++          { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed', 'cancelled'] },
++          { name: 'completed', classification: 'terminal' as const, attrs: ['success'], allowedTransitions: [] },
++          { name: 'cancelled', classification: 'terminal' as const, attrs: ['cancelled'], allowedTransitions: [] },
++        ],
++      });
+       await clerk.post({ title: 'Mandate', body: 'Body', type: 'mandate' });
+       await clerk.post({ title: 'Errand', body: 'Body', type: 'errand' });
+ 
+@@ -536,13 +557,21 @@ describe('Clerk', () => {
+ 
+   describe('tree()', () => {
+     beforeEach(async () => {
+-      await setup({
+-        clerkConfig: {
+-          writTypes: [
+-            { name: 'errand', description: 'A small errand' },
+-            { name: 'task', description: 'A task' },
+-          ],
+-        },
++      await setup();
++      clerk.registerWritType({
++        name: 'errand',
++        states: [
++          { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed', 'cancelled'] },
++          { name: 'completed', classification: 'terminal' as const, attrs: ['success'], allowedTransitions: [] },
++          { name: 'cancelled', classification: 'terminal' as const, attrs: ['cancelled'], allowedTransitions: [] },
++        ],
++      });
++      clerk.registerWritType({
++        name: 'task',
++        states: [
++          { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++          { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++        ],
+       });
+     });
+ 
+@@ -721,7 +750,15 @@ describe('Clerk', () => {
+ 
+   describe('edit()', () => {
+     beforeEach(async () => {
+-      await setup({ clerkConfig: { writTypes: [{ name: 'errand', description: 'A small errand' }] } });
++      await setup();
++      clerk.registerWritType({
++        name: 'errand',
++        states: [
++          { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed', 'cancelled'] },
++          { name: 'completed', classification: 'terminal' as const, attrs: ['success'], allowedTransitions: [] },
++          { name: 'cancelled', classification: 'terminal' as const, attrs: ['cancelled'], allowedTransitions: [] },
++        ],
++      });
+     });
+ 
+     it('updates the title of a draft writ', async () => {
+@@ -1189,10 +1226,11 @@ describe('Clerk', () => {
+     it('transition() strips managed fields from caller-supplied fields', async () => {
+       const writ = await clerk.post({ title: 'Sanitize test', body: 'Body' });
+ 
++      // D29: phase is no longer silently stripped — it is rejected (tested
++      // separately below). Other managed fields continue to be stripped.
+       const done = await clerk.transition(writ.id, 'completed', {
+         resolution: 'Legit resolution',
+         id: 'w-evil',
+-        phase: 'open' as const,
+         status: { evil: { injected: true } },
+         createdAt: '1999-01-01T00:00:00Z',
+         updatedAt: '1999-01-01T00:00:00Z',
+@@ -1208,6 +1246,18 @@ describe('Clerk', () => {
+       assert.notEqual(done.resolvedAt, '1999-01-01T00:00:00Z');
+       assert.equal(done.resolution, 'Legit resolution');
+     });
++
++    it('transition() throws (D29) when phase is passed in the fields argument', async () => {
++      const writ = await clerk.post({ title: 'Phase override attempt', body: 'Body' });
++
++      await assert.rejects(
++        () => clerk.transition(writ.id, 'completed', {
++          phase: 'open' as const,
++          resolution: 'Should not reach here',
++        }),
++        /cannot override phase via fields/,
++      );
++    });
+   });
+ 
+   // ── setWritStatus() — plugin-owned observation slot ───────────────
+@@ -2492,8 +2542,13 @@ describe('Clerk', () => {
+     });
+ 
+     it('honors --depth and --type filters', async () => {
+-      await setup({
+-        clerkConfig: { writTypes: [{ name: 'task', description: 't' }] },
++      await setup();
++      clerk.registerWritType({
++        name: 'task',
++        states: [
++          { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++          { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++        ],
+       });
+       const root = await clerk.post({ title: 'Root', body: 'Body', type: 'mandate' });
+       const child = await clerk.post({ title: 'Child', body: 'Body', parentId: root.id, type: 'task' });
+@@ -2601,7 +2656,15 @@ describe('Clerk', () => {
+ 
+   describe('writ-edit tool handler (via guild apparatus)', () => {
+     beforeEach(async () => {
+-      await setup({ clerkConfig: { writTypes: [{ name: 'errand', description: 'A small errand' }] } });
++      await setup();
++      clerk.registerWritType({
++        name: 'errand',
++        states: [
++          { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed', 'cancelled'] },
++          { name: 'completed', classification: 'terminal' as const, attrs: ['success'], allowedTransitions: [] },
++          { name: 'cancelled', classification: 'terminal' as const, attrs: ['cancelled'], allowedTransitions: [] },
++        ],
++      });
+     });
+ 
+     it('edits title of a draft writ via the tool handler', async () => {
+@@ -2670,222 +2733,103 @@ describe('Clerk', () => {
+     });
+   });
+ 
+-  // ── Config validation ────────────────────────────────────────────
+-
+-  describe('config: writTypes validation', () => {
+-    it('built-in type mandate is always valid regardless of writTypes config', async () => {
+-      await setup({ clerkConfig: { writTypes: [] } }); // empty writTypes — built-in still works
+-      const w1 = await clerk.post({ title: 'Mandate', body: 'Body', type: 'mandate' });
+-      assert.equal(w1.type, 'mandate');
+-    });
++  // ── registerWritType() ─────────────────────────────────────────────────
+ 
+-    it('summon is not a built-in type (must be declared)', async () => {
+-      await setup({ clerkConfig: { writTypes: [] } });
+-      await assert.rejects(
+-        () => clerk.post({ title: 'Summon', body: 'Body', type: 'summon' }),
+-        /Unknown writ type/,
+-      );
++  describe('registerWritType()', () => {
++    it('mandate is pre-registered and always valid', async () => {
++      await setup();
++      const config = clerk.getWritTypeConfig('mandate');
++      assert.equal(config.name, 'mandate');
++      assert.equal(config.states.length, 6);
+     });
+ 
+-    it('declared custom types are accepted', async () => {
+-      await setup({
+-        clerkConfig: {
+-          writTypes: [
+-            { name: 'epic', description: 'A significant task' },
+-            { name: 'errand', description: 'A small errand' },
+-          ],
+-        },
++    it('registers a custom type and allows post() to use it', async () => {
++      await setup();
++      clerk.registerWritType({
++        name: 'errand',
++        states: [
++          { name: 'open', classification: 'initial', allowedTransitions: ['completed', 'cancelled'] },
++          { name: 'completed', classification: 'terminal', attrs: ['success'], allowedTransitions: [] },
++          { name: 'cancelled', classification: 'terminal', attrs: ['cancelled'], allowedTransitions: [] },
++        ],
+       });
+-      const w = await clerk.post({ title: 'Start an epic', body: 'Body', type: 'epic' });
+-      assert.equal(w.type, 'epic');
++      const writ = await clerk.post({ title: 'Run errand', body: 'Do it', type: 'errand' });
++      assert.equal(writ.type, 'errand');
++      assert.equal(writ.phase, 'open');
+     });
+ 
+-    it('undeclared types are rejected even when other custom types exist', async () => {
+-      await setup({ clerkConfig: { writTypes: [{ name: 'epic', description: 'An epic' }] } });
++    it('rejects an unknown writ type on post()', async () => {
++      await setup();
+       await assert.rejects(
+-        () => clerk.post({ title: 'Test', body: 'Body', type: 'unknown' }),
++        () => clerk.post({ title: 'Test', body: 'Body', type: 'unknown-type' }),
+         /Unknown writ type/,
+       );
+     });
+ 
+-    it('defaultType from clerk config is validated against declared types', async () => {
+-      await setup({
+-        clerkConfig: {
+-          writTypes: [{ name: 'errand', description: 'A small errand' }],
+-          defaultType: 'errand',
+-        },
+-      });
+-      const w = await clerk.post({ title: 'Default errand', body: 'Body' });
+-      assert.equal(w.type, 'errand');
+-    });
+-  });
+-
+-  // ── Kit-contributed writ types ────────────────────────────────────
+-
+-  describe('Kit-contributed writ types', () => {
+-    describe('V3 — basic kit writ type', () => {
+-      it('allows posting with kit-contributed writ type', async () => {
+-        const kit: LoadedKit = {
+-          packageName: '@test/quality-tools',
+-          id: 'quality-tools',
+-          version: '0.0.0',
+-          kit: { writTypes: [{ name: 'quality-audit' }] },
+-        };
+-        await setup({ extraKits: [kit] });
+-
+-        const writ = await clerk.post({ title: 'Audit', body: 'Run audit', type: 'quality-audit' });
+-        assert.equal(writ.type, 'quality-audit');
+-      });
+-
+-      it('config writType with same name silently skips kit contribution', async () => {
+-        const kit: LoadedKit = {
+-          packageName: '@test/quality-tools',
+-          id: 'quality-tools',
+-          version: '0.0.0',
+-          kit: { writTypes: [{ name: 'quality-audit' }] },
+-        };
+-        await setup({
+-          clerkConfig: { writTypes: [{ name: 'quality-audit' }] },
+-          extraKits: [kit],
+-        });
+-        // No warning should be emitted; posting should still work
+-        const writ = await clerk.post({ title: 'Audit', body: 'Run audit', type: 'quality-audit' });
+-        assert.equal(writ.type, 'quality-audit');
+-      });
+-
+-      it('throws when two kits contribute the same writ type (kit-vs-kit collision is fatal)', async () => {
+-        const kitA: LoadedKit = {
+-          packageName: '@test/kit-a',
+-          id: 'kit-a',
+-          version: '0.0.0',
+-          kit: { writTypes: [{ name: 'quality-audit' }] },
+-        };
+-        const kitB: LoadedKit = {
+-          packageName: '@test/kit-b',
+-          id: 'kit-b',
+-          version: '0.0.0',
+-          kit: { writTypes: [{ name: 'quality-audit' }] },
+-        };
+-        await assert.rejects(
+-          () => setup({ extraKits: [kitA, kitB] }),
+-          (err: Error) => {
+-            // Error must name both contributing plugins and the conflicting writ type.
+-            return (
+-              /writTypes/.test(err.message) &&
+-              /quality-audit/.test(err.message) &&
+-              /kit-a/.test(err.message) &&
+-              /kit-b/.test(err.message)
+-            );
+-          },
+-          'kit-vs-kit writ-type collision must throw and name both plugins + the writ type',
+-        );
+-      });
+-
+-      it('built-in mandate type still works even if kit contributes it', async () => {
+-        const kit: LoadedKit = {
+-          packageName: '@test/kit-a',
+-          id: 'kit-a',
+-          version: '0.0.0',
+-          kit: { writTypes: [{ name: 'mandate' }] },
+-        };
+-        await setup({ extraKits: [kit] });
+-        // mandate is built-in, kit contribution is harmless but redundant
+-        const writ = await clerk.post({ title: 'Mandate', body: 'Body', type: 'mandate' });
+-        assert.equal(writ.type, 'mandate');
+-      });
+-
+-      it('rejects unknown type even with kits loaded', async () => {
+-        const kit: LoadedKit = {
+-          packageName: '@test/kit-a',
+-          id: 'kit-a',
+-          version: '0.0.0',
+-          kit: { writTypes: [{ name: 'known-type' }] },
+-        };
+-        await setup({ extraKits: [kit] });
+-        await assert.rejects(
+-          () => clerk.post({ title: 'Test', body: 'Body', type: 'unknown-type' }),
+-          /Unknown writ type/
+-        );
+-      });
+-
+-      it('warns on malformed writTypes entry missing name field', async () => {
+-        const warnings: string[] = [];
+-        const original = console.warn;
+-        console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); };
+-
+-        try {
+-          const kit: LoadedKit = {
+-            packageName: '@test/bad-kit',
+-            id: 'bad-kit',
+-            version: '0.0.0',
+-            kit: { writTypes: [{ notName: 'bad' }] },
+-          };
+-          await setup({ extraKits: [kit] });
+-          assert.ok(
+-            warnings.some(w => w.includes('bad-kit') && w.includes('writTypes')),
+-            `Expected warning about bad-kit writTypes, got: ${JSON.stringify(warnings)}`
+-          );
+-        } finally {
+-          console.warn = original;
+-        }
+-      });
++    it('throws on duplicate registration', async () => {
++      await setup();
++      const config = {
++        name: 'task',
++        states: [
++          { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++          { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++        ],
++      };
++      clerk.registerWritType(config);
++      assert.throws(
++        () => clerk.registerWritType(config),
++        /already registered/,
++      );
+     });
+ 
+-    describe('V9 — Clerk consumes declaration', () => {
+-      it('declares consumes with writTypes', () => {
+-        const plugin = createClerk();
+-        assert.ok('apparatus' in plugin);
+-        const apparatus = (plugin as { apparatus: { consumes?: string[] } }).apparatus;
+-        assert.ok(Array.isArray(apparatus.consumes));
+-        assert.ok(apparatus.consumes!.includes('writTypes'));
+-      });
++    it('getWritTypeConfig() returns the registered config', async () => {
++      await setup();
++      const config = {
++        name: 'custom',
++        states: [
++          { name: 'pending', classification: 'initial' as const, allowedTransitions: ['done'] },
++          { name: 'done', classification: 'terminal' as const, allowedTransitions: [] },
++        ],
++      };
++      clerk.registerWritType(config);
++      const retrieved = clerk.getWritTypeConfig('custom');
++      assert.equal(retrieved.name, 'custom');
++      assert.equal(retrieved.states.length, 2);
+     });
+ 
+-    describe('V11 — exports', () => {
+-      it('ClerkKit is exported from clerk module', async () => {
+-        // Just verify the import works — if it compiles, the export exists
+-        const mod = await import('./clerk.ts');
+-        // ClerkKit is a type export; we can't check it at runtime directly,
+-        // but we verify createClerk is still exported
+-        assert.ok(typeof mod.createClerk === 'function');
+-      });
++    it('uses the guild defaultType for post() when no type is specified', async () => {
++      // mandate is the built-in default type
++      await setup();
++      const writ = await clerk.post({ title: 'Default mandate', body: 'Body' });
++      assert.equal(writ.type, 'mandate');
+     });
+ 
+-    describe('V13 — resolveWritTypes uses in-memory set', () => {
+-      it('kit-contributed type is valid for posting without re-reading config', async () => {
+-        const kit: LoadedKit = {
+-          packageName: '@test/quality-tools',
+-          id: 'quality-tools',
+-          version: '0.0.0',
+-          kit: { writTypes: [{ name: 'quality-audit' }] },
+-        };
+-        await setup({ extraKits: [kit] });
+-
+-        // Post multiple writs to confirm the set is stable
+-        const w1 = await clerk.post({ title: 'Audit 1', body: 'Body', type: 'quality-audit' });
+-        const w2 = await clerk.post({ title: 'Audit 2', body: 'Body', type: 'quality-audit' });
+-        assert.equal(w1.type, 'quality-audit');
+-        assert.equal(w2.type, 'quality-audit');
++    it('isInitial/isActive/isTerminal work for registered types', async () => {
++      await setup();
++      clerk.registerWritType({
++        name: 'custom',
++        states: [
++          { name: 'pending', classification: 'initial', allowedTransitions: ['active', 'cancelled'] },
++          { name: 'active', classification: 'active', allowedTransitions: ['done', 'cancelled'] },
++          { name: 'done', classification: 'terminal', allowedTransitions: [] },
++          { name: 'cancelled', classification: 'terminal', allowedTransitions: [] },
++        ],
+       });
+-    });
++      const writ = await clerk.post({ title: 'Custom', body: 'Body', type: 'custom' });
++      assert.equal(writ.phase, 'pending');
++      assert.ok(clerk.isInitial(writ));
++      assert.ok(!clerk.isActive(writ));
++      assert.ok(!clerk.isTerminal(writ));
+ 
+-    describe('V25 — apparatus supportKit writ type via Wire phase', () => {
+-      it('apparatus supportKit writ type is valid for posting (via Wire phase)', async () => {
+-        const lateApp: LoadedApparatus = {
+-          packageName: '@test/late-app',
+-          id: 'late-app',
+-          version: '0.0.0',
+-          apparatus: {
+-            requires: [],
+-            start: () => {},
+-            supportKit: { writTypes: [{ name: 'late-type' }] },
+-          },
+-        };
+-        await setup({ extraApparatuses: [lateApp] });
++      const active = await clerk.transition(writ.id, 'active');
++      assert.ok(!clerk.isInitial(active));
++      assert.ok(clerk.isActive(active));
++      assert.ok(!clerk.isTerminal(active));
+ 
+-        const writ = await clerk.post({ title: 'Late', body: 'Body', type: 'late-type' });
+-        assert.equal(writ.type, 'late-type');
+-      });
++      const done = await clerk.transition(active.id, 'done');
++      assert.ok(!clerk.isInitial(done));
++      assert.ok(!clerk.isActive(done));
++      assert.ok(clerk.isTerminal(done));
+     });
+   });
+ });
+@@ -2919,21 +2863,35 @@ describe('writ-types tool', () => {
+     assert.equal(mandate.source, 'builtin');
+   });
+ 
+-  it('returns config-declared types with description', async () => {
+-    const plugin = await setupCore({ clerkConfig: { writTypes: [{ name: 'task', description: 'A task' }] } });
++  it('returns plugin-registered types with source plugin', async () => {
++    const plugin = await setupCore();
++    clerk.registerWritType({
++      name: 'task',
++      states: [
++        { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++        { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++      ],
++    });
+     const writTypesTool = getWritTypesTool(plugin);
+     const result = await writTypesTool.handler({}) as Array<{ name: string; description: string | null; source: string; isDefault: boolean }>;
+     const task = result.find(t => t.name === 'task');
+     assert.ok(task, 'task should be in result');
+-    assert.equal(task.description, 'A task');
++    assert.equal(task.description, null);
+     assert.equal(task.isDefault, false);
+-    assert.equal(task.source, 'guild');
++    assert.equal(task.source, 'plugin');
+     // mandate should still be there
+     assert.ok(result.find(t => t.name === 'mandate'), 'mandate should still appear');
+   });
+ 
+   it('marks configured defaultType as default', async () => {
+-    const plugin = await setupCore({ clerkConfig: { writTypes: [{ name: 'task' }], defaultType: 'task' } });
++    const plugin = await setupCore({ clerkConfig: { defaultType: 'task' } });
++    clerk.registerWritType({
++      name: 'task',
++      states: [
++        { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++        { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++      ],
++    });
+     const writTypesTool = getWritTypesTool(plugin);
+     const result = await writTypesTool.handler({}) as Array<{ name: string; description: string | null; source: string; isDefault: boolean }>;
+     const task = result.find(t => t.name === 'task');
+@@ -2944,21 +2902,22 @@ describe('writ-types tool', () => {
+     assert.equal(mandate.isDefault, false);
+   });
+ 
+-  it('includes kit-contributed types', async () => {
+-    const kit: LoadedKit = {
+-      packageName: '@test/kit-a',
+-      id: 'kit-a',
+-      version: '0.0.0',
+-      kit: { writTypes: [{ name: 'quality-audit' }] },
+-    };
+-    const plugin = await setupCore({ extraKits: [kit] });
++  it('includes plugin-registered types', async () => {
++    const plugin = await setupCore();
++    clerk.registerWritType({
++      name: 'quality-audit',
++      states: [
++        { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++        { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++      ],
++    });
+     const writTypesTool = getWritTypesTool(plugin);
+     const result = await writTypesTool.handler({}) as Array<{ name: string; description: string | null; source: string; isDefault: boolean }>;
+     const qa = result.find(t => t.name === 'quality-audit');
+     assert.ok(qa, 'quality-audit should be in result');
+     assert.equal(qa.description, null);
+     assert.equal(qa.isDefault, false);
+-    assert.equal(qa.source, 'kit-a');
++    assert.equal(qa.source, 'plugin');
+   });
+ 
+   it('tool is registered in supportKit.tools', () => {
+@@ -2979,71 +2938,32 @@ describe('writ-types tool', () => {
+     assert.equal(t.callableBy, undefined);
+   });
+ 
+-  it('preserves kit-contributed description', async () => {
+-    const kit: LoadedKit = {
+-      packageName: '@test/kit-desc',
+-      id: 'kit-desc',
+-      version: '0.0.0',
+-      kit: { writTypes: [{ name: 'quality-audit', description: 'Code quality audit' }] },
+-    };
+-    const plugin = await setupCore({ extraKits: [kit] });
+-    const writTypesTool = getWritTypesTool(plugin);
+-    const result = await writTypesTool.handler({}) as Array<{ name: string; description: string | null; source: string; isDefault: boolean }>;
+-    const qa = result.find(t => t.name === 'quality-audit');
+-    assert.ok(qa, 'quality-audit should be in result');
+-    assert.equal(qa.description, 'Code quality audit');
+-    assert.equal(qa.source, 'kit-desc');
+-    assert.equal(qa.isDefault, false);
+-  });
+-
+-  it('guild config shadows kit description', async () => {
+-    const kit: LoadedKit = {
+-      packageName: '@test/kit-shadow',
+-      id: 'kit-shadow',
+-      version: '0.0.0',
+-      kit: { writTypes: [{ name: 'quality-audit', description: 'Kit version' }] },
+-    };
+-    const plugin = await setupCore({
+-      clerkConfig: { writTypes: [{ name: 'quality-audit', description: 'Guild version' }] },
+-      extraKits: [kit],
+-    });
+-    const writTypesTool = getWritTypesTool(plugin);
+-    const result = await writTypesTool.handler({}) as Array<{ name: string; description: string | null; source: string; isDefault: boolean }>;
+-    const qa = result.find(t => t.name === 'quality-audit');
+-    assert.ok(qa, 'quality-audit should be in result');
+-    assert.equal(qa.description, 'Guild version');
+-    assert.equal(qa.source, 'guild');
+-  });
+-
+-  it('guild config shadows kit with no description', async () => {
+-    const kit: LoadedKit = {
+-      packageName: '@test/kit-shadow2',
+-      id: 'kit-shadow2',
+-      version: '0.0.0',
+-      kit: { writTypes: [{ name: 'quality-audit', description: 'Kit version' }] },
+-    };
+-    const plugin = await setupCore({
+-      clerkConfig: { writTypes: [{ name: 'quality-audit' }] },
+-      extraKits: [kit],
++  it('plugin-registered type has null description (descriptions not tracked in registry)', async () => {
++    const plugin = await setupCore();
++    clerk.registerWritType({
++      name: 'quality-audit',
++      states: [
++        { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++        { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++      ],
+     });
+     const writTypesTool = getWritTypesTool(plugin);
+     const result = await writTypesTool.handler({}) as Array<{ name: string; description: string | null; source: string; isDefault: boolean }>;
+     const qa = result.find(t => t.name === 'quality-audit');
+     assert.ok(qa, 'quality-audit should be in result');
+     assert.equal(qa.description, null);
+-    assert.equal(qa.source, 'guild');
++    assert.equal(qa.source, 'plugin');
++    assert.equal(qa.isDefault, false);
+   });
+ 
+   it('tool delegates to api.listWritTypes()', async () => {
+-    const kit: LoadedKit = {
+-      packageName: '@test/kit-delegate',
+-      id: 'kit-delegate',
+-      version: '0.0.0',
+-      kit: { writTypes: [{ name: 'quality-audit', description: 'QA' }] },
+-    };
+-    const plugin = await setupCore({
+-      clerkConfig: { writTypes: [{ name: 'task', description: 'A task' }] },
+-      extraKits: [kit],
++    const plugin = await setupCore();
++    clerk.registerWritType({
++      name: 'task',
++      states: [
++        { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++        { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++      ],
+     });
+     const writTypesTool = getWritTypesTool(plugin);
+     const toolResult = await writTypesTool.handler({});
+@@ -3077,33 +2997,48 @@ describe('listWritTypes()', () => {
+     assert.equal(mandate.description, null);
+   });
+ 
+-  it('returns guild config types with source guild', async () => {
+-    await setupCore({ clerkConfig: { writTypes: [{ name: 'task', description: 'A task' }] } });
++  it('returns plugin-registered types with source plugin', async () => {
++    await setupCore();
++    clerk.registerWritType({
++      name: 'task',
++      states: [
++        { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++        { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++      ],
++    });
+     const result = clerk.listWritTypes();
+     const task = result.find(t => t.name === 'task');
+     assert.ok(task);
+-    assert.equal(task.source, 'guild');
+-    assert.equal(task.description, 'A task');
++    assert.equal(task.source, 'plugin');
++    assert.equal(task.description, null);
+   });
+ 
+-  it('returns kit types with pluginId as source', async () => {
+-    const kit: LoadedKit = {
+-      packageName: '@test/kit-src',
+-      id: 'kit-src',
+-      version: '0.0.0',
+-      kit: { writTypes: [{ name: 'quality-audit', description: 'Code quality audit' }] },
+-    };
+-    await setupCore({ extraKits: [kit] });
++  it('returns registered types with null description', async () => {
++    await setupCore();
++    clerk.registerWritType({
++      name: 'quality-audit',
++      states: [
++        { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++        { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++      ],
++    });
+     const result = clerk.listWritTypes();
+     const qa = result.find(t => t.name === 'quality-audit');
+     assert.ok(qa);
+-    assert.equal(qa.source, 'kit-src');
+-    assert.equal(qa.description, 'Code quality audit');
++    assert.equal(qa.source, 'plugin');
++    assert.equal(qa.description, null);
+     assert.equal(qa.isDefault, false);
+   });
+ 
+-  it('guild config default override changes isDefault', async () => {
+-    await setupCore({ clerkConfig: { writTypes: [{ name: 'task' }], defaultType: 'task' } });
++  it('guild config defaultType changes isDefault', async () => {
++    await setupCore({ clerkConfig: { defaultType: 'task' } });
++    clerk.registerWritType({
++      name: 'task',
++      states: [
++        { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++        { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++      ],
++    });
+     const result = clerk.listWritTypes();
+     const task = result.find(t => t.name === 'task');
+     const mandate = result.find(t => t.name === 'mandate');
+@@ -3113,27 +3048,20 @@ describe('listWritTypes()', () => {
+     assert.equal(mandate.isDefault, false);
+   });
+ 
+-  it('apparatus supportKit writ type has pluginId source', async () => {
+-    const apparatusPlugin = createClerk();
+-    const fakeApparatus: LoadedApparatus = {
+-      packageName: '@test/apparatus-contrib',
+-      id: 'apparatus-contrib',
+-      version: '0.0.0',
+-      apparatus: {
+-        ...((apparatusPlugin as { apparatus: Record<string, unknown> }).apparatus),
+-        supportKit: {
+-          writTypes: [{ name: 'late-type', description: 'Late' }],
+-        },
+-        provides: {},
+-        start() {},
+-      },
+-    };
+-    await setupCore({ extraApparatuses: [fakeApparatus] });
++  it('plugin-registered type has null description', async () => {
++    await setupCore();
++    clerk.registerWritType({
++      name: 'late-type',
++      states: [
++        { name: 'open', classification: 'initial' as const, allowedTransitions: ['completed'] },
++        { name: 'completed', classification: 'terminal' as const, allowedTransitions: [] },
++      ],
++    });
+     const result = clerk.listWritTypes();
+     const late = result.find(t => t.name === 'late-type');
+     assert.ok(late, 'late-type should be in result');
+-    assert.equal(late.description, 'Late');
+-    assert.equal(late.source, 'apparatus-contrib');
++    assert.equal(late.description, null);
++    assert.equal(late.source, 'plugin');
+   });
+ });
+ 
+@@ -3301,309 +3229,6 @@ describe('Parent/child relationships', () => {
+     });
+   });
+ 
+-  // ── Child failure cascade ──────────────────────────────────────────
+-
+-  describe('child failure cascade', () => {
+-    beforeEach(async () => { await setup(); });
+-
+-    it('transitions open parent to failed when child fails', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const child = await clerk.post({ title: 'Child', body: 'Body', parentId: parent.id });
+-
+-      await clerk.transition(child.id, 'failed', { resolution: 'Broke' });
+-
+-      const updated = await clerk.show(parent.id);
+-      assert.equal(updated.phase, 'failed');
+-      assert.ok(updated.resolution?.includes('Child'));
+-      assert.ok(updated.resolution?.includes('Broke'));
+-    });
+-
+-    it('transitions stuck parent to failed when child fails', async () => {
+-      const parent = await clerk.post({ title: 'Stuck Parent', body: 'Body' });
+-      await clerk.transition(parent.id, 'stuck');
+-      const child = await clerk.post({ title: 'Child of stuck', body: 'Body', parentId: parent.id });
+-
+-      await clerk.transition(child.id, 'failed', { resolution: 'Broke too' });
+-
+-      const updated = await clerk.show(parent.id);
+-      assert.equal(updated.phase, 'failed');
+-      assert.ok(updated.resolution?.includes('Child'));
+-    });
+-
+-    it('does not cascade failure when parent is in new status', async () => {
+-      const parent = await clerk.post({ title: 'Draft Parent', body: 'Body', draft: true });
+-      const child = await clerk.post({ title: 'Child', body: 'Body', parentId: parent.id });
+-
+-      await clerk.transition(child.id, 'failed', { resolution: 'Broke' });
+-
+-      const updated = await clerk.show(parent.id);
+-      assert.equal(updated.phase, 'new');
+-    });
+-
+-    it('parent stays open when child completes', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const child = await clerk.post({ title: 'Child', body: 'Body', parentId: parent.id });
+-
+-      await clerk.transition(child.id, 'completed', { resolution: 'Done' });
+-
+-      const updated = await clerk.show(parent.id);
+-      assert.equal(updated.phase, 'open');
+-    });
+-
+-    it('parent stays open when all children complete', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const c1 = await clerk.post({ title: 'C1', body: 'B', parentId: parent.id });
+-      const c2 = await clerk.post({ title: 'C2', body: 'B', parentId: parent.id });
+-
+-      await clerk.transition(c1.id, 'completed', { resolution: 'Done' });
+-      await clerk.transition(c2.id, 'completed', { resolution: 'Done' });
+-
+-      const updated = await clerk.show(parent.id);
+-      assert.equal(updated.phase, 'open');
+-    });
+-
+-    it('two children: first completes, second fails → parent transitions to failed', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const c1 = await clerk.post({ title: 'C1', body: 'B', parentId: parent.id });
+-      const c2 = await clerk.post({ title: 'C2', body: 'B', parentId: parent.id });
+-
+-      await clerk.transition(c1.id, 'completed', { resolution: 'Done' });
+-      await clerk.transition(c2.id, 'failed', { resolution: 'Broke' });
+-
+-      const updated = await clerk.show(parent.id);
+-      assert.equal(updated.phase, 'failed');
+-    });
+-  });
+-
+-  // ── Failure cascade ───────────────────────────────────────────────
+-
+-  describe('failure cascade', () => {
+-    beforeEach(async () => { await setup(); });
+-
+-    it('fails parent when child fails, cancels remaining siblings', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const c1 = await clerk.post({ title: 'C1', body: 'B', parentId: parent.id });
+-      const c2 = await clerk.post({ title: 'C2', body: 'B', parentId: parent.id });
+-      const c3 = await clerk.post({ title: 'C3', body: 'B', parentId: parent.id });
+-
+-      await clerk.transition(c1.id, 'failed', { resolution: 'Broke' });
+-
+-      const updatedParent = await clerk.show(parent.id);
+-      assert.equal(updatedParent.phase, 'failed');
+-      assert.ok(updatedParent.resolution?.includes(`Child "${c1.id}" failed: Broke`));
+-
+-      const updatedC2 = await clerk.show(c2.id);
+-      assert.equal(updatedC2.phase, 'cancelled');
+-      assert.equal(updatedC2.resolution, CASCADE_PARENT_TERMINATION_RESOLUTION);
+-
+-      const updatedC3 = await clerk.show(c3.id);
+-      assert.equal(updatedC3.phase, 'cancelled');
+-      assert.equal(updatedC3.resolution, CASCADE_PARENT_TERMINATION_RESOLUTION);
+-    });
+-
+-    it('fails parent when single child fails', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const child = await clerk.post({ title: 'Child', body: 'B', parentId: parent.id });
+-
+-      await clerk.transition(child.id, 'failed', { resolution: 'Error occurred' });
+-
+-      const updated = await clerk.show(parent.id);
+-      assert.equal(updated.phase, 'failed');
+-      assert.ok(updated.resolution?.includes('Error occurred'));
+-    });
+-
+-    it('cascades failure through 3-level hierarchy', async () => {
+-      const grandparent = await clerk.post({ title: 'GP', body: 'B' });
+-      const parent = await clerk.post({ title: 'P', body: 'B', parentId: grandparent.id });
+-      const child = await clerk.post({ title: 'C', body: 'B', parentId: parent.id });
+-
+-      await clerk.transition(child.id, 'failed', { resolution: 'Leaf failed' });
+-
+-      const updatedChild = await clerk.show(child.id);
+-      assert.equal(updatedChild.phase, 'failed');
+-
+-      const updatedParent = await clerk.show(parent.id);
+-      assert.equal(updatedParent.phase, 'failed');
+-
+-      const updatedGP = await clerk.show(grandparent.id);
+-      assert.equal(updatedGP.phase, 'failed');
+-    });
+-
+-    it('uses "unknown" when child has no resolution', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const child = await clerk.post({ title: 'Child', body: 'B', parentId: parent.id });
+-
+-      // Fail child without resolution
+-      await clerk.transition(child.id, 'failed');
+-
+-      const updated = await clerk.show(parent.id);
+-      assert.ok(updated.resolution?.includes('unknown'));
+-    });
+-  });
+-
+-  // ── Downward cancellation cascade ─────────────────────────────────
+-
+-  describe('cancellation cascade (downward)', () => {
+-    beforeEach(async () => { await setup(); });
+-
+-    it('cancels non-terminal children when parent is cancelled', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const c1 = await clerk.post({ title: 'C1', body: 'B', parentId: parent.id });
+-      const c2 = await clerk.post({ title: 'C2', body: 'B', parentId: parent.id });
+-
+-      await clerk.transition(parent.id, 'cancelled');
+-
+-      const updatedC1 = await clerk.show(c1.id);
+-      assert.equal(updatedC1.phase, 'cancelled');
+-      assert.equal(updatedC1.resolution, CASCADE_PARENT_TERMINATION_RESOLUTION);
+-
+-      const updatedC2 = await clerk.show(c2.id);
+-      assert.equal(updatedC2.phase, 'cancelled');
+-    });
+-
+-    it('does not cancel already-terminal children', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const c1 = await clerk.post({ title: 'C1', body: 'B', parentId: parent.id });
+-      const c2 = await clerk.post({ title: 'C2', body: 'B', parentId: parent.id });
+-
+-      // Complete c1 first
+-      await clerk.transition(c1.id, 'completed', { resolution: 'Done' });
+-
+-      // Now cancel parent
+-      await clerk.transition(parent.id, 'cancelled');
+-
+-      const updatedC1 = await clerk.show(c1.id);
+-      assert.equal(updatedC1.phase, 'completed'); // already terminal, unchanged
+-
+-      const updatedC2 = await clerk.show(c2.id);
+-      assert.equal(updatedC2.phase, 'cancelled');
+-    });
+-
+-    it('cancels non-terminal children when parent is failed directly', async () => {
+-      const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-      const c1 = await clerk.post({ title: 'C1', body: 'B', parentId: parent.id });
+-      const c2 = await clerk.post({ title: 'C2', body: 'B', parentId: parent.id });
+-
+-      // Transition parent directly to failed (no child failure driving it).
+-      await clerk.transition(parent.id, 'failed', { resolution: 'Parent-level failure' });
+-
+-      const updatedC1 = await clerk.show(c1.id);
+-      assert.equal(updatedC1.phase, 'cancelled');
+-      assert.equal(updatedC1.resolution, CASCADE_PARENT_TERMINATION_RESOLUTION);
+-
+-      const updatedC2 = await clerk.show(c2.id);
+-      assert.equal(updatedC2.phase, 'cancelled');
+-      assert.equal(updatedC2.resolution, CASCADE_PARENT_TERMINATION_RESOLUTION);
+-    });
+-  });
+-
+-  // ── Downward completion cascade (warn, do not cancel) ────────────
+-
+-  describe('completion cascade (downward)', () => {
+-    beforeEach(async () => { await setup(); });
+-
+-    it('does not cancel non-terminal children when parent completes; warns for each', async () => {
+-      const warnings: string[] = [];
+-      const original = console.warn;
+-      console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); };
+-
+-      try {
+-        const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-        const c1 = await clerk.post({ title: 'C1', body: 'B', parentId: parent.id });
+-        const c2 = await clerk.post({ title: 'C2', body: 'B', parentId: parent.id });
+-
+-        // Transition the parent straight to completed while children are still open.
+-        // This simulates the race the commission is defending against: parent
+-        // reaches `completed` before child-writ bookkeeping has caught up.
+-        await clerk.transition(parent.id, 'completed', { resolution: 'Parent completed early' });
+-
+-        // Children must remain non-terminal — the cascade must not mask the gap.
+-        const updatedC1 = await clerk.show(c1.id);
+-        assert.equal(updatedC1.phase, 'open');
+-        assert.equal(updatedC1.resolution, undefined);
+-
+-        const updatedC2 = await clerk.show(c2.id);
+-        assert.equal(updatedC2.phase, 'open');
+-        assert.equal(updatedC2.resolution, undefined);
+-
+-        // A warning must be emitted referencing each non-terminal child so the
+-        // bookkeeping gap is visible to operators.
+-        assert.ok(
+-          warnings.some((w) => w.includes(c1.id) && w.includes(parent.id) && w.includes('completed')),
+-          `Expected warning referencing c1 (${c1.id}) and parent (${parent.id}), got: ${JSON.stringify(warnings)}`,
+-        );
+-        assert.ok(
+-          warnings.some((w) => w.includes(c2.id) && w.includes(parent.id) && w.includes('completed')),
+-          `Expected warning referencing c2 (${c2.id}) and parent (${parent.id}), got: ${JSON.stringify(warnings)}`,
+-        );
+-      } finally {
+-        console.warn = original;
+-      }
+-    });
+-
+-    it('does not warn when all children are already terminal at parent completion', async () => {
+-      const warnings: string[] = [];
+-      const original = console.warn;
+-      console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); };
+-
+-      try {
+-        const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-        const c1 = await clerk.post({ title: 'C1', body: 'B', parentId: parent.id });
+-
+-        await clerk.transition(c1.id, 'completed', { resolution: 'Done' });
+-        await clerk.transition(parent.id, 'completed', { resolution: 'All done' });
+-
+-        const updatedC1 = await clerk.show(c1.id);
+-        assert.equal(updatedC1.phase, 'completed');
+-
+-        assert.ok(
+-          !warnings.some((w) => w.includes('non-terminal')),
+-          `Expected no non-terminal child warnings, got: ${JSON.stringify(warnings)}`,
+-        );
+-      } finally {
+-        console.warn = original;
+-      }
+-    });
+-
+-    it('does not cancel non-terminal children when parent completes, regardless of child count', async () => {
+-      const warnings: string[] = [];
+-      const original = console.warn;
+-      console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); };
+-
+-      try {
+-        const parent = await clerk.post({ title: 'Parent', body: 'Body' });
+-        const openChild = await clerk.post({ title: 'Open', body: 'B', parentId: parent.id });
+-        const stuckChild = await clerk.post({ title: 'Stuck', body: 'B', parentId: parent.id });
+-        await clerk.transition(stuckChild.id, 'stuck');
+-        const doneChild = await clerk.post({ title: 'Done', body: 'B', parentId: parent.id });
+-        await clerk.transition(doneChild.id, 'completed', { resolution: 'Done' });
+-
+-        await clerk.transition(parent.id, 'completed', { resolution: 'Parent done' });
+-
+-        // Terminal child stays terminal; non-terminal children stay non-terminal.
+-        assert.equal((await clerk.show(openChild.id)).phase, 'open');
+-        assert.equal((await clerk.show(stuckChild.id)).phase, 'stuck');
+-        assert.equal((await clerk.show(doneChild.id)).phase, 'completed');
+-
+-        // Cascade must have warned for both non-terminal children, but not the terminal one.
+-        assert.ok(
+-          warnings.some((w) => w.includes(openChild.id) && w.includes('non-terminal')),
+-          `Expected warning for open child, got: ${JSON.stringify(warnings)}`,
+-        );
+-        assert.ok(
+-          warnings.some((w) => w.includes(stuckChild.id) && w.includes('non-terminal')),
+-          `Expected warning for stuck child, got: ${JSON.stringify(warnings)}`,
+-        );
+-        assert.ok(
+-          !warnings.some((w) => w.includes(doneChild.id) && w.includes('non-terminal')),
+-          `Did not expect warning for already-terminal child, got: ${JSON.stringify(warnings)}`,
+-        );
+-      } finally {
+-        console.warn = original;
+-      }
+-    });
+-  });
+-
+   // ── Full lifecycle with children ──────────────────────────────────
+ 
+   describe('full lifecycle with children', () => {
+@@ -3851,6 +3476,19 @@ describe('piece-add tool', () => {
+       },
+     });
+ 
++    // Register 'piece' as a proper WritTypeConfig so post() uses its declared
++    // initial state ('open'). T4 will migrate this to astrolabe's start() call;
++    // until then the test owns the config directly.
++    clerk.registerWritType({
++      name: 'piece',
++      states: [
++        { name: 'open', classification: 'initial', allowedTransitions: ['completed', 'failed', 'cancelled'] },
++        { name: 'completed', classification: 'terminal', attrs: ['success'], allowedTransitions: [] },
++        { name: 'failed', classification: 'terminal', attrs: ['failure'], allowedTransitions: [] },
++        { name: 'cancelled', classification: 'terminal', attrs: ['cancelled'], allowedTransitions: [] },
++      ],
++    });
++
+     // Create a mandate first
+     const mandate = await clerk.post({ title: 'Parent mandate', body: 'Do all things', type: 'mandate' });
+ 
+@@ -3879,10 +3517,15 @@ describe('piece-add tool', () => {
+   });
+ 
+   it('creates a piece with only required fields', async () => {
+-    await setup({
+-      clerkConfig: {
+-        writTypes: [{ name: 'piece', description: 'task piece' }],
+-      },
++    await setup();
++    clerk.registerWritType({
++      name: 'piece',
++      states: [
++        { name: 'open', classification: 'initial', allowedTransitions: ['completed', 'failed', 'cancelled'] },
++        { name: 'completed', classification: 'terminal', attrs: ['success'], allowedTransitions: [] },
++        { name: 'failed', classification: 'terminal', attrs: ['failure'], allowedTransitions: [] },
++        { name: 'cancelled', classification: 'terminal', attrs: ['cancelled'], allowedTransitions: [] },
++      ],
+     });
+ 
+     const mandate = await clerk.post({ title: 'Parent mandate', body: 'Do things', type: 'mandate' });
+@@ -3903,10 +3546,15 @@ describe('piece-add tool', () => {
+   });
+ 
+   it('rejects when parent mandate does not exist', async () => {
+-    await setup({
+-      clerkConfig: {
+-        writTypes: [{ name: 'piece', description: 'task piece' }],
+-      },
++    await setup();
++    clerk.registerWritType({
++      name: 'piece',
++      states: [
++        { name: 'open', classification: 'initial', allowedTransitions: ['completed', 'failed', 'cancelled'] },
++        { name: 'completed', classification: 'terminal', attrs: ['success'], allowedTransitions: [] },
++        { name: 'failed', classification: 'terminal', attrs: ['failure'], allowedTransitions: [] },
++        { name: 'cancelled', classification: 'terminal', attrs: ['cancelled'], allowedTransitions: [] },
++      ],
+     });
+ 
+     const pieceAddTool = (await import('./tools/piece-add.ts')).default;
+diff --git a/packages/plugins/clerk/src/clerk.ts b/packages/plugins/clerk/src/clerk.ts
+index ed7743b..146f0d5 100644
+--- a/packages/plugins/clerk/src/clerk.ts
++++ b/packages/plugins/clerk/src/clerk.ts
+@@ -2,14 +2,14 @@
+  * The Clerk — writ lifecycle management apparatus.
+  *
+  * The Clerk manages the lifecycle of writs: lightweight work orders that flow
+- * through a fixed phase machine (new → open → completed/failed/cancelled,
+- * with stuck as a non-terminal "needs attention" state off open).
++ * through a type-specific state machine declared via `registerWritType()`.
++ * The built-in `mandate` type uses a six-state machine (new → open →
++ * completed/failed/cancelled, with stuck as a non-terminal "needs attention"
++ * state off open). Other plugin types declare their own state machines.
+  * Each writ has a type, a title, a body, and optional codex and resolution
+  * fields.
+  *
+- * Writ types are validated against the guild config's writTypes field plus the
+- * built-in type ('mandate'). An unknown type is rejected at post time.
+- * Kits may also contribute writ types via their writTypes field.
++ * Writ types are registered via `registerWritType()` during the startup window.
+  *
+  * See: docs/architecture/apparatus/clerk.md
+  */
+@@ -30,13 +30,15 @@ import type {
+   PostCommissionRequest,
+   EditWritRequest,
+   WritFilters,
+-  WritTypeEntry,
+   KindEntry,
+   LinkKindDoc,
+   WritTree,
+   WritTreeParams,
+ } from './types.ts';
+ 
++import { validateWritTypeConfig } from './writ-type-config.ts';
++import type { WritTypeConfig } from './writ-type-config.ts';
++
+ import {
+   commissionPost,
+   pieceAdd,
+@@ -60,8 +62,6 @@ import { normalizeLinkLabel } from './link-normalize.ts';
+ 
+ /** Kit contribution interface for the Clerk's writ type system. */
+ export interface ClerkKit {
+-  /** Writ type descriptors to register with the Clerk. Names are unqualified. */
+-  writTypes?: WritTypeEntry[];
+   /**
+    * Link-kind descriptors to register with the Clerk. Kind ids must be
+    * prefixed with the contributing plugin id (e.g. `astrolabe.refines`).
+@@ -75,65 +75,77 @@ export interface ClerkKit {
+ // ── Built-in writ types ──────────────────────────────────────────────
+ 
+ /**
+- * Name of the one built-in writ type. Single source of truth — this value
+- * serves both as the sole member of `BUILTIN_TYPES` (the set of always-
+- * valid writ type names) and as the fallback returned by
+- * `resolveDefaultType()` when the guild config declares no `defaultType`.
+- * A future rename of the built-in type lands here in one place.
++ * Name of the built-in mandate writ type. Used internally as the fallback
++ * returned by `resolveDefaultType()` when the guild config declares no
++ * `defaultType`.
++ *
++ * Not exported — mandate is no longer "special"; it is registered via
++ * `registerWritType(MANDATE_CONFIG)` in clerk's own `start()` like any
++ * other plugin-registered type. Callers use the literal string `'mandate'`.
+  */
+-export const BUILTIN_WRIT_TYPE = 'mandate';
+-
+-const BUILTIN_TYPES = new Set([BUILTIN_WRIT_TYPE]);
+-
+-// ── Cascade resolution constants ─────────────────────────────────────
++const MANDATE_TYPE_NAME = 'mandate';
+ 
+ /**
+- * Resolution string applied to non-terminal children that are cancelled by
+- * the downward cascade when their parent transitions to a terminal failure
+- * or cancellation phase. Single source of truth — referenced by code,
+- * tests, and documentation. Modeled on `PIECE_EXECUTION_EPILOGUE` in the
+- * Spider plugin.
++ * Mandate's six-state lifecycle config — the built-in registered type.
++ *
++ *   new       (initial)  → open, cancelled
++ *   open      (active)   → stuck, completed, failed, cancelled
++ *   stuck     (active, attrs:[stuck]) → open, failed, cancelled
++ *   completed (terminal, attrs:[success])
++ *   failed    (terminal, attrs:[failure])
++ *   cancelled (terminal, attrs:[cancelled])
++ *
++ * Per D8: state strings are unchanged from the pre-refactor phase machine.
++ * Existing mandate writs remain bit-for-bit identical.
++ * Per D9: no childrenBehavior block — cascade was removed in T5.
+  */
+-export const CASCADE_PARENT_TERMINATION_RESOLUTION =
+-  'Automatically cancelled due to parent termination';
+-
+-// ── Phase machine ────────────────────────────────────────────────────
+-
+-const ALLOWED_FROM: Record<WritPhase, WritPhase[]> = {
+-  open: ['new', 'stuck'],
+-  stuck: ['open'],
+-  completed: ['open'],
+-  failed: ['open', 'stuck'],
+-  cancelled: ['new', 'open', 'stuck'],
+-  new: [],
++const MANDATE_CONFIG: WritTypeConfig = {
++  name: MANDATE_TYPE_NAME,
++  states: [
++    {
++      name: 'new',
++      classification: 'initial',
++      allowedTransitions: ['open', 'cancelled'],
++    },
++    {
++      name: 'open',
++      classification: 'active',
++      allowedTransitions: ['stuck', 'completed', 'failed', 'cancelled'],
++    },
++    {
++      name: 'stuck',
++      classification: 'active',
++      attrs: ['stuck'],
++      allowedTransitions: ['open', 'failed', 'cancelled'],
++    },
++    {
++      name: 'completed',
++      classification: 'terminal',
++      attrs: ['success'],
++      allowedTransitions: [],
++    },
++    {
++      name: 'failed',
++      classification: 'terminal',
++      attrs: ['failure'],
++      allowedTransitions: [],
++    },
++    {
++      name: 'cancelled',
++      classification: 'terminal',
++      attrs: ['cancelled'],
++      allowedTransitions: [],
++    },
++  ],
+ };
+ 
+-const TERMINAL_PHASES = new Set<WritPhase>(['completed', 'failed', 'cancelled']);
+-
+ // ── Factory ──────────────────────────────────────────────────────────
+ 
+-/** Parent phases that allow adding children. */
+-const CHILD_ALLOWED_PARENT_PHASES = new Set<WritPhase>(['new', 'open', 'stuck']);
+-
+ export function createClerk(): Plugin {
+   let stacks: StacksApi;
+   let writs: Book<WritDoc>;
+   let links: Book<WritLinkDoc>;
+ 
+-  /** Internal metadata stored per writ type. */
+-  interface WritTypeMeta {
+-    description?: string;
+-    source: string;
+-  }
+-
+-  /** Merged map of valid writ type names to metadata: builtins + config + kit contributions. */
+-  let mergedWritTypes: Map<string, WritTypeMeta> = new Map(
+-    [...BUILTIN_TYPES].map((name) => [name, { source: 'builtin' }]),
+-  );
+-
+-  /** Config-declared writ type names, for override checking during kit registration. */
+-  let configWritTypeNames: Set<string> = new Set();
+-
+   /** Internal metadata stored per registered link kind. */
+   interface KindMeta {
+     ownerPlugin: string;
+@@ -143,6 +155,27 @@ export function createClerk(): Plugin {
+   /** Registry of kit-contributed link kinds, keyed by kind id. */
+   let linkKindRegistry: Map<string, KindMeta> = new Map();
+ 
++  // ── Plugin-registered writ type registry ─────────────────────────
++
++  /**
++   * Registry of plugin-registered writ types, keyed by type name.
++   * Mandate is added here from clerk's own start() via registerWritType().
++   * Other plugins add their types in their own start() calls.
++   */
++  let writTypeRegistry: Map<string, WritTypeConfig> = new Map();
++
++  /**
++   * Tracks the source plugin id for each registered writ type, for
++   * use in listWritTypes(). Keyed by type name, mirroring writTypeRegistry.
++   */
++  let writTypeSource: Map<string, string> = new Map();
++
++  /**
++   * When true, the startup registration window has closed and calls to
++   * registerWritType() will throw. Sealed when `phase:started` fires.
++   */
++  let writTypeRegistrySealed = false;
++
+   /**
+    * Grammar for kind-id suffixes after the `{pluginId}.` prefix.
+    *
+@@ -157,13 +190,9 @@ export function createClerk(): Plugin {
+     return guild().guildConfig().clerk ?? {};
+   }
+ 
+-  function resolveWritTypes(): Map<string, WritTypeMeta> {
+-    return mergedWritTypes;
+-  }
+-
+   function resolveDefaultType(): string {
+     const config = resolveClerkConfig();
+-    return config.defaultType ?? BUILTIN_WRIT_TYPE;
++    return config.defaultType ?? MANDATE_TYPE_NAME;
+   }
+ 
+   function buildWhereClause(filters?: WritFilters): WhereClause | undefined {
+@@ -190,54 +219,36 @@ export function createClerk(): Plugin {
+     return conditions.length > 0 ? conditions : undefined;
+   }
+ 
+-  function registerKitWritTypes(kitEntry: { pluginId: string; value: unknown }): void {
+-    const pluginId = kitEntry.pluginId;
+-    const raw = kitEntry.value;
+-    if (!Array.isArray(raw)) return;
++  /**
++   * Internal implementation for registering a writ type with an explicit
++   * source label. The public `registerWritType(config)` on `ClerkApi` calls
++   * this with source='plugin'; clerk's own `start()` calls it with
++   * source='builtin' for the mandate type.
++   */
++  function registerWritTypeInternal(config: WritTypeConfig, source: string): void {
++    if (writTypeRegistrySealed) {
++      throw new Error(
++        `[clerk] registerWritType: registration window has closed; ` +
++        `writ types may only be registered during apparatus start() ` +
++        `(before the framework fires "phase:started"). ` +
++        `Attempted to register type "${config.name}" after seal.`,
++      );
++    }
+ 
+-    for (const entry of raw) {
+-      if (
+-        typeof entry !== 'object' ||
+-        entry === null ||
+-        typeof (entry as Record<string, unknown>).name !== 'string'
+-      ) {
+-        console.warn(
+-          `[clerk] Kit "${pluginId}" writTypes: entry is missing required "name" field — skipped`
+-        );
+-        continue;
+-      }
+-      const name = (entry as WritTypeEntry).name;
+-
+-      // Config override: skip silently. Config-vs-kit precedence is unchanged;
+-      // the kit-vs-kit collision rule below only fires when no config entry
+-      // claims the writ type.
+-      if (configWritTypeNames.has(name)) continue;
+-
+-      const existing = mergedWritTypes.get(name);
+-      if (existing !== undefined) {
+-        // Built-in vs. kit: silently skip. A kit that re-declares a built-in
+-        // writ type is redundant but harmless — the built-in is already valid.
+-        if (existing.source === 'builtin') continue;
+-
+-        // Kit-vs-kit collision: throw at registration time. Two kits
+-        // contributing the same writ type is a guild-config hazard — operators
+-        // resolve by removing one contribution, or by overriding via guild
+-        // config (clerk.writTypes).
+-        throw new Error(
+-          `[clerk] writTypes: writ type "${name}" is contributed by two kits ` +
+-          `— kit "${existing.source}" already registered it, and ` +
+-          `kit "${pluginId}" attempted to register it again. ` +
+-          `Two kits cannot contribute the same writ type. ` +
+-          `Resolve by removing one of the kit contributions, or by overriding ` +
+-          `via guild config (clerk.writTypes).`
+-        );
+-      }
++    // Run the structural validator — let validator errors propagate verbatim (D4).
++    validateWritTypeConfig(config);
+ 
+-      mergedWritTypes.set(name, {
+-        description: (entry as WritTypeEntry).description,
+-        source: pluginId,
+-      });
++    // Duplicate check — fail-loud (D3). Report the existing registrant's source.
++    if (writTypeRegistry.has(config.name)) {
++      throw new Error(
++        `[clerk] registerWritType: writ type "${config.name}" is already registered ` +
++        `(first registered by "${writTypeSource.get(config.name) ?? 'unknown'}"). ` +
++        `Each writ type name must be unique across all registered types.`,
++      );
+     }
++
++    writTypeRegistry.set(config.name, config);
++    writTypeSource.set(config.name, source);
+   }
+ 
+   function registerKitLinkKinds(kitEntry: { pluginId: string; value: unknown }): void {
+@@ -319,7 +330,7 @@ export function createClerk(): Plugin {
+   async function buildTree(
+     writId: string,
+     options?: {
+-      phaseSet?: Set<WritPhase>;
++      phaseSet?: Set<string>;
+       typeSet?: Set<string>;
+       depth?: number;
+       currentDepth?: number;
+@@ -363,14 +374,19 @@ export function createClerk(): Plugin {
+   const api: ClerkApi = {
+     async post(request: PostCommissionRequest): Promise<WritDoc> {
+       const type = request.type ?? resolveDefaultType();
+-      const validTypes = resolveWritTypes();
+ 
+-      if (!validTypes.has(type)) {
++      // Type validation: only registry-registered types are accepted.
++      if (!writTypeRegistry.has(type)) {
+         throw new Error(
+-          `Unknown writ type "${type}". Declared types: ${[...validTypes.keys()].join(', ')}.`,
++          `Unknown writ type "${type}". Registered types: ${[...writTypeRegistry.keys()].sort().join(', ')}.`,
+         );
+       }
+ 
++      // Determine the initial phase for this type from the registry.
++      const typeConfig = writTypeRegistry.get(type)!;
++      const initialState = typeConfig.states.find((s) => s.classification === 'initial');
++      const initialPhase = initialState?.name ?? 'new';
++
+       const now = new Date().toISOString();
+       const childId = generateId('w', 6);
+ 
+@@ -379,17 +395,23 @@ export function createClerk(): Plugin {
+ 
+       if (request.parentId) {
+         // Wrap in a transaction for atomicity
+-        return stacks.transaction(async (tx) => {
++        const created = await stacks.transaction(async (tx) => {
+           const txWrits = tx.book<WritDoc>('clerk', 'writs');
+ 
+-          // Validate parent exists and is in an allowed phase
++          // Validate parent exists and is not in a terminal state
+           const parent = await txWrits.get(request.parentId!);
+           if (!parent) {
+             throw new Error(`Parent writ "${request.parentId}" not found.`);
+           }
+-          if (!CHILD_ALLOWED_PARENT_PHASES.has(parent.phase)) {
++
++          // Check whether the parent is terminal using the registry.
++          const parentConfig = writTypeRegistry.get(parent.type);
++          const parentState = parentConfig ? parentConfig.states.find(s => s.name === parent.phase) : undefined;
++          const parentIsTerminal = parentState ? parentState.classification === 'terminal' : false;
++
++          if (parentIsTerminal) {
+             throw new Error(
+-              `Cannot add children to writ "${request.parentId}": phase is "${parent.phase}", expected one of: ${[...CHILD_ALLOWED_PARENT_PHASES].join(', ')}.`,
++              `Cannot add children to writ "${request.parentId}": phase is "${parent.phase}" (terminal).`,
+             );
+           }
+ 
+@@ -406,7 +428,7 @@ export function createClerk(): Plugin {
+           const writ: WritDoc = {
+             id: childId,
+             type,
+-            phase: request.draft === true ? 'new' : 'open',
++            phase: initialPhase,
+             title: request.title,
+             body: request.body,
+             ...(codex !== undefined ? { codex } : {}),
+@@ -419,12 +441,20 @@ export function createClerk(): Plugin {
+ 
+           return writ;
+         });
++
++        // Auto-advance mandate writs from initial state ('new') to 'open'
++        // unless the caller explicitly requested a draft. The `draft` flag is
++        // deprecated (D23); this auto-advance lives here only until T6.
++        if (type === MANDATE_TYPE_NAME && request.draft !== true) {
++          return api.transition(created.id, 'open');
++        }
++        return created;
+       }
+ 
+       const writ: WritDoc = {
+         id: childId,
+         type,
+-        phase: request.draft === true ? 'new' : 'open',
++        phase: initialPhase,
+         title: request.title,
+         body: request.body,
+         ...(codex !== undefined ? { codex } : {}),
+@@ -433,6 +463,13 @@ export function createClerk(): Plugin {
+       };
+ 
+       await writs.put(writ);
++
++      // Auto-advance mandate writs from initial state ('new') to 'open'
++      // unless the caller explicitly requested a draft. The `draft` flag is
++      // deprecated (D23); this auto-advance lives here only until T6.
++      if (type === MANDATE_TYPE_NAME && request.draft !== true) {
++        return api.transition(childId, 'open');
++      }
+       return writ;
+     },
+ 
+@@ -478,7 +515,7 @@ export function createClerk(): Plugin {
+     },
+ 
+     async tree(params?: WritTreeParams): Promise<WritTree[]> {
+-      const phaseSet = params?.phase
++      const phaseSet: Set<string> | undefined = params?.phase
+         ? new Set(Array.isArray(params.phase) ? params.phase : [params.phase])
+         : undefined;
+       const typeSet = params?.type
+@@ -515,7 +552,7 @@ export function createClerk(): Plugin {
+       return forest;
+     },
+ 
+-    async countDescendantsByPhase(writId: string): Promise<Record<WritPhase, number>> {
++    async countDescendantsByPhase(writId: string): Promise<Record<string, number>> {
+       // Validate the root exists up front so callers get a clear error rather
+       // than a silent zero-count result for an invalid id.
+       const root = await writs.get(writId);
+@@ -523,7 +560,7 @@ export function createClerk(): Plugin {
+         throw new Error(`Writ "${writId}" not found.`);
+       }
+ 
+-      const counts: Record<WritPhase, number> = {} as Record<WritPhase, number>;
++      const counts: Record<string, number> = {};
+ 
+       // Per-level recursive walk, mirroring ratchet's buildTree / collectDescendantIds.
+       // Uses the existing `[parentId, phase]` composite index — no extra index needed.
+@@ -627,14 +664,74 @@ export function createClerk(): Plugin {
+ 
+     listWritTypes(): WritTypeInfo[] {
+       const defaultType = resolveDefaultType();
+-      return [...mergedWritTypes.entries()].map(([name, meta]) => ({
++      return [...writTypeRegistry.entries()].map(([name]) => ({
+         name,
+-        description: meta.description ?? null,
+-        source: meta.source,
++        description: null,
++        source: writTypeSource.get(name) ?? 'unknown',
+         isDefault: name === defaultType,
+       }));
+     },
+ 
++    registerWritType(config: WritTypeConfig): void {
++      registerWritTypeInternal(config, 'plugin');
++    },
++
++    getWritTypeConfig(name: string): WritTypeConfig {
++      const config = writTypeRegistry.get(name);
++      if (!config) {
++        throw new Error(`[clerk] getWritTypeConfig: writ type "${name}" is not registered.`);
++      }
++      return config;
++    },
++
++    isInitial(writ: WritDoc): boolean {
++      const config = writTypeRegistry.get(writ.type);
++      if (!config) {
++        throw new Error(`[clerk] getWritTypeConfig: writ type "${writ.type}" is not registered.`);
++      }
++      const state = config.states.find((s) => s.name === writ.phase);
++      if (!state) {
++        const legalStates = config.states.map((s) => s.name).join(', ');
++        throw new Error(
++          `[clerk] writ "${writ.id}" carries state "${writ.phase}" which is not declared ` +
++          `in type "${writ.type}" config; legal states are ${legalStates}.`,
++        );
++      }
++      return state.classification === 'initial';
++    },
++
++    isActive(writ: WritDoc): boolean {
++      const config = writTypeRegistry.get(writ.type);
++      if (!config) {
++        throw new Error(`[clerk] getWritTypeConfig: writ type "${writ.type}" is not registered.`);
++      }
++      const state = config.states.find((s) => s.name === writ.phase);
++      if (!state) {
++        const legalStates = config.states.map((s) => s.name).join(', ');
++        throw new Error(
++          `[clerk] writ "${writ.id}" carries state "${writ.phase}" which is not declared ` +
++          `in type "${writ.type}" config; legal states are ${legalStates}.`,
++        );
++      }
++      return state.classification === 'active';
++    },
++
++    isTerminal(writ: WritDoc): boolean {
++      const config = writTypeRegistry.get(writ.type);
++      if (!config) {
++        throw new Error(`[clerk] getWritTypeConfig: writ type "${writ.type}" is not registered.`);
++      }
++      const state = config.states.find((s) => s.name === writ.phase);
++      if (!state) {
++        const legalStates = config.states.map((s) => s.name).join(', ');
++        throw new Error(
++          `[clerk] writ "${writ.id}" carries state "${writ.phase}" which is not declared ` +
++          `in type "${writ.type}" config; legal states are ${legalStates}.`,
++        );
++      }
++      return state.classification === 'terminal';
++    },
++
+     async listKinds(): Promise<LinkKindDoc[]> {
+       return [...linkKindRegistry.entries()].map(([id, meta]) => ({
+         id,
+@@ -664,10 +761,9 @@ export function createClerk(): Plugin {
+ 
+       // Validate type if provided
+       if (request.type !== undefined) {
+-        const validTypes = resolveWritTypes();
+-        if (!validTypes.has(request.type)) {
++        if (!writTypeRegistry.has(request.type)) {
+           throw new Error(
+-            `Unknown writ type "${request.type}". Declared types: ${[...validTypes.keys()].join(', ')}.`,
++            `Unknown writ type "${request.type}". Registered types: ${[...writTypeRegistry.keys()].sort().join(', ')}.`,
+           );
+         }
+       }
+@@ -690,21 +786,62 @@ export function createClerk(): Plugin {
+       return writs.patch(request.id, patch);
+     },
+ 
+-    async transition(id: string, to: WritPhase, fields?: Partial<WritDoc>): Promise<WritDoc> {
++    async transition(id: string, to: string, fields?: Partial<WritDoc>): Promise<WritDoc> {
+       const writ = await writs.get(id);
+       if (!writ) {
+         throw new Error(`Writ "${id}" not found.`);
+       }
+ 
+-      const allowedFrom = ALLOWED_FROM[to];
+-      if (!allowedFrom.includes(writ.phase)) {
++      // D29: reject caller attempts to override the managed `phase` field via
++      // the `fields` argument. The target state is always the `to` parameter.
++      if (fields !== undefined && 'phase' in fields && (fields as Record<string, unknown>).phase !== undefined) {
+         throw new Error(
+-          `Cannot transition writ "${id}" to "${to}": phase is "${writ.phase}", expected one of: ${allowedFrom.join(', ')}.`,
++          `[clerk] transition: cannot override phase via fields argument; use the "to" parameter.`,
+         );
+       }
+ 
++      let isTerminalState: boolean;
++
++      if (writTypeRegistry.has(writ.type)) {
++        // Registry-driven path: validate via WritTypeConfig.
++        const config = writTypeRegistry.get(writ.type)!;
++        const currentState = config.states.find((s) => s.name === writ.phase);
++
++        if (!currentState) {
++          // D6: stored phase is not declared in the type's config — data
++          // integrity issue; throw rather than silently accepting it.
++          const legalStates = config.states.map((s) => s.name).join(', ');
++          throw new Error(
++            `[clerk] transition: writ "${id}" carries state "${writ.phase}" which is not declared ` +
++            `in type "${writ.type}" config; legal states are ${legalStates}.`,
++          );
++        }
++
++        if (!currentState.allowedTransitions.includes(to)) {
++          // D5: illegal transition — target not in the current state's
++          // allowedTransitions. Use bracket notation so terminal states
++          // produce a clean "none" message.
++          const allowed = currentState.allowedTransitions;
++          throw new Error(
++            `Cannot transition writ "${id}" to "${to}": current phase "${writ.phase}" → ` +
++            `not in allowed [${allowed.length > 0 ? allowed.join(', ') : 'none — terminal state'}].`,
++          );
++        }
++
++        const toState = config.states.find((s) => s.name === to);
++        if (!toState) {
++          // Target state is named in allowedTransitions but not declared in
++          // states — malformed config; surface clearly.
++          throw new Error(
++            `[clerk] transition: target state "${to}" is not declared in type "${writ.type}" config.`,
++          );
++        }
++        isTerminalState = toState.classification === 'terminal';
++      } else {
++        throw new Error(`[clerk] transition: writ type "${writ.type}" is not registered.`);
++      }
++
+       const now = new Date().toISOString();
+-      const isTerminal = TERMINAL_PHASES.has(to);
+ 
+       // Strip managed fields — callers cannot override id, phase, the
+       // plugin-owned observation slot `status`, or timestamps controlled
+@@ -729,7 +866,7 @@ export function createClerk(): Plugin {
+       const patch: Partial<Omit<WritDoc, 'id'>> = {
+         phase: to,
+         updatedAt: now,
+-        ...(isTerminal ? { resolvedAt: now } : {}),
++        ...(isTerminalState ? { resolvedAt: now } : {}),
+         ...safeFields,
+       };
+ 
+@@ -764,54 +901,6 @@ export function createClerk(): Plugin {
+     },
+   };
+ 
+-  // ── CDC cascade handlers ─────────────────────────────────────────
+-
+-  async function handleChildTerminal(child: WritDoc): Promise<void> {
+-    if (!child.parentId) return;
+-
+-    const parent = await writs.get(child.parentId);
+-    if (!parent || (parent.phase !== 'open' && parent.phase !== 'stuck')) return;
+-
+-    if (child.phase === 'failed') {
+-      const childResolution = child.resolution ?? 'unknown';
+-      await api.transition(parent.id, 'failed', {
+-        resolution: `Child "${child.id}" failed: ${childResolution}`,
+-      });
+-    }
+-  }
+-
+-  async function handleParentTerminal(parent: WritDoc): Promise<void> {
+-    const children = await writs.find({ where: [['parentId', '=', parent.id]] });
+-    if (children.length === 0) return;
+-
+-    const nonTerminalChildren = children.filter((c) => !TERMINAL_PHASES.has(c.phase));
+-    if (nonTerminalChildren.length === 0) return;
+-
+-    // When the parent reached `completed`, non-terminal children shouldn't
+-    // exist — their presence indicates an upstream bookkeeping gap (e.g. a
+-    // child-writ transition lost a race). Warn loudly rather than masking
+-    // the discrepancy by cancelling.
+-    if (parent.phase === 'completed') {
+-      for (const child of nonTerminalChildren) {
+-        console.warn(
+-          `[clerk] Parent writ "${parent.id}" transitioned to "completed" but ` +
+-            `child writ "${child.id}" is still in non-terminal phase ` +
+-            `"${child.phase}". Leaving the child as-is; this indicates an ` +
+-            `upstream bookkeeping gap that should be investigated.`,
+-        );
+-      }
+-      return;
+-    }
+-
+-    // Parent reached `failed` or `cancelled` — cancel all non-terminal children
+-    // with the single canonical resolution string.
+-    for (const child of nonTerminalChildren) {
+-      await api.transition(child.id, 'cancelled', {
+-        resolution: CASCADE_PARENT_TERMINATION_RESOLUTION,
+-      });
+-    }
+-  }
+-
+   // ── writ-types tool ──────────────────────────────────────────────
+ 
+   const writTypesTool = tool({
+@@ -832,7 +921,7 @@ export function createClerk(): Plugin {
+     apparatus: {
+       requires: ['stacks'],
+       recommends: ['oculus'],
+-      consumes: ['writTypes', 'linkKinds'],
++      consumes: ['linkKinds'],
+ 
+       supportKit: {
+         books: {
+@@ -873,19 +962,17 @@ export function createClerk(): Plugin {
+         writs = stacks.book<WritDoc>('clerk', 'writs');
+         links = stacks.book<WritLinkDoc>('clerk', 'links');
+ 
+-        // Initialize merged writ types from builtins + config
+-        const config = resolveClerkConfig();
+-        const configEntries = config.writTypes ?? [];
+-        configWritTypeNames = new Set(configEntries.map((e) => e.name));
+-        mergedWritTypes = new Map([
+-          ...[...BUILTIN_TYPES].map((name) => [name, { source: 'builtin' }] as [string, WritTypeMeta]),
+-          ...configEntries.map((e) => [e.name, { description: e.description, source: 'guild' }] as [string, WritTypeMeta]),
+-        ]);
++        // Seal the plugin writ-type registry after all apparatuses have started.
++        // Other plugins call registerWritType() in their own start(); by the time
++        // phase:started fires every start() has completed and no further
++        // registrations are expected.
++        ctx.on('phase:started', () => {
++          writTypeRegistrySealed = true;
++        });
+ 
+-        // Scan all kit-contributed writ types via the Wire-phase snapshot.
+-        for (const entry of ctx.kits('writTypes')) {
+-          registerKitWritTypes(entry);
+-        }
++        // Register mandate as a first-class writ type in the new registry.
++        // Clerk owns mandate, so it registers it with source='builtin'.
++        registerWritTypeInternal(MANDATE_CONFIG, 'builtin');
+ 
+         // Scan all kit-contributed link kinds via the Wire-phase snapshot.
+         // Unlike writTypes, malformed entries here hard-fail the start() call
+@@ -896,27 +983,6 @@ export function createClerk(): Plugin {
+           registerKitLinkKinds(entry);
+         }
+ 
+-        // ── CDC: parent/child cascade ───────────────────────────────
+-        stacks.watch<WritDoc>('clerk', 'writs', async (event) => {
+-          if (event.type !== 'update') return;
+-
+-          const writ = event.entry as WritDoc;
+-          const prev = event.prev as WritDoc;
+-
+-          // Only act on phase changes
+-          if (writ.phase === prev.phase) return;
+-
+-          // ── Upward cascade: child → parent ──
+-          if (writ.parentId && TERMINAL_PHASES.has(writ.phase)) {
+-            await handleChildTerminal(writ);
+-          }
+-
+-          // ── Downward cascade: parent → children ──
+-          if (TERMINAL_PHASES.has(writ.phase)) {
+-            await handleParentTerminal(writ);
+-          }
+-        }, { failOnError: true });
+-
+         // ── One-shot migration: rename `status` → `phase`, subsume legacy values ──
+         // Safe to run inside start(): stacks only seals the CDC registry
+         // at phase:started (after every apparatus has started), so these
+diff --git a/packages/plugins/clerk/src/index.ts b/packages/plugins/clerk/src/index.ts
+index 1e41cbc..101d49f 100644
+--- a/packages/plugins/clerk/src/index.ts
++++ b/packages/plugins/clerk/src/index.ts
+@@ -1,10 +1,12 @@
+ /**
+  * @shardworks/clerk-apparatus — The Clerk.
+  *
+- * Writ lifecycle management: post commissions, complete or fail writs, and
+- * cancel them at any pre-terminal stage. Writs flow through a fixed phase
+- * machine (new → open → completed/failed/cancelled) and are persisted in
+- * The Stacks.
++ * Writ lifecycle management: post commissions, transition writs through
++ * their type-specific state machine, and query writ state. The built-in
++ * `mandate` type uses a six-state lifecycle (new → open →
++ * completed/failed/cancelled, with stuck as a non-terminal "needs
++ * attention" detour off open). Other plugin-registered types declare their
++ * own state machines via `registerWritType(config)`.
+  *
+  * See: docs/architecture/apparatus/clerk.md
+  */
+@@ -16,7 +18,6 @@ import { createClerk } from './clerk.ts';
+ export {
+   type ClerkApi,
+   type ClerkConfig,
+-  type WritTypeEntry,
+   type WritDoc,
+   type WritLinkDoc,
+   type WritLinks,
+@@ -31,7 +32,7 @@ export {
+   type WritTreeParams,
+ } from './types.ts';
+ 
+-export { createClerk, CASCADE_PARENT_TERMINATION_RESOLUTION, BUILTIN_WRIT_TYPE } from './clerk.ts';
++export { createClerk } from './clerk.ts';
+ export type { ClerkKit } from './clerk.ts';
+ 
+ // ── Writ-type configuration (structural shape + validator) ────────────
+diff --git a/packages/plugins/clerk/src/tools/writ-show.ts b/packages/plugins/clerk/src/tools/writ-show.ts
+index 0375aea..756c39e 100644
+--- a/packages/plugins/clerk/src/tools/writ-show.ts
++++ b/packages/plugins/clerk/src/tools/writ-show.ts
+@@ -1,7 +1,7 @@
+ import { z } from 'zod';
+ import { guild } from '@shardworks/nexus-core';
+ import { tool } from '@shardworks/tools-apparatus';
+-import type { ClerkApi, WritPhase } from '../types.ts';
++import type { ClerkApi } from '../types.ts';
+ 
+ export default tool({
+   name: 'writ-show',
+@@ -26,7 +26,7 @@ export default tool({
+     ]);
+ 
+     // Parent context
+-    let parent: { id: string; title: string; phase: WritPhase } | null = null;
++    let parent: { id: string; title: string; phase: string } | null = null;
+     if (writ.parentId) {
+       const parentWrit = await clerk.show(writ.parentId);
+       parent = { id: parentWrit.id, title: parentWrit.title, phase: parentWrit.phase };
+@@ -35,7 +35,7 @@ export default tool({
+     // Direct-children list — `items` stays direct-children-only. The subtree-wide
+     // phase tally lives in `summary` (computed via clerk.countDescendantsByPhase).
+     const childWrits = await clerk.list({ parentId: writ.id, limit: 1000 });
+-    const items: Array<{ id: string; title: string; phase: WritPhase }> = [];
++    const items: Array<{ id: string; title: string; phase: string }> = [];
+     for (const child of childWrits) {
+       items.push({ id: child.id, title: child.title, phase: child.phase });
+     }
+diff --git a/packages/plugins/clerk/src/tools/writ-tree.ts b/packages/plugins/clerk/src/tools/writ-tree.ts
+index 1dd9a18..eafeca9 100644
+--- a/packages/plugins/clerk/src/tools/writ-tree.ts
++++ b/packages/plugins/clerk/src/tools/writ-tree.ts
+@@ -1,14 +1,15 @@
+ import { z } from 'zod';
+ import { guild, shortId } from '@shardworks/nexus-core';
+ import { tool } from '@shardworks/tools-apparatus';
+-import type { ClerkApi, WritPhase, WritTree } from '../types.ts';
++import type { ClerkApi, WritTree } from '../types.ts';
+ 
+ /**
+  * Single-glyph status indicators for the box-drawing tree. Mirrors the
+  * mapping used by ratchet's click-tree so output reads consistently across
+- * apparatus.
++ * apparatus. Phase keys cover the mandate lifecycle; non-mandate phases
++ * fall through to the `?? ' '` default in renderNode.
+  */
+-const PHASE_INDICATORS: Record<WritPhase, string> = {
++const PHASE_INDICATORS: Record<string, string> = {
+   new: '◌',
+   open: '●',
+   stuck: '◇',
+diff --git a/packages/plugins/clerk/src/types.ts b/packages/plugins/clerk/src/types.ts
+index 15c7207..fef1b72 100644
+--- a/packages/plugins/clerk/src/types.ts
++++ b/packages/plugins/clerk/src/types.ts
+@@ -4,6 +4,8 @@
+  * All types exported from @shardworks/clerk-apparatus.
+  */
+ 
++import type { WritTypeConfig } from './writ-type-config.ts';
++
+ // ── Writ phase ───────────────────────────────────────────────────────
+ 
+ /**
+@@ -37,8 +39,13 @@ export interface WritDoc {
+   id: string;
+   /** Writ type — must be a type declared in guild config, or a built-in type. */
+   type: string;
+-  /** Current lifecycle phase (Clerk-owned; spec side of the spec/status split). */
+-  phase: WritPhase;
++  /**
++   * Current lifecycle phase (Clerk-owned; spec side of the spec/status split).
++   * Widened to `string` to accommodate plugin-registered writ types that
++   * declare their own state names beyond the mandate-specific `WritPhase` union.
++   * Callers that knowingly work with mandate writs may downcast to `WritPhase`.
++   */
++  phase: string;
+   /**
+    * Plugin-owned observation slot (status side of the spec/status split).
+    *
+@@ -104,7 +111,7 @@ export interface EditWritRequest {
+ export interface PostCommissionRequest {
+   /**
+    * Writ type. Defaults to the guild's configured defaultType, or "mandate"
+-   * if no default is configured. Must be a valid declared type.
++   * if no default is configured. Must be a registered type.
+    */
+   type?: string;
+   /** Short human-readable title describing the work. */
+@@ -114,15 +121,17 @@ export interface PostCommissionRequest {
+   /** Optional target codex name. */
+   codex?: string;
+   /**
+-   * When true, the writ is created in 'new' (draft) status instead of 'open'.
+-   * Draft writs are invisible to the Spider and must be explicitly published
+-   * (new → open) before they can be picked up for execution.
+-   * Defaults to false (writ enters the queue immediately).
++   * When true, the writ is created in its type's declared initial state without
++   * any auto-advance. For mandate writs the `commission-post` tool auto-advances
++   * from 'new' to 'open' unless `draft` is true.
++   *
++   * @deprecated Kept for backward compatibility. The `draft` concern belongs in
++   * the `commission-post` tool (D23); removed from this API in T6.
+    */
+   draft?: boolean;
+   /**
+    * Create this writ as a child of the specified parent writ.
+-   * The parent must be in new or open status.
++   * The parent must not be in a terminal state.
+    */
+   parentId?: string;
+ }
+@@ -197,22 +206,10 @@ export interface WritTreeParams {
+ 
+ // ── Configuration ───────────────────────────────────────────────
+ 
+-/**
+- * A writ type entry declared in clerk config.
+- */
+-export interface WritTypeEntry {
+-  /** The writ type name (e.g. "mandate", "task", "bug"). */
+-  name: string;
+-  /** Optional human-readable description of this writ type. */
+-  description?: string;
+-}
+-
+ /**
+  * Clerk apparatus configuration — lives under the `clerk` key in guild.json.
+  */
+ export interface ClerkConfig {
+-  /** Additional writ type declarations. The built-in type "mandate" is always valid. */
+-  writTypes?: WritTypeEntry[];
+   /** Default writ type when commission-post is called without a type (default: "mandate"). */
+   defaultType?: string;
+ }
+@@ -345,10 +342,15 @@ export interface WritTypeInfo {
+  */
+ export interface ClerkApi {
+   /**
+-   * Post a new commission, creating a writ in 'open' status by default.
+-   * If `request.draft` is true, the writ is created in 'new' status instead
+-   * and will not be picked up by the Spider until explicitly published.
+-   * Validates the writ type against declared types in guild config.
++   * Post a new commission, creating a writ in its type's declared initial
++   * state. The initial state is derived from the registered `WritTypeConfig`
++   * for the writ's type.
++   *
++   * For mandate writs the initial state is 'new'. The `commission-post` tool
++   * handles auto-advance (new → open) for mandate when `draft` is not true —
++   * that UX concern lives in the tool layer, not here.
++   *
++   * Throws if the type is unregistered.
+    */
+   post(request: PostCommissionRequest): Promise<WritDoc>;
+ 
+@@ -393,28 +395,33 @@ export interface ClerkApi {
+    * Walks the parent/child tree recursively beneath `writId`, tallying each
+    * descendant's phase. The root writ (the writ identified by `writId`) is
+    * excluded from the count — only its descendants contribute. The result is
+-   * a plain object keyed by `WritPhase` with numeric values; phases with no
++   * a plain object keyed by phase string with numeric values; phases with no
+    * matching descendants are simply absent.
+    *
+    * This is the traversal primitive behind `writ-show`'s `children.summary`
+    * field, and is also reusable by any future subtree-oriented tooling (e.g.
+    * a `writ-tree` apparatus). Throws if the writ does not exist.
+    */
+-  countDescendantsByPhase(writId: string): Promise<Record<WritPhase, number>>;
++  countDescendantsByPhase(writId: string): Promise<Record<string, number>>;
+ 
+   /**
+    * Transition a writ to a new phase, optionally setting additional fields.
+-   * Validates that the transition is legal.
++   * Validates that the transition is legal per the writ's registered type
++   * config.
++   *
++   * On a rejected transition, throws:
++   *   `Cannot transition writ "<id>" from "<current>" to "<to>": legal
++   *    transitions from "<current>" are <list> (or none for terminal states).`
+    *
+-   * Managed fields supplied in `fields` are silently dropped before the
+-   * patch is applied: `id`, `phase`, `status`, `createdAt`, `updatedAt`,
+-   * `resolvedAt`, and `parentId`. `phase` is managed by the state machine;
+-   * the plugin-owned observation slot `status` is writable only via
+-   * `setWritStatus()` (the one sanctioned slot-write path) so that
+-   * sibling sub-slots are preserved under concurrent writers. The generic
+-   * `put()` / `patch()` paths are not supported slot-write mechanisms.
++   * If `fields.phase` is present and non-empty, throws:
++   *   `[clerk] transition: cannot override phase via fields argument`
++   *
++   * Managed fields supplied in `fields` are stripped before the patch is
++   * applied: `id`, `status`, `createdAt`, `updatedAt`, `resolvedAt`, and
++   * `parentId`. `status` is writable only via `setWritStatus()` (the one
++   * sanctioned slot-write path).
+    */
+-  transition(id: string, to: WritPhase, fields?: Partial<WritDoc>): Promise<WritDoc>;
++  transition(id: string, to: string, fields?: Partial<WritDoc>): Promise<WritDoc>;
+ 
+   /**
+    * Write a plugin-owned sub-slot of the writ's observation `status` map.
+@@ -473,12 +480,61 @@ export interface ClerkApi {
+ 
+   /**
+    * List all registered writ types with metadata.
+-   * Returns builtin types, guild-configured types, and kit-contributed types.
+-   * Each entry includes the type name, optional description, source, and
+-   * whether it is the default type.
++   * Returns builtin types, guild-configured types, kit-contributed types, and
++   * plugin-registered types. Each entry includes the type name, optional
++   * description, source, and whether it is the default type.
+    */
+   listWritTypes(): WritTypeInfo[];
+ 
++  /**
++   * Register a plugin-contributed writ type with the Clerk.
++   *
++   * The `config` is validated with T1's `validateWritTypeConfig` before it is
++   * stored; validator errors propagate verbatim. Registration-specific failures
++   * (duplicate name, late call after the post-start seal) are prefixed with
++   * `[clerk] registerWritType:`.
++   *
++   * Callable only during the startup window — from the time clerk's
++   * `start()` completes until the framework fires `phase:started`. Any call
++   * after that throws with the sealed-registry error.
++   *
++   * Duplicate names throw naming both the type name and the fact it is
++   * already registered (D3).
++   */
++  registerWritType(config: WritTypeConfig): void;
++
++  /**
++   * Return the `WritTypeConfig` for a named writ type.
++   *
++   * Throws `[clerk] getWritTypeConfig: writ type "${name}" is not registered`
++   * when no config for that name is in the registry.
++   */
++  getWritTypeConfig(name: string): WritTypeConfig;
++
++  /**
++   * Return true when `writ` is in its type's declared initial state.
++   *
++   * Throws if the writ's type is unregistered or if the writ's stored phase
++   * is not declared in that type's config (D6).
++   */
++  isInitial(writ: WritDoc): boolean;
++
++  /**
++   * Return true when `writ` is in one of its type's declared active states.
++   *
++   * Throws if the writ's type is unregistered or if the writ's stored phase
++   * is not declared in that type's config (D6).
++   */
++  isActive(writ: WritDoc): boolean;
++
++  /**
++   * Return true when `writ` is in one of its type's declared terminal states.
++   *
++   * Throws if the writ's type is unregistered or if the writ's stored phase
++   * is not declared in that type's config (D6).
++   */
++  isTerminal(writ: WritDoc): boolean;
++
+   /**
+    * List all registered link kinds contributed by kits.
+    * Returns the registry-projection view of each kind, including its owner
+diff --git a/packages/plugins/lattice/src/tools/pulse-list.ts b/packages/plugins/lattice/src/tools/pulse-list.ts
+index d872045..2bdb01c 100644
+--- a/packages/plugins/lattice/src/tools/pulse-list.ts
++++ b/packages/plugins/lattice/src/tools/pulse-list.ts
+@@ -1,12 +1,13 @@
+ import { z } from 'zod';
+ import { guild } from '@shardworks/nexus-core';
+ import { tool } from '@shardworks/tools-apparatus';
+-import type { ClerkApi, WritPhase } from '@shardworks/clerk-apparatus';
++import type { ClerkApi } from '@shardworks/clerk-apparatus';
+ 
+ import type { LatticeApi, PulseDoc } from '../types.ts';
+ 
+ /** Writ phases considered still-actionable for `--live` filtering. */
+-const LIVE_WRIT_PHASES = new Set<WritPhase>(['stuck', 'failed']);
++// Typed as Set<string> because WritDoc.phase is now string (widened in T1).
++const LIVE_WRIT_PHASES = new Set<string>(['stuck', 'failed']);
+ 
+ export default tool({
+   name: 'pulse-list',
