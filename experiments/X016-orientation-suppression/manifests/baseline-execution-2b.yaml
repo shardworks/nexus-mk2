@@ -1,0 +1,106 @@
+slug: x016-baseline-2b-implementer
+title: X016 Phase 2b — first implementer-driven trial
+codex: nexus
+
+description: |
+  Phase 2b — first end-to-end trial that actually drives the
+  implementer. Plugin set extended with animator + loom +
+  claude-code so Spider can summon a real anima session.
+  Spider's plugin-default `mandate → default` fallback handles
+  template lookup with no explicit mapping required (verified
+  in spider.ts:1389 — the fallback fires when no kit claims
+  `mandate`, which is the case without astrolabe installed).
+
+  guild.json givens layer in:
+    - loom.roles.artificer with clerk:* tools:* (mirrors vibers)
+    - animator.sessionProvider = 'claude-code'
+    - spider.variables { role, buildCommand, testCommand } —
+      build/test commands package-scoped via pnpm --filter to
+      keep the implementer out of `pnpm -r` purgatory
+
+  Brief retargeted at packages/framework/core (the smallest,
+  zero-dep framework package) — see briefs/baseline-task-core.md.
+
+  waitForTerminal=true with a 15-min cap. The expected wallclock
+  is well under that for a healthy implementer session; the cap
+  exists to bound a runaway. Cost expectation: ~$0.30/trial,
+  budget for 1-2 debug rounds on first attempt.
+
+  ANTHROPIC_API_KEY flows through to the test guild's daemon
+  via process.env inheritance — `lab.daemon-setup`'s execFile
+  call does not pass `env`, so the spawned `nsg start` inherits
+  the lab-host's environment.
+
+frameworkVersion: '0.1.292'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      # Same nexus-monorepo codex as phase 2a. Pinned to local
+      # HEAD; local-bare flow tolerates unpushed commits.
+      upstreamRepo: /workspace/nexus
+      baseSha: 3c307a20a7afc33df96c87c1a2d694edfb951c05
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # Phase-2a's seven plugins + animator/loom/claude-code so
+      # the `implement` engine can actually summon. No astrolabe
+      # — Spider's plugin-default mandate→default fallback fires
+      # automatically without it.
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.292' }
+      # Deep-merged into the test guild's guild.json so the
+      # implementer wiring is in place when the daemon boots.
+      config:
+        loom:
+          roles:
+            artificer:
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+        animator:
+          sessionProvider: 'claude-code'
+        spider:
+          variables:
+            role: 'artificer'
+            buildCommand: 'pnpm --filter @shardworks/nexus-core build'
+            testCommand: 'pnpm --filter @shardworks/nexus-core test'
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}    # auto-allocate ports
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X016-orientation-suppression/briefs/baseline-task-core.md
+    waitForTerminal: true
+    timeoutMs: 900000   # 15 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
