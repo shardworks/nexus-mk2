@@ -355,3 +355,61 @@ work until N>1.
   - **Pre-flight:** `lab.probe-git-range` diff-stats fixed
     (`c-monnvxkz` → `20b857ee`); spider apparatus.requires fixed
     upstream (`c-monniwt3` → `acd2037`). Both blockers cleared.
+
+- 2026-05-02: **Phase 2c trials run — both N=1 variants completed.**
+  Headline finding: strong-prompt halves orientation tax but does
+  not eliminate it; H1 as originally stated is falsified.
+  - **Baseline N=1** (`w-monu86fr` / `rig-monu89oy-1533cfce`): 28m
+    wallclock, $6.47 total. firstProductiveEditTurn=43, totalTurns=125,
+    readonlyCallsBefore=40. Implementer completed all cascade work
+    (10 files: 5 test files + 4 docs + 1 export tweak), 79/79 reckoner
+    + 25/25 vision-keeper passing, reviewer no required changes.
+  - **Strong-prompt N=1** (`w-monvhnjs` / `rig-monvhob0-91a144ac`):
+    28m wallclock, $6.85 total. firstProductiveEditTurn=18,
+    totalTurns=116, readonlyCallsBefore=17. Implementer completed
+    14 files (more than baseline because it surfaced an additional
+    `index.ts` export), same passing test results, reviewer no
+    required changes.
+  - **Headline metric delta:** firstProductiveEditTurn 43 → 18
+    (−58%), readonlyCallsBefore 40 → 17 (−58%), totalTurns 125 →
+    116 (−7%), trial cost $6.47 → $6.85 (+6%). Strong-prompt
+    suppressed pre-edit work but did not shorten the session
+    overall — total compute roughly equivalent, just rearranged.
+  - **Tool-call analysis** of pre-edit sequences revealed: baseline
+    paid ~25 calls of redundant orientation (re-reads of same files,
+    multi-chunk reads of same file at different offsets, exploratory
+    greps for behavior patterns, two subagent fan-outs); strong-
+    prompt's 17 calls were almost entirely necessary (must-read
+    of remaining files for editing + must-read of done files for
+    pattern reference). The directive eliminated REDUNDANT
+    orientation; the necessary orientation floor for a 9-file
+    cascade task is ~17 calls, well above H1's <5 target.
+  - **H1 verdict:** falsified at the original threshold. The
+    derivative finding (strong-prompt cleanly suppresses redundant
+    orientation while leaving necessary orientation intact) opens
+    a refined research question — see follow-up click `c-moo9o9q3`
+    (X010 H1 re-run with strong-prompt enabled, parented under
+    `c-modxxtu6` / idea #15). If X010 H1's 3.5x piece-session
+    blowup was driven partly by redundant orientation, strong-
+    prompt-enabled piece-sessions might fall below #15's 1.3x
+    ceiling — testable via re-run of the X010 H1 protocol.
+  - **Cost envelope established:** ~$6.50/trial on rig-2-shaped
+    work without planning engines. N=10/variant ≈ $130;
+    N=20/variant ≈ $260. N=1+N=1 produced a clear directional
+    answer for this phase; further N would only tighten CIs.
+  - **Apparatus changes:** lab.probe-git-range fix (b/c the
+    daemon was restarted between trials, strong-prompt's
+    commits-manifest.yaml has correct diff stats —
+    14 files / +343 / −333 — while baseline's is the pre-fix
+    zeros).
+  - **Sanctum committed** at `a1443a4b` on nexus-mk2 main:
+    spec update, both briefs, both manifests, analysis script,
+    extract artifacts for both trials, coco-log entry.
+  - **Synthetic checkpoint preserved:** branch
+    `x016-phase-2c-checkpoint` at `c047e29` on /workspace/nexus.
+    Local-only; the local-bare codex flow tolerates unpushed.
+    Branch must NOT be deleted if reruns are wanted.
+  - **Experiment status:** complete at the original-H1 question.
+    Open at the refined research question (does strong-prompt
+    rescue idea #15) — that question is X010-territory now,
+    tracked under `c-moo9o9q3`.

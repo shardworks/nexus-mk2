@@ -545,6 +545,186 @@ reading static fixture data) shouldn't add the daemon fixture —
 spinning up a daemon costs ~10 seconds and adds an orphan-cleanup
 risk if teardown is interrupted. The fixture is opt-in by design.
 
+### Running A/B trials
+
+The Laboratory's idiomatic way to run an A/B trial is **two manifests
+that differ only in the variable under test** (typically the brief
+content), each posted as its own trial. Same codex pin, same plugin
+set, same test-guild config — only the variable that's being measured
+changes. This keeps the comparison clean and lets the analysis
+script join trial outputs by variant label.
+
+#### The variant-pair pattern
+
+```
+experiments/X<NN>-<slug>/
+├── briefs/
+│   ├── phase-2c-baseline.md            # control variant
+│   └── phase-2c-strong-prompt.md       # test variant
+├── manifests/
+│   ├── baseline-execution-2c-baseline.yaml
+│   └── baseline-execution-2c-strong-prompt.yaml
+└── scripts/
+    └── extract-orientation-metrics.py  # analysis: reads both extracts
+```
+
+The two manifests are byte-identical except for `briefPath`:
+
+```yaml
+# baseline manifest:
+scenario:
+  givens:
+    briefPath: .../briefs/phase-2c-baseline.md
+
+# variant manifest:
+scenario:
+  givens:
+    briefPath: .../briefs/phase-2c-strong-prompt.md
+```
+
+Both pin to the same `frameworkVersion`, the same `baseSha`, the same
+plugin list, and the same `spider.variables`. Drift across these
+fields breaks the comparison — copy the manifest with diff-discipline.
+
+#### Brief structure for handoff trials
+
+When testing prompt directives or handoff strategies, the brief is the
+unit of variation. The conventional structure is:
+
+```
+# Continuing: <writ title>
+
+[VARIANT-SPECIFIC DIRECTIVES, prepended to test variants only]
+
+## Situation
+
+[honest summary of "what was done" in the synthesized prior session
+ — see "Synthesizing a mid-flow checkpoint" below]
+
+## What remains
+
+[file-by-file list of remaining work, terse]
+
+### Verification at completion
+
+[concrete checks the implementer can run]
+
+---
+
+# [original writ body verbatim, beginning with the writ's H1]
+```
+
+The writ body is the canonical task definition; the handoff context
+sets the stage. Variant-specific directives go at the **top** of the
+doc — recency in the prompt window matters less than position when
+the brief is presented as `writ.body` in the implementer's first
+turn.
+
+#### Synthesizing a mid-flow checkpoint
+
+Many A/B questions are about behavior *mid-flow* — what does an
+implementer do when entering a session that already has prior work
+committed? To create a faithful mid-flow codex state:
+
+1. **Pick a real rig that exhibits the phenomenon you're measuring.**
+   Real rigs from past commissions have honest commit shapes, real
+   test surfaces, real cross-package complexity. Synthetic rigs
+   produce synthetic answers.
+2. **Inspect that rig's commits.** Spider's `seal` engine often
+   produces a single squashed commit even when the implementer was
+   asked to commit per-task — see the per-task-commit non-compliance
+   click. Don't assume the draft branch's intermediate states are
+   recoverable; check `git log` and `fsck --lost-found` on the codex
+   bare repo.
+3. **Partition the diff.** Pick which file-changes count as "done by
+   prior session" and which count as "remaining." Cut so that build
+   stays green at the checkpoint (or fails in a way that's
+   self-evidently the remaining work — e.g., test cascades).
+4. **Apply the "done" subset as a single synthetic commit on top of
+   `<seal-commit>~1`** in the upstream codex source. Branch it so
+   the commit is reachable; the local-bare codex flow tolerates
+   unpushed commits and unmerged branches:
+   ```sh
+   cd /workspace/nexus
+   git checkout -b x<NN>-checkpoint <seal-sha>~1
+   git checkout <seal-sha> -- <subset of files>
+   git add -A
+   GIT_AUTHOR_NAME="Prior Session" GIT_AUTHOR_EMAIL="x<NN>-prior@nexus.local" \
+     git commit -m "<honest description of partitioned work>"
+   git rev-parse HEAD   # this SHA is your trial's baseSha
+   ```
+5. **Verify the checkpoint state matches expectations** — run the
+   build/test commands at the checkpoint and confirm the result is
+   what your handoff describes ("primary surface green, cascades
+   red"). Drift here makes the handoff dishonest.
+6. **The branch must persist** for any reruns of the trial. A
+   well-named branch (`x<NN>-phase-<P>-checkpoint`) is the cheapest
+   way to preserve it; tags work too.
+
+The synthesized commit's SHA becomes `baseSha` in both variants'
+manifests. Both variants test against the same mid-flow state.
+
+#### Sanctum-side analysis
+
+Trial outputs land in the lab's archive books and materialize via
+`nsg lab trial-extract`. For most A/B trials, the analysis is
+sanctum-side post-processing of the `animator/transcripts` rows —
+not a probe. Standard pattern:
+
+```
+experiments/X<NN>-<slug>/scripts/extract-<metric>.py
+```
+
+The script reads `<extract-dir>/stacks-export/animator-transcripts.json`
+(an array of session rows, each with a `messages` array of Claude
+Code chat events), walks the per-session message stream, and emits
+one row per session with the metric of interest plus a `--variant`
+stamp from CLI args.
+
+```sh
+# Run after each variant's trial completes:
+python3 scripts/extract-<metric>.py \
+  artifacts/<extract-dir>-baseline/ --variant baseline
+python3 scripts/extract-<metric>.py \
+  artifacts/<extract-dir>-strong-prompt/ --variant strong-prompt
+```
+
+Two-stage extraction (script per trial, manual join) keeps the
+analysis independent of the apparatus and makes the metric
+definition iteratable. See
+`experiments/X016-orientation-suppression/scripts/extract-orientation-metrics.py`
+for the working reference implementation — it scans assistant
+messages for `Edit`/`Write`/`MultiEdit` tool calls and emits
+turns-to-first-productive-edit plus four secondary metrics.
+
+#### N strategy
+
+A/B cost can be high. Standard pattern:
+
+1. **N=1 calibration.** Post the control variant first. Use it to
+   measure (a) per-trial cost on this scope of work, (b) whether
+   the phenomenon you're measuring is even visible at this brief
+   size. If the metric is degenerate (e.g., baseline already hits
+   the target value), kill the experiment cheap.
+2. **N=1 of test variant.** Same partition, same checkpoint, same
+   manifest plumbing — just the swapped brief. Direction-of-effect
+   should be obvious from N=1+N=1 even without statistical power.
+3. **Decide N.** If the effect is small or noise-dominated, scale
+   to N=5 or N=10 per variant. If the effect is large and clean,
+   N=1+N=1 may be enough for a directional answer; further N is
+   for tightening confidence intervals.
+4. **Quality control on N>1.** Randomize variant order across runs
+   (don't batch baseline-then-test — model snapshot drift could
+   confound), pin the model snapshot, save full transcripts.
+
+#### Reference: X016 phase 2c
+
+`experiments/X016-orientation-suppression/` is the canonical worked
+example. Read its `spec.md` for the design narrative, the two manifests
+under `manifests/baseline-execution-2c-*.yaml` for the variant pair,
+the two briefs under `briefs/phase-2c-*.md` for the brief structure,
+and `scripts/extract-orientation-metrics.py` for the analysis pattern.
+
 ### After posting
 
 ```sh
@@ -591,18 +771,34 @@ nsg lab trial-export-book <trialId> --book animator/sessions  # streaming JSONL
 
 ## Status
 
-Production-ready for nexus-dev trials. The trial writ type is
+Production-ready for nexus-dev A/B trials. The trial writ type is
 registered, the rig template is the canonical
 `post-and-collect-default`, all five fixture and scenario engine
 pairs (codex / guild / daemon / commission-post / wait) are real,
 the three standard probes are real, the archive engine is real,
 and the four CLI tools (`trial-post`, `trial-show`, `trial-extract`,
 `trial-export-book`) ship with the package. 228/228 unit tests
-passing including a codified pipeline smoke test. The first
-real-world trial (X016 phase 1, baseline apparatus validation) ran
-end-to-end against vibers as the lab-host on 2026-05-01. Phase 2
-trials with full implementer execution are unblocked by the
-`lab.daemon-setup` / `lab.daemon-teardown` fixture pair.
+passing including a codified pipeline smoke test.
+
+Real-world trial history:
+
+- **X016 phase 1** (2026-05-01) — baseline apparatus validation
+  against vibers as lab-host.
+- **X016 phase 2a** (2026-05-02) — daemon-fixture smoke test:
+  `lab.daemon-setup` / `lab.daemon-teardown` fixture pair under load.
+- **X016 phase 2b** (2026-05-02) — first implementer-driven trial
+  (sonnet draft → implement → review → revise → seal pipeline).
+- **X016 phase 2c** (2026-05-02) — first A/B trial: baseline N=1
+  vs strong-prompt N=1 against a synthesized mid-flow checkpoint.
+  Demonstrated the variant-pair pattern, the synthesized-midpoint
+  pattern, and sanctum-side metric extraction. See "Running A/B
+  trials" above and
+  `experiments/X016-orientation-suppression/spec.md` for the worked
+  example.
+
+Both bug fixes from phase 2 are landed in framework HEAD: the spider
+apparatus.requires ordering bomb (`acd2037` on nexus main) and the
+probe-git-range diff-stats bug (`20b857ee` on nexus-mk2 main).
 
 ## Background
 
