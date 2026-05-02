@@ -1,0 +1,188 @@
+slug: x018-calibration-baseline-cartograph
+title: X018 calibration baseline — cartograph commission, no surface map
+codex: nexus
+
+description: |
+  Pre-flight calibration trial for X018. Replays the cartograph commission
+  (writ w-mojmj0rc, originally produced spec session ses-mojmj4zc-e81d52ed
+  at $8.08, 14.6 min) under the lab.plan-only rig with NO surface map
+  injection. Purpose: validate the lab.plan-only recipe end-to-end and
+  measure apparatus fidelity vs the real-world session.
+
+  The reader-analyst's cost (USD) and tool-call profile from this trial
+  is compared against $8.08 to decide which reference baseline X018
+  variant trials use:
+
+  - Within ~10–15% of $8.08: trust the real-world baseline as comparator.
+  - Diverges 15–30% consistently: re-anchor at this Lab baseline.
+  - Diverges >50% or non-determ.: stop, diagnose apparatus before variant.
+
+  Codex pinned to aff280e — the parent of the cartograph commission's
+  sealed commit (607b572). This is the codex state the original planner
+  saw. Brief is the verbatim writ body extracted from w-mojmj0rc.
+
+  patronRole is set to 'patron' (matching vibers config) so the
+  reader-analyst uses sage-primer-attended (the role X018 will inject the
+  surface map into). patron-anima runs but, per the running-trials.md
+  recipe, decision-review fast-paths when the primer pre-fills selected
+  values (which the cartograph's decisions did in the original session).
+
+  waitForRigTerminal=true (the spec-only mandate writ never seals so
+  writ-based wait would time out; rig-based wait polls the spider rig
+  to its terminal RigStatus) with a 30-min cap. ANTHROPIC_API_KEY flows
+  through to the test guild's daemon via process.env inheritance.
+
+frameworkVersion: '0.1.298'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      # Parent of cartograph commission's sealed commit (607b572).
+      # The codex state the original cartograph planner saw on
+      # 2026-04-29 when w-mojmj0rc was created.
+      baseSha: aff280e75add02bd25e1af0e9467e8a81bfbcd41
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # Spec-only plugin set: implement-only + astrolabe.
+      # Astrolabe declares clerk/stacks/spider as `requires`, so it
+      # comes after them in topo order. Spider's 0.1.292 ordering
+      # bomb is fixed in 0.1.298 — canonical order works.
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/astrolabe-apparatus', version: '0.1.298' }
+      config:
+        # Model override — vibers defaults to opus at the guild level
+        # (settings.model: opus). Without this, the test guild defaults
+        # to sonnet (animator's `getDefaultModel()` fallback), which
+        # would invalidate cost comparisons against Opus-run real-world
+        # baseline. Calibration trial 1 (no model override) cost $2.90
+        # vs production $8.08 — entirely a model-pricing artifact.
+        settings:
+          model: opus
+        loom:
+          roles:
+            artificer:
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+            patron:
+              permissions: []
+        animator:
+          sessionProvider: 'claude-code'
+        astrolabe:
+          patronRole: 'patron'
+        spider:
+          variables:
+            role: 'artificer'
+          # lab.plan-only rig template — copied verbatim from
+          # experiments/lab-operations/running-trials.md#planning-only-rig.
+          # Stops the rig at observation-lift, no implement/review/seal.
+          rigTemplates:
+            lab.plan-only:
+              engines:
+                - id: plan-init
+                  designId: astrolabe.plan-init
+                  upstream: []
+                  givens:
+                    writ: '${writ}'
+                - id: draft
+                  designId: draft
+                  upstream: [plan-init]
+                  givens:
+                    writ: '${writ}'
+                - id: reader-analyst
+                  designId: astrolabe.reader-analyst
+                  upstream: [draft]
+                  givens:
+                    prompt: 'Plan ID: ${yields.plan-init.planId}'
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                    metadata:
+                      engineId: reader-analyst
+                - id: inventory-check
+                  designId: astrolabe.inventory-check
+                  upstream: [reader-analyst]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: patron-anima
+                  designId: astrolabe.patron-anima
+                  upstream: [inventory-check]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                - id: decision-review
+                  designId: astrolabe.decision-review
+                  upstream: [patron-anima]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: spec-writer
+                  designId: anima-session
+                  upstream: [decision-review]
+                  givens:
+                    role: astrolabe.sage-writer
+                    prompt: |
+                      Plan ID: ${yields.plan-init.planId}
+
+                      Decision summary:
+                      ${yields.decision-review.decisionSummary}
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                    metadata:
+                      engineId: spec-writer
+                - id: plan-finalize
+                  designId: astrolabe.plan-finalize
+                  upstream: [spec-writer]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: observation-lift
+                  designId: astrolabe.observation-lift
+                  upstream: [plan-finalize]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+              resolutionEngine: observation-lift
+          rigTemplateMappings:
+            mandate: lab.plan-only
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X018-package-surface-map-injection/briefs/cartograph-replay.md
+    # Spec-only rigs: mandate writ never seals (no seal engine in
+    # lab.plan-only template). Wait on the rig instead of the writ.
+    waitForRigTerminal: true
+    timeoutMs: 1800000   # 30 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
