@@ -1,0 +1,193 @@
+package: plugins/lattice-discord
+date: 2026-05-02
+session: adf910c8-02ca-44e7-9233-6e1ad84806e0
+
+# Pre-trim state
+test_files_before: 1
+test_lines_before: 413
+tests_before: 20
+pure_redundant_count: 8
+pure_redundant_pct: 40.0
+
+# Aggregate coverage (pre-trim)
+line_coverage_before: 67.96
+branch_coverage_before: 80.03
+func_coverage_before: 53.08
+
+# Per-package coverage (pre-trim) — from `pnpm test:coverage` "all files" row
+# (includes import-time hits in framework/core dependencies; the
+# channel.ts-only row was 98.44/85.37/100.00).
+package_line_coverage_before: 84.22
+package_branch_coverage_before: 88.24
+package_func_coverage_before: 26.47
+
+# Review pass
+candidates_reviewed: 8
+candidates_deleted: 1
+candidates_kept: 7
+
+# Per-cut breakdown
+deletions:
+  - file: src/channel.test.ts
+    test: "Discord channel send() > returns ok:false on a 5xx response"
+    reason: parameter_sweep_over_helper
+    note: |
+      The 5xx test is strictly a worse version of the 4xx test on the
+      same code path. The implementation has a single branch
+      (`if (!response.ok)`) that handles all non-2xx responses
+      identically. Both tests exercise that branch:
+
+        - 4xx test (kept): asserts ok=false, status code (/404/) AND
+          body text (/not found/) appear in error.
+        - 5xx test (cut):  asserts ok=false, status code (/503/) only.
+
+      The 5xx test adds nothing the 4xx doesn't — same code path,
+      weaker assertions. The body-in-error contract is unique to the
+      4xx test and worth preserving.
+
+      Note on analyzer flagging: the analyzer initially flagged the
+      *4xx* test as pure-redundant (and put 5xx in the low-uniqueness
+      required list with 9 unique lines). This is greedy-reducer
+      ordering — it doesn't compare assertion strength, only line
+      coverage. Within an equivalence class (same code path), the
+      correct cut is the weaker test, regardless of which one the
+      analyzer named. After cutting 5xx, the 4xx test moved into the
+      required set as expected.
+
+# Sampled "kept" tests with reason categories — covers the major patterns
+# of false-positive redundancy in this 8-flag package
+kept_samples:
+  - test: "Discord channel send() > returns ok:false on a 4xx response with the status in the error"
+    reason_category: representative
+    note: |
+      Now the canonical error-path test (after 5xx cut). Pins three
+      contracts: ok=false on non-2xx, status in error, body in error.
+  - test: "Discord channel send() > returns ok:true on a 2xx response"
+    reason_category: representative
+    note: |
+      Canonical happy-path identity. The "posts JSON" test runs through
+      a 2xx path but does not assert outcome.ok, so this is the only
+      test pinning the success-result contract.
+  - test: "Discord channel send() > posts JSON with the built payload to the webhook URL"
+    reason_category: representative
+    note: |
+      Pins the request shape (URL, Content-Type header, body title +
+      description). No other test verifies these.
+  - test: "context field rendering > renders failed context with NO engine fields when engineFailure is absent"
+    reason_category: edge_case
+    note: |
+      Negative-space contract — verifies that Engine/Engine design/
+      Attempts/Last error fields are absent when engineFailure is not
+      provided. Catches accidental field additions.
+  - test: "buildPayload > wraps the embed in an embeds array with title and description"
+    reason_category: representative
+    note: |
+      Canonical buildPayload happy path — only test asserting the basic
+      embed shape (title + description + color-is-number + fields-array
+      exists).
+  - test: "buildPayload > omits url when linkUrl is null"
+    reason_category: edge_case
+    note: |
+      Negative-space pair with the required "includes url when linkUrl
+      is set" test. Together they pin the optional-url branch.
+  - test: "context field rendering > renders stuck context with writ metadata and cause fields"
+    reason_category: parameter_sweep
+    note: |
+      Trigger-specific branch in contextFields() — the stuck branch has
+      its own fields (Type, Cause). The failed and drained tests cover
+      different branches in the same function.
+  - test: "embed color selection > maps each trigger type to a distinct color"
+    reason_category: representative
+    note: |
+      Only test pinning the stuck/failed/drained color-uniqueness
+      contract. The complementary "fallback for unknown" test covers the
+      default branch but doesn't assert anything about the known-trigger
+      colors.
+
+# Post-trim state
+test_files_after: 1
+test_lines_after: 394
+tests_after: 19
+
+# Aggregate coverage (post-trim)
+line_coverage_after: 67.96
+branch_coverage_after: 80.06
+func_coverage_after: 53.08
+
+# Per-package coverage (post-trim)
+package_line_coverage_after: 84.22
+package_branch_coverage_after: 88.24
+package_func_coverage_after: 26.47
+
+# Re-run analyzer post-trim
+pure_redundant_count_after: 7
+pure_redundant_pct_after: 36.8
+
+# Effort
+trim_duration_min: 25
+notes: |
+  Third X017 data point. Calibration extends the conservative pattern:
+
+    - framework/core:         29 flagged,  6 deleted (21.0% deletion rate)
+    - plugins/fabricator:     13 flagged,  1 deleted ( 7.7% deletion rate)
+    - plugins/lattice-discord: 8 flagged,  1 deleted (12.5% deletion rate)
+
+  The flag rates remain high (74/81/40%) and deletion rates remain low
+  (21/7.7/12.5%) — H2's "≥50% deletable" prediction continues to be
+  refuted at the assertion-strength level. Pure-redundant is a
+  coverage-safety filter, not a deletion recommendation.
+
+  ## New calibration finding: greedy-reducer ordering can mislead
+
+  This package surfaced a refinement to the trim heuristic. The
+  analyzer flagged the 4xx error-response test as pure-redundant and
+  marked the 5xx test as "required" (with 9 unique lines). On
+  inspection, both tests exercise the same `if (!response.ok)` branch
+  — they are a parameter sweep over the same code path. The 4xx test
+  was the *stronger* assertion (status + body in error); the 5xx test
+  was *weaker* (status only).
+
+  The greedy reducer's required-vs-redundant labeling is arbitrary
+  within an equivalence class — it minimizes line coverage, not
+  assertion value. The correct cut was the weaker test, regardless of
+  which label the analyzer applied.
+
+  Operational rule for future trim sessions: when a pure-redundant
+  candidate looks like a parameter sweep over a single branch, also
+  inspect the corresponding *required* test in the low-uniqueness
+  list. If the required test is strictly weaker than the redundant
+  one, cut the required test instead.
+
+  ## Why so few cuts on lattice-discord
+
+  20 tests around 4 exported functions. Each test pins a distinct
+  observable contract:
+
+    - Three negative-space tests (no engine fields when engineFailure
+      absent, omits url when linkUrl null, returns ok=false when env
+      var unset and doesn't call fetch).
+    - Three trigger-specific branches in contextFields (stuck, failed,
+      drained, plus the unknown fallback) — each branch has different
+      output fields.
+    - Two tests of the !response.ok branch — one is a parameter sweep
+      (cut), one pins additional contracts (kept).
+    - The remaining tests pin distinct contracts (request shape, color
+      uniqueness, env var default, etc.).
+
+  ## Aggregate gate behavior
+
+  Branch coverage actually nudged UP (80.03 → 80.06) — the deleted test
+  contributed to a branch denominator that no longer exists, the same
+  pattern observed on fabricator. Line and function coverage unchanged
+  to two decimal places. Per-package coverage unchanged (per-package
+  test only counts lines, and the cut test was 100% redundant on the
+  channel.ts code paths).
+
+  Calibration data point for X017:
+    - flag rate: 40.0%, deletion rate: 12.5%, false-positive rate: 87.5%
+    - flag rate is significantly lower than core/fabricator (74%/81%) —
+      smaller, better-curated suite shows less analyzer noise.
+    - deletion rate is small but non-zero, validating that even
+      well-curated suites can carry redundant parameter sweeps.
+
+# commit_sha filled in by the commit itself
