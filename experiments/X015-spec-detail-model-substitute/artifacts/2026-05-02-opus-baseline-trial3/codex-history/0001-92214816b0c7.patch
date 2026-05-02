@@ -1,0 +1,572 @@
+
+
+diff --git a/packages/plugins/animator/src/index.ts b/packages/plugins/animator/src/index.ts
+index 53c1882..814c83e 100644
+--- a/packages/plugins/animator/src/index.ts
++++ b/packages/plugins/animator/src/index.ts
+@@ -23,6 +23,10 @@ export {
+   type SessionCost,
+   type SessionDoc,
+   type AnimatorConfig,
++  type AnimatorRateLimitBackoffConfig,
++  type AnimatorStatusDoc,
++  type AnimatorPauseReason,
++  type SessionTerminationTag,
+   // Provider types (for implementors)
+   type AnimatorSessionProvider,
+   type SessionProviderConfig,
+diff --git a/packages/plugins/claude-code/src/babysitter.ts b/packages/plugins/claude-code/src/babysitter.ts
+index 36613b3..a8ad747 100644
+--- a/packages/plugins/claude-code/src/babysitter.ts
++++ b/packages/plugins/claude-code/src/babysitter.ts
+@@ -36,9 +36,13 @@ import {
+   processNdjsonBuffer,
+   parseStreamJsonMessage,
+   extractFinalAssistantText,
++  detectRateLimitFromStderr,
++  detectRateLimitFromExitCode,
+   type StreamJsonResult,
+ } from './index.ts';
+ 
++import type { SessionTerminationTag } from '@shardworks/animator-apparatus';
++
+ // ── Config types ────────────────────────────────────────────────────────
+ 
+ /** A serialized tool definition as received in the babysitter config. */
+@@ -561,6 +565,64 @@ export async function reportRunning(
+   }
+ }
+ 
++/**
++ * Resolve the terminal status and error text for a terminated session,
++ * giving rate-limit detection precedence over the generic exit-code
++ * mapping.
++ *
++ * Cascade order (D5):
++ *   1. A `'cancelled'` override (SIGTERM path) — short-circuits.
++ *   2. A `terminationTag` already carried on the StreamJsonResult —
++ *      set by the NDJSON-level cascade (first-wins across NDJSON and
++ *      stderr observations in the babysitter).
++ *   3. A distinguished rate-limit exit code (RATE_LIMIT_EXIT_CODE).
++ *   4. Generic exit-code mapping (0 → completed, non-zero → failed).
++ *
++ * Returns both the payload status, a human-readable error string (only
++ * populated for the failed branches), and the tag that informed the
++ * decision (if any). The tag is forwarded to the guild so the Animator's
++ * back-off machine can disambiguate rate-limit terminations without
++ * pattern-matching on error text.
++ */
++export function resolveTerminalStatus(
++  result: StreamJsonResult,
++  statusOverride?: 'cancelled',
++): { status: 'completed' | 'failed' | 'cancelled' | 'rate-limited'; error?: string; terminationTag?: SessionTerminationTag } {
++  if (statusOverride === 'cancelled') {
++    return { status: 'cancelled' };
++  }
++
++  // Second priority: a structural tag observed by the NDJSON/stderr
++  // cascades. Fire even on exit code 0 because claude may emit the
++  // rate-limit signal and still exit cleanly.
++  if (result.terminationTag) {
++    return {
++      status: 'rate-limited',
++      error: result.terminationTag.detail ?? `Anima provider reported a rate limit (source: ${result.terminationTag.source})`,
++      terminationTag: result.terminationTag,
++    };
++  }
++
++  // Third priority: distinguished exit code.
++  const exitCodeTag = detectRateLimitFromExitCode(result.exitCode);
++  if (exitCodeTag) {
++    return {
++      status: 'rate-limited',
++      error: exitCodeTag.detail,
++      terminationTag: exitCodeTag,
++    };
++  }
++
++  if (result.exitCode === 0) {
++    return { status: 'completed' };
++  }
++
++  return {
++    status: 'failed',
++    error: `claude exited with code ${result.exitCode}`,
++  };
++}
++
+ /**
+  * Report the final session result to the guild via the session-record tool.
+  *
+@@ -575,20 +637,21 @@ export async function reportResult(
+ ): Promise<void> {
+   const route = toolNameToRoute('session-record');
+   const url = `${config.guildToolUrl}${route}`;
+-  const status = statusOverride ?? (result.exitCode === 0 ? 'completed' : 'failed');
++  const resolved = resolveTerminalStatus(result, statusOverride);
+   const output = extractFinalAssistantText(transcript);
+ 
+   const payload = {
+     sessionId: config.sessionId,
+-    status,
++    status: resolved.status,
+     exitCode: result.exitCode,
+     signal: result.signal,
+-    error: status === 'failed' ? `claude exited with code ${result.exitCode}` : undefined,
++    error: resolved.error,
+     costUsd: result.costUsd,
+     tokenUsage: result.tokenUsage,
+     output,
+     providerSessionId: result.providerSessionId,
+     transcript,
++    ...(resolved.terminationTag ? { terminationTag: resolved.terminationTag } : {}),
+   };
+ 
+   try {
+@@ -728,8 +791,19 @@ export async function runBabysitter(
+     }
+     claudeProc.stdin!.end();
+ 
+-    // Forward claude's stderr through the babysitter's redirected stderr
++    // Sample claude's stderr for rate-limit phrasing (narrow: pattern
++    // detection only, not general forwarding to the guild) then forward
++    // the raw bytes to the babysitter's redirected stderr log.
++    //
++    // First-wins: the NDJSON cascade runs inside parseStreamJsonMessage,
++    // so this branch only populates the tag when nothing more structured
++    // fired. That keeps the stderr pattern from masking the more
++    // informative NDJSON `source: 'ndjson-result'` tag in the common case.
+     claudeProc.stderr?.on('data', (chunk: Buffer) => {
++      if (!acc.terminationTag) {
++        const tag = detectRateLimitFromStderr(chunk.toString());
++        if (tag) acc.terminationTag = tag;
++      }
+       process.stderr.write(chunk);
+     });
+ 
+@@ -788,6 +862,12 @@ export async function runBabysitter(
+       costUsd?: number;
+       tokenUsage?: StreamJsonResult['tokenUsage'];
+       providerSessionId?: string;
++      /**
++       * First rate-limit signal captured from any source (NDJSON result
++       * inspection inside parseStreamJsonMessage, or the stderr pattern
++       * observer above). First-wins preserves the cascade order.
++       */
++      terminationTag?: SessionTerminationTag;
+     } = { transcript: [] };
+ 
+     let buffer = '';
+@@ -835,6 +915,7 @@ export async function runBabysitter(
+       tokenUsage: acc.tokenUsage,
+       providerSessionId: acc.providerSessionId,
+       signal: exitSignal,
++      ...(acc.terminationTag ? { terminationTag: acc.terminationTag } : {}),
+     };
+ 
+     // 8. Report result
+diff --git a/packages/plugins/claude-code/src/index.ts b/packages/plugins/claude-code/src/index.ts
+index 7d3b9a1..606bae5 100644
+--- a/packages/plugins/claude-code/src/index.ts
++++ b/packages/plugins/claude-code/src/index.ts
+@@ -20,10 +20,134 @@ import type {
+   SessionProviderConfig,
+   SessionProviderResult,
+   SessionChunk,
++  SessionTerminationTag,
+ } from '@shardworks/animator-apparatus';
+ 
+ import { launchDetached } from './detached.ts';
+ 
++// ── Rate-limit detection ────────────────────────────────────────────
++
++/**
++ * Exit code the claude CLI reports (at least sometimes) when the Anthropic
++ * API returns a rate-limit error. The CLI does not document its exit
++ * codes, so we treat a distinguished non-zero code as a signal and keep
++ * it tunable in one place.
++ *
++ * Used as a last-resort branch: NDJSON result inspection fires first,
++ * stderr pattern fires second, and the exit code catches the case where
++ * the babysitter has no structural signal to go on.
++ */
++export const RATE_LIMIT_EXIT_CODE = 7;
++
++/**
++ * Regex that matches common rate-limit phrasings in claude CLI stderr
++ * output. The CLI's stderr text is not a stable contract — the regex is
++ * deliberately forgiving (case-insensitive, alternate phrasings) rather
++ * than narrow. If none of the branches fire, the cascade falls through
++ * to the exit-code branch.
++ */
++export const RATE_LIMIT_STDERR_PATTERN =
++  /(rate[-\s]?limit|429\b|usage[-\s]?limit|quota[-\s]?exceeded|too\s+many\s+requests)/i;
++
++/**
++ * Detect a rate-limit signature on an NDJSON message from the claude
++ * `--output-format stream-json` stream.
++ *
++ * Looks for:
++ *  - `msg.subtype` === 'error_max_turns' or any value containing the
++ *    substring `rate_limit` / `rate-limit`
++ *  - `msg.is_error` true with `msg.error` / `msg.message.error` text
++ *    matching the stderr pattern
++ *  - `msg.type` === 'result' whose `result` field contains a rate-limit
++ *    phrase (claude's CLI sometimes surfaces provider errors there)
++ *
++ * The wire shape of claude's error NDJSON is not formally documented, so
++ * the branches are generous — any positive match returns a tag. Returns
++ * null when the message does not indicate rate limiting.
++ */
++export function detectRateLimitFromNdjson(
++  msg: Record<string, unknown>,
++): SessionTerminationTag | null {
++  const subtype = typeof msg.subtype === 'string' ? msg.subtype : undefined;
++  if (subtype && /rate[-_ ]?limit/i.test(subtype)) {
++    return {
++      kind: 'rate-limit',
++      source: 'ndjson-result',
++      detail: `NDJSON subtype: ${subtype}`,
++    };
++  }
++
++  if (msg.is_error === true) {
++    const errText =
++      (typeof msg.error === 'string' ? msg.error : undefined) ??
++      (typeof (msg as { message?: { error?: unknown } }).message?.error === 'string'
++        ? ((msg as { message: { error: string } }).message.error)
++        : undefined);
++    if (errText && RATE_LIMIT_STDERR_PATTERN.test(errText)) {
++      return {
++        kind: 'rate-limit',
++        source: 'ndjson-result',
++        detail: errText.slice(0, 200),
++      };
++    }
++  }
++
++  if (msg.type === 'result') {
++    const resultText = typeof msg.result === 'string' ? msg.result : undefined;
++    if (resultText && RATE_LIMIT_STDERR_PATTERN.test(resultText)) {
++      return {
++        kind: 'rate-limit',
++        source: 'ndjson-result',
++        detail: resultText.slice(0, 200),
++      };
++    }
++  }
++
++  return null;
++}
++
++/**
++ * Detect a rate-limit signature in a block of stderr text.
++ *
++ * Returns a tag when the pattern matches, null otherwise. The detail
++ * carries a bounded excerpt of the matching line so operators can
++ * confirm the detection in logs without the Animator forwarding the
++ * full stderr buffer.
++ */
++export function detectRateLimitFromStderr(
++  chunk: string,
++): SessionTerminationTag | null {
++  const match = chunk.match(RATE_LIMIT_STDERR_PATTERN);
++  if (!match) return null;
++  // Capture the line around the match for context — truncated to keep
++  // the tag payload small.
++  const lines = chunk.split('\n');
++  const hit = lines.find((l) => RATE_LIMIT_STDERR_PATTERN.test(l)) ?? match[0];
++  return {
++    kind: 'rate-limit',
++    source: 'stderr-pattern',
++    detail: hit.slice(0, 200),
++  };
++}
++
++/**
++ * Detect a rate-limit signature from a process exit code.
++ *
++ * Used as the last branch of the cascade — the NDJSON and stderr
++ * observers fire first. Returns a tag only for the one distinguished
++ * code; generic non-zero codes surface as plain failures.
++ */
++export function detectRateLimitFromExitCode(
++  exitCode: number,
++): SessionTerminationTag | null {
++  if (exitCode !== RATE_LIMIT_EXIT_CODE) return null;
++  return {
++    kind: 'rate-limit',
++    source: 'exit-code',
++    detail: `claude exited with distinguished rate-limit exit code ${exitCode}`,
++  };
++}
++
+ // ── Output extraction ───────────────────────────────────────────────
+ 
+ /**
+@@ -131,6 +255,13 @@ export interface StreamJsonResult {
+   providerSessionId?: string;
+   /** Process signal name if killed by signal (e.g. 'SIGTERM'). */
+   signal?: string;
++  /**
++   * Structured termination tag. Populated by the babysitter's detection
++   * cascade (NDJSON parse → stderr pattern → exit-code) when the
++   * session terminated under a detectable condition (today: rate
++   * limiting).
++   */
++  terminationTag?: SessionTerminationTag;
+ }
+ 
+ /**
+@@ -148,8 +279,23 @@ export function parseStreamJsonMessage(
+     costUsd?: number;
+     tokenUsage?: StreamJsonResult['tokenUsage'];
+     providerSessionId?: string;
++    /**
++     * First rate-limit signal observed on the NDJSON stream. Kept
++     * first-wins so the cascade source is auditable. The babysitter
++     * promotes this onto the final StreamJsonResult when present.
++     */
++    terminationTag?: SessionTerminationTag;
+   },
+ ): SessionChunk[] {
++  // Detection first (first-wins) — examine every NDJSON message the
++  // claude CLI emits. An error or `result`-with-error message may carry
++  // a rate-limit signature even when we otherwise just pass the message
++  // through to the transcript.
++  if (!acc.terminationTag) {
++    const tag = detectRateLimitFromNdjson(msg);
++    if (tag) acc.terminationTag = tag;
++  }
++
+   const chunks: SessionChunk[] = [];
+ 
+   if (msg.type === 'assistant') {
+diff --git a/packages/plugins/claude-code/src/rate-limit-detection.test.ts b/packages/plugins/claude-code/src/rate-limit-detection.test.ts
+new file mode 100644
+index 0000000..87e1b12
+--- /dev/null
++++ b/packages/plugins/claude-code/src/rate-limit-detection.test.ts
+@@ -0,0 +1,222 @@
++/**
++ * Tests for rate-limit signature detection in the claude-code provider.
++ *
++ * Covers the three-branch cascade declared by decision D5:
++ *   1. NDJSON `result` / error message inspection (first-wins)
++ *   2. Stderr pattern match
++ *   3. Distinguished exit code mapping
++ *
++ * Also verifies the cascade ordering inside resolveTerminalStatus() —
++ * the babysitter's one-stop seat for translating a StreamJsonResult and
++ * optional status override into the payload sent to session-record.
++ */
++
++import { describe, it } from 'node:test';
++import assert from 'node:assert/strict';
++
++import {
++  detectRateLimitFromNdjson,
++  detectRateLimitFromStderr,
++  detectRateLimitFromExitCode,
++  parseStreamJsonMessage,
++  RATE_LIMIT_EXIT_CODE,
++  type StreamJsonResult,
++} from './index.ts';
++import { resolveTerminalStatus } from './babysitter.ts';
++import type { SessionTerminationTag } from '@shardworks/animator-apparatus';
++
++function freshAcc(): {
++  transcript: Record<string, unknown>[];
++  costUsd?: number;
++  tokenUsage?: StreamJsonResult['tokenUsage'];
++  providerSessionId?: string;
++  terminationTag?: SessionTerminationTag;
++} {
++  return { transcript: [] };
++}
++
++// ── NDJSON detection ────────────────────────────────────────────────
++
++describe('detectRateLimitFromNdjson()', () => {
++  it('tags messages with a rate_limit subtype', () => {
++    const tag = detectRateLimitFromNdjson({ type: 'result', subtype: 'rate_limit_error' });
++    assert.ok(tag);
++    assert.equal(tag!.kind, 'rate-limit');
++    assert.equal(tag!.source, 'ndjson-result');
++    assert.match(tag!.detail ?? '', /rate_limit_error/);
++  });
++
++  it('tags is_error messages whose error text matches the pattern', () => {
++    const tag = detectRateLimitFromNdjson({
++      is_error: true,
++      error: 'HTTP 429: rate limit exceeded',
++    });
++    assert.ok(tag);
++    assert.equal(tag!.source, 'ndjson-result');
++  });
++
++  it('tags result messages whose result text mentions rate limit', () => {
++    const tag = detectRateLimitFromNdjson({
++      type: 'result',
++      result: 'Error: Rate limit exceeded. Please try again later.',
++    });
++    assert.ok(tag);
++    assert.equal(tag!.source, 'ndjson-result');
++  });
++
++  it('returns null on ordinary assistant messages', () => {
++    const tag = detectRateLimitFromNdjson({
++      type: 'assistant',
++      message: { content: [{ type: 'text', text: 'Hello world' }] },
++    });
++    assert.equal(tag, null);
++  });
++
++  it('returns null on a result message without matching text', () => {
++    const tag = detectRateLimitFromNdjson({
++      type: 'result',
++      result: 'Done!',
++      total_cost_usd: 0.01,
++    });
++    assert.equal(tag, null);
++  });
++});
++
++// ── stderr detection ────────────────────────────────────────────────
++
++describe('detectRateLimitFromStderr()', () => {
++  it('matches "rate limit" phrasing case-insensitively', () => {
++    const tag = detectRateLimitFromStderr('Error: Rate Limit reached, retry later.\n');
++    assert.ok(tag);
++    assert.equal(tag!.source, 'stderr-pattern');
++  });
++
++  it('matches 429 status code', () => {
++    const tag = detectRateLimitFromStderr('HTTP/1.1 429 Too Many Requests\n');
++    assert.ok(tag);
++  });
++
++  it('matches "usage limit" phrasing', () => {
++    const tag = detectRateLimitFromStderr('Your usage limit has been reached for today.\n');
++    assert.ok(tag);
++  });
++
++  it('returns null on ordinary stderr', () => {
++    const tag = detectRateLimitFromStderr('[babysitter] MCP proxy server listening on port 12345\n');
++    assert.equal(tag, null);
++  });
++
++  it('bounds the detail excerpt to 200 characters', () => {
++    const longLine = 'rate limit exceeded: ' + 'x'.repeat(500);
++    const tag = detectRateLimitFromStderr(longLine);
++    assert.ok(tag);
++    assert.ok((tag!.detail ?? '').length <= 200);
++  });
++});
++
++// ── exit code detection ────────────────────────────────────────────
++
++describe('detectRateLimitFromExitCode()', () => {
++  it('tags the distinguished exit code', () => {
++    const tag = detectRateLimitFromExitCode(RATE_LIMIT_EXIT_CODE);
++    assert.ok(tag);
++    assert.equal(tag!.source, 'exit-code');
++  });
++
++  it('returns null for exit code 0', () => {
++    assert.equal(detectRateLimitFromExitCode(0), null);
++  });
++
++  it('returns null for generic non-zero exit codes', () => {
++    assert.equal(detectRateLimitFromExitCode(1), null);
++    assert.equal(detectRateLimitFromExitCode(137), null);
++  });
++});
++
++// ── parseStreamJsonMessage cascade integration ──────────────────────
++
++describe('parseStreamJsonMessage() rate-limit accumulation', () => {
++  it('writes a terminationTag on the accumulator when it sees a rate-limit subtype', () => {
++    const acc = freshAcc();
++    parseStreamJsonMessage({ type: 'result', subtype: 'rate_limit_error' }, acc);
++    assert.ok(acc.terminationTag);
++    assert.equal(acc.terminationTag!.kind, 'rate-limit');
++  });
++
++  it('is first-wins — a later success does not clear the tag', () => {
++    const acc = freshAcc();
++    parseStreamJsonMessage({ is_error: true, error: '429 rate limit' }, acc);
++    parseStreamJsonMessage({
++      type: 'assistant',
++      message: { content: [{ type: 'text', text: 'after' }] },
++    }, acc);
++    assert.ok(acc.terminationTag);
++    assert.equal(acc.terminationTag!.source, 'ndjson-result');
++  });
++
++  it('leaves terminationTag undefined on an ordinary happy-path transcript', () => {
++    const acc = freshAcc();
++    parseStreamJsonMessage({
++      type: 'assistant',
++      message: { content: [{ type: 'text', text: 'Done' }] },
++    }, acc);
++    parseStreamJsonMessage({
++      type: 'result',
++      total_cost_usd: 0.05,
++      session_id: 'sess-42',
++      usage: { input_tokens: 10, output_tokens: 5 },
++    }, acc);
++    assert.equal(acc.terminationTag, undefined);
++  });
++});
++
++// ── resolveTerminalStatus cascade ───────────────────────────────────
++
++describe('resolveTerminalStatus()', () => {
++  it('honours a cancel override over everything else', () => {
++    const result: StreamJsonResult = {
++      exitCode: RATE_LIMIT_EXIT_CODE,
++      transcript: [],
++      terminationTag: { kind: 'rate-limit', source: 'ndjson-result' },
++    };
++    const resolved = resolveTerminalStatus(result, 'cancelled');
++    assert.equal(resolved.status, 'cancelled');
++    assert.equal(resolved.terminationTag, undefined);
++  });
++
++  it('promotes a pre-populated NDJSON termination tag to rate-limited even on exit 0', () => {
++    const result: StreamJsonResult = {
++      exitCode: 0,
++      transcript: [],
++      terminationTag: { kind: 'rate-limit', source: 'ndjson-result', detail: 'rate_limit_error' },
++    };
++    const resolved = resolveTerminalStatus(result);
++    assert.equal(resolved.status, 'rate-limited');
++    assert.ok(resolved.terminationTag);
++    assert.equal(resolved.terminationTag!.source, 'ndjson-result');
++  });
++
++  it('falls back to the distinguished exit-code branch when no tag is present', () => {
++    const result: StreamJsonResult = {
++      exitCode: RATE_LIMIT_EXIT_CODE,
++      transcript: [],
++    };
++    const resolved = resolveTerminalStatus(result);
++    assert.equal(resolved.status, 'rate-limited');
++    assert.ok(resolved.terminationTag);
++    assert.equal(resolved.terminationTag!.source, 'exit-code');
++  });
++
++  it('returns completed for exit 0 with no rate-limit signal', () => {
++    const resolved = resolveTerminalStatus({ exitCode: 0, transcript: [] });
++    assert.equal(resolved.status, 'completed');
++    assert.equal(resolved.terminationTag, undefined);
++  });
++
++  it('returns failed for a generic non-zero exit code', () => {
++    const resolved = resolveTerminalStatus({ exitCode: 1, transcript: [] });
++    assert.equal(resolved.status, 'failed');
++    assert.match(resolved.error ?? '', /exited with code 1/);
++    assert.equal(resolved.terminationTag, undefined);
++  });
++});

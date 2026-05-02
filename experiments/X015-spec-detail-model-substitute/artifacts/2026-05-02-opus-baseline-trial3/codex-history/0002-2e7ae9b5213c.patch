@@ -1,0 +1,1159 @@
+
+
+diff --git a/packages/plugins/animator/src/animator.test.ts b/packages/plugins/animator/src/animator.test.ts
+index 5e9f09c..4bb7fe6 100644
+--- a/packages/plugins/animator/src/animator.test.ts
++++ b/packages/plugins/animator/src/animator.test.ts
+@@ -236,6 +236,8 @@ function setup(
+   memBackend.ensureBook({ ownerId: 'animator', book: 'transcripts' }, {
+     indexes: ['sessionId'],
+   });
++  memBackend.ensureBook({ ownerId: 'animator', book: 'state' }, {});
++  memBackend.ensureBook({ ownerId: 'animator', book: 'status' }, {});
+ 
+   // Start animator
+   const animatorApparatus = (animatorPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
+@@ -1483,4 +1485,190 @@ describe('Animator', () => {
+       assert.equal(result.size, 0);
+     });
+   });
++
++  // ── Rate-limit pre-check (D12 / D13) ────────────────────────────
++
++  describe('animate() rate-limit pre-check', () => {
++    beforeEach(() => {
++      setup();
++    });
++
++    async function setPaused(windowMs: number): Promise<void> {
++      // Directly seed the status book, then force the back-off cache to
++      // refresh by observing a rate-limited terminal. This mirrors the
++      // in-production path (machine writes the doc and keeps the cache
++      // fresh) without reaching into private state.
++      const statusBook = stacks.book('animator', 'status');
++      const pausedUntil = new Date(Date.now() + windowMs).toISOString();
++      await statusBook.put({
++        id: 'current',
++        state: 'paused',
++        pausedSince: new Date().toISOString(),
++        pausedUntil,
++        pauseReason: 'rate-limit',
++        backoffLevel: 0,
++      });
++      // Trigger the back-off machine to re-read.
++      await animator.getStatus();
++    }
++
++    it('synthesizes a rate-limited SessionResult when paused (D12)', async () => {
++      await setPaused(60_000);
++      const handle = animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      });
++      const result = await handle.result;
++      assert.equal(result.status, 'rate-limited');
++      assert.ok(result.terminationTag);
++      assert.equal(result.terminationTag!.kind, 'rate-limit');
++      // No SessionDoc must be written for the rejected call.
++      const sessions = stacks.readBook<SessionDoc>('animator', 'sessions');
++      const doc = await sessions.get(result.id);
++      assert.ok(doc == null, `Expected no SessionDoc for rejected call; got ${JSON.stringify(doc)}`);
++    });
++
++    it('allows dispatch when the pause window has elapsed (D24)', async () => {
++      // Seed a paused doc whose window has already elapsed.
++      const statusBook = stacks.book('animator', 'status');
++      await statusBook.put({
++        id: 'current',
++        state: 'paused',
++        pausedSince: new Date(Date.now() - 120_000).toISOString(),
++        pausedUntil: new Date(Date.now() - 60_000).toISOString(),
++        pauseReason: 'rate-limit',
++        backoffLevel: 0,
++      });
++      // Warm cache.
++      await animator.getStatus();
++
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++      assert.equal(result.status, 'completed');
++    });
++
++    it('getStatus() returns the persisted back-off doc', async () => {
++      const before = await animator.getStatus();
++      assert.equal(before.state, 'running');
++      assert.equal(before.backoffLevel, 0);
++
++      await setPaused(30_000);
++      const after = await animator.getStatus();
++      assert.equal(after.state, 'paused');
++      assert.ok(after.pausedUntil);
++    });
++
++    it('emits empty chunks on pre-check rejection', async () => {
++      await setPaused(60_000);
++      const handle = animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++        streaming: true,
++      });
++      const collected: SessionChunk[] = [];
++      for await (const c of handle.chunks) collected.push(c);
++      assert.equal(collected.length, 0);
++    });
++  });
++
++  // ── Back-off transitions via session-record ────────────────────
++
++  describe('Back-off transitions via session-record', () => {
++    beforeEach(() => {
++      setup();
++    });
++
++    it('paused → running after a completed terminal reset (D7)', async () => {
++      const statusBook = stacks.book('animator', 'status');
++      await statusBook.put({
++        id: 'current',
++        state: 'paused',
++        pausedSince: new Date().toISOString(),
++        pausedUntil: new Date(Date.now() + 60_000).toISOString(),
++        pauseReason: 'rate-limit',
++        backoffLevel: 2,
++      });
++      // Reload cache.
++      await animator.getStatus();
++
++      // Simulate a completed session-record firing through the
++      // session-record handler (which invokes the back-off observer
++      // registered by animator.start()).
++      const { handleSessionRecord } = await import('./session-record-handler.ts');
++      const sessions = stacks.book<SessionDoc>('animator', 'sessions');
++      await sessions.put({
++        id: 'ses-reset',
++        status: 'running',
++        startedAt: new Date().toISOString(),
++        provider: 'fake',
++      });
++      await handleSessionRecord({
++        sessionId: 'ses-reset',
++        status: 'completed',
++        exitCode: 0,
++      });
++
++      const status = await animator.getStatus();
++      assert.equal(status.state, 'running');
++      assert.equal(status.backoffLevel, 0);
++    });
++  });
++
++  // ── Config validation ────────────────────────────────────────────
++
++  describe('startup config validation (D10 patron override)', () => {
++    afterEach(() => {
++      clearGuild();
++    });
++
++    it('throws on a malformed rateLimitBackoff block', () => {
++      assert.throws(
++        () => {
++          const memBackend = new MemoryBackend();
++          const stacksPlugin = createStacksApparatus(memBackend);
++          const animatorPlugin = createAnimator();
++          const apparatusMap = new Map<string, unknown>();
++          const fakeGuild: Guild = {
++            home: '/tmp/fake-guild',
++            apparatus<T>(name: string): T {
++              const api = apparatusMap.get(name);
++              if (!api) throw new Error(`Apparatus "${name}" not installed`);
++              return api as T;
++            },
++            config<T>(): T { return {} as T; },
++            writeConfig() {},
++            guildConfig() {
++              return {
++                name: 't',
++                nexus: '0.0.0',
++                plugins: [],
++                settings: { model: 'sonnet' },
++                animator: {
++                  sessionProvider: 'fake',
++                  rateLimitBackoff: { initialMs: -1 },
++                },
++              } as never;
++            },
++            kits: () => [],
++            apparatuses: () => [],
++            startupWarnings() { return []; },
++          };
++          setGuild(fakeGuild);
++          apparatusMap.set('fake', createFakeProvider());
++          memBackend.ensureBook({ ownerId: 'animator', book: 'sessions' }, { indexes: [] });
++          memBackend.ensureBook({ ownerId: 'animator', book: 'transcripts' }, { indexes: [] });
++          memBackend.ensureBook({ ownerId: 'animator', book: 'state' }, {});
++          memBackend.ensureBook({ ownerId: 'animator', book: 'status' }, {});
++          const stacksApp = (stacksPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
++          stacksApp.start({ on: () => {}, kits: () => [] });
++          apparatusMap.set('stacks', stacksApp.provides);
++          const animatorApp = (animatorPlugin as { apparatus: { start: (ctx: unknown) => void } }).apparatus;
++          animatorApp.start({ on: () => {}, kits: () => [] });
++        },
++        /initialMs/,
++      );
++    });
++  });
+ });
+diff --git a/packages/plugins/animator/src/animator.ts b/packages/plugins/animator/src/animator.ts
+index 7b12783..955f588 100644
+--- a/packages/plugins/animator/src/animator.ts
++++ b/packages/plugins/animator/src/animator.ts
+@@ -36,6 +36,17 @@ import type {
+ import { sessionList, sessionShow, summon as summonTool, sessionCancel, sessionRunning, sessionRecord, sessionHeartbeat } from './tools/index.ts';
+ import { animatorRoutes } from './oculus-routes.ts';
+ import { drainDlq, recoverOrphans } from './startup.ts';
++import {
++  ANIMATOR_STATUS_DOC_ID,
++  buildPrecheckRejectionResult,
++  createBackoffMachine,
++  createResumeProbeTracker,
++  freshStatusDoc,
++  isDispatchable,
++  validateBackoffConfig,
++  type BackoffMachine,
++} from './rate-limit-backoff.ts';
++import { setBackoffMachine } from './session-record-handler.ts';
+ 
+ // ── Session broadcast infrastructure ─────────────────────────────────
+ 
+@@ -382,6 +393,8 @@ export function createAnimator(): Plugin {
+   let config: AnimatorConfig = {};
+   let sessions: Book<SessionDoc>;
+   let transcripts: Book<TranscriptDoc>;
++  let statusBook: Book<AnimatorStatusDoc>;
++  let backoff: BackoffMachine;
+ 
+   /**
+    * In-memory registry of active session broadcasters.
+@@ -398,11 +411,11 @@ export function createAnimator(): Plugin {
+     },
+ 
+     async getStatus(): Promise<AnimatorStatusDoc> {
+-      // Placeholder (T1): returns a default `running` doc so the type
+-      // system compiles end-to-end. T3 replaces this with a real read
+-      // against the `animator/status` book (id: 'current') and the
+-      // back-off state machine.
+-      return { id: 'current', state: 'running', backoffLevel: 0 };
++      // The back-off machine owns the `'current'` doc in the animator
++      // status book. A fresh install (never rate-limited) returns the
++      // default running shape rather than `undefined` — consumers can
++      // branch on `state`/`pausedUntil` without a null check.
++      return backoff ? backoff.read() : freshStatusDoc();
+     },
+ 
+     async getSessionCosts(sessionIds: string[]): Promise<Map<string, SessionCost>> {
+@@ -553,12 +566,62 @@ export function createAnimator(): Plugin {
+       const provider = resolveProvider(config);
+       const model = resolveModel();
+ 
+-      // Step 1: use pre-generated session id if provided (from summon()),
+-      // otherwise generate one. Capture startedAt.
+-      const id = request.sessionId ?? generateId('ses', 4);
+-      const startedAt = new Date().toISOString();
++      // Step 0: rate-limit pre-check (D13 — top of animate(), before id
++      // generation or SessionDoc write). Uses the back-off machine's
++      // synchronous cached doc so the returned handle keeps its
++      // happy-path sync contract (no await before activeSessions is
++      // populated, so immediate subscribeToSession() calls resolve).
++      // When paused AND the current window has not yet elapsed, we
++      // synthesize a rate-limited SessionResult and resolve without
++      // dispatching; no SessionDoc is written for the rejected call.
++      if (backoff) {
++        const statusDoc = backoff.peek();
++        if (!isDispatchable(statusDoc)) {
++          const rejectionId = request.sessionId ?? generateId('ses', 4);
++          const startedAt = new Date().toISOString();
++          const rejection = buildPrecheckRejectionResult({
++            sessionId: rejectionId,
++            startedAt,
++            provider: provider.name,
++            pausedUntil: statusDoc.pausedUntil ?? new Date().toISOString(),
++            pauseReason: statusDoc.pauseReason ?? 'rate-limit',
++            metadata: request.metadata,
++            conversationId: request.conversationId,
++          });
++          const emptyChunks: AsyncIterable<SessionChunk> = {
++            [Symbol.asyncIterator]() {
++              return {
++                async next() {
++                  return { value: undefined as unknown as SessionChunk, done: true };
++                },
++              };
++            },
++          };
++          return {
++            sessionId: rejectionId,
++            chunks: emptyChunks,
++            result: Promise.resolve(rejection),
++          };
++        }
++        // Gate open — record the dispatch attempt so the next rate-limit
++        // terminal increments back-off rather than coalescing (D8).
++        backoff.noteDispatch();
++      }
++
++      return dispatchAnimate(request, request.sessionId ?? generateId('ses', 4));
++    },
++  };
+ 
+-      const providerConfig = buildProviderConfig(request, model, id);
++  /**
++   * The pre-check-free dispatch path. Extracted so animate() can call it
++   * after the pause gate has been cleared. Always writes a SessionDoc
++   * and drives the provider.launch lifecycle.
++   */
++  function dispatchAnimate(request: AnimateRequest, id: string): AnimateHandle {
++    const provider = resolveProvider(config);
++    const model = resolveModel();
++    const startedAt = new Date().toISOString();
++    const providerConfig = buildProviderConfig(request, model, id);
+ 
+       // Single path — the provider returns { chunks, result } regardless
+       // of whether streaming is enabled. Providers that don't support
+@@ -679,8 +742,7 @@ export function createAnimator(): Plugin {
+       // The handle's chunks is a broadcaster subscription, providing history
+       // replay and real-time delivery for this session's caller.
+       return { sessionId: id, chunks: broadcaster.subscribe(), result };
+-    },
+-  };
++  }
+ 
+   return {
+     apparatus: {
+@@ -696,6 +758,12 @@ export function createAnimator(): Plugin {
+             indexes: ['sessionId'],
+           },
+           state: {},
++          // Single-row book for the rate-limit back-off machine.
++          // Document id is always `'current'` (ANIMATOR_STATUS_DOC_ID).
++          // The Laboratory's CDC ingestion of this book is the historical
++          // record of pause / resume transitions; no separate events
++          // table is maintained.
++          status: {},
+         },
+         tools: [sessionList, sessionShow, summonTool, sessionCancel, sessionRunning, sessionRecord, sessionHeartbeat],
+         pages: [
+@@ -710,9 +778,39 @@ export function createAnimator(): Plugin {
+         const g = guild();
+         config = g.guildConfig().animator ?? {};
+ 
++        // Fail-loud validation of the rate-limit back-off block (D10
++        // patron override). The default shape is applied silently when
++        // the block is absent; malformed values throw at startup so we
++        // don't silently drift from the configured window.
++        validateBackoffConfig(config.rateLimitBackoff);
++
+         const stacks = g.apparatus<StacksApi>('stacks');
+         sessions = stacks.book<SessionDoc>('animator', 'sessions');
+         transcripts = stacks.book<TranscriptDoc>('animator', 'transcripts');
++        statusBook = stacks.book<AnimatorStatusDoc>('animator', 'status');
++
++        // Build the back-off machine. The config read is deferred per
++        // transition so a live-reloaded guild config takes effect on
++        // the next transition without restarting the Animator.
++        backoff = createBackoffMachine({
++          statusBook,
++          config: {
++            get: () => validateBackoffConfig(guild().guildConfig().animator?.rateLimitBackoff),
++          },
++          probe: createResumeProbeTracker(),
++        });
++        setBackoffMachine({ observeTerminal: backoff.observeTerminal });
++
++        // Warm the back-off cache so the first animate() call's
++        // synchronous pre-check reflects the persisted state rather
++        // than the default running shape. D24's "passive reconciliation"
++        // intentionally leaves any persisted paused doc alone — the
++        // first dispatch after `pausedUntil` elapses naturally flips it.
++        void backoff.read().catch((err) => {
++          console.warn(
++            `[animator] Failed to read initial rate-limit status: ${err instanceof Error ? err.message : err}`,
++          );
++        });
+ 
+         const GUILD_HEARTBEAT_INTERVAL_MS = 30_000;
+         const GUILD_HEARTBEAT_DOC_ID = 'guild-heartbeat';
+diff --git a/packages/plugins/animator/src/rate-limit-backoff.test.ts b/packages/plugins/animator/src/rate-limit-backoff.test.ts
+new file mode 100644
+index 0000000..fdb1c10
+--- /dev/null
++++ b/packages/plugins/animator/src/rate-limit-backoff.test.ts
+@@ -0,0 +1,305 @@
++/**
++ * Tests for the Animator rate-limit back-off state machine.
++ *
++ * Covers:
++ *  - Back-off config validation (D10 — patron-override fail-loud shape).
++ *  - The state machine's pause / resume / coalesce / increment rules
++ *    (D7, D8).
++ *  - Reading the status doc via `read()` and the cached `peek()`.
++ *  - isDispatchable() predicate (D24 — combined state + window check).
++ *  - buildPrecheckRejectionResult() shape parity with in-flight
++ *    rate-limited terminals.
++ */
++
++import { describe, it, beforeEach } from 'node:test';
++import assert from 'node:assert/strict';
++
++import { createStacksApparatus } from '@shardworks/stacks-apparatus';
++import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
++import type { Book, StacksApi } from '@shardworks/stacks-apparatus';
++import { setGuild, clearGuild } from '@shardworks/nexus-core';
++import type { Guild, GuildConfig, KitEntry } from '@shardworks/nexus-core';
++
++import {
++  ANIMATOR_STATUS_DOC_ID,
++  DEFAULT_RATE_LIMIT_BACKOFF,
++  buildPrecheckRejectionResult,
++  createBackoffMachine,
++  createResumeProbeTracker,
++  freshStatusDoc,
++  isDispatchable,
++  validateBackoffConfig,
++} from './rate-limit-backoff.ts';
++import type { AnimatorStatusDoc } from './types.ts';
++
++// ── validateBackoffConfig ───────────────────────────────────────────
++
++describe('validateBackoffConfig()', () => {
++  it('returns defaults when config is absent', () => {
++    const resolved = validateBackoffConfig(undefined);
++    assert.deepEqual(resolved, { ...DEFAULT_RATE_LIMIT_BACKOFF });
++  });
++
++  it('accepts partial overrides', () => {
++    const resolved = validateBackoffConfig({ initialMs: 1000 });
++    assert.equal(resolved.initialMs, 1000);
++    assert.equal(resolved.maxMs, DEFAULT_RATE_LIMIT_BACKOFF.maxMs);
++    assert.equal(resolved.factor, DEFAULT_RATE_LIMIT_BACKOFF.factor);
++  });
++
++  it('throws on non-object input', () => {
++    assert.throws(() => validateBackoffConfig(42 as unknown as undefined));
++  });
++
++  it('throws on a negative initialMs', () => {
++    assert.throws(() => validateBackoffConfig({ initialMs: -1 }));
++  });
++
++  it('throws on a non-integer maxMs', () => {
++    assert.throws(() => validateBackoffConfig({ maxMs: 1.5 }));
++  });
++
++  it('throws on factor <= 1', () => {
++    assert.throws(() => validateBackoffConfig({ factor: 1 }));
++  });
++
++  it('throws when maxMs < initialMs', () => {
++    assert.throws(() => validateBackoffConfig({ initialMs: 1000, maxMs: 500 }));
++  });
++
++  it('accepts a fully-specified block', () => {
++    const resolved = validateBackoffConfig({ initialMs: 1000, maxMs: 4000, factor: 3 });
++    assert.deepEqual(resolved, { initialMs: 1000, maxMs: 4000, factor: 3 });
++  });
++});
++
++// ── isDispatchable ──────────────────────────────────────────────────
++
++describe('isDispatchable()', () => {
++  it('allows dispatch while running', () => {
++    assert.equal(isDispatchable({ id: 'current', state: 'running', backoffLevel: 0 }), true);
++  });
++
++  it('allows dispatch when paused but window has elapsed', () => {
++    const past = new Date(Date.now() - 60_000).toISOString();
++    const doc: AnimatorStatusDoc = {
++      id: 'current',
++      state: 'paused',
++      pausedUntil: past,
++      backoffLevel: 0,
++    };
++    assert.equal(isDispatchable(doc), true);
++  });
++
++  it('blocks dispatch when paused and window is open', () => {
++    const future = new Date(Date.now() + 60_000).toISOString();
++    const doc: AnimatorStatusDoc = {
++      id: 'current',
++      state: 'paused',
++      pausedUntil: future,
++      backoffLevel: 0,
++    };
++    assert.equal(isDispatchable(doc), false);
++  });
++});
++
++// ── back-off state machine ──────────────────────────────────────────
++
++describe('BackoffMachine', () => {
++  let stacks: StacksApi;
++  let statusBook: Book<AnimatorStatusDoc>;
++  let clock: number;
++  const nowFn = () => clock;
++
++  beforeEach(() => {
++    const memBackend = new MemoryBackend();
++    memBackend.ensureBook({ ownerId: 'animator', book: 'status' }, {});
++    const apparatuses = new Map<string, unknown>();
++    const fakeGuild: Guild = {
++      home: '/tmp/backoff-test',
++      apparatus<T>(name: string): T {
++        const api = apparatuses.get(name);
++        if (!api) throw new Error(`Apparatus "${name}" not installed`);
++        return api as T;
++      },
++      config<T>(): T { return {} as T; },
++      writeConfig() {},
++      guildConfig() { return { name: 't', nexus: '0.0.0', plugins: [] } as GuildConfig; },
++      kits() { return []; },
++      apparatuses() { return []; },
++      startupWarnings() { return []; },
++    };
++    setGuild(fakeGuild);
++    const stacksPlugin = createStacksApparatus(memBackend);
++    if (!('apparatus' in stacksPlugin)) throw new Error('stacks must be apparatus');
++    const noopCtx = { on: () => {}, kits: () => [] as KitEntry[] };
++    stacksPlugin.apparatus.start(noopCtx as never);
++    stacks = stacksPlugin.apparatus.provides as StacksApi;
++    apparatuses.set('stacks', stacks);
++
++    statusBook = stacks.book<AnimatorStatusDoc>('animator', 'status');
++    clock = Date.UTC(2026, 3, 24, 0, 0, 0);
++  });
++
++  function make(opts: {
++    initialMs?: number;
++    maxMs?: number;
++    factor?: number;
++  } = {}) {
++    const cfg = {
++      initialMs: opts.initialMs ?? 1000,
++      maxMs: opts.maxMs ?? 8000,
++      factor: opts.factor ?? 2,
++    };
++    return createBackoffMachine({
++      statusBook,
++      config: { get: () => cfg },
++      now: nowFn,
++      probe: createResumeProbeTracker(),
++    });
++  }
++
++  it('starts in the fresh running state', async () => {
++    const bm = make();
++    const doc = await bm.read();
++    assert.equal(doc.state, 'running');
++    assert.equal(doc.backoffLevel, 0);
++    assert.equal(doc.pausedUntil, undefined);
++  });
++
++  it('opens a fresh pause on a rate-limit terminal', async () => {
++    const bm = make();
++    await bm.read(); // warm cache
++    await bm.observeTerminal({ sessionId: 'ses-1', status: 'rate-limited' });
++    const doc = await bm.read();
++    assert.equal(doc.state, 'paused');
++    assert.equal(doc.backoffLevel, 0);
++    assert.equal(doc.pauseReason, 'rate-limit');
++    assert.equal(doc.lastTriggeringSession, 'ses-1');
++    assert.equal(new Date(doc.pausedUntil!).getTime(), clock + 1000);
++  });
++
++  it('coalesces rate-limit hits during an already-paused window (D8)', async () => {
++    const bm = make();
++    await bm.read();
++    await bm.observeTerminal({ sessionId: 'ses-1', status: 'rate-limited' });
++    const firstDoc = await bm.read();
++    // Second hit before any noteDispatch — should coalesce.
++    clock += 50;
++    await bm.observeTerminal({ sessionId: 'ses-2', status: 'rate-limited' });
++    const secondDoc = await bm.read();
++    assert.equal(secondDoc.state, 'paused');
++    assert.equal(secondDoc.backoffLevel, 0, 'level must not increment on coalesce');
++    assert.equal(secondDoc.pausedUntil, firstDoc.pausedUntil, 'window end unchanged');
++  });
++
++  it('increments the back-off level only after a resume dispatch (D8)', async () => {
++    const bm = make();
++    await bm.read();
++    await bm.observeTerminal({ sessionId: 'ses-1', status: 'rate-limited' });
++    // Simulate an animate() dispatch that got past the gate.
++    bm.noteDispatch();
++    clock += 5_000;
++    await bm.observeTerminal({ sessionId: 'ses-2', status: 'rate-limited' });
++    const doc = await bm.read();
++    assert.equal(doc.backoffLevel, 1);
++    assert.equal(new Date(doc.pausedUntil!).getTime(), clock + 2000);
++  });
++
++  it('caps the pause window at maxMs', async () => {
++    const bm = make({ initialMs: 1000, maxMs: 3000, factor: 2 });
++    await bm.read();
++    await bm.observeTerminal({ sessionId: 'ses-1', status: 'rate-limited' });
++    for (let i = 0; i < 5; i++) {
++      bm.noteDispatch();
++      clock += 100;
++      await bm.observeTerminal({ sessionId: `ses-${i + 2}`, status: 'rate-limited' });
++    }
++    const doc = await bm.read();
++    const window = new Date(doc.pausedUntil!).getTime() - clock;
++    assert.ok(window <= 3000, `window ${window}ms should be capped at 3000ms`);
++  });
++
++  it('resets on a completed terminal (D7)', async () => {
++    const bm = make();
++    await bm.read();
++    await bm.observeTerminal({ sessionId: 'ses-1', status: 'rate-limited' });
++    await bm.observeTerminal({ sessionId: 'ses-2', status: 'completed' });
++    const doc = await bm.read();
++    assert.equal(doc.state, 'running');
++    assert.equal(doc.backoffLevel, 0);
++    assert.equal(doc.pausedUntil, undefined);
++  });
++
++  it('resets on a failed terminal (non-rate-limit)', async () => {
++    const bm = make();
++    await bm.read();
++    await bm.observeTerminal({ sessionId: 'ses-1', status: 'rate-limited' });
++    await bm.observeTerminal({ sessionId: 'ses-2', status: 'failed' });
++    const doc = await bm.read();
++    assert.equal(doc.state, 'running');
++    assert.equal(doc.backoffLevel, 0);
++  });
++
++  it('is a no-op when already running and a non-rate-limit terminal arrives', async () => {
++    const bm = make();
++    await bm.read();
++    await bm.observeTerminal({ sessionId: 'ses-1', status: 'completed' });
++    const doc = await bm.read();
++    assert.equal(doc.state, 'running');
++  });
++
++  it('peek() reflects the most recent transition synchronously', async () => {
++    const bm = make();
++    await bm.read();
++    assert.equal(bm.peek().state, 'running');
++    await bm.observeTerminal({ sessionId: 'ses-1', status: 'rate-limited' });
++    assert.equal(bm.peek().state, 'paused');
++    await bm.observeTerminal({ sessionId: 'ses-2', status: 'completed' });
++    assert.equal(bm.peek().state, 'running');
++  });
++});
++
++// ── buildPrecheckRejectionResult ────────────────────────────────────
++
++describe('buildPrecheckRejectionResult()', () => {
++  it('produces a rate-limited SessionResult with a termination tag', () => {
++    const startedAt = new Date().toISOString();
++    const pausedUntil = new Date(Date.now() + 60_000).toISOString();
++    const result = buildPrecheckRejectionResult({
++      sessionId: 'ses-gate-1',
++      startedAt,
++      provider: 'claude-code',
++      pausedUntil,
++      pauseReason: 'rate-limit',
++      metadata: { writId: 'w-1' },
++      conversationId: 'conv-7',
++    });
++    assert.equal(result.status, 'rate-limited');
++    assert.equal(result.id, 'ses-gate-1');
++    assert.equal(result.provider, 'claude-code');
++    assert.equal(result.conversationId, 'conv-7');
++    assert.deepEqual(result.metadata, { writId: 'w-1' });
++    assert.ok(result.terminationTag);
++    assert.equal(result.terminationTag!.kind, 'rate-limit');
++    assert.match(result.error ?? '', /paused/);
++  });
++});
++
++// ── freshStatusDoc ───────────────────────────────────────────────────
++
++describe('freshStatusDoc()', () => {
++  it('uses the well-known document id and a running default', () => {
++    const doc = freshStatusDoc();
++    assert.equal(doc.id, ANIMATOR_STATUS_DOC_ID);
++    assert.equal(doc.state, 'running');
++    assert.equal(doc.backoffLevel, 0);
++  });
++});
++
++// Clean up global guild after all tests in this module.
++describe('teardown', () => {
++  it('clears the guild singleton', () => {
++    clearGuild();
++  });
++});
+diff --git a/packages/plugins/animator/src/rate-limit-backoff.ts b/packages/plugins/animator/src/rate-limit-backoff.ts
+new file mode 100644
+index 0000000..918363a
+--- /dev/null
++++ b/packages/plugins/animator/src/rate-limit-backoff.ts
+@@ -0,0 +1,390 @@
++/**
++ * Animator rate-limit back-off state machine.
++ *
++ * Owns the `'current'` document in the animator `status` book and
++ * translates terminal session outcomes into pause / resume transitions.
++ *
++ * Design references:
++ *  - D7  — "successful dispatch after resume" = any terminal other than
++ *          rate-limited resets `backoffLevel`.
++ *  - D8  — hits while already paused coalesce; only a rate-limit hit
++ *          arriving *after* a resume attempt dispatched bumps the level.
++ *  - D11 — `getStatus()` returns the doc verbatim; no composed
++ *          dispatchability predicate lives here.
++ *  - D12 — `animate()` rejects at the top with a synthesized
++ *          rate-limited SessionResult when paused.
++ *  - D24 — daemon restart leaves state untouched; the first dispatch
++ *          that happens while `pausedUntil <= now` naturally flips the
++ *          state to `running`.
++ *
++ * The machine is intentionally small — consumers (Spider's crawl gate,
++ * Oculus banner, CLI tool) compose their own dispatchability predicate
++ * over the returned doc.
++ */
++
++import type { Book } from '@shardworks/stacks-apparatus';
++import type {
++  AnimatorRateLimitBackoffConfig,
++  AnimatorStatusDoc,
++  SessionTerminationTag,
++} from './types.ts';
++
++/** Well-known document id for the single animator status row. */
++export const ANIMATOR_STATUS_DOC_ID = 'current';
++
++/** Defaults applied when the caller omits the corresponding config field. */
++export const DEFAULT_RATE_LIMIT_BACKOFF = Object.freeze({
++  initialMs: 15 * 60_000, // 15 minutes
++  maxMs: 60 * 60_000,     // 1 hour
++  factor: 2,
++}) satisfies Required<AnimatorRateLimitBackoffConfig>;
++
++/**
++ * Validate a back-off config block fail-loud (D10 patron override).
++ *
++ * Missing block → caller should apply DEFAULT_RATE_LIMIT_BACKOFF. When a
++ * block is provided, every supplied value must be well-formed or this
++ * throws. Partial overrides (e.g. just `initialMs`) are allowed; each
++ * omitted field falls back to its default.
++ *
++ * Returns a resolved config with all three fields populated, suitable
++ * for passing to the back-off machine.
++ */
++export function validateBackoffConfig(
++  raw: AnimatorRateLimitBackoffConfig | undefined,
++): Required<AnimatorRateLimitBackoffConfig> {
++  if (raw === undefined) return { ...DEFAULT_RATE_LIMIT_BACKOFF };
++
++  if (typeof raw !== 'object' || raw === null) {
++    throw new Error(
++      `[animator] animator.rateLimitBackoff must be an object; received ${typeof raw}`,
++    );
++  }
++
++  const resolved: Required<AnimatorRateLimitBackoffConfig> = { ...DEFAULT_RATE_LIMIT_BACKOFF };
++
++  if (raw.initialMs !== undefined) {
++    if (!Number.isInteger(raw.initialMs) || raw.initialMs <= 0) {
++      throw new Error(
++        `[animator] animator.rateLimitBackoff.initialMs must be a positive integer; received ${String(raw.initialMs)}`,
++      );
++    }
++    resolved.initialMs = raw.initialMs;
++  }
++
++  if (raw.maxMs !== undefined) {
++    if (!Number.isInteger(raw.maxMs) || raw.maxMs <= 0) {
++      throw new Error(
++        `[animator] animator.rateLimitBackoff.maxMs must be a positive integer; received ${String(raw.maxMs)}`,
++      );
++    }
++    resolved.maxMs = raw.maxMs;
++  }
++
++  if (raw.factor !== undefined) {
++    if (typeof raw.factor !== 'number' || !Number.isFinite(raw.factor) || raw.factor <= 1) {
++      throw new Error(
++        `[animator] animator.rateLimitBackoff.factor must be a finite number greater than 1; received ${String(raw.factor)}`,
++      );
++    }
++    resolved.factor = raw.factor;
++  }
++
++  if (resolved.maxMs < resolved.initialMs) {
++    throw new Error(
++      `[animator] animator.rateLimitBackoff.maxMs (${resolved.maxMs}) must be >= initialMs (${resolved.initialMs})`,
++    );
++  }
++
++  return resolved;
++}
++
++/** The default status doc used when nothing has been persisted yet. */
++export function freshStatusDoc(): AnimatorStatusDoc {
++  return {
++    id: ANIMATOR_STATUS_DOC_ID,
++    state: 'running',
++    backoffLevel: 0,
++  };
++}
++
++/**
++ * Terminal statuses that count as "session made it through without a
++ * rate-limit termination" for the purposes of the reset rule (D7).
++ *
++ * Includes `'completed'`, `'failed'`, `'timeout'`, and `'cancelled'`.
++ * Any one of these, when observed after a pause window has opened a
++ * resume attempt, counts as a successful probe and resets the level
++ * to 0. Observing one of these while running is a no-op.
++ */
++const NON_RATE_LIMIT_TERMINAL_STATUSES = new Set<string>([
++  'completed',
++  'failed',
++  'timeout',
++  'cancelled',
++]);
++
++export interface BackoffReadConfig {
++  /** Read the current back-off config — called at each transition. */
++  get(): Required<AnimatorRateLimitBackoffConfig>;
++}
++
++export interface NowFn {
++  (): number;
++}
++
++/**
++ * Per-process in-memory flag tracking whether a resume dispatch has
++ * happened since the current pause began. Necessary because D8 says
++ * "hits during a paused window coalesce; only a hit after a resume
++ * attempt dispatches increments." On a single-process daemon this is
++ * sufficient; multi-process deployments are out of scope here.
++ */
++export interface ResumeProbeTracker {
++  /**
++   * Record that `animate()` successfully dispatched a session (i.e.
++   * passed its pre-check). The next rate-limit terminal will now
++   * increment the back-off level instead of coalescing.
++   */
++  noteDispatch(): void;
++  /**
++   * Return true if a dispatch has been observed since the last pause
++   * was opened. Called on the pause-transition path to decide whether
++   * to coalesce or increment.
++   */
++  hasDispatchedSinceLastPause(): boolean;
++  /**
++   * Reset the "dispatched since last pause" counter. Called each time
++   * the machine opens a fresh pause window.
++   */
++  resetOnPause(): void;
++}
++
++export function createResumeProbeTracker(): ResumeProbeTracker {
++  let dispatched = false;
++  return {
++    noteDispatch() { dispatched = true; },
++    hasDispatchedSinceLastPause() { return dispatched; },
++    resetOnPause() { dispatched = false; },
++  };
++}
++
++export interface BackoffMachine {
++  /**
++   * Load and return the current status document. Falls back to a fresh
++   * "running" default if the row has never been written.
++   *
++   * Also updates the in-memory cache consulted by `peek()`.
++   */
++  read(): Promise<AnimatorStatusDoc>;
++  /**
++   * Synchronous read of the most recently observed status document.
++   * Used by the `animate()` pre-check so the handle can return
++   * immediately without awaiting a status-book round-trip. Initialised
++   * from the first `read()` at startup; subsequent `observeTerminal()`
++   * calls keep it in sync.
++   */
++  peek(): AnimatorStatusDoc;
++  /**
++   * Observe a terminal session outcome and update the status book in
++   * response. Idempotent — safe to call twice for the same session.
++   *
++   * Rate-limited terminals open a pause (or coalesce into the current
++   * one). Any other terminal resets the back-off level if the machine
++   * was paused.
++   */
++  observeTerminal(params: {
++    sessionId: string;
++    status: 'completed' | 'failed' | 'timeout' | 'cancelled' | 'rate-limited';
++    terminationTag?: SessionTerminationTag;
++  }): Promise<void>;
++  /**
++   * Note a successful `animate()` dispatch so the next rate-limit
++   * terminal increments back-off rather than coalescing.
++   */
++  noteDispatch(): void;
++}
++
++export function createBackoffMachine(params: {
++  statusBook: Book<AnimatorStatusDoc>;
++  config: BackoffReadConfig;
++  now?: NowFn;
++  probe?: ResumeProbeTracker;
++}): BackoffMachine {
++  const { statusBook, config } = params;
++  const now = params.now ?? (() => Date.now());
++  const probe = params.probe ?? createResumeProbeTracker();
++
++  // Cached view of the status doc so the animate() pre-check can read
++  // it synchronously. Updated on every read() and after every mutation.
++  let cached: AnimatorStatusDoc = freshStatusDoc();
++
++  async function read(): Promise<AnimatorStatusDoc> {
++    const doc = await statusBook.get(ANIMATOR_STATUS_DOC_ID);
++    cached = doc ?? freshStatusDoc();
++    return cached;
++  }
++
++  function peek(): AnimatorStatusDoc {
++    return cached;
++  }
++
++  function computeNextWindow(
++    prev: AnimatorStatusDoc,
++    cfg: Required<AnimatorRateLimitBackoffConfig>,
++  ): { pausedUntilMs: number; backoffLevel: number } {
++    // D8: hits during an already-paused window coalesce (do not
++    // increment). Only a hit that arrives after a resume attempt
++    // dispatched increments the level and extends the window.
++    if (prev.state === 'paused' && !probe.hasDispatchedSinceLastPause()) {
++      // Coalesce — keep the existing window bounds.
++      const existing = prev.pausedUntil ? new Date(prev.pausedUntil).getTime() : (now() + cfg.initialMs);
++      return { pausedUntilMs: existing, backoffLevel: prev.backoffLevel };
++    }
++
++    // Either we were running (fresh pause) or we were paused AND a
++    // resume attempt has dispatched since the last pause opened.
++    const isFreshPause = prev.state !== 'paused';
++    const nextLevel = isFreshPause
++      ? 0
++      : Math.min(prev.backoffLevel + 1, Number.MAX_SAFE_INTEGER);
++    const pausedUntilMs = Math.min(
++      now() + cfg.initialMs * Math.pow(cfg.factor, nextLevel),
++      now() + cfg.maxMs,
++    );
++    return { pausedUntilMs, backoffLevel: nextLevel };
++  }
++
++  async function onRateLimitTerminal(
++    sessionId: string,
++    terminationTag: SessionTerminationTag | undefined,
++  ): Promise<void> {
++    const prev = await read();
++    const cfg = config.get();
++    const { pausedUntilMs, backoffLevel } = computeNextWindow(prev, cfg);
++    const isCoalesce = prev.state === 'paused' && !probe.hasDispatchedSinceLastPause();
++
++    const nowIso = new Date(now()).toISOString();
++    const next: AnimatorStatusDoc = {
++      id: ANIMATOR_STATUS_DOC_ID,
++      state: 'paused',
++      pausedSince: isCoalesce ? (prev.pausedSince ?? nowIso) : nowIso,
++      pausedUntil: new Date(pausedUntilMs).toISOString(),
++      pauseReason: 'rate-limit',
++      backoffLevel,
++      backoffLastHitAt: nowIso,
++      lastTriggeringSession: sessionId,
++    };
++    void terminationTag; // consumed elsewhere (the SessionDoc carries it too)
++    await statusBook.put(next);
++    cached = next;
++    // A fresh or escalated pause starts a new resume probe window; a
++    // coalesced hit leaves the counter alone because no resume has
++    // actually dispatched yet.
++    if (!isCoalesce) {
++      probe.resetOnPause();
++    }
++  }
++
++  async function onOtherTerminal(): Promise<void> {
++    // Any non-rate-limit terminal counts as a successful probe from the
++    // back-off machine's perspective (D7): reset the level and, if
++    // paused, return to running.
++    const prev = await read();
++    if (prev.state === 'running' && prev.backoffLevel === 0) {
++      // Nothing to do — already reset.
++      return;
++    }
++    const nowIso = new Date(now()).toISOString();
++    const next: AnimatorStatusDoc = {
++      id: ANIMATOR_STATUS_DOC_ID,
++      state: 'running',
++      backoffLevel: 0,
++      // Clear window fields; keep backoffLastHitAt for audit trail.
++      ...(prev.backoffLastHitAt ? { backoffLastHitAt: prev.backoffLastHitAt } : {}),
++      // lastTriggeringSession is preserved for audit; callers reading a
++      // running doc typically ignore it.
++      ...(prev.lastTriggeringSession ? { lastTriggeringSession: prev.lastTriggeringSession } : {}),
++    };
++    // Explicitly drop pausedSince/pausedUntil/pauseReason from the row.
++    void nowIso;
++    await statusBook.put(next);
++    cached = next;
++    probe.resetOnPause();
++  }
++
++  async function observeTerminal(params: {
++    sessionId: string;
++    status: 'completed' | 'failed' | 'timeout' | 'cancelled' | 'rate-limited';
++    terminationTag?: SessionTerminationTag;
++  }): Promise<void> {
++    if (params.status === 'rate-limited') {
++      await onRateLimitTerminal(params.sessionId, params.terminationTag);
++      return;
++    }
++    if (NON_RATE_LIMIT_TERMINAL_STATUSES.has(params.status)) {
++      await onOtherTerminal();
++      return;
++    }
++    // Unknown status — no-op. Exhaustiveness is enforced at the call
++    // site's type signature.
++  }
++
++  return {
++    read,
++    peek,
++    observeTerminal,
++    noteDispatch: probe.noteDispatch,
++  };
++}
++
++/**
++ * Build a synthesized SessionResult for an `animate()` pre-check
++ * rejection (D12). The session never gets a SessionDoc — this shape is
++ * returned directly from `handle.result` so every caller sees the same
++ * rejection contract as an in-flight rate-limited terminal.
++ */
++export function buildPrecheckRejectionResult(params: {
++  sessionId: string;
++  startedAt: string;
++  provider: string;
++  pausedUntil: string;
++  pauseReason: string;
++  metadata?: Record<string, unknown>;
++  conversationId?: string;
++}): import('./types.ts').SessionResult {
++  const endedAt = new Date().toISOString();
++  const startedMs = new Date(params.startedAt).getTime();
++  const endedMs = new Date(endedAt).getTime();
++  const durationMs = Math.max(0, endedMs - startedMs);
++  const detail = `Anima provider is paused (${params.pauseReason}); try again after ${params.pausedUntil}`;
++  return {
++    id: params.sessionId,
++    status: 'rate-limited',
++    startedAt: params.startedAt,
++    endedAt,
++    durationMs,
++    provider: params.provider,
++    exitCode: 0,
++    error: detail,
++    ...(params.conversationId ? { conversationId: params.conversationId } : {}),
++    ...(params.metadata ? { metadata: params.metadata } : {}),
++    terminationTag: {
++      kind: 'rate-limit',
++      source: 'ndjson-result',
++      detail,
++    },
++  };
++}
++
++/**
++ * Compute the dispatchability predicate declared by D24: dispatch is
++ * allowed when the Animator is running OR the current pause window has
++ * already elapsed. Exposed here so callers (Spider's crawl gate, the
++ * Oculus banner, the `animator-status` CLI) compose the same rule.
++ */
++export function isDispatchable(doc: AnimatorStatusDoc, nowMs: number = Date.now()): boolean {
++  if (doc.state === 'running') return true;
++  if (!doc.pausedUntil) return true;
++  return new Date(doc.pausedUntil).getTime() <= nowMs;
++}
+diff --git a/packages/plugins/animator/src/session-record-handler.ts b/packages/plugins/animator/src/session-record-handler.ts
+index ef9a451..fd275c6 100644
+--- a/packages/plugins/animator/src/session-record-handler.ts
++++ b/packages/plugins/animator/src/session-record-handler.ts
+@@ -9,6 +9,40 @@ import { guild } from '@shardworks/nexus-core';
+ import type { StacksApi } from '@shardworks/stacks-apparatus';
+ import type { SessionDoc, SessionTerminationTag, TranscriptDoc, TranscriptMessage } from './types.ts';
+ 
++// ── Back-off machine hook ───────────────────────────────────────────
++
++/**
++ * Callback interface the Animator apparatus registers during startup.
++ *
++ * session-record-handler is imported both by the animator plugin itself
++ * and by the DLQ drain path; both enter through `handleSessionRecord`.
++ * Rather than reaching back into `guild().apparatus('animator')` — which
++ * would create a circular invocation during startup — we accept a
++ * registered hook and invoke it from the handler after a terminal write.
++ *
++ * `null` means the apparatus has not started yet (e.g. unit tests that
++ * exercise handleSessionRecord in isolation); the handler silently
++ * skips the observation in that case.
++ */
++export interface BackoffObserver {
++  observeTerminal(params: {
++    sessionId: string;
++    status: 'completed' | 'failed' | 'timeout' | 'cancelled' | 'rate-limited';
++    terminationTag?: SessionTerminationTag;
++  }): Promise<void>;
++}
++
++let backoffObserver: BackoffObserver | null = null;
++
++/**
++ * Register (or clear) the back-off observer invoked after every
++ * terminal session recording. The Animator apparatus calls this during
++ * start(); tests that need isolation can pass null to reset.
++ */
++export function setBackoffMachine(observer: BackoffObserver | null): void {
++  backoffObserver = observer;
++}
++
+ export interface SessionRecordParams {
+   sessionId: string;
+   status: 'completed' | 'failed' | 'timeout' | 'rate-limited';
+@@ -113,5 +147,21 @@ export async function handleSessionRecord(
+     }
+   }
+ 
++  // Step 4: Notify the back-off machine. Never throws — a status-book
++  // write failure must not mask the terminal session record.
++  if (backoffObserver) {
++    try {
++      await backoffObserver.observeTerminal({
++        sessionId: params.sessionId,
++        status: params.status,
++        terminationTag: params.terminationTag,
++      });
++    } catch (err) {
++      console.warn(
++        `[animator] Back-off observer failed for ${params.sessionId}: ${err instanceof Error ? err.message : err}`,
++      );
++    }
++  }
++
+   return { ok: true, sessionId: params.sessionId, status: params.status };
+ }

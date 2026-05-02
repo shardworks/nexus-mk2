@@ -1,0 +1,125 @@
+slug: x015-trial-3-rate-limit-n1
+title: X015 trial 3 — Sonnet implementer + Opus reviewer on Rate-limit-aware scheduling (N=1, full pipeline, greenfield contrast)
+codex: nexus
+
+description: |
+  Second X015 trial, contrasting against trial 2's refactor shape:
+  trial 2 was a transformative refactor (Clerk's mandate state-machine
+  → config-driven registry); trial 3 is a greenfield infrastructure
+  build (rate-limit-aware scheduling — animator back-off state machine,
+  spider gate, claude-code detection, Oculus banner, status tool).
+
+  Why this writ: It's the second-most-expensive Opus implement we have
+  on record ($43.16 vs trial 2's $45.55) and one of only ~7 with both
+  many files (37) and high turn count (515). Spec is comparable depth
+  (28K chars, 24 decisions, 13 scope items). Critically, the work is
+  ~96% additive (+2794/-59 lines in baseline) — almost no consumer
+  migration to do. Trial 2's only behavioral gap was Sonnet missing
+  consumer migrations; this writ has barely any consumers to migrate,
+  so it's a clean read on whether Sonnet handles greenfield infra at
+  Opus-equivalent quality.
+
+  Same fixes as trial 2:
+    - artificer permissions narrowed to clerk:read (no writ-complete
+      escape hatch)
+    - test guild ships vibers's roles/artificer.md + roles/patron.md
+      via lab.guild-setup files: parameter
+    - per-role model: artificer=sonnet, reviewer=opus
+    - framework 0.1.294 (post-role-model-feature) on both lab-host
+      and test-guild
+    - same minimum-plugin set as trial 2 (10 plugins; rate-limit work
+      touches animator + claude-code + spider, all included)
+
+  Codex pinned to 03d36cb849c92d0ab434c9bd4a066716c8f50fbb — the
+  commit immediately before the original Apr-23 rate-limit rig
+  drafted. Brief is the verbatim 28034-char planner spec from
+  vibers astrolabe.plans[w-mocei999-ffc6a8c4972c].spec.
+
+  Opus baseline numbers (full rig from vibers):
+    implement:   2 attempts, est. ~$43 / 515 turns
+    review/revise/seal: full pipeline, 8 sealed commits
+    sealedCommit: 1a9f0389b6ceadab6a5c8676e26f0895698f3c59
+
+  Cost expectation: similar ballpark to trial 2 — ~$30-50 total
+  if Sonnet does well, possibly more if revise has heavy iteration.
+  Wall-clock cap: 3h (same as trial 2; turn count was higher than
+  trial 2's so revise may run longer).
+
+  ANTHROPIC_API_KEY flows through to the test guild's daemon via
+  process.env inheritance.
+
+frameworkVersion: '0.1.294'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: 03d36cb849c92d0ab434c9bd4a066716c8f50fbb
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.294' }
+      config:
+        loom:
+          roles:
+            artificer:
+              model: sonnet
+              permissions:
+                - 'clerk:read'
+                - 'tools:*'
+            reviewer:
+              model: opus
+              permissions: []
+        animator:
+          sessionProvider: 'claude-code'
+        spider:
+          variables:
+            role: 'artificer'
+            buildCommand: 'pnpm -w typecheck'
+            testCommand: 'pnpm -w test'
+
+      files:
+        - sourcePath: /workspace/nexus-mk2/experiments/X015-spec-detail-model-substitute/fixtures/test-guild/roles/artificer.md
+          guildPath: roles/artificer.md
+        - sourcePath: /workspace/nexus-mk2/experiments/X015-spec-detail-model-substitute/fixtures/test-guild/roles/patron.md
+          guildPath: roles/patron.md
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X015-spec-detail-model-substitute/briefs/trial-3-rate-limit-aware-scheduling.md
+    waitForTerminal: true
+    timeoutMs: 10800000   # 3h cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

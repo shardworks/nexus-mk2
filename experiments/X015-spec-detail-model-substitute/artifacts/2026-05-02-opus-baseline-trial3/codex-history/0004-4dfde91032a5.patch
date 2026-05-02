@@ -1,0 +1,312 @@
+
+
+diff --git a/packages/plugins/animator/src/animator.ts b/packages/plugins/animator/src/animator.ts
+index 955f588..9db2189 100644
+--- a/packages/plugins/animator/src/animator.ts
++++ b/packages/plugins/animator/src/animator.ts
+@@ -33,7 +33,7 @@ import type {
+   GuildStateDoc,
+ } from './types.ts';
+ 
+-import { sessionList, sessionShow, summon as summonTool, sessionCancel, sessionRunning, sessionRecord, sessionHeartbeat } from './tools/index.ts';
++import { sessionList, sessionShow, summon as summonTool, sessionCancel, sessionRunning, sessionRecord, sessionHeartbeat, animatorStatus } from './tools/index.ts';
+ import { animatorRoutes } from './oculus-routes.ts';
+ import { drainDlq, recoverOrphans } from './startup.ts';
+ import {
+@@ -765,7 +765,7 @@ export function createAnimator(): Plugin {
+           // table is maintained.
+           status: {},
+         },
+-        tools: [sessionList, sessionShow, summonTool, sessionCancel, sessionRunning, sessionRecord, sessionHeartbeat],
++        tools: [sessionList, sessionShow, summonTool, sessionCancel, sessionRunning, sessionRecord, sessionHeartbeat, animatorStatus],
+         pages: [
+           { id: 'animator', title: 'Animator', dir: 'src/static' },
+         ],
+diff --git a/packages/plugins/animator/src/oculus-routes.test.ts b/packages/plugins/animator/src/oculus-routes.test.ts
+index a1295cc..2fdf363 100644
+--- a/packages/plugins/animator/src/oculus-routes.test.ts
++++ b/packages/plugins/animator/src/oculus-routes.test.ts
+@@ -561,13 +561,67 @@ describe('Animator Oculus Routes', () => {
+     });
+   });
+ 
++  // ── GET /api/animator/status ────────────────────────────────────
++
++  describe('GET /api/animator/status', () => {
++    const handler = () => getHandler('GET', '/api/animator/status');
++
++    beforeEach(() => {
++      setup();
++    });
++
++    it('returns the status doc verbatim via AnimatorApi.getStatus()', async () => {
++      // Replace the mock animator with one whose getStatus() returns a
++      // paused doc.
++      const apparatusMap = new Map<string, unknown>();
++      const statusDoc = {
++        id: 'current',
++        state: 'paused' as const,
++        pausedSince: '2026-04-24T00:00:00.000Z',
++        pausedUntil: '2026-04-24T00:15:00.000Z',
++        pauseReason: 'rate-limit' as const,
++        backoffLevel: 1,
++        lastTriggeringSession: 'ses-42',
++      };
++      const animator = {
++        async getStatus() { return statusDoc; },
++        subscribeToSession() { return null; },
++      } as unknown as AnimatorApi;
++      apparatusMap.set('stacks', stacks);
++      apparatusMap.set('animator', animator);
++      setGuild({
++        home: '/tmp/fake',
++        apparatus<T>(name: string): T {
++          const api = apparatusMap.get(name);
++          if (!api) throw new Error(`Apparatus "${name}" not installed`);
++          return api as T;
++        },
++        config<T>(): T { return {} as T; },
++        writeConfig() {},
++        guildConfig() {
++          return { name: 't', nexus: '0.0.0', plugins: [] } as never;
++        },
++        kits: () => [],
++        apparatuses: () => [],
++        startupWarnings() { return []; },
++      } as Guild);
++
++      const { ctx, getResponse } = createMockContext();
++      await handler()(ctx as never);
++      const { data, status } = getResponse();
++      assert.equal(status, 200);
++      assert.deepEqual(data, statusDoc);
++    });
++  });
++
+   // ── Route structure ─────────────────────────────────────────────────
+ 
+   describe('Route definitions', () => {
+-    it('exports three routes with correct methods and paths', () => {
+-      assert.equal(animatorRoutes.length, 3);
++    it('exports all expected routes', () => {
++      assert.equal(animatorRoutes.length, 4);
+ 
+       const paths = animatorRoutes.map((r) => `${r.method} ${r.path}`);
++      assert.ok(paths.includes('GET /api/animator/status'));
+       assert.ok(paths.includes('GET /api/animator/sessions'));
+       assert.ok(paths.includes('GET /api/animator/session-transcript'));
+       assert.ok(paths.includes('GET /api/animator/session-stream'));
+diff --git a/packages/plugins/animator/src/oculus-routes.ts b/packages/plugins/animator/src/oculus-routes.ts
+index 3af3385..cfba435 100644
+--- a/packages/plugins/animator/src/oculus-routes.ts
++++ b/packages/plugins/animator/src/oculus-routes.ts
+@@ -32,6 +32,20 @@ interface WritEntry {
+ }
+ 
+ export const animatorRoutes = [
++  {
++    method: 'GET',
++    path: '/api/animator/status',
++    handler: async (c: Context) => {
++      // Read the back-off status doc through the Animator apparatus so
++      // consumers (Oculus banner, external monitoring) see exactly what
++      // the internal machine sees. Running on a fresh install returns
++      // the default running shape — never a null body.
++      const g = guild();
++      const animator = g.apparatus<AnimatorApi>('animator');
++      const status = await animator.getStatus();
++      return c.json(status);
++    },
++  },
+   {
+     method: 'GET',
+     path: '/api/animator/sessions',
+diff --git a/packages/plugins/animator/src/tools/animator-status.test.ts b/packages/plugins/animator/src/tools/animator-status.test.ts
+new file mode 100644
+index 0000000..3efcae7
+--- /dev/null
++++ b/packages/plugins/animator/src/tools/animator-status.test.ts
+@@ -0,0 +1,104 @@
++/**
++ * Tests for the animator-status tool.
++ *
++ * Covers the text / JSON output variants and the AnimatorApi read path.
++ */
++
++import { describe, it, beforeEach, afterEach } from 'node:test';
++import assert from 'node:assert/strict';
++
++import { setGuild, clearGuild } from '@shardworks/nexus-core';
++import type { Guild, GuildConfig } from '@shardworks/nexus-core';
++
++import animatorStatus from './animator-status.ts';
++import type { AnimatorApi, AnimatorStatusDoc } from '../types.ts';
++
++// ── Harness ─────────────────────────────────────────────────────────
++
++let currentStatus: AnimatorStatusDoc = {
++  id: 'current',
++  state: 'running',
++  backoffLevel: 0,
++};
++
++function setup() {
++  const apparatusMap = new Map<string, unknown>();
++  const mockAnimator = {
++    async getStatus(): Promise<AnimatorStatusDoc> { return currentStatus; },
++    summon() { throw new Error('unused'); },
++    animate() { throw new Error('unused'); },
++    subscribeToSession() { return null; },
++    async cancel() { throw new Error('unused'); },
++    async getSessionCosts() { return new Map(); },
++  } as unknown as AnimatorApi;
++  apparatusMap.set('animator', mockAnimator);
++
++  const fakeGuild: Guild = {
++    home: '/tmp/animator-status-test',
++    apparatus<T>(name: string): T {
++      const api = apparatusMap.get(name);
++      if (!api) throw new Error(`Apparatus "${name}" not installed`);
++      return api as T;
++    },
++    config<T>(): T { return {} as T; },
++    writeConfig() {},
++    guildConfig() { return { name: 't', nexus: '0.0.0', plugins: [] } as GuildConfig; },
++    kits: () => [],
++    apparatuses: () => [],
++    startupWarnings() { return []; },
++  };
++  setGuild(fakeGuild);
++}
++
++describe('animator-status tool', () => {
++  beforeEach(() => { setup(); });
++  afterEach(() => { clearGuild(); });
++
++  it('has permission read and is patron-callable', () => {
++    assert.equal(animatorStatus.permission, 'read');
++    assert.deepEqual(animatorStatus.callableBy, ['patron']);
++  });
++
++  it('returns the raw status doc when --json is set', async () => {
++    currentStatus = {
++      id: 'current',
++      state: 'paused',
++      pausedSince: '2026-04-24T00:00:00.000Z',
++      pausedUntil: '2026-04-24T00:15:00.000Z',
++      pauseReason: 'rate-limit',
++      backoffLevel: 1,
++      lastTriggeringSession: 'ses-42',
++    };
++    const result = await animatorStatus.handler({ json: true });
++    assert.ok(typeof result === 'object');
++    assert.equal((result as AnimatorStatusDoc).state, 'paused');
++    assert.equal((result as AnimatorStatusDoc).backoffLevel, 1);
++    assert.equal((result as AnimatorStatusDoc).lastTriggeringSession, 'ses-42');
++  });
++
++  it('returns a human-readable multi-line string by default', async () => {
++    currentStatus = {
++      id: 'current',
++      state: 'paused',
++      pausedSince: '2026-04-24T00:00:00.000Z',
++      pausedUntil: new Date(Date.now() + 60_000).toISOString(),
++      pauseReason: 'rate-limit',
++      backoffLevel: 2,
++      lastTriggeringSession: 'ses-77',
++    };
++    const result = await animatorStatus.handler({});
++    assert.ok(typeof result === 'string');
++    assert.match(result as string, /State:\s+paused/);
++    assert.match(result as string, /Back-off level:\s+2/);
++    assert.match(result as string, /Pause reason:\s+rate-limit/);
++    assert.match(result as string, /Triggering sess.:\s+ses-77/);
++  });
++
++  it('covers the running-state path (default install)', async () => {
++    currentStatus = { id: 'current', state: 'running', backoffLevel: 0 };
++    const result = await animatorStatus.handler({});
++    assert.ok(typeof result === 'string');
++    assert.match(result as string, /State:\s+running/);
++    assert.ok(!(result as string).includes('Paused'), 'no paused-only fields when running');
++  });
++});
+diff --git a/packages/plugins/animator/src/tools/animator-status.ts b/packages/plugins/animator/src/tools/animator-status.ts
+new file mode 100644
+index 0000000..f2d8333
+--- /dev/null
++++ b/packages/plugins/animator/src/tools/animator-status.ts
+@@ -0,0 +1,64 @@
++/**
++ * animator-status tool — show the Animator's current rate-limit state.
++ *
++ * Reads the `current` document from the Animator's status book (the
++ * single-row table owned by the back-off state machine). Returns a
++ * human-readable multi-line summary by default, or the raw status doc
++ * as JSON when `--json` is passed.
++ *
++ * Modeled on `session-show` and on the framework `status` tool (the
++ * text-default-with-`--json` convention). Permission is `read`; no
++ * mutation paths here.
++ */
++
++import { tool } from '@shardworks/tools-apparatus';
++import { guild } from '@shardworks/nexus-core';
++import { z } from 'zod';
++import type { AnimatorApi, AnimatorStatusDoc } from '../types.ts';
++
++function formatStatus(doc: AnimatorStatusDoc): string {
++  const lines: string[] = [];
++  lines.push(`State:            ${doc.state}`);
++  lines.push(`Back-off level:   ${doc.backoffLevel}`);
++  if (doc.pauseReason) {
++    lines.push(`Pause reason:     ${doc.pauseReason}`);
++  }
++  if (doc.pausedSince) {
++    lines.push(`Paused since:     ${doc.pausedSince}`);
++  }
++  if (doc.pausedUntil) {
++    const ms = new Date(doc.pausedUntil).getTime() - Date.now();
++    const rel = ms > 0
++      ? `${Math.ceil(ms / 1000)}s from now`
++      : `${Math.abs(Math.floor(ms / 1000))}s ago`;
++    lines.push(`Paused until:     ${doc.pausedUntil} (${rel})`);
++  }
++  if (doc.backoffLastHitAt) {
++    lines.push(`Last rate-limit:  ${doc.backoffLastHitAt}`);
++  }
++  if (doc.lastTriggeringSession) {
++    lines.push(`Triggering sess.: ${doc.lastTriggeringSession}`);
++  }
++  return lines.join('\n');
++}
++
++export default tool({
++  name: 'animator-status',
++  description: "Show the Animator's current rate-limit pause state",
++  instructions:
++    'Returns the rate-limit back-off state document verbatim. ' +
++    'Default output is human-readable; pass --json for machine-parseable output.',
++  callableBy: ['patron'],
++  params: {
++    json: z.boolean().optional().describe('Emit the status document as JSON'),
++  },
++  permission: 'read',
++  handler: async (params) => {
++    const animator = guild().apparatus<AnimatorApi>('animator');
++    const doc = await animator.getStatus();
++    if (params.json) {
++      return doc;
++    }
++    return formatStatus(doc);
++  },
++});
+diff --git a/packages/plugins/animator/src/tools/index.ts b/packages/plugins/animator/src/tools/index.ts
+index d0ec9fd..e59bf3f 100644
+--- a/packages/plugins/animator/src/tools/index.ts
++++ b/packages/plugins/animator/src/tools/index.ts
+@@ -9,3 +9,4 @@ export { default as sessionCancel } from './session-cancel.ts';
+ export { default as sessionRunning } from './session-running.ts';
+ export { default as sessionRecord } from './session-record.ts';
+ export { default as sessionHeartbeat } from './session-heartbeat.ts';
++export { default as animatorStatus } from './animator-status.ts';
