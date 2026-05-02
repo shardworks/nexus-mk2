@@ -1,0 +1,129 @@
+slug: x015-trial-1-clerk-refactor-sonnet-n1
+title: X015 trial 1 — Sonnet implementer + Opus reviewer on Clerk refactor (N=1)
+codex: nexus
+
+description: |
+  First Sonnet stress-test on a known-complex commission. Re-runs the
+  Clerk refactor (writ w-mod6458g-992589fcce60 in vibers — 35 files,
+  440 turns, $45.55, 4 implement attempts under Opus) with the
+  per-role model override (AnimaWeave.model, framework 0.1.294):
+
+    - artificer (implementer + reviser): sonnet
+    - reviewer:                          opus
+
+  This exercises X015's H1 ("Spec detail reduces model tier
+  requirements") — does the planner-generated spec carry enough
+  detail for a Sonnet implementer to produce work an Opus reviewer
+  will accept?
+
+  Codex pinned to d871dd76 — the commit immediately before the
+  original Clerk-refactor rig started. The implementer receives the
+  same plan.spec the original Opus implementer saw (29811 chars),
+  via writ.body. No astrolabe in this trial — the implement engine's
+  prompt is byte-identical between the plan-and-ship rig path
+  (givens.prompt = plan.spec) and the no-astrolabe default-rig path
+  (writ.body = plan.spec); both append the same EXECUTION_EPILOGUE.
+
+  Cost expectation: Sonnet implementer at ~1/5 Opus output cost.
+  Original Opus burned $45.55. Range guess: $5-15 if Sonnet handles
+  it; possibly more if it iterates heavily. Opus reviewer adds ~$1-5.
+  Set timeout high — original Opus needed 4 implement attempts before
+  a successful one.
+
+  Outcome metric: pass/fail of the rig pipeline (review verdict,
+  build/test mechanical checks, seal). Diff captured by
+  lab.probe-git-range for side-by-side comparison against the
+  original Opus diff (commits b98151f3..e6304096 in /workspace/nexus).
+
+  ANTHROPIC_API_KEY flows through to the test guild's daemon via
+  process.env inheritance.
+
+frameworkVersion: '0.1.294'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      # Commit immediately before the original Clerk-refactor rig started
+      # (d871dd7 "clerk: add WritTypeConfig shape and structural validator").
+      # The next commit on origin/main was b98151f3 — the first commit of
+      # the rig itself. local-bare flow tolerates commits not on
+      # origin/main.
+      upstreamRepo: /workspace/nexus
+      baseSha: d871dd76cd56f9236a8866952081b22f8dbcfa30
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # Minimum plugin set to dispatch the default rig (draft → implement
+      # → review → revise → seal). astrolabe is intentionally omitted
+      # so the rig template defaults to the implement-only path; the
+      # spec is delivered via writ.body.
+      #
+      # Plugin order matters at 0.1.294 (animator must precede spider
+      # so spider's start() can resolve animator via g.apparatus()).
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.294' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.294' }
+      config:
+        loom:
+          roles:
+            artificer:
+              model: sonnet
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+            reviewer:
+              model: opus
+              permissions: []
+        animator:
+          sessionProvider: 'claude-code'
+        spider:
+          variables:
+            role: 'artificer'
+            # Whole-monorepo build + test. The Clerk refactor widens
+            # WritDoc.phase to string and migrates astrolabe / spider /
+            # lattice / clockworks consumers — the spec explicitly
+            # requires monorepo-wide compile and test pass. Scoping
+            # narrower would mask cross-package fallout the original
+            # rig had to fix in commit e6304096.
+            buildCommand: 'pnpm -w typecheck'
+            testCommand: 'pnpm -w test'
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X015-spec-detail-model-substitute/briefs/trial-1-clerk-refactor.md
+    waitForTerminal: true
+    # 2h cap. Original Opus needed 4 implement attempts; Sonnet may
+    # iterate more or run faster — give the rig room.
+    timeoutMs: 7200000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

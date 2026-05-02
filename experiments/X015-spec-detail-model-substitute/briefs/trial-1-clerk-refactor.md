@@ -1,0 +1,157 @@
+# Clerk refactor — config-driven state machine with plugin-registered writ types
+
+## Intent
+
+Replace Clerk's hardcoded mandate state machine with a generic, config-driven engine. Introduce a plugin-registration API as the only path by which a plugin contributes a writ type, and re-express mandate as a type the Clerk plugin registers for itself — no private path, no special case. Every state transition is validated against the writ's declared `allowedTransitions`; classification queries are derived from each type's config at read time.
+
+## Rationale
+
+The "mandate is special" assumption is baked deep into Clerk — hardcoded phase tables, terminal-state literals, kit and guild-config channels for type contribution, and a CDC watcher driving mandate-only cascade. Lifting that assumption is the load-bearing move in the writ-generalization refactor: once Clerk treats its built-in mandate the same way it treats any externally-contributed type, downstream work-tracking primitives can be expressed as writ types without parallel subsystems. T2 lands the plumbing; T3 (children-behavior engine) and T4 (Reckoner migration) build on the surfaces this commission introduces.
+
+## Scope & Blast Radius
+
+**Primary package:** `packages/plugins/clerk/` — apparatus factory (`clerk.ts`), public type surface (`types.ts`), index exports, mandate-specific transition tools, the writ tools, and the test suite.
+
+**Cross-package consumers — the cross-cutting concerns:**
+
+- **`WritDoc.phase` widens to `string`.** Every consumer that imports `WritDoc` or destructures `phase` is affected. `WritPhase` (now mandate-specific) remains exported for callers that knowingly downcast. Implementer must audit the monorepo for typing on `WritPhase` and `phase:` references in `packages/`.
+- **In-tree astrolabe migration.** `packages/plugins/astrolabe/src/astrolabe.ts` currently contributes `piece` and `observation-set` via `supportKit.writTypes`. That channel disappears in this commission; astrolabe must register both via the new API in its own `start()` with mandate-clone configs. Astrolabe is the only in-tree production contributor of the kit channel; failing to migrate it breaks every astrolabe consumer at post time.
+- **Guild config field removal.** `ClerkConfig.writTypes` is deleted entirely. Any guild.json carrying `clerk.writTypes` silently loses registrations — no warn-and-deprecate path. Verify guild fixtures and READMEs across the monorepo.
+- **Kit-contribution channel removal.** `consumes: ['writTypes']` is dropped (linkKinds stays). Test fixtures and kits declaring `writTypes: [{name, description?}]` must be ported to call `registerWritType(config)` from a real apparatus's `start()`. Verify by grepping for `writTypes:` array literals across `packages/`.
+- **`BUILTIN_WRIT_TYPE` export removal.** Any external import resolves to nothing. Spider's literal `'mandate'` references continue to work as bare strings.
+- **Mandate cascade removal.** CDC watcher and both handler functions are deleted. Mandate writs will not auto-cascade between T2 and T3 — intentional. Any code path or test asserting cascade behavior breaks; tests are deleted (T3 owns restored coverage).
+- **Mandate-specific transition tools** (`writ-publish`, `writ-complete`, `writ-fail`, `writ-cancel`) keep their current shape but route through the strict validator. Behavior on non-mandate writs becomes a clear `legal transitions from "<state>"` error.
+- **Phase-indicator glyph maps** in `clerk/src/tools/writ-tree.ts` and `clerk/src/pages/writs/` fall through to the empty-glyph default for non-mandate states once `WritDoc.phase` widens. T5 owns the proper rework — acceptable degradation in T2.
+
+**Out of consumer migration scope:** Spider's terminal-phase literals, Reckoner's stuck-phase gates, and clockworks-retry's stuck queries continue to use literal-state checks. T4 (Reckoner) is on the roadmap; spider and clockworks-retry are separate follow-ups. The classification predicates this commission ships are the surface those follow-ups will consume.
+
+## Decisions
+
+| # | Decision | Default | Rationale |
+|---|----------|---------|-----------|
+| D1 | Where does the registration entry point live? | Extend `ClerkApi` with `registerWritType(config)` | Mirrors linkKinds' single-surface pattern; no parallel lookup channel. |
+| D2 | When is `registerWritType` callable? | Startup window only — accept until framework's post-start signal fires, then throw | Sealed registry enforces ordering rather than relying on plugin convention. |
+| D3 | Duplicate-name registrations? | Throw, naming both registering plugins | Fail-loud; mirrors `registerKitLinkKinds`. |
+| D4 | Error-message shape for registration/validation. | Validator errors propagate verbatim; registration-specific failures wrapped with `[clerk] registerWritType:` prefix | Validator messages already cite a precise path; double-wrapping hides it. |
+| D5 | Error format for rejected `transition()`. | Source-keyed plain Error: `Cannot transition writ "<id>" from "<phase>" to "<to>": legal transitions from "<phase>" are <list> (or none for terminal states).` | Brief specifies the four pieces; source-keyed is natural for the new model. |
+| D6 | Writ's stored state not declared in its type's config. | Throw loudly: `[clerk] writ "<id>" carries state "<phase>" which is not declared in type "<type>" config; legal states are <list>.` | Fail-loud; an unknown stored state is a registration/data bug. |
+| D7 | Where does mandate's `WritTypeConfig` live? | Inline in `clerk.ts` near the top, passed to `registerWritType` from `start()` | Earn new files from a named consumer; linkKinds precedent is inline. **(Patron override of primer's `dedicated-module` recommendation.)** |
+| D8 | Exact mandate `WritTypeConfig`. | Byte-faithful: `new` (initial → open, cancelled); `open` (active → stuck, completed, failed, cancelled); `stuck` (active, attrs:[`stuck`] → open, failed, cancelled); `completed` (terminal, attrs:[`success`]); `failed` (terminal, attrs:[`failure`]); `cancelled` (terminal, attrs:[`cancelled`]) | Brief: state strings unchanged; existing mandate writs remain bit-for-bit identical. Attrs use the v0 vocabulary. |
+| D9 | Does mandate config carry `childrenBehavior` in T2? | Omit; T3 patches it on when it ships the engine | Don't author config shape with no T2 consumer; T3 ships cascade atomically. |
+| D10 | Classification-query surface on `ClerkApi`. | Predicate trio on `WritDoc`: `isInitial`, `isActive`, `isTerminal`, plus `getWritTypeConfig(name)` accessor | Brief literally calls out `isTerminal(writ)`; trio plus accessor covers common cases. |
+| D11 | Predicates accept `WritDoc`, `(type, state)` tuples, or both? | `WritDoc` only | Abstract overloads earn from a real consumer; `getWritTypeConfig` is the escape hatch. |
+| D12 | Removal strategy for the cascade CDC watcher. | Delete `stacks.watch(...)` and both handler functions | Prefer removal; T3 ships its own engine. |
+| D13 | `CASCADE_PARENT_TERMINATION_RESOLUTION` constant + export. | Drop with cascade | T3 will pick its own string; an unused exported constant misleads. |
+| D14 | Does `ClerkConfig.defaultType` survive? | Keep; validate at `start()` that the named type is registered (throw if not). Remove orphaned `writTypes` field. | Brief's prohibition is on registration via guild config, not operator preference. |
+| D15 | Surfaces removed when kit channel and guild registry drop. | Remove all cleanly: `consumes: 'writTypes'` (keep `linkKinds`), `registerKitWritTypes`, the start-time scan, `WritTypeEntry`, `ClerkKit.writTypes`, `ClerkConfig.writTypes`; refresh `index.ts` exports | No deprecation cycle in freshly-written Mk 2.1 code. **(Patron override of primer's `warn-on-legacy-config` recommendation.)** |
+| D16 | What does `listWritTypes()` return? | Preserve current `WritTypeInfo` shape (`name, description, source, isDefault`); expose config separately via `getWritTypeConfig(name)` | Keep `listWritTypes` cheap and stable; full config in every list response widens the API without a named consumer. |
+| D17 | What `WritTypeConfig` for astrolabe's `piece` and `observation-set`? | Clone mandate (identical six-state config, declared independently per type) | T2 makes existing implicit behavior explicit, not reshape it. |
+| D18 | How do test fixtures register throwaway writ types? | Fake-apparatus fixture: `makeWritTypeApparatus(types)` returns a tiny `LoadedApparatus` whose `start()` calls `registerWritType` | Mirror the production path so ordering bugs the framework would catch stay caught in tests. |
+| D19 | Initial-state derivation in `post()`. | Always create the writ in its type's declared `initial` state | `post()` is a single-responsibility creator; auto-advance is a tool concern. |
+| D20 | Disposition of `PostCommissionRequest.draft`. | Drop from `PostCommissionRequest`; `commission-post` tool keeps the param and handles auto-advance internally for mandate writs | API stays type-agnostic; tool layer carries mandate-specific UX. |
+| D21 | Parent-accepts-children gating logic. | Reject only if parent is in a `terminal`-classified state; initial and active parents both accept children | Mirrors current behavior exactly; no speculative config surface. |
+| D22 | Behavior of `writ-publish/complete/fail/cancel` post-refactor. | Keep as-is; tools call `transition(id, 'open'\|'completed'\|'failed'\|'cancelled')`; non-mandate writs get the validator's clear error | Validator's error is already fail-loud; an extra type-guard duplicates work. |
+| D23 | How does `commission-post` implement auto-publish for mandate when `draft: false`? | When `draft !== true` AND resulting writ's type is `'mandate'`, immediately call `transition(writ.id, 'open')` and return the post-transition writ | Confine the special case to the one type it was designed for. |
+| D24 | Add a generic `writ-transition` tool in T2? | Defer to T5 | Don't ship a UX tool before T5 designs the surface. |
+| D25 | Existing cascade tests in `clerk.test.ts`? | Delete now | Prefer removal; zombie skipped tests add noise. |
+| D26 | Coverage scenarios T2 must add. | Brief's five PLUS: duplicate-registration, late-registration, validator-error propagation, post-with-unregistered-type, parent-terminal-rejects-children, classification queries for known types | Thinnest slice that is complete; failure paths pin the new surfaces. |
+| D27 | `BUILTIN_WRIT_TYPE` export. | Drop the export and the constant; mandate's name declared inline in the new mandate config | Mandate is no longer "built-in"; the symbol's name is misleading. |
+| D28 | Update style for `clerk/README.md` and `docs/architecture/apparatus/clerk.md`. | Surgical edits only: remove guild.json/kit writTypes language; reframe Phase Machine as `Mandate's lifecycle (an example registered type)`; document `registerWritType` + the new predicates; leave broader narrative untouched | T7 owns the deeper rewrite. |
+| D29 | Should `transition()` continue silently stripping `phase` from `fields`? | Throw on conflict: `[clerk] transition: cannot override phase via fields argument` if `fields.phase` is present and non-empty | Fail-loud; smuggling `phase` via `fields` is a caller bug. |
+| D30 | How wide does `WritDoc.phase`'s static type become? | Widen to `string`; `WritPhase` remains exported as a mandate-specific union | Minimal cross-cutting change; structural generics propagate without a named consumer. |
+
+## Acceptance Signal
+
+- A mandate writ posted before this commission and one posted after produce byte-identical on-disk records for every state (`new`, `open`, `stuck`, `completed`, `failed`, `cancelled`). No migration script runs.
+- A plugin's `start()` calls `apparatus<ClerkApi>('clerk').registerWritType(config)` with a config that passes T1's validator; subsequent posts of that type land in the declared initial state, transition along the declared `allowedTransitions`, and respond correctly to `isInitial`/`isActive`/`isTerminal`.
+- A mandate writ in `completed`: `transition(id, 'open')` is rejected with the source-keyed message naming writ id, current state, attempted target, and legal transitions list (empty for terminal states).
+- A mandate writ in `open`: `transition(id, 'stuck')` succeeds; `transition(id, 'new')` is rejected with the same error shape.
+- `isTerminal(writ)` returns true for mandate writs in `completed`/`failed`/`cancelled`, false for `new`/`open`/`stuck`, and returns correct results for any other registered type without the predicate knowing the type's name.
+- `pnpm -w typecheck` and `pnpm -w test` both pass.
+- A grep across `packages/` for `BUILTIN_WRIT_TYPE`, `CASCADE_PARENT_TERMINATION_RESOLUTION`, `ClerkKit.writTypes`, `WritTypeEntry`, and `consumes:.*writTypes` returns no production references.
+- A grep across `packages/plugins/clerk/` for the literal terminal-phase set `['completed','failed','cancelled']` returns no clerk-internal callers — every internal classification check routes through the new predicates.
+
+## Existing Patterns
+
+- **`registerKitLinkKinds` in `packages/plugins/clerk/src/clerk.ts` (around L243-306)** — the canonical sibling registry. Demonstrates duplicate-throw, strict-validation, runtime `Map` registry, and `listKinds()` projection. The new `registerWritType` mirrors its shape (single-surface API on `ClerkApi`, throw-on-duplicate, package-local map); the difference is that link kinds carry only metadata while writ types carry full state machines.
+- **Ratchet's target-keyed `ALLOWED_FROM` in `packages/plugins/ratchet/src/ratchet.ts` (around L49-70)** — the prior phase-machine precedent. Useful for judging error-message shape and how strict the transition API should be (Ratchet stays a parallel apparatus; not migrated here).
+- **T1's validator and config types in `packages/plugins/clerk/src/writ-type-config.ts`** — `validateWritTypeConfig`, `WritTypeConfig`, `WritTypeStateDefinition`, `WritTypeStateClassification`, `WritTypeStateAttr`. T2 imports these; do not reshape. T1 ships no canonical mandate fixture — T2 is the first place mandate's config exists in production.
+- **`ClerkApi` and `GuildConfig` module augmentation in `types.ts` (around L222-226)** — use the same pattern when shrinking `ClerkConfig` (drop `writTypes`, keep `defaultType`).
+- **Apparatus startup-window event in `packages/framework/arbor/src/arbor.ts`** — implementer must audit this file (and arbor's lifecycle event surface) to find the right post-start signal for sealing the registry. Per obs-8: per-apparatus `apparatus:started` events fire too early; the seal needs the global "all apparatuses started" moment, or an explicit `sealWritTypeRegistry()` invoked by arbor at the right instant. Choose the mechanism that mirrors how arbor coordinates other once-per-startup signals.
+
+## What NOT To Do
+
+- **Do not preserve the mandate cascade.** No feature flag, no neutered handlers, no retained CDC watcher. Mandate writs will misbehave between T2 and T3; that is the intended state.
+- **Do not author `childrenBehavior` on mandate's config.** T3 owns both the engine and the mandate-config edit that wires it on.
+- **Do not add a deprecation cycle for `clerk.writTypes` in guild.json.** The patron explicitly overrode the warn-on-legacy-config option. Drop the field cleanly.
+- **Do not invent abstract `(type, state)` predicate overloads.** Predicates are `WritDoc`-only; abstract callers use `getWritTypeConfig(type)`.
+- **Do not embed the full `WritTypeConfig` in `listWritTypes()` responses.** `WritTypeInfo` shape stays as-is.
+- **Do not auto-advance generic types in `commission-post`.** The auto-publish (`post → transition('open')`) is mandate-specific.
+- **Do not ship a generic `writ-transition` tool.** T5 owns generic transition tooling.
+- **Do not migrate Reckoner, Spider's terminal-phase literals, clockworks-retry, or the writ-tree/page glyph maps.** Explicit follow-ups; touching them here expands blast radius.
+- **Do not rename mandate's states or rationalize the lifecycle.** Preserve the six state strings exactly.
+- **Do not migrate existing mandate writs on disk.** No schema bump, no field rename, no migration script.
+- **Do not extract a shared `MANDATE_LIKE_CONFIG(name)` helper for astrolabe.** Each of `piece` and `observation-set` declares its own clone independently.
+- **Do not export `BUILTIN_WRIT_TYPE` or any equivalent symbol.** Mandate's name is a literal string in the new mandate config.
+- **Do not preserve `PostCommissionRequest.draft` on the API.** It is removed; the `commission-post` tool keeps the param and handles mandate auto-publish internally.
+- **Do not silently strip `phase` from `transition`'s `fields` argument.** Throw on conflict.
+- **Do not preserve cascade test blocks.** Delete them; T3 reintroduces equivalent or richer tests.
+- **Do not introduce surfaces beyond what the decisions explicitly authorize** (e.g. `acceptsChildrenWhile`, autoAdvance, `(type, state)` overloads, `MANDATE_TYPE_NAME` re-export). This commission is plumbing, not API expansion.
+
+<task-manifest>
+  <task id="t1">
+    <name>Plugin registration API, classification surface, and WritDoc.phase widening</name>
+    <files>packages/plugins/clerk/src/clerk.ts, packages/plugins/clerk/src/types.ts, packages/plugins/clerk/src/index.ts; cross-cutting: anywhere in packages/ that imports WritDoc or WritPhase</files>
+    <action>Add `registerWritType(config: WritTypeConfig): void` to `ClerkApi`, backed by a runtime registry (Map keyed by name) that runs T1's `validateWritTypeConfig` first and lets validator errors propagate verbatim. Wrap registration-specific failures (duplicate name, late call) with `[clerk] registerWritType:` prefix; duplicates throw naming both registering plugins. Implement the startup-window seal: registrations accepted until the framework's post-start signal fires, then throw on subsequent calls. Audit `packages/framework/arbor/` for the right once-per-startup mechanism (global event, microtask after all starts, or explicit arbor-invoked `sealWritTypeRegistry()`); pick the one that aligns with how arbor coordinates other once-per-startup signals. Add `isInitial(writ)`, `isActive(writ)`, `isTerminal(writ)`, and `getWritTypeConfig(name)` to `ClerkApi`. Predicates accept `WritDoc` only — no `(type, state)` overloads. When asked about a writ whose stored state is not declared in its type's config, throw the unknown-state error from D6. Widen `WritDoc.phase` from `WritPhase` to `string`; `WritPhase` itself stays exported as a mandate-specific union for callers that knowingly downcast. Drop the `BUILTIN_WRIT_TYPE` constant and its export. Update `index.ts` exports. Mandate is not registered yet — clerk's start continues to use the existing hardcoded paths until t3 cuts them over. Audit cross-package consumers of `WritDoc.phase` and adjust types where the narrow union assumption is now wrong.</action>
+    <verify>pnpm -w typecheck && pnpm -w test --filter clerk</verify>
+    <done>`registerWritType` exists on `ClerkApi`, the four classification methods exist, `WritDoc.phase` is `string`, `BUILTIN_WRIT_TYPE` is gone from clerk's exports and source, and the typecheck passes across the monorepo.</done>
+  </task>
+
+  <task id="t2">
+    <name>Register mandate as a registered type in clerk's start()</name>
+    <files>packages/plugins/clerk/src/clerk.ts</files>
+    <action>Declare `MANDATE_CONFIG: WritTypeConfig` inline near the top of `clerk.ts` (D7) using the byte-faithful state machine from D8: `new` (initial → open, cancelled); `open` (active → stuck, completed, failed, cancelled); `stuck` (active, attrs:[`stuck`] → open, failed, cancelled); `completed` (terminal, attrs:[`success`]); `failed` (terminal, attrs:[`failure`]); `cancelled` (terminal, attrs:[`cancelled`]). No `childrenBehavior` block — T3 owns that. Call `registerWritType(MANDATE_CONFIG)` in clerk's own `start()` so mandate is in the new registry from this commit forward. The hardcoded `ALLOWED_FROM`, `TERMINAL_PHASES`, and `CHILD_ALLOWED_PARENT_PHASES` paths still drive `transition()` and `post()` at this point — the cut-over happens in t3. Mandate behavior is unchanged at runtime; this task only seeds the registry.</action>
+    <verify>pnpm -w typecheck && pnpm -w test --filter clerk</verify>
+    <done>Mandate is present in the new registry after clerk's start, `MANDATE_CONFIG` is declared inline near the top of `clerk.ts`, and existing mandate behavior is unchanged (the hardcoded paths still serve transition and post).</done>
+  </task>
+
+  <task id="t3">
+    <name>Cut transition() and post() over to the registry; ship strict transition validator</name>
+    <files>packages/plugins/clerk/src/clerk.ts, packages/plugins/clerk/src/types.ts</files>
+    <action>Replace the hardcoded `ALLOWED_FROM` table in `transition()` with per-type, source-indexed enforcement read from the registry. On a rejected transition emit the source-keyed error from D5 (writ id, current state, attempted target, list of legal targets — "or none for terminal states" when empty). When the writ's stored state is not declared in its type config, throw the unknown-state error from D6. Replace the `TERMINAL_PHASES.has()` resolved-at write with the new `isTerminal` predicate. Replace the silent `phase` strip from `fields` with a throw: `[clerk] transition: cannot override phase via fields argument` when `fields.phase` is present and non-empty (D29). In `post()`, derive the new writ's initial state from its type config (D19) — always land in the declared `initial` state, regardless of any caller hint. Replace the `CHILD_ALLOWED_PARENT_PHASES` set with a non-terminal classification check via the new predicates (D21). Drop `draft` from `PostCommissionRequest` (D20). Posts of unregistered types fail at the registry lookup — that error is acceptable. Mandate writs continue to round-trip correctly because t2 registered mandate.</action>
+    <verify>pnpm -w typecheck && pnpm -w test --filter clerk</verify>
+    <done>The hardcoded phase table and terminal-phase set are gone from clerk's transition and post paths; transition errors carry the new format; `fields.phase` conflicts throw; `post()` reads initial state from the registry; `CHILD_ALLOWED_PARENT_PHASES` is removed; mandate writs continue to flow through the new path with byte-identical on-disk shape.</done>
+  </task>
+
+  <task id="t4">
+    <name>Migrate astrolabe types (piece, observation-set) to plugin registration</name>
+    <files>packages/plugins/astrolabe/src/astrolabe.ts (and any astrolabe test fixtures or kit declarations referencing supportKit.writTypes)</files>
+    <action>Remove astrolabe's `supportKit.writTypes` contribution. In astrolabe's own `start()`, look up the clerk apparatus and call `registerWritType(config)` once for `piece` and once for `observation-set`. Each config is an independent clone of mandate's six-state machine (D17) — no shared helper. Verify ordering: astrolabe's `start()` must run after clerk's start has completed but before the registration window seals; this is the production registration path the test fixture (in t6) will mirror. After this task, astrolabe's piece and observation-set writs flow through `post()` and `transition()` via the new registry — clerk's old kit-channel scan still reads the (now-empty) `supportKit.writTypes` field harmlessly until t5 deletes it.</action>
+    <verify>pnpm -w typecheck && pnpm -w test --filter astrolabe</verify>
+    <done>Astrolabe no longer contributes via `supportKit.writTypes`, both `piece` and `observation-set` are registered through `registerWritType` in astrolabe's start, and astrolabe's tests pass.</done>
+  </task>
+
+  <task id="t5">
+    <name>Remove cascade, kit channel, guild registry, and supporting surface</name>
+    <files>packages/plugins/clerk/src/clerk.ts, packages/plugins/clerk/src/types.ts, packages/plugins/clerk/src/index.ts; cross-cutting: any guild.json fixtures or test kits in packages/ that declare clerk.writTypes or kit writTypes contributions</files>
+    <action>Delete the cascade CDC watcher (`stacks.watch(...)` in clerk.ts) and both handler functions (`handleChildTerminal`, `handleParentTerminal`); delete the `CASCADE_PARENT_TERMINATION_RESOLUTION` constant and any export of it (D12, D13). Delete the kit-contribution channel: drop `'writTypes'` from `consumes` (keep `'linkKinds'`), delete `registerKitWritTypes()` and the start-time scan, delete `WritTypeEntry`, delete `ClerkKit.writTypes` from the kit augmentation. Delete `ClerkConfig.writTypes` from the guild config augmentation; keep `ClerkConfig.defaultType` and add a start()-time validator that throws if the named type is not in the registry (D14). `listWritTypes()` keeps the existing `WritTypeInfo` shape; the new `getWritTypeConfig(name)` accessor (added in t1) is the path for callers needing the full config (D16). Update `index.ts` exports. Cross-cut audit: grep `packages/` for `clerk.writTypes` (in guild.json fixtures, READMEs) and `writTypes:` array literals (in test kits) and migrate or remove each — there is no deprecation cycle.</action>
+    <verify>pnpm -w typecheck && pnpm -w test; verify residuals with greps for `CASCADE_PARENT_TERMINATION_RESOLUTION`, `WritTypeEntry`, `ClerkKit.writTypes`, `clerk.writTypes`, `consumes:.*writTypes`, `registerKitWritTypes` across `packages/`</verify>
+    <done>Cascade scaffolding, kit-contribution channel, and guild-config writTypes registry are gone from clerk. `defaultType` is validated at start. `listWritTypes` shape is preserved. Grep audits return no production references. The full monorepo test run passes.</done>
+  </task>
+
+  <task id="t6">
+    <name>Update mandate-specific tools and refresh clerk test coverage</name>
+    <files>packages/plugins/clerk/src/tools/commission-post.ts, packages/plugins/clerk/src/tools/writ-publish.ts, packages/plugins/clerk/src/tools/writ-complete.ts, packages/plugins/clerk/src/tools/writ-fail.ts, packages/plugins/clerk/src/tools/writ-cancel.ts, packages/plugins/clerk/src/clerk.test.ts; new test helper module under packages/plugins/clerk/src/</files>
+    <action>Update `commission-post`: keep its `draft` param; when `draft !== true` AND the resulting writ's `type === 'mandate'`, immediately call `clerk.transition(writ.id, 'open')` and return the post-transition writ (D23). For non-mandate types, skip the auto-advance — the writ stays in its declared initial state. Leave `writ-publish`, `writ-complete`, `writ-fail`, `writ-cancel` calling `transition(id, 'open'|'completed'|'failed'|'cancelled')` exactly as today (D22); the validator's clear error from D5 covers the non-mandate case. Refresh tests: delete the four cascade `describe` blocks in `clerk.test.ts` and any sub-tests inside `full lifecycle with children` that assert cascade behavior (D25). Rewrite the writTypes / config channel tests around the new registration API. Add a `makeWritTypeApparatus(types: WritTypeConfig[])` helper under the clerk src tree that returns a tiny `LoadedApparatus` whose `start()` calls `registerWritType` for each (D18); migrate test fixtures that previously contributed via the kit channel to use it. Add the brief's five scenarios PLUS: duplicate-registration error, late-registration error, validator-error propagation, post-with-unregistered-type error, parent-terminal-rejects-children, classification queries for known types (D26).</action>
+    <verify>pnpm -w typecheck && pnpm -w test --filter clerk</verify>
+    <done>Mandate auto-publish in `commission-post` is preserved; the four single-target transition tools route through the strict validator; cascade tests are deleted; writTypes tests are rewritten around the new API; the fake-apparatus helper exists and is used by test fixtures; the brief's five scenarios plus the failure-mode set are pinned by tests.</done>
+  </task>
+
+  <task id="t7">
+    <name>Documentation refresh — surgical edits to README, apparatus doc, and module docstring</name>
+    <files>packages/plugins/clerk/README.md, docs/architecture/apparatus/clerk.md, packages/plugins/clerk/src/index.ts</files>
+    <action>Surgical edits per D28. In `clerk/README.md`, remove the §"Writ types" guild.json + kit writTypes language; document the `registerWritType(config)` API and the new classification predicates (`isInitial`/`isActive`/`isTerminal`/`getWritTypeConfig`); leave broader narrative untouched. In `docs/architecture/apparatus/clerk.md`: remove guild.json/kit writTypes language from the "Kit Interface", "Support Kit", and "Configuration" sections; reframe the "Phase Machine" section as `Mandate's lifecycle (an example registered type)` and note that other plugin-registered types declare their own state machines via `WritTypeConfig`; remove the "CDC Cascade Behavior" section (or mark it as restored in T3); document `registerWritType` and the predicates; retire the "Writ type validation — strict or advisory?" Open Question (T2 answers strict + config-based). In `packages/plugins/clerk/src/index.ts`, update the L3-9 module docstring from "writs flow through a fixed phase machine (new → open → completed/failed/cancelled)" to language that frames the six-state machine as mandate's lifecycle (the built-in registered type), with other plugin-registered types declaring their own machines.</action>
+    <verify>pnpm -w typecheck && pnpm -w test; manual review of README + clerk.md + index.ts docstring; grep packages/plugins/clerk and docs/architecture/apparatus/clerk.md for "writTypes" returns no stale references to the dropped channel or guild-config registry</verify>
+    <done>The README, apparatus doc, and index.ts docstring no longer describe the removed surfaces or frame mandate's lifecycle as a framework invariant. The new registration API and classification predicates are documented at all three locations.</done>
+  </task>
+</task-manifest>

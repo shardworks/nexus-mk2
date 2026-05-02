@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 ---
 
 # X015 — Spec Detail as Model Substitute

@@ -11,6 +11,7 @@ Maintained by Coco. Update when experiments are created, activated, or closed.
 | [X010](X010-staged-sessions/spec.md) | Staged Sessions | What is the relationship between session length, cost, and output quality for autonomous commissions? Phase 1 (cost curve) complete at original scale; Apr 29 addendum sharpens H4 into H4a/H4b/H4c sub-hypotheses (cost model + handoff thresholds) and adds H5 (inventory pure-read bloat). |
 | [X011](X011-context-debt/spec.md) | Context Debt | How much context window is consumed by tool output never referenced again, and can we reduce it? Activated 2026-04-29 with the read-utilization instrument as its first artifact. |
 | [X016](X016-orientation-suppression/spec.md) | Orientation Suppression | When a fresh implementer session enters mid-flow, how many turns elapse before it produces productive work? Does an imperative anti-orientation directive in the brief reduce that turn count to <5? Phase 2c completed 2026-05-02 (N=1 baseline vs N=1 strong-prompt). H1 falsified at the original <5 threshold — the orientation floor for cascade-shaped work is ~17 calls. Strong-prompt suppressed redundant orientation cleanly (43→18 first-edit turns, −58%) but did not shorten the session overall. Open derivative question: re-run X010 H1 piece-sessions with strong-prompt enabled (click `c-moo9o9q3` under idea #15). |
+| [X015](X015-spec-detail-model-substitute/spec.md) | Spec Detail as Model Substitute | Can planning-pipeline specs reduce the model capability threshold, enabling Sonnet-class models to match Opus outcomes? Activated 2026-05-02 with trial 1 — Sonnet implementer + Opus reviewer rerunning the Clerk refactor commission (writ w-mod6458g, $45.55 / 440 turns / 4 implement attempts under all-Opus). Per-role model override (framework 0.1.294, AnimaWeave.model) is the load-bearing dependency. |
 
 ## Ready (approved, not yet started)
 
@@ -27,7 +28,6 @@ Maintained by Coco. Update when experiments are created, activated, or closed.
 | [X005](X005-greenfield-assembly/spec.md) | Greenfield Assembly | What if agents never iterate on existing code — only build net-new? |
 | [X012](X012-agent-oriented-code/spec.md) | Agent-Oriented Code | Do conventional clean code principles still apply when agents are the primary authors? |
 | [X014](X014-technical-spec-quality/spec.md) | Technical Spec Quality | Do technically detailed specs outperform mountain-quality specs — and does it depend on complexity? |
-| [X015](X015-spec-detail-model-substitute/spec.md) | Spec Detail as Model Substitute | Can planning-pipeline specs reduce the model capability threshold, enabling Sonnet-class models to match Opus outcomes? |
 
 ## Complete
 
