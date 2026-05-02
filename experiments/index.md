@@ -28,6 +28,7 @@ Maintained by Coco. Update when experiments are created, activated, or closed.
 | [X005](X005-greenfield-assembly/spec.md) | Greenfield Assembly | What if agents never iterate on existing code — only build net-new? |
 | [X012](X012-agent-oriented-code/spec.md) | Agent-Oriented Code | Do conventional clean code principles still apply when agents are the primary authors? |
 | [X014](X014-technical-spec-quality/spec.md) | Technical Spec Quality | Do technically detailed specs outperform mountain-quality specs — and does it depend on complexity? |
+| [X017](X017-test-redundancy/spec.md) | Test Redundancy in Agent-Written Code | What fraction of agent-written test code is structurally redundant, and what fraction survives human spot-check as deletable? Probe data from framework/core (74%) and framework/arbor (80%) suggests substantial redundancy but unmeasured human survival rate. |
 
 ## Complete
 
