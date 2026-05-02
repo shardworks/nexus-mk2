@@ -1,0 +1,417 @@
+package: plugins/copilot
+date: 2026-05-02
+session: be88fec8-ff84-4b5a-b392-37a64f2e89c7
+status: trimmed
+
+# Pre-trim state
+test_files_before: 1
+test_lines_before: 897
+tests_before: 35
+pure_redundant_count: 27
+pure_redundant_pct: 77.1
+
+# Aggregate coverage (pre-trim)
+line_coverage_before: 67.96
+branch_coverage_before: 80.06
+func_coverage_before: 53.08
+
+# Per-package coverage (pre-trim)
+package_line_coverage_before: 88.58
+package_branch_coverage_before: 81.25
+package_func_coverage_before: 48.94
+
+# Review pass
+candidates_reviewed: 27
+candidates_deleted: 5
+candidates_kept: 22
+
+deletions:
+  - file: src/index.test.ts
+    test: "launch() — missing token > throws when the token env var is missing"
+    reason: parameter_sweep_over_helper
+    note: |
+      Group B redundant. Parameter sweep over the same missing-token
+      code path with a different env var name. The kept default test
+      (`uses GITHUB_TOKEN by default`) pins "no config → GITHUB_TOKEN
+      is the env var, missing throws with name in error." The
+      `config defaults > uses custom config values` test (kept) sets
+      `tokenEnvVar: 'MY_CUSTOM_TOKEN'` and verifies the auth header
+      uses the custom env var's value — pinning "tokenEnvVar config
+      is honored." Together the two kept tests cover both "missing
+      throws with env var name" and "tokenEnvVar config is read";
+      the cut test adds nothing.
+
+  - file: src/index.test.ts
+    test: "launch() — agentic tool-call loop > uses providerSessionId from the last API response"
+    reason: subsumed_by_other_test
+    note: |
+      Strict subset of `happy path: tool-calling session with 2 API
+      calls`. Both tests run a 2-call tool-call session where the
+      first call returns one id and the second returns another, then
+      assert that res.providerSessionId is the second (last) id.
+      Same code path (last-response-id assignment in the loop). The
+      happy path additionally asserts transcript shape, output,
+      tokenUsage summation, and tool handler invocation — strictly
+      stronger.
+
+  - file: src/index.test.ts
+    test: "launch() — non-streaming single-turn > uses custom apiEndpoint from config"
+    reason: subsumed_by_other_test
+    note: |
+      Strict subset of `config defaults > uses custom config values`.
+      Both tests set `apiEndpoint: 'https://custom.endpoint.com'` and
+      assert the captured URL starts with that value. Same code path.
+      The kept "custom config values" test additionally sets a custom
+      tokenEnvVar and asserts the auth header value — strictly
+      stronger on the same path.
+
+  - file: src/index.test.ts
+    test: "createCopilotProvider > reads copilot config from guild at start() time"
+    reason: subsumed_by_other_test
+    note: |
+      The test name promises "verifies config is read at start time"
+      but the only assertion is `provider.name === 'copilot'`, which
+      is a static property unaffected by config. Effectively a smoke
+      test that start() doesn't throw when given custom config.
+      `config defaults > uses custom config values` (kept) calls
+      start() with custom apiEndpoint+tokenEnvVar AND proceeds to
+      launch + assert URL/auth header — verifying the config is
+      genuinely read and used. The other shape test
+      (`returns a plugin with apparatus.provides having name "copilot"`,
+      kept) pins the static plugin shape. Together those two tests
+      cover everything the cut test claimed.
+
+  - file: src/index.test.ts
+    test: "launch() — agentic tool-call loop > accumulates token usage across multiple rounds"
+    reason: subsumed_by_other_test
+    note: |
+      Same accumulator code path as `happy path: tool-calling session
+      with 2 API calls`. The cut test runs 4 calls × {100, 50}
+      constant tokens, asserts {400, 200}; the happy path runs 2
+      calls × {100→150, 10→20} varying tokens, asserts {250, 30}.
+      Both verify the inputTokens/outputTokens accumulator works
+      across the loop. The happy path with VARYING per-call values
+      is the stronger accumulation test (catches a "uses last
+      round's values only" bug; constant-value accumulator can't
+      distinguish that bug from correct sum). Cutting the
+      constant-value variant loses no contract — same code path,
+      strictly weaker discriminator.
+
+kept_samples:
+  - test: "launch() — agentic tool-call loop > enforces maxToolRounds — stops after limit and completes normally"
+    reason_category: parameter_sweep
+    note: |
+      Group A redundant per the analyzer, but kept after assertion
+      review. The kept default test (`uses default maxToolRounds of
+      50`) pins "no config → 50 rounds." This test pins "explicit
+      maxToolRounds: 3 → 3 rounds." No other test verifies that an
+      explicit maxToolRounds value is honored, so cutting this would
+      lose that contract. Same code path, distinct config-plumbing
+      contract.
+
+  - test: "launch() — non-streaming single-turn > happy path: single-turn completion with no tools"
+    reason_category: representative
+    note: |
+      Canonical non-streaming happy path. Only test asserting full
+      request shape (model, stream:false, tools-absent, system + user
+      message ordering, Authorization header) AND full response shape
+      (status, exitCode, output, providerSessionId, tokenUsage,
+      costUsd:undefined, transcript role sequence).
+
+  - test: "launch() — agentic tool-call loop > happy path: tool-calling session with 2 API calls"
+    reason_category: representative
+    note: |
+      Canonical 2-round tool-call path. Asserts transcript role
+      sequence, tool handler invocation count, providerSessionId
+      (last-id-wins), tokenUsage summation across rounds, and final
+      output. Most assertion-rich tool-loop test in the suite.
+
+  - test: "launch() — agentic tool-call loop > handles tool handler error — sends error message back to model"
+    reason_category: error_path
+    note: |
+      Distinct branch in the tool-handler dispatch — known-tool that
+      throws. Asserts the error is captured into the tool message
+      content and the session continues to a normal completion.
+
+  - test: "launch() — agentic tool-call loop > handles unknown tool name — sends error message back to model"
+    reason_category: error_path
+    note: |
+      Distinct branch in the tool-handler dispatch — unknown tool
+      name. Asserts the dispatch returns a structured error in the
+      tool message and the session continues to completion.
+
+  - test: "launch() — agentic tool-call loop > includes tools array in API request when tools are provided"
+    reason_category: representative
+    note: |
+      Only test pinning the body['tools'] shape sent to the API
+      (function array with each tool's name + parameters). Other
+      tool-call tests verify behavior; this verifies the request-body
+      contract.
+
+  - test: "launch() — non-streaming single-turn > returns status: failed on HTTP error"
+    reason_category: error_path
+    note: |
+      HTTP-error path. Distinct from the network-failure path
+      (fetch throws); HTTP error is fetch returning a 4xx/5xx.
+
+  - test: "launch() — non-streaming single-turn > returns status: failed on network failure (fetch throws)"
+    reason_category: error_path
+    note: |
+      Network-error path (fetch itself throws). Distinct branch from
+      HTTP-error (fetch resolves with a non-OK response).
+
+  - test: "launch() — non-streaming single-turn > ignores conversationId, cwd, and environment without errors"
+    reason_category: edge_case
+    note: |
+      Negative-space contract — verifies that fields the OpenAI
+      provider does not consume are silently ignored. Catches a
+      regression where, e.g., environment leaks into a header.
+
+  - test: "launch() — non-streaming single-turn > handles absent systemPrompt and initialPrompt"
+    reason_category: edge_case
+    note: |
+      Negative-space contract — empty messages array is sent when
+      both prompts are absent.
+
+  - test: "launch() — streaming > yields text chunks from streamed response"
+    reason_category: representative
+    note: |
+      Canonical streaming text path. Only test asserting the
+      streaming request body shape (`stream: true`,
+      `stream_options.include_usage`) AND the chunk shape via deep
+      equal across two text deltas AND tokenUsage extracted from the
+      final chunk.
+
+  - test: "launch() — streaming > yields tool_use chunk when tool call is streamed"
+    reason_category: representative
+    note: |
+      High-leverage streaming + tool-call path. Single highest-unique
+      test in the suite (163 unique lines). Pins delta-accumulator
+      for tool_call across multiple chunks AND the tool_use /
+      tool_result / text chunk-type sequence.
+
+  - test: "launch() — streaming > non-streaming returns empty chunks iterable"
+    reason_category: edge_case
+    note: |
+      Verifies explicit `streaming: false` produces zero chunks.
+      Different from `happy path: single-turn` which uses
+      `streaming: undefined`. Both currently flow through the same
+      branch (`if (streaming)` is falsy for both), but the explicit
+      false-value test pins the explicit-config contract — a future
+      `streaming !== false ? stream() : nonStream()` refactor
+      would catch the bug only here. Hairsplitter, but lean keep on
+      the explicit-config-honored principle.
+
+  - test: "launch() — streaming > returns failed result on streaming API error"
+    reason_category: error_path
+    note: |
+      Distinct from the non-streaming HTTP error path — the
+      streaming path has its own error-extraction code (no JSON body
+      to parse, just status text).
+
+  - test: "convertTools > converts ResolvedTool array to OpenAI function tool format"
+    reason_category: representative
+    note: |
+      Canonical convertTools happy path. Verifies output array
+      length, type='function', name, description, and parameters
+      type for a 2-tool input.
+
+  - test: "convertTools > produces valid JSON Schema from Zod schema"
+    reason_category: representative
+    note: |
+      Distinct contract — the zod-to-JSON-Schema conversion path,
+      verified via `params.type === 'object'` and 'properties' in
+      params. Independent from the array-shape contract.
+
+  - test: "convertTools > returns empty array for empty input"
+    reason_category: edge_case
+    note: |
+      Empty-input edge case for convertTools.
+
+  - test: "extractOutput > returns content of the last assistant message with no tool_calls"
+    reason_category: representative
+    note: |
+      Canonical extractOutput happy path. The other 3 extractOutput
+      tests are parameter sweeps over distinct branches.
+
+  - test: "extractOutput > skips assistant messages that have tool_calls"
+    reason_category: parameter_sweep
+    note: |
+      Distinct branch — assistant message with tool_calls is
+      skipped, not returned. Different code path from the no-tool_calls
+      happy path.
+
+  - test: "extractOutput > returns undefined when last assistant message has null content"
+    reason_category: parameter_sweep
+    note: |
+      Distinct branch — assistant message with null content returns
+      undefined.
+
+  - test: "extractOutput > returns undefined when no suitable assistant message exists"
+    reason_category: parameter_sweep
+    note: |
+      Distinct branch — no assistant message at all in the list.
+
+  - test: "parseSseLines > parses data lines and calls handler"
+    reason_category: representative
+    note: |
+      Canonical parseSseLines happy path. The other 3 parseSseLines
+      tests are parameter sweeps over distinct branches in the line
+      parser.
+
+  - test: "parseSseLines > skips [DONE] sentinel"
+    reason_category: parameter_sweep
+    note: |
+      Distinct branch — [DONE] sentinel is filtered out.
+
+  - test: "parseSseLines > ignores non-data lines (empty, comments, event:)"
+    reason_category: parameter_sweep
+    note: |
+      Distinct branch — non-data lines (event:, comments, empty)
+      are filtered.
+
+  - test: "parseSseLines > returns incomplete last line as remaining buffer"
+    reason_category: edge_case
+    note: |
+      Buffering edge case — incomplete final line is returned as the
+      remaining buffer for the next chunk read.
+
+  - test: "createCopilotProvider > returns a plugin with apparatus.provides having name \"copilot\""
+    reason_category: representative
+    note: |
+      Canonical plugin-shape smoke test — `'apparatus' in plugin`
+      AND `provider.name === 'copilot'`. Doesn't call start(); pins
+      the static structure.
+
+  - test: "config defaults > uses default endpoint when copilot config is absent"
+    reason_category: representative
+    note: |
+      Only test pinning the default API endpoint URL
+      (https://models.inference.ai.azure.com).
+
+  - test: "config defaults > uses default maxToolRounds of 50"
+    reason_category: representative
+    note: |
+      Only test pinning the default maxToolRounds value (51 calls =
+      initial + 50 rounds).
+
+  - test: "config defaults > uses custom config values"
+    reason_category: representative
+    note: |
+      Pins both apiEndpoint AND tokenEnvVar config plumbing
+      together — the strongest config-plumbing test.
+
+  - test: "launch() — missing token > uses GITHUB_TOKEN by default"
+    reason_category: representative
+    note: |
+      Only surviving missing-token test after the parameter-sweep
+      cut. Pins "default tokenEnvVar is GITHUB_TOKEN, missing
+      rejects with name in error."
+
+# Post-trim state
+test_files_after: 1
+test_lines_after: 819
+tests_after: 30
+
+line_coverage_after: 67.96
+branch_coverage_after: 80.04
+func_coverage_after: 53.08
+
+package_line_coverage_after: 88.58
+package_branch_coverage_after: 81.25
+package_func_coverage_after: 48.94
+
+pure_redundant_count_after: 22
+pure_redundant_pct_after: 73.3
+
+# Effort
+trim_duration_min: 35
+notes: |
+  Fifth X017 data point. First trim of a non-trivial single-file
+  package (897 test lines, 35 tests, all in src/index.test.ts).
+
+  Rolling calibration:
+    - framework/core:                  29 flagged,  6 deleted (21.0%)
+    - plugins/fabricator:              13 flagged,  1 deleted ( 7.7%)
+    - plugins/lattice-discord:          8 flagged,  1 deleted (12.5%)
+    - plugins/clockworks-stacks-signals: 12 flagged, 0 deleted (0.0%)
+    - plugins/copilot:                 27 flagged,  5 deleted (18.5%)
+
+  Calibration trend stabilizes around the framework/core 21%
+  baseline. Flag rate 77.1% → deletion rate 18.5%. The "≥50% deletable"
+  H2 prediction continues to be sharply refuted; the analyzer's
+  pure-redundant set is a coverage-safety filter, not a deletion
+  recommendation.
+
+  ## Why 5 cuts on copilot
+
+  Heavy parameter-sweep structure: tests organized as N variants of
+  each scenario (single-turn, tool-call loop, streaming, config
+  defaults). Most variants verify behaviorally distinct contracts
+  (different request body shapes, different chunk types, different
+  error code paths, different config-plumbing fields), but a few
+  pairs sit on the same code path with strict-subset assertions:
+
+    1. token-missing default vs. token-missing custom — both verify
+       "no token rejects with env var name in error"; the custom
+       variant's "config plumbing" property is verified elsewhere
+       (`uses custom config values`).
+    2. providerSessionId-from-last-call (subsumed) vs. happy-path
+       tool-call (subsumed but heavily used) — both verify
+       last-id-wins on the 2-call path.
+    3. apiEndpoint-config (subsumed) vs. custom-config-values
+       (subsumed) — both verify URL plumbing; the custom-config
+       version pins URL+auth.
+    4. start()-doesn't-throw-with-config (subsumed) vs.
+       custom-config-values — both exercise start() with config; the
+       custom-config-values version pins URL+auth from launch().
+    5. token-accumulator-4-rounds (subsumed) vs. happy-path
+       tool-call (subsumed) — both verify the accumulator works in
+       the loop; happy path uses VARYING per-call values, which is
+       the stronger accumulator discriminator.
+
+  ## Patterns kept
+
+  21 keepers fall into the runbook's expected categories:
+    - Distinct-branch parameter sweeps (4× parseSseLines, 4×
+      extractOutput, 3× tool-handler dispatch branches).
+    - Edge cases (empty-input convertTools, empty messages on
+      absent prompts, incomplete-line buffering in SSE, conversationId/
+      cwd/environment ignored).
+    - Negative-space contracts (no chunks on non-streaming, error
+      messages back to model on tool errors).
+    - Distinct error paths (HTTP error vs. network failure vs.
+      streaming error).
+    - Canonical happy-path representatives (single-turn, 2-round
+      tool-call, streaming text, streaming tool-use).
+
+  ## Aggregate gate behavior
+
+  Pre-cut:  113865/167540 lines, 9293/11608 branches, 2830/5332 functions
+  Post-cut: 113865/167540 lines, 9285/11601 branches, 2830/5332 functions
+
+  Lines: identical (cuts had no unique line coverage by definition).
+  Branches: numerator and denominator both dropped 8 and 7 — small
+  net shift inside the 80.06 → 80.04 range, well above the 80 floor.
+  Functions: identical numerator and denominator (the cuts removed
+  it() callbacks but they were not counted as "covered functions"
+  because... actually the function counter is identical, so the test
+  callbacks must already be off the production-source surface; their
+  removal doesn't move the counter).
+
+  The function-coverage no-op stands in contrast to the
+  clockworks-stacks-signals data point where cutting one strict-subset
+  test dropped 5 transitively-covered functions in Stacks's patch()
+  chain. The difference: copilot's cuts are all subsets of OTHER
+  copilot tests in the same file, so the transitive function coverage
+  is preserved by the kept tests. clockworks-stacks-signals's cut was
+  a subset on the bridge but the lone attestation for transitive
+  functions in a different package's call chain.
+
+  Calibration data point for X017:
+    - flag rate: 77.1%, deletion rate: 18.5%, false-positive rate: 81.5%.
+    - Per-package coverage unchanged on all three dimensions.
+    - Aggregate function coverage held at 53.08% (no transitive
+      function-coverage drops, unlike clockworks-stacks-signals).
+
+# commit_sha filled in by the commit itself
