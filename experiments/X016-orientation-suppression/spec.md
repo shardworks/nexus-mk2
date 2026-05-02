@@ -169,3 +169,63 @@ actually run. At that point:
     npx-bootstrapped guild, real npm-installed plugins, real `nsg
     start` daemon process, and real `nsg stop` shutdown. Phase 2b
     (implementer config + waitForTerminal=true) is unblocked.
+
+- 2026-05-02: **Trial 2b (first implementer-driven trial) completed.**
+  First end-to-end trial that drives a real implementer session
+  through the full draft → implement → review → revise → seal
+  pipeline inside a Laboratory test guild. Apparatus
+  end-to-end-validated.
+  - Trial id: `w-monnnuqw-c998a09d0e9f`
+  - Rig: `rig-monnny9h-786e0be8` (16 engines, all completed in 1 attempt)
+  - Archive: `lar-monnr5zx-7868fa26482d`
+  - Wallclock: 2m 31s end-to-end (01:20:56 → 01:23:27 UTC)
+  - Extracted artifacts: `artifacts/2026-05-02-baseline-2b-implementer/`
+  - Plugin set extended to animator + loom + claude-code on top of
+    phase-2a's seven. No astrolabe — verified that Spider's
+    plugin-default `mandate → default` fallback (spider.ts:1389) fires
+    automatically without an explicit mapping when no kit claims
+    `mandate`.
+  - guild.json deep-merged with `loom.roles.artificer`
+    (`clerk:* tools:*`, mirroring vibers),
+    `animator.sessionProvider = claude-code`, and `spider.variables`
+    (role/buildCommand/testCommand) — build/test commands
+    package-scoped via `pnpm --filter @shardworks/nexus-core` to
+    avoid recursive-pnpm overhead.
+  - **Three real animator sessions captured.** All completed
+    successfully (exitCode 0):
+    - `implement` (artificer): 102.8s, $0.207, tokens 15in / 5527out /
+      245k cache-read / 13k cache-write.
+    - `review` (reviewer): 11.4s, $0.045, 3in / 380out / 11.5k
+      cache-read / 8.8k cache-write. No rejection.
+    - `revise` (artificer): 8.1s, $0.026, 4in / 324out / 24.7k
+      cache-read / 3.2k cache-write.
+  - **Total session cost: $0.278.** Rig-level cost reported as
+    $0.2782 (matches; no lab-host overhead beyond per-engine
+    invocation).
+  - **Codex commit captured.** 1 commit, 1562 bytes of diff:
+    `feat(nexus-core): add multiplySafely utility` at SHA
+    `7b984d611010` adding `packages/framework/core/src/util/numeric.ts`
+    + `numeric.test.ts`. Function shape matches the brief precisely
+    (overflow guard via `Math.abs(product) > Number.MAX_SAFE_INTEGER`).
+  - **Two real bugs caught and fixed in the same session:**
+    1. Spider 0.1.292 ordering bomb (filed as `c-monn8wfk` under
+       `c-monew2rg`): spider.start() calls `g.apparatus('animator')`
+       but only declares requires=[stacks,clerk,fabricator]. Worked
+       around in the manifest by ordering [animator, loom, claude-code]
+       before [spider, clockworks] in the plugin list.
+    2. `lab.commission-post-xguild`'s poll loop called the
+       non-existent `nsg writ-show` command (should be `nsg writ
+       show`). Earlier phases all ran with `waitForTerminal=false`
+       and never exercised this path. Fixed in scenario-xguild.ts.
+  - Apparatus pipeline now end-to-end-validated against a live
+    sonnet implementer + reviewer + revise + seal. Phase 2c
+    (baseline vs strong-prompt A/B) is unblocked.
+  - **Cost expectation reconciled.** Pre-trial budget was ~$0.30
+    per trial; actual cost was $0.28 with no debug rounds (the two
+    bugs were caught at the apparatus level, not the implementer
+    level — no API calls wasted on retries).
+  - Open follow-up: `lab.probe-git-range`'s commits-manifest.yaml
+    reports `filesChanged: 0, insertions: 0, deletions: 0` per
+    commit even when the patch contains content. Diff-stat
+    extraction in the probe is broken; cosmetic but worth fixing
+    before phase 2c so we have proper summary stats.
