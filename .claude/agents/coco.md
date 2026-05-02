@@ -117,6 +117,61 @@ When opening any new click, scan `docs/future/guild-vocabulary.md` for related t
 
 For historical references (old clicks, commits, transcripts using terms that have since drifted), consult the companion `docs/future/vocabulary-aliases.yaml` — the machine-readable registry that resolves legacy terms to their canonical successors. When we rename or subsume a term, add an entry to the registry as part of the change; the narrative tome carries the why, the registry carries the lookup.
 
+## In-session Checklist
+
+Maintain a lightweight per-session checklist at `.scratch/notes-<session-id>.md` for tracking open questions, tasks, and memos that arise during a working session. This is a *side surface* — not for chat output, not in the click tree, just a queryable file. Sean can ask "what's still open?" and you read the file to answer.
+
+### Initial template
+
+Create the file at session start (if it doesn't already exist) with this structure:
+
+    # Session checklist — <session-id>
+
+    ## Open
+
+    ## Tasks
+
+    ## Memos
+
+Note the blank line after each `##` heading and the single blank line before the next heading — required for valid markdown when items are added.
+
+### Maintaining the checklist
+
+When you raise a question, note a task, or capture an observation worth keeping in mind, **prepend** it to the appropriate section (newest at top). Use the Edit tool, anchored on the heading + blank line.
+
+**Empty section** (next thing after heading is the next heading):
+
+    old_string: "## Open\n\n## Tasks"
+    new_string: "## Open\n\n- new question here\n\n## Tasks"
+
+**Section with items already**:
+
+    old_string: "## Open\n\n- "
+    new_string: "## Open\n\n- new item here\n- "
+
+For checking off a task, Edit on the specific line: `[ ]` → `[x]`.
+
+### When to use it
+
+- Sean asks "what's still open?" — read the file, answer from it.
+- A question arises that you can't resolve right now — prepend to **Open**.
+- A task you'll do later this session — prepend to **Tasks**.
+- An observation worth keeping in mind without disrupting flow — prepend to **Memos**.
+
+### What it's NOT for
+
+- **Decisions** — those go in chat (and get distilled at wrap-up).
+- **Long-form content** — keep in `.scratch/` drafts.
+- **Cross-session continuity** — that's the distill's job at wrap-up.
+
+The checklist is ephemeral within the session. At wrap-up, the distiller works from the chat transcript directly; the checklist is for in-session use, not handoff.
+
+## Session Distillation
+
+At wrap-up (via the wrap-up skill), the session is distilled by the **distiller** agent into a structured planning artifact at `docs/planning/<YYYY-MM-DD>-<slug>.md`. The distiller runs in a fresh context — it has no memory of the conversation, only the transcript. This Cornell-style temporal/contextual separation forces actual distillation rather than transcribe-via-summary. After distillation, the **verifier** agent checks the distill against the transcript and surfaces only genuinely serious discrepancies.
+
+You don't generate the distill yourself — invoke `bin/coco-distill.sh <session-id>` from the wrap-up skill and let the agents do the work.
+
 ## The `nsg` CLI
 
 `nsg` is the guild CLI. You invoke it as plain `nsg <command>` from any Bash tool call — it's on your PATH via `/usr/local/bin/nsg`.
