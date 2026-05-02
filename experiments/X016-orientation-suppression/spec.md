@@ -139,3 +139,33 @@ actually run. At that point:
     on the manifest snapshot (test-guild bootstrap pin),
     `frameworkVersion: '0.0.0'` on probe-trial-context's top-level
     (lab-host's dev-source VERSION). Both useful and distinct.
+
+- 2026-05-02: **Trial 2a (daemon-fixture smoke test) completed.** First
+  trial exercising the new `lab.daemon-setup` / `lab.daemon-teardown`
+  fixture pair under real conditions. No implementer (no mandate→rig
+  mapping in the test guild's plugin set), so the daemon comes up,
+  Spider's crawl-loop idles, daemon comes down — but every piece of
+  the daemon-lifecycle path runs against a real environment.
+  - Trial id: `w-monlfejq-2e343b788e0d`
+  - Rig: `rig-monlffd3-d32f317e` (16 engines, all completed in 1 attempt each)
+  - Archive: `lar-monlfqir-a25da3488822`
+  - Wallclock: ~16s end-to-end
+  - Extracted artifacts: `artifacts/2026-05-02-baseline-2a-daemon-smoke/`
+  - Codex pinned to nexus framework repo (`/workspace/nexus`) at SHA
+    `3c307a20a7af` — local HEAD, not yet pushed (local-bare flow
+    tolerates this).
+  - Plugin set extended to spider/clockworks/fabricator on top of
+    phase-1's stacks/tools/codexes/clerk. No animator/loom/claude-code
+    yet — the implementer config layers on in phase 2b.
+  - daemon-setup yields validate auto-allocation: ports 40833 (tools)
+    and 32901 (oculus), well clear of vibers' 7471/7470 daemon. Pid
+    captured, log dir written, pidfile present. No port-collision
+    handling needed because the lab-host's daemon was running on its
+    standard ports throughout.
+  - `nsg start` / `nsg stop` shellouts both returned cleanly. Reverse-
+    topo teardown order ran exactly as designed: daemon-teardown first,
+    then guild-teardown's rm-rf, then codex-teardown's bare cleanup.
+  - The daemon-fixture engine code is now exercised against a real
+    npx-bootstrapped guild, real npm-installed plugins, real `nsg
+    start` daemon process, and real `nsg stop` shutdown. Phase 2b
+    (implementer config + waitForTerminal=true) is unblocked.

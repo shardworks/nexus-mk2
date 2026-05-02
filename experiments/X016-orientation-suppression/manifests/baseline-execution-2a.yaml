@@ -1,0 +1,85 @@
+slug: x016-baseline-2a-daemon
+title: X016 Phase 2a — daemon-fixture smoke test
+codex: nexus
+
+description: |
+  Phase 2a — validates the new lab.daemon-setup / lab.daemon-teardown
+  fixture pair under real conditions without driving an implementer.
+  Same shape as phase 1 + a daemon fixture inserted between
+  test-guild and scenario.
+
+  Spider has no kit-side mapping for the `mandate` writ-type when
+  astrolabe isn't installed, so the writ posts but no rig fires.
+  Spider's crawl loop idles (returns null each tick), the daemon
+  sits idle, then teardown stops it. Captures real-world data on:
+    - port allocation working
+    - guild.json deep-merge preserving existing keys
+    - nsg start's startup-sync returning cleanly
+    - daemon log files getting written
+    - nsg stop cleanly tearing the daemon down before guild rm-rf
+
+  waitForTerminal=false because no rig will ever drive the writ
+  to terminal — the daemon's job here is just "exist briefly without
+  exploding." Phase 2b will add the mandate→default mapping +
+  implementer config and switch to waitForTerminal=true.
+
+frameworkVersion: '0.1.292'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      # The framework repo, not nexus-mk2. Local-bare flow clones
+      # from /workspace/nexus directly and pushes to a per-trial
+      # bare repo; no origin involvement. The pinned SHA is local
+      # HEAD (not yet pushed to origin/main); the local-bare flow
+      # tolerates this.
+      upstreamRepo: /workspace/nexus
+      baseSha: 3c307a20a7afc33df96c87c1a2d694edfb951c05
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # Plugin set sized for daemon-driven dispatch:
+      #   stacks/tools/codexes/clerk: writ persistence + CLI
+      #   spider: rig execution loop (the daemon's main reason)
+      #   clockworks: event dispatch (drives spider's crawl)
+      #   fabricator: engine registry
+      # Notably absent: animator/loom/claude-code (no rig will fire,
+      # so no implementer summoned), astrolabe (no plan-and-ship
+      # mapping wanted), oculus (skipped at runtime if uninstalled).
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.292' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.292' }
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}    # auto-allocate ports
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X016-orientation-suppression/briefs/baseline-task.md
+    waitForTerminal: false
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
