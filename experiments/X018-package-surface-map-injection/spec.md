@@ -67,9 +67,9 @@ without meaningfully degrading spec quality.
 
 "Meaningfully degrading" is operationalized via a three-tier
 quality observation regime — see [Quality](#quality-no-regression)
-below. Tier 1 (mechanical) and Tier 2 (manual review) run every
-trial; Tier 3 (downstream implementer) is deferred unless 1 or 2
-flag a regression.
+below. Tier 1 (mechanical) and Tier 2 (manual review) run on every
+variant trial; Tier 3 (downstream implementer) is deferred unless 1
+or 2 flag a regression.
 
 ## Variants
 
@@ -104,29 +104,35 @@ Greps and deep semantic reads stay roughly unchanged.
 
 ### Quality (no-regression)
 
-Three-tier observation regime. Tiers 1 + 2 run on every trial /
-trial pair; Tier 3 is deferred unless triggered.
+Three-tier observation regime. Tiers 1 + 2 run on every variant
+trial; Tier 3 is deferred unless triggered.
 
-**Tier 1 — Mechanical structural integrity (every trial).**
+The **comparator** for all three tiers is the **reference baseline**
+established in Phase 3 — either the real-world baseline plan (if
+the calibration trial confirms apparatus fidelity) or the
+calibration trial's plan (if we re-baseline at the Lab cost).
+
+**Tier 1 — Mechanical structural integrity (every variant trial).**
 Extracted post-trial from the `astrolabe/plans` book:
 
 - All four artifact sections present and non-trivial in length
   (`inventory`, `scope`, `decisions`, `observations`, `spec`)
-- Decision count within ±30% of baseline
-- Scope item count within ±30% of baseline
-- Inventory length within ±40% of baseline (word count)
+- Decision count within ±30% of reference baseline
+- Scope item count within ±30% of reference baseline
+- Inventory length within ±40% of reference baseline (word count)
 - Every decision has `selected` populated
 
 Trip any check → trial flagged "quality flagged." Automated;
 runs unconditionally.
 
-**Tier 2 — Manual side-by-side review (every trial pair).**
-Coco/Sean reads baseline + variant specs side-by-side. Flag any
-obvious quality regression: missing decisions, glossed-over
-sections, drifted recommendations, etc. Expected outcome is "no
-identified issues" — if Tier 2 flags something, escalate to
-Tier 3. ~10 min human time per pair. One-paragraph summary lands
-in the trial pair's artifact directory.
+**Tier 2 — Manual side-by-side review (every variant trial).**
+Coco/Sean reads the reference baseline + variant specs
+side-by-side. Flag any obvious quality regression: missing
+decisions, glossed-over sections, drifted recommendations, etc.
+Expected outcome is "no identified issues" — if Tier 2 flags
+something, escalate to Tier 3. ~10 min human time per trial.
+One-paragraph summary lands in the variant trial's artifact
+directory.
 
 **Tier 3 — Downstream implementer trial (deferred / on-trigger).**
 Hand each variant's spec to a fresh implement-only trial. Compare
@@ -136,7 +142,7 @@ per implementer trial. Run when:
 
 - Tier 1 flags a structural issue
 - Tier 2 surfaces a possible regression
-- Periodic spot-check (once per N pairs)
+- Periodic spot-check (once per N variant trials)
 - Final sign-off before declaring the experiment complete
 
 H1 is sustained when cost reduction is observed AND at least one of:
@@ -206,24 +212,56 @@ Promote to Lever B only if X018 results justify the production
 investment. Sequence: ship Lever A → run X018 → if H1 sustained,
 specify and ship Lever B as a separate commission.
 
-### Phase 3 — A/B trials
+### Phase 3 — Trials
 
-Run paired trials on identical commissions, spec-only shape.
-Codex pinned per trial; surface map regenerated against that SHA.
+Trials are spec-only shape. Codex pinned per trial; surface map
+regenerated against that SHA. **No paired baseline-per-variant** —
+we use the existing real-world baseline as the comparator
+(possibly re-anchored after calibration; see below).
 
-**Codex selection.** Prefer replays of the two real plan rigs we
-already analyzed:
+**Codex selection.** Replays of the two real plan rigs we already
+analyzed give us known real-world baselines:
 
 1. Stacks `dropBook` plan rig (mandate writ `w-mojnftby`,
    reader-analyst session `ses-mok28grd`, baseline cost $6.48)
 2. Cartograph plan rig (mandate writ `w-mojmj0rc`,
    reader-analyst session `ses-mojmj4zc`, baseline cost $8.08)
 
-Both are real cross-package work with known costs. Replay both as
-paired trials.
+Both are real cross-package work. Run cartograph first (richer
+session, larger baseline cost — bigger effect-size signal).
 
-**N=1/variant calibration first.** Decide on expansion (N=5+ for
-formal CI) based on directional signal and per-trial cost.
+#### Trial sequence
+
+**Step 1 — Calibration baseline.** Run a Lab baseline (no surface
+map) of the cartograph commission. Validates the `lab.plan-only`
+recipe end-to-end and measures apparatus fidelity vs the
+real-world session.
+
+**Step 2 — Branch on calibration result.** Three cases:
+
+- **(a) Lab baseline within ~10–15% of real-world cost.**
+  Apparatus is faithful. Use the real-world session as the
+  reference baseline for variant comparison. Proceed to step 3.
+- **(b) Lab baseline diverges 15–30% consistently.** Re-anchor:
+  treat the calibration plan as the new reference baseline (it
+  reflects current apparatus reality). Proceed to step 3.
+- **(c) Lab baseline diverges >50% or non-deterministically.**
+  Apparatus problem. Stop, diagnose, fix before any variant trial.
+
+**Step 3 — Variant trial.** Run the with-surface-map variant on
+the same commission. Compare cost (USD, tokens, duration) and
+quality (Tiers 1 + 2) against the reference baseline established
+in step 2.
+
+**Step 4 — Decide expansion.** Based on directional signal and
+per-trial cost, decide whether to: replay stacks `dropBook` for a
+second data point, expand N for formal CI, trigger Tier 3, or
+stop.
+
+**Per-trial cost** is roughly the real-world baseline (~$6–8 per
+trial). Total minimum spend for a complete cartograph
+calibration + variant pair: ~$16. Stacks adds another ~$13 if we
+extend.
 
 **Rig configuration.** Use the `lab.plan-only` rig template per
 [Lab Operations / Planning-only rig](../lab-operations/running-trials.md#planning-only-rig).
@@ -248,10 +286,15 @@ block; no framework changes required.
   benefit little; cross-package work probably benefits most.
   Both calibration codexes are cross-package, intentionally.
 - **First spec-only trial shape.** The Laboratory has not yet run
-  a spec-only trial. Apparatus issues may surface; run a
-  baseline-only calibration trial first (using the `lab.plan-only`
-  rig from the ops doc) to validate the recipe end-to-end before
-  paired A/B runs.
+  a spec-only trial. Apparatus issues may surface; the Phase 3
+  step 1 calibration trial is precisely where these get caught.
+  Calibration result drives the branch in step 2 (trust real-world
+  baseline / re-anchor / stop and fix).
+- **Single-run variance.** With no paired Lab baseline per
+  variant, a single variant run might be a high or low outlier
+  vs the reference baseline. N=1 is sufficient for *directional*
+  H1 evidence per the spec's calibration framing; expansion to
+  N>1 (step 4) is the canonical control for variance.
 
 ## Depends on
 
