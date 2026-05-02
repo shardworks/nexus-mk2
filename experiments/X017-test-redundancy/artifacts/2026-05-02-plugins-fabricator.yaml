@@ -1,0 +1,154 @@
+package: plugins/fabricator
+date: 2026-05-02
+session: b22fa587-51c2-41b8-9565-5c27eb79f3d3
+
+# Pre-trim state
+test_files_before: 1
+test_lines_before: 399
+tests_before: 16
+pure_redundant_count: 13
+pure_redundant_pct: 81.3
+
+# Aggregate coverage (pre-trim)
+line_coverage_before: 67.98
+branch_coverage_before: 80.03
+func_coverage_before: 53.05
+
+# Per-package coverage (pre-trim) — from the aggregate report's per-package row
+# (includes import-time hits in core dependencies; the fabricator.ts-only row
+# was 79.95/88.00/75.00).
+package_line_coverage_before: 79.52
+package_branch_coverage_before: 91.43
+package_func_coverage_before: 28.95
+
+# Review pass
+candidates_reviewed: 13
+candidates_deleted: 1
+candidates_kept: 12
+
+# Per-cut breakdown
+deletions:
+  - file: src/fabricator.test.ts
+    test: "Fabricator > getEngineDesign() > handles engines from both kits and apparatus supportKits together"
+    reason: belt_and_suspenders
+    note: |
+      Pure integration test — kit-only registration (test #3) and
+      apparatus-only registration (test #5) each cover their source
+      independently, and on the fabricator side both flow through the
+      same registerFromKit() via ctx.kits('engines'). The mixed-source
+      merging happens upstream in the framework's kits() aggregator,
+      not in the fabricator. No new code path exercised.
+
+# Sampled "kept" tests with reason categories — covers the major patterns
+# of false-positive redundancy in this package
+kept_samples:
+  - test: "Fabricator > getEngineDesign() > finds an engine registered from a kit"
+    reason_category: representative
+    note: "Canonical kit happy path."
+  - test: "Fabricator > getEngineDesign() > registers engines from apparatus supportKit (via Wire phase)"
+    reason_category: representative
+    note: |
+      Coverage-redundant with the kit happy path (same registerFromKit
+      code), but pins the apparatus.supportKit user-facing contract.
+  - test: "Fabricator > getEngineDesign() > registers engines from multiple kits"
+    reason_category: parameter_sweep
+    note: |
+      Multi-kit aggregation success path. The kit-vs-kit collision test
+      uses two kits but throws before set(); only this test verifies the
+      success branch with multiple kits.
+  - test: "Fabricator > getEngineDesign() > throws when two kits contribute the same engine-design id (kit-vs-kit collision is fatal)"
+    reason_category: error_path
+    note: |
+      Asserts four distinct properties on the error message (engine id +
+      both plugin names + 'engines' marker). Author intentionally pinned
+      the sibling in listEngineDesigns() too.
+  - test: "Fabricator > getEngineDesign() > skips entries missing the id field silently"
+    reason_category: error_path
+    note: "isEngineDesign() guard branch — missing id."
+  - test: "Fabricator > getEngineDesign() > skips entries missing the run field silently"
+    reason_category: error_path
+    note: "isEngineDesign() guard branch — missing run. Distinct branch from missing-id."
+  - test: "Fabricator > getEngineDesign() > skips null and primitive entries silently, keeps valid ones"
+    reason_category: edge_case
+    note: |
+      Mixed-input edge case — null, string, and number rejected while a
+      valid engine in the same kit is preserved. Distinct invalid-input
+      contract from the missing-field cases.
+  - test: "Fabricator > getEngineDesign() > ignores a kit with no engines field"
+    reason_category: edge_case
+    note: |
+      Optionality contract for the kit shape. Same observable outcome as
+      'no kits at all', but pins the 'engines field is optional' contract.
+  - test: "Fabricator > getEngineDesign() > ignores an apparatus with no supportKit"
+    reason_category: edge_case
+    note: |
+      Distinct optional-chain branch from the kit case — verifies the
+      apparatus.supportKit guard.
+  - test: "Fabricator > getEngineDesign() > returns undefined for an unknown engine ID"
+    reason_category: edge_case
+    note: "Lookup-miss contract on empty registry."
+  - test: "Fabricator > listEngineDesigns() > returns empty array before registering anything"
+    reason_category: edge_case
+    note: "Empty-state contract for listEngineDesigns()."
+  - test: "Fabricator > listEngineDesigns() > returns correct EngineDesignInfo for two designs from different plugins"
+    reason_category: representative
+    note: |
+      Cross-plugin pluginId attribution. The high-leverage hasCollect:true
+      test uses a single kit, so this is the only test verifying pluginId
+      is correctly recorded across multiple contributing plugins.
+
+# Post-trim state
+test_files_after: 1
+test_lines_after: 387
+tests_after: 15
+
+# Aggregate coverage (post-trim)
+line_coverage_after: 67.98
+branch_coverage_after: 80.02
+func_coverage_after: 53.05
+
+# Per-package coverage (post-trim)
+package_line_coverage_after: 79.52
+package_branch_coverage_after: 91.67
+package_func_coverage_after: 28.95
+
+# Re-run analyzer post-trim
+pure_redundant_count_after: 12
+pure_redundant_pct_after: 80.0
+
+# Effort
+trim_duration_min: 20
+notes: |
+  Second X017 data point. Calibration extends framework/core's pattern
+  with an even more conservative outcome:
+
+    - framework/core: 29 flagged, 6 deleted (21% deletion rate)
+    - plugins/fabricator: 13 flagged, 1 deleted (7.7% deletion rate)
+
+  The fabricator's analyzer flag rate (81%) is in line with framework/core
+  (74%) — both well above H2's predicted "≥50% of agent-written tests
+  are deletable" — but the post-review deletion rate is far below. This
+  is the H2 false-positive story: pure-redundant ≠ deletable.
+
+  Why so few deletions on fabricator:
+    - The package's surface is small (16 tests around two API methods).
+    - Most "redundant" tests pin distinct external contracts that the
+      analyzer can't see: three optionality points (kit no engines /
+      apparatus no supportKit / supportKit no engines), two isEngineDesign
+      guard branches (missing id / missing run), the mixed-input edge case,
+      the multi-plugin pluginId attribution, the empty-state listings.
+    - The single genuine deletion (kit + apparatus together) was a pure
+      integration test where both halves were already individually covered
+      and the merging logic lives upstream of fabricator anyway.
+
+  The aggregate gate held (67.98%/80.02%/53.05%, all above floor). Per-
+  package branch coverage actually nudged up (91.43% → 91.67%) — the
+  deleted test contributed to a branch denominator that no longer exists.
+
+  Calibration data point for X017:
+    - flag rate: 81.3%, deletion rate: 7.7%, false-positive rate: 92.3%
+    - extends framework/core (74.4% flag, 21% delete, 79% false-positive)
+    - direction is consistent across two packages: agents over-test, but
+      the analyzer overstates it by an order of magnitude.
+
+# commit_sha filled in by the commit itself
