@@ -5,7 +5,7 @@
  *   - Pure helpers (discoverTestGuilds, extractH1Title) tested directly.
  *   - Engine validation guards (briefPath absolute, writId required,
  *     timeout/poll positivity) tested without subprocesses.
- *   - The shell-out happy path (nsg commission-post + nsg writ-show)
+ *   - The shell-out happy path (nsg commission-post + nsg writ show)
  *     is exercised by live smoke verification rather than unit tests
  *     — booting the full nsg toolchain is too expensive.
  */

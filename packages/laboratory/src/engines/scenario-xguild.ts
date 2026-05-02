@@ -210,7 +210,7 @@ function resolveTestGuild(
 /**
  * Poll until the target writ reaches a terminal-classification state.
  * Throws on timeout. Each poll shells out `nsg --guild-root <test-guild>
- * writ-show --id <writId> --format json`.
+ * writ show --id <writId> --format json`.
  *
  * Exposed as a standalone helper so both engines (the post-and-wait
  * happy path, and the standalone wait engine) share its behavior.
@@ -233,10 +233,19 @@ export async function waitForWritTerminal(opts: {
     }
 
     const localNsg = resolveLocalNsg(opts.testGuildPath, opts.designId);
+    // `writ show` is a sub-subcommand of the `writ` group in the
+    // published 0.1.292 CLI surface — there is no top-level
+    // `writ-show` command. Earlier drafts of this engine (and a
+    // few of the engine docstrings) referred to `writ-show`; that
+    // was always wrong and only escaped notice because phase-1/2a
+    // trials all ran with `waitForTerminal: false` and never
+    // exercised this poll path. Phase 2b is the first trial to
+    // hit it and surfaced the typo.
     const { stdout } = await exec(localNsg, [
       '--guild-root',
       opts.testGuildPath,
-      'writ-show',
+      'writ',
+      'show',
       '--id',
       opts.writId,
       '--format',
