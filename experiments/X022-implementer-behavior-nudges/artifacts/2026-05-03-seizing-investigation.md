@@ -128,27 +128,112 @@ These are the lab host's polling block-checkers (in
 `packages/laboratory/src/engines/xguild-shell.ts`), which shell out
 to the test guild's local `nsg` binary to fetch writ/rig state via
 `--format json`. The JSON parser succeeds in parsing one object,
-then encounters non-whitespace bytes immediately after. Two
-candidates for the trailing content:
+then encounters non-whitespace bytes at the position immediately
+after the JSON.
 
-- A second JSON object appended (some race condition where the
-  command output twice? unlikely for a single `execFile` call).
-- Trailing text — but stderr is captured separately by `execFile`,
-  so warnings like `[scriptorium] Background clone of ... failed`
-  shouldn't reach stdout.
-- Embedded content in the writ body that broke the JSON.stringify
-  → JSON.parse round-trip (less likely; standard stringify escapes).
+### Root cause: animator's start() leaks an unawaited async IIFE
 
-When this throws, the block checker reports failed. Spider's
-`evaluateDispatchPredicate` catches it and the predicate fails to
-evaluate → dispatch is held → next crawl pass tries again. If the
-parse failure is sticky (e.g., the writ body content is the
-problem), the trial sits in `open` indefinitely while the polling
-loop keeps throwing.
+`packages/plugins/animator/src/animator.ts:947–995` fires this:
 
-Worth a follow-up click: reproduce the parse failure, identify the
-trailing content. Until then, every long-running trial is one
-parse-failure away from indefinite hang.
+```ts
+(async () => {
+  try { await drainDlq(g.home); } catch (err) { /* warn */ }
+  try { await backoff.reconcileOnBoot(); } catch (err) { /* warn */ }
+  // … guild_alive_at write …
+  try {
+    await recoverOrphans(sessions, downtimeCredit);
+  } catch (err) { /* warn */ }
+})();
+```
+
+The IIFE is **fire-and-forget** — nothing awaits it. `start()`
+returns immediately after invoking it.
+
+When the lab host shells out
+`nsg --guild-root <test-guild> writ show --id … --format json`,
+the test guild's nsg subprocess boots the full guild (line 283:
+`await createGuild(home)`), animator's `start()` fires the IIFE,
+the writ-show tool runs and prints its JSON via
+`console.log(JSON.stringify(result, null, 2))`, the action handler
+returns. Node's event loop then waits for any in-flight async work
+(the IIFE) before exiting. If the IIFE's `recoverOrphans` finds a
+stale session at this moment, it executes:
+
+```ts
+console.log(`[animator] Reconciler: marked ${recovered} dead sessions as failed`);
+```
+
+…which writes to stdout **after** the JSON output but **before**
+process exit. The trailing log corrupts the JSON parser at the
+consuming side.
+
+### Timing trace (matches both observed parse-failure positions)
+
+```
+t=0       apparatus.start() returns; IIFE running in background
+          IIFE: drainDlq() (no DLQ files in fresh test guild — silent)
+          IIFE: backoff.reconcileOnBoot() (silent)
+          IIFE: state.put(guild_alive_at) (silent)
+          IIFE: await recoverOrphans(...)  ← still in flight
+t=0.5s    writ-show tool reads DB, returns result object
+t=0.51s   CLI prints JSON via console.log → 25856 bytes + '\n' to stdout
+t=0.52s   action handler returns; main returns
+t=0.55s   IIFE's recoverOrphans completes:
+          - finds the just-killed reviewer session in 'running' state
+            with stale lastActivityAt (>90s old)
+          - marks it failed
+          - console.log("[animator] Reconciler: marked 1 dead sessions as failed")
+          → 60-odd more bytes appended to stdout
+t=0.56s   process exits
+```
+
+Position 25857 = end of writ JSON + 1 for the newline → first
+non-whitespace char (`[` of `[animator]`) of the trailing log line.
+Same shape for position 89137 on the larger `rig for-writ` payload.
+
+### Why the fix isn't simply "don't log"
+
+The reconciler log is operationally useful (it's a real diagnostic
+when sessions are getting reconciled). The fix is to **route the
+log through stderr instead of stdout** (matching `console.warn`
+elsewhere in the file — DLQ failures, heartbeat write failures, and
+guild_alive_at failures all go via `console.warn`), or to **await
+the IIFE inside start()** so its completion is observable to the
+caller. Both are small changes; routing to stderr is the lowest-
+risk option since it preserves the diagnostic without blocking
+boot on the reconciler scan.
+
+Same fix applies to the `[animator] DLQ drain: processed N of M…`
+log at `startup.ts:70`, the `[animator] Backfilled lastActivityAt`
+log at line 123, and the `[clerk] Link migration: renamed N…` log
+at `packages/plugins/clerk/src/clerk.ts:1506` (the clerk migration
+runs synchronously inside `start()`, so it's safer — but it still
+writes to stdout, which would corrupt JSON parsers if the migration
+ever runs during a JSON-format invocation).
+
+### Why parse failures are intermittent (not always-fatal)
+
+Once `recoverOrphans` marks a stale session failed, it's terminal —
+no second log on subsequent CLI invocations. So the parse failure
+is **one-shot per stale-session-discovery event**. Spider's
+re-evaluate-on-error path picks up the next clean parse and the
+trial proceeds.
+
+But the cost is real: each failure delays the lab host's polling
+by one crawl tick (and burns the parsing throw through the
+daemon's error log), and any sustained reconciler activity (a
+session that crashes repeatedly under retry) generates a fresh
+parse failure each cycle.
+
+### Reproducer (untested but mechanically obvious)
+
+1. In a fresh test guild, post a session record with `status:
+   running`, `lastActivityAt: <2 minutes ago>`, no `endedAt`.
+2. Run `nsg writ list --format json` (or any tool that returns
+   JSON-shaped output — writ-show, click-show, lab-trial-show).
+3. Capture stdout. Expected: clean JSON. Actual (post-fix
+   verification): JSON followed by `[animator] Reconciler: marked
+   1 dead sessions as failed\n`.
 
 ## Evidence — database lock contention
 
@@ -227,11 +312,15 @@ daemon.
 
 ## Recommended follow-ups (parked for Sean to scope)
 
-1. **Reproduce the JSON-parse-after-position bug.** Run
-   `/workspace/vibers/.nexus/laboratory/guilds/<some-old-guild>/node_modules/.bin/nsg
-   --guild-root <that-guild> writ show --id <its-mandate-writ-id>
-   --format json | wc -c` and inspect what's at byte 25858+. May
-   require restoring a guild dir.
+1. **Fix the animator-IIFE / clerk-migration stdout pollution.**
+   See "Root cause: animator's start() leaks an unawaited async
+   IIFE" above. The minimal fix is converting four call sites to
+   `console.warn` (which goes to stderr): `animator.ts:174`,
+   `startup.ts:70`, `startup.ts:123`, and `clerk.ts:1506`. A
+   sturdier fix would also `await` the IIFE inside `start()` so
+   the boot reconciler's completion is observable to the bootstrap
+   caller. With those changes, the lab-host block-checker JSON
+   parse failures stop at the source.
 
 2. **Cap concurrent lab trials per host.** With 3 trials running
    alongside 4 interactive coco sessions, swap pressure became the
