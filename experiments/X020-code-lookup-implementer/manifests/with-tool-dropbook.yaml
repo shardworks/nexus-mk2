@@ -1,0 +1,158 @@
+slug: x020-with-tool-dropbook
+title: X020 variant — dropBook commission, code-lookup tool exposed to artificer
+codex: nexus
+
+description: |
+  X020 variant trial: replays the dropBook commission with the
+  `@shardworks/code-lookup-apparatus` plugin installed, the
+  `artificer` role granted `code-lookup:read`, and the role's
+  loom-resolved instructions set to the X020 implementer-flavored
+  tool-preference snippet (shipped via `files:` to
+  `<guild-root>/roles/artificer.md`; loom auto-loads
+  `<home>/roles/<roleName>.md` for every guild-configured role).
+
+  Hypothesis: directing the implementer to `code-lookup` for
+  symbol/usages/package queries (instead of Grep) reduces
+  implement-session cost ≥25% relative to the X020 baseline
+  (production artificer role file, no code-lookup), without
+  meaningfully degrading code quality.
+
+  Why this experiment exists: X019 ported the same hypothesis to
+  the reader-analyst role and the result was -1.3% on N=1 (not
+  supported). X019's diagnosis was role mismatch — the planner's
+  bottleneck is deep-Read, not lookup/navigation. The implementer's
+  edit workflow is structurally different: "find all callers of X
+  before changing X's signature" is the canonical structural use
+  case for `mode: usages`. If the diagnosis is correct, the
+  implementer should produce the cost-reduction signal X019 did
+  not.
+
+  Identical apparatus to baseline-dropbook.yaml — same plugin set
+  (PLUS code-lookup), same codex SHA, same artificer permissions
+  (PLUS `code-lookup:read`), no rig-template override (default
+  spider mandate-fallback wires implement-only). The only material
+  differences:
+
+  1. `@shardworks/code-lookup-apparatus@0.1.300-x019.0` added to plugins.
+  2. `code-lookup:read` permission added to artificer.
+  3. `code-lookup.indexPath` configured (resolves to <guild-root>).
+  4. Reverse-usage-index JSON copied to
+     `<guild-root>/code-lookup-index.json` via `files:`. Pre-built
+     once per codex SHA (no fixture-time generator run).
+  5. `roles/artificer.md` shipped via `files:` is the production
+     artificer file (vibers snapshot) PLUS the X020 implementer-
+     flavored tool-preference snippet inserted as a top-level
+     section. Baseline ships the production file unmodified.
+
+  Reference baseline: paired against this trial's baseline manifest run.
+  H1 sustain criterion: ≥25% implementer cost reduction with no Tier 1
+  / Tier 2 quality regression.
+
+  waitForRigTerminal=true with a 60-min cap.
+
+frameworkVersion: '0.1.300-x019.0'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: 93f8ce5089e0a115775c166534ca46f7ec196b8d
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # X020 plugin set: baseline plugins + code-lookup. All pinned to
+      # 0.1.300-x019.0 (the X019 prerelease that introduced code-lookup).
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/ratchet-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.300-x019.0' }
+        # X020 INTERVENTION: code-lookup MCP plugin.
+        - { name: '@shardworks/code-lookup-apparatus', version: '0.1.300-x019.0' }
+      config:
+        settings:
+          model: opus
+        loom:
+          roles:
+            artificer:
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+                # X020 INTERVENTION: grant the implementer access to
+                # the code-lookup tool. The code-lookup plugin
+                # contributes one tool (`code-lookup`) with
+                # permission 'read', which combines with the
+                # auto-derived plugin id `code-lookup` to yield this
+                # string.
+                - 'code-lookup:read'
+        animator:
+          sessionProvider: 'claude-code'
+        # X020 INTERVENTION: code-lookup config block. The path is
+        # relative to process.cwd() of the daemon, which `nsg start`
+        # sets to the guild root. Resolves to:
+        #   <guild-root>/code-lookup-index.json
+        # The matching `files:` entry below copies the pre-built index
+        # JSON to that path.
+        code-lookup:
+          indexPath: 'code-lookup-index.json'
+        spider:
+          variables:
+            role: 'artificer'
+            buildCommand: 'pnpm --filter @shardworks/stacks-apparatus --filter @shardworks/clockworks-stacks-signals-apparatus --filter @shardworks/lattice-apparatus --filter @shardworks/cartograph-apparatus build'
+            testCommand: 'pnpm --filter @shardworks/stacks-apparatus --filter @shardworks/clockworks-stacks-signals-apparatus --filter @shardworks/lattice-apparatus --filter @shardworks/cartograph-apparatus test'
+      # X020 INTERVENTION:
+      # - `roles/artificer.md` is the production vibers artificer
+      #   file PLUS the implementer-flavored code-lookup tool-
+      #   preference snippet, inserted as a top-level "Tool
+      #   preference" section between the role intro and the rest of
+      #   the file. Loom auto-loads `<home>/roles/<roleName>.md` for
+      #   every guild-configured role; the file becomes the
+      #   artificer's loom-resolved instructions, appended to the
+      #   system prompt by claude-code.
+      # - The reverse-usage-index JSON ships to the path
+      #   `code-lookup.indexPath` configures.
+      #
+      # All sourcePaths are manifest-relative (resolved against the
+      # directory of THIS manifest at trial-post time).
+      files:
+        - sourcePath: ../variants/artificer-with-code-lookup.md
+          guildPath: roles/artificer.md
+        - sourcePath: ../artifacts/2026-05-03-code-lookup-index-93f8ce50.json
+          guildPath: code-lookup-index.json
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: ../briefs/dropbook-replay.md
+    waitForRigTerminal: true
+    timeoutMs: 3600000   # 60 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

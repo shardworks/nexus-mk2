@@ -1,0 +1,129 @@
+slug: x020-baseline-dropbook
+title: X020 baseline — dropBook commission, production artificer (no code-lookup)
+codex: nexus
+
+description: |
+  X020 baseline trial. Replays the dropBook commission (writ
+  w-mojnftby, real-world implementer session ses-mok2say8 at $16.15,
+  33.8 min) under lab.implement-only with the production artificer
+  role file shipped to the test guild.
+
+  The artificer role file lives in vibers
+  (`/workspace/vibers/roles/artificer.md`) — not in the framework
+  itself. The framework's loom auto-loads `<guild-home>/roles/<role>.md`
+  for every guild-configured role; production deployments ship the
+  file as part of their guild scaffolding. Faithful baseline:
+  vibers's artificer.md, snapshotted at experiment activation, is
+  shipped to the test guild via `files:`. The X020 A/B measures the
+  marginal value of the with-tool variant's injected snippet against
+  the unmodified production implementer.
+
+  Reference baseline: real-world implementer session ses-mok2say8
+  (the original commission's implement attempt), $16.15 / 33.8 min.
+  Pre-flight calibration sanity-check: this manifest run alone first;
+  cost should land within ~15% of $16.15. If not, diagnose
+  apparatus before running the paired with-tool variant.
+
+  Codex pinned to 93f8ce50 — parent of dropBook commission's sealed
+  commit (c25353ff). The codex state the original implementer saw on
+  2026-04-29 when w-mojnftby was created.
+
+  Frameworked at 0.1.300-x019.0 (the X019 prerelease — code-lookup
+  package is published but NOT installed in the baseline plugin set).
+
+  waitForRigTerminal=true, 60-min cap (real-world implement was 34
+  min; build/test passes can stretch). ANTHROPIC_API_KEY flows via
+  process.env to the daemon.
+
+frameworkVersion: '0.1.300-x019.0'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      # Parent of dropBook commission's sealed commit (c25353ff).
+      # The codex state the original implementer saw on 2026-04-29
+      # when w-mojnftby was created.
+      baseSha: 93f8ce5089e0a115775c166534ca46f7ec196b8d
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # Implement-only plugin set — NO astrolabe, NO code-lookup.
+      # All pinned to 0.1.300-x019.0 (the X019 prerelease).
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/ratchet-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.300-x019.0' }
+      config:
+        settings:
+          model: opus
+        loom:
+          roles:
+            artificer:
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+        animator:
+          sessionProvider: 'claude-code'
+        spider:
+          variables:
+            role: 'artificer'
+            # dropBook touches stacks (substrate primitive) plus its
+            # downstream consumers in clockworks-stacks-signals,
+            # lattice, and cartograph. Build/test the affected
+            # packages directly to keep the verify loop cheap.
+            buildCommand: 'pnpm --filter @shardworks/stacks-apparatus --filter @shardworks/clockworks-stacks-signals-apparatus --filter @shardworks/lattice-apparatus --filter @shardworks/cartograph-apparatus build'
+            testCommand: 'pnpm --filter @shardworks/stacks-apparatus --filter @shardworks/clockworks-stacks-signals-apparatus --filter @shardworks/lattice-apparatus --filter @shardworks/cartograph-apparatus test'
+      # Production artificer role file. The framework's loom
+      # auto-loads <home>/roles/<roleName>.md for every guild-
+      # configured role; production guilds ship this file as part of
+      # their scaffolding. The snapshot under variants/ is a verbatim
+      # copy of /workspace/vibers/roles/artificer.md captured at
+      # X020 activation time so the trial remains reproducible from
+      # the experiment artifacts alone, even if vibers's copy
+      # subsequently drifts.
+      #
+      # All sourcePaths are manifest-relative (resolved against the
+      # directory of THIS manifest at trial-post time).
+      files:
+        - sourcePath: ../variants/artificer-baseline.md
+          guildPath: roles/artificer.md
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    # Manifest-relative path to the dropBook commission body.
+    briefPath: ../briefs/dropbook-replay.md
+    waitForRigTerminal: true
+    timeoutMs: 3600000   # 60 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
