@@ -1,0 +1,88 @@
+slug: x022-rig-moji64hs-combined
+title: X022 — rig-moji64hs (control, vision-keeper deletion) combined-nudges variant
+codex: nexus
+
+description: |
+  X022 combined-nudges variant on the control rig (rig-moji64hs,
+  vision-keeper deletion + Surveyor redefinition / w-moji63xm).
+  Identical to rig-moji64hs-baseline.yaml in every way EXCEPT the
+  artificer role file copied into roles/artificer.md.
+
+  Variant role file prepends the same five Category 3 nudges
+  (c-mok4oct1) used in the rig-moj12h4o-combined variant.
+
+  Pair with manifests/rig-moji64hs-baseline.yaml.
+
+frameworkVersion: '0.1.301'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: d6e34097f698df66d595f81f928320eafde8276f
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.301' }
+      config:
+        loom:
+          roles:
+            artificer:
+              model: opus
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+            reviewer:
+              model: opus
+              permissions: []
+        animator:
+          sessionProvider: 'claude-code'
+        spider:
+          variables:
+            role: 'artificer'
+            buildCommand: 'pnpm --filter @shardworks/reckoner-apparatus build'
+            testCommand: 'pnpm --filter @shardworks/reckoner-apparatus test'
+
+      files:
+        - sourcePath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/fixtures/test-guild/roles/artificer-combined-nudges.md
+          guildPath: roles/artificer.md
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/briefs/rig-moji64hs-baseline.md
+    waitForTerminal: true
+    timeoutMs: 5400000   # 90 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

@@ -1,0 +1,102 @@
+slug: x022-rig-moj12h4o-baseline
+title: X022 — rig-moj12h4o (substantive, Reckoner periodic tick) baseline (stock artificer.md)
+codex: nexus
+
+description: |
+  X022 baseline trial on the substantive rig (rig-moj12h4o, Reckoner
+  periodic tick / w-moiy8hkv). Ships the verbatim production
+  artificer.md (copied 2026-05-03 from /workspace/vibers/roles/) into
+  the test guild. Brief is the verbatim planner spec extracted from
+  the production astrolabe.plans book.
+
+  Codex pinned to 0e1e81f4a219179fd264625b869e12bd00778365 — the
+  parent of the implementer's draft commit 7bed456 for w-moiy8hkv.
+  This is the implementer-eye-view of the codebase at the moment
+  the original rig started.
+
+  Pair with manifests/rig-moj12h4o-combined.yaml (combined-nudges
+  variant). Outcome metric: implementer session cost (USD), tokens,
+  wallclock duration. Mechanism metrics extracted post-hoc from the
+  transcript jsonl via scripts/extract-tool-use-metrics.py.
+
+  Production cost (full rig with planning) was $47. Implement-only
+  is the back-half; X016 phase 2c on the same codebase ran $6.50
+  for a partial handoff. Full implement on this rig estimated
+  $15-30. Wall-clock cap: 90 min.
+
+  ANTHROPIC_API_KEY flows through to the test guild's daemon via
+  process.env inheritance.
+
+frameworkVersion: '0.1.301'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: 0e1e81f4a219179fd264625b869e12bd00778365
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.301' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.301' }
+      config:
+        loom:
+          roles:
+            artificer:
+              model: opus
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+            reviewer:
+              model: opus
+              permissions: []
+        animator:
+          sessionProvider: 'claude-code'
+        spider:
+          variables:
+            role: 'artificer'
+            buildCommand: 'pnpm --filter @shardworks/reckoner-apparatus build && pnpm --filter @shardworks/clockworks-apparatus build'
+            testCommand: 'pnpm --filter @shardworks/reckoner-apparatus test && pnpm --filter @shardworks/clockworks-apparatus test'
+
+      files:
+        - sourcePath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/fixtures/test-guild/roles/artificer-baseline.md
+          guildPath: roles/artificer.md
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/briefs/rig-moj12h4o-baseline.md
+    waitForTerminal: true
+    timeoutMs: 5400000   # 90 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
