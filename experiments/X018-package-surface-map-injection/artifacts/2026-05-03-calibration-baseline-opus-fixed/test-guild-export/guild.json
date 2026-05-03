@@ -1,0 +1,196 @@
+{
+  "name": "x018-calibration-baseline-cartograph-aceb96da",
+  "nexus": "0.1.298",
+  "plugins": [
+    "stacks",
+    "tools",
+    "codexes",
+    "clerk",
+    "ratchet",
+    "fabricator",
+    "animator",
+    "loom",
+    "claude-code",
+    "spider",
+    "clockworks",
+    "astrolabe"
+  ],
+  "settings": {
+    "model": "opus"
+  },
+  "codexes": {
+    "registered": {
+      "x018-calibration-baseline-cartograph-aceb96da": {
+        "remoteUrl": "/workspace/vibers/.nexus/laboratory/codexes/x018-calibration-baseline-cartograph-aceb96da.git"
+      }
+    }
+  },
+  "loom": {
+    "roles": {
+      "artificer": {
+        "permissions": [
+          "clerk:*",
+          "tools:*"
+        ]
+      },
+      "patron": {
+        "permissions": []
+      },
+      "astrolabe.sage-primer-attended": {
+        "permissions": [
+          "astrolabe:read",
+          "astrolabe:write",
+          "clerk:read",
+          "ratchet:read"
+        ],
+        "strict": true
+      },
+      "astrolabe.sage-primer-solo": {
+        "permissions": [
+          "astrolabe:read",
+          "astrolabe:write",
+          "clerk:read",
+          "ratchet:read"
+        ],
+        "strict": true
+      },
+      "astrolabe.sage-writer": {
+        "permissions": [
+          "astrolabe:read",
+          "astrolabe:write",
+          "clerk:read",
+          "ratchet:read"
+        ],
+        "strict": true
+      }
+    }
+  },
+  "animator": {
+    "sessionProvider": "claude-code"
+  },
+  "astrolabe": {
+    "patronRole": "patron"
+  },
+  "spider": {
+    "variables": {
+      "role": "artificer"
+    },
+    "rigTemplates": {
+      "lab.plan-only": {
+        "engines": [
+          {
+            "id": "plan-init",
+            "designId": "astrolabe.plan-init",
+            "upstream": [],
+            "givens": {
+              "writ": "${writ}"
+            }
+          },
+          {
+            "id": "draft",
+            "designId": "draft",
+            "upstream": [
+              "plan-init"
+            ],
+            "givens": {
+              "writ": "${writ}"
+            }
+          },
+          {
+            "id": "reader-analyst",
+            "designId": "astrolabe.reader-analyst",
+            "upstream": [
+              "draft"
+            ],
+            "givens": {
+              "prompt": "Plan ID: ${yields.plan-init.planId}",
+              "cwd": "${yields.draft.path}",
+              "writ": "${writ}",
+              "metadata": {
+                "engineId": "reader-analyst"
+              }
+            }
+          },
+          {
+            "id": "inventory-check",
+            "designId": "astrolabe.inventory-check",
+            "upstream": [
+              "reader-analyst"
+            ],
+            "givens": {
+              "planId": "${yields.plan-init.planId}"
+            }
+          },
+          {
+            "id": "patron-anima",
+            "designId": "astrolabe.patron-anima",
+            "upstream": [
+              "inventory-check"
+            ],
+            "givens": {
+              "planId": "${yields.plan-init.planId}",
+              "cwd": "${yields.draft.path}",
+              "writ": "${writ}"
+            }
+          },
+          {
+            "id": "decision-review",
+            "designId": "astrolabe.decision-review",
+            "upstream": [
+              "patron-anima"
+            ],
+            "givens": {
+              "planId": "${yields.plan-init.planId}"
+            }
+          },
+          {
+            "id": "spec-writer",
+            "designId": "anima-session",
+            "upstream": [
+              "decision-review"
+            ],
+            "givens": {
+              "role": "astrolabe.sage-writer",
+              "prompt": "Plan ID: ${yields.plan-init.planId}\n\nDecision summary:\n${yields.decision-review.decisionSummary}\n",
+              "cwd": "${yields.draft.path}",
+              "writ": "${writ}",
+              "metadata": {
+                "engineId": "spec-writer"
+              }
+            }
+          },
+          {
+            "id": "plan-finalize",
+            "designId": "astrolabe.plan-finalize",
+            "upstream": [
+              "spec-writer"
+            ],
+            "givens": {
+              "planId": "${yields.plan-init.planId}"
+            }
+          },
+          {
+            "id": "observation-lift",
+            "designId": "astrolabe.observation-lift",
+            "upstream": [
+              "plan-finalize"
+            ],
+            "givens": {
+              "planId": "${yields.plan-init.planId}"
+            }
+          }
+        ],
+        "resolutionEngine": "observation-lift"
+      }
+    },
+    "rigTemplateMappings": {
+      "mandate": "lab.plan-only"
+    }
+  },
+  "tools": {
+    "serverPort": 35089
+  },
+  "oculus": {
+    "port": 39965
+  }
+}
