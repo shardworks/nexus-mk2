@@ -1,0 +1,245 @@
+slug: x019-with-tool-cartograph
+title: X019 variant — cartograph commission, code-lookup tool exposed to sage-primer-attended
+codex: nexus
+
+description: |
+  X019 variant trial: replays the cartograph commission with the
+  `@shardworks/code-lookup-apparatus` plugin installed, the
+  `astrolabe.sage-primer-attended` role granted `code-lookup:read`,
+  and the role's prompt augmented with the `sage-tool-preference.md`
+  snippet (composed into the variant role file at
+  experiments/X019-reverse-usage-index/variants/sage-primer-attended-with-code-lookup.md
+  via build-variant-role.sh).
+
+  Hypothesis: directing the reader-analyst to `code-lookup` for
+  symbol/usages/package queries (instead of Grep) reduces planning-
+  session cost ≥25% relative to the X019 baseline (clean upstream
+  primer), without meaningfully degrading spec quality.
+
+  Compared to X018: X018 baked structured data INTO the system
+  prompt (surface map), paying a cache-write cost up front; X019
+  keeps structured data behind a tool, so it joins context only
+  on-demand. Tool results are also smaller than the Greps they
+  replace, so per-call context-growth shrinks across the session.
+
+  Identical apparatus to baseline-cartograph.yaml — same plugin set
+  (PLUS code-lookup), same codex SHA, same role permission shape (PLUS
+  `code-lookup:read` on sage-primer-attended), same lab.plan-only rig.
+  The only material differences:
+
+  1. `@shardworks/code-lookup-apparatus@0.1.300-x019.0` added to plugins.
+  2. `code-lookup:read` permission added to astrolabe.sage-primer-attended.
+  3. `code-lookup.indexPath` configured (resolves to <guild-root>).
+  4. Reverse-usage-index JSON copied to `<guild-root>/code-lookup-index.json`
+     via `files:`. Pre-built artifact — see Q2 in the design discussion
+     (the click goal language "fixture step that regenerates the index"
+     is honored by pre-building once per codex SHA, not by running the
+     generator at trial time).
+  5. sage-primer-attended role file replaced with the X019 variant
+     (upstream sage-primer-attended + appended sage-tool-preference).
+     NO X018 surface-map injection.
+
+  Reference baseline: paired against this trial's baseline manifest run.
+  H1 sustain criterion: ≥25% reader-analyst cost reduction with no
+  Tier 1 / Tier 2 quality regression.
+
+  waitForRigTerminal=true with a 30-min cap.
+
+frameworkVersion: '0.1.300-x019.0'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: aff280e75add02bd25e1af0e9467e8a81bfbcd41
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # X019 plugin set: baseline plugins + code-lookup. All pinned to
+      # 0.1.300-x019.0 (the X019 prerelease that introduced code-lookup).
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/ratchet-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/astrolabe-apparatus', version: '0.1.300-x019.0' }
+        # X019 INTERVENTION: code-lookup MCP plugin.
+        - { name: '@shardworks/code-lookup-apparatus', version: '0.1.300-x019.0' }
+      config:
+        settings:
+          model: opus
+        loom:
+          roles:
+            artificer:
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+            patron:
+              permissions: []
+            astrolabe.sage-primer-attended:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+                # X019 INTERVENTION: grant the reader-analyst access to
+                # the code-lookup tool. The code-lookup plugin contributes
+                # one tool (`code-lookup`) with permission 'read', which
+                # combines with the auto-derived plugin id `code-lookup`
+                # to yield this string.
+                - 'code-lookup:read'
+              strict: true
+            astrolabe.sage-primer-solo:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+              strict: true
+            astrolabe.sage-writer:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+              strict: true
+        animator:
+          sessionProvider: 'claude-code'
+        astrolabe:
+          patronRole: 'patron'
+        # X019 INTERVENTION: code-lookup config block. The path is
+        # relative to process.cwd() of the daemon, which `nsg start`
+        # sets to the guild root. Resolves to:
+        #   <guild-root>/code-lookup-index.json
+        # The matching `files:` entry below copies the pre-built index
+        # JSON to that path.
+        code-lookup:
+          indexPath: 'code-lookup-index.json'
+        spider:
+          variables:
+            role: 'artificer'
+          # lab.plan-only rig template — verbatim from baseline-cartograph
+          # and X018 manifests. No X019-specific changes here.
+          rigTemplates:
+            lab.plan-only:
+              engines:
+                - id: plan-init
+                  designId: astrolabe.plan-init
+                  upstream: []
+                  givens:
+                    writ: '${writ}'
+                - id: draft
+                  designId: draft
+                  upstream: [plan-init]
+                  givens:
+                    writ: '${writ}'
+                - id: reader-analyst
+                  designId: astrolabe.reader-analyst
+                  upstream: [draft]
+                  givens:
+                    prompt: 'Plan ID: ${yields.plan-init.planId}'
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                    metadata:
+                      engineId: reader-analyst
+                - id: inventory-check
+                  designId: astrolabe.inventory-check
+                  upstream: [reader-analyst]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: patron-anima
+                  designId: astrolabe.patron-anima
+                  upstream: [inventory-check]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                - id: decision-review
+                  designId: astrolabe.decision-review
+                  upstream: [patron-anima]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: spec-writer
+                  designId: anima-session
+                  upstream: [decision-review]
+                  givens:
+                    role: astrolabe.sage-writer
+                    prompt: |
+                      Plan ID: ${yields.plan-init.planId}
+
+                      Decision summary:
+                      ${yields.decision-review.decisionSummary}
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                    metadata:
+                      engineId: spec-writer
+                - id: plan-finalize
+                  designId: astrolabe.plan-finalize
+                  upstream: [spec-writer]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: observation-lift
+                  designId: astrolabe.observation-lift
+                  upstream: [plan-finalize]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+              resolutionEngine: observation-lift
+          rigTemplateMappings:
+            mandate: lab.plan-only
+      # X019 INTERVENTION: sage-primer-attended is the X019 variant
+      # role file (clean upstream + sage-tool-preference snippet
+      # spliced before "## Tools"). sage-primer-solo and sage-writer
+      # remain upstream copies. The reverse-usage-index JSON ships
+      # to the path `code-lookup.indexPath` configures.
+      #
+      # All sourcePaths are manifest-relative (resolved against the
+      # directory of THIS manifest at trial-post time). Cross-repo
+      # references (../../../../nexus/...) assume the standard
+      # sibling layout /workspace/nexus and /workspace/nexus-mk2.
+      files:
+        - sourcePath: ../variants/sage-primer-attended-with-code-lookup.md
+          guildPath: roles/astrolabe.sage-primer-attended.md
+        - sourcePath: ../../../../nexus/packages/plugins/astrolabe/sage-primer-solo.md
+          guildPath: roles/astrolabe.sage-primer-solo.md
+        - sourcePath: ../../../../nexus/packages/plugins/astrolabe/sage-writer.md
+          guildPath: roles/astrolabe.sage-writer.md
+        - sourcePath: ../artifacts/2026-05-03-code-lookup-index-aff280e7.json
+          guildPath: code-lookup-index.json
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    # Manifest-relative path to X018's cartograph-replay brief.
+    briefPath: ../../X018-package-surface-map-injection/briefs/cartograph-replay.md
+    waitForRigTerminal: true
+    timeoutMs: 1800000   # 30 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

@@ -1,0 +1,223 @@
+slug: x019-baseline-cartograph
+title: X019 baseline — cartograph commission, clean primer (no code-lookup, no surface-map)
+codex: nexus
+
+description: |
+  X019 baseline trial. Replays the cartograph commission (writ
+  w-mojmj0rc, real-world reader-analyst session ses-mojmj4zc-e81d52ed
+  at $8.08, 14.6 min) under lab.plan-only with the UPSTREAM
+  sage-primer-attended role active. NO code-lookup plugin or
+  tool-preference injection. NO X018 surface-map injection.
+
+  Why a clean baseline: X018's package-surface-map injection was
+  provisionally falsified on cache-write economics — the cost of
+  carrying the surface map in the system prompt swamped the
+  orientation-tax savings on tool calls. Carrying X018's mechanism
+  forward into X019's baseline would bake a known-bad pattern into
+  both arms; a clean baseline measures the X019 tool's marginal
+  value against an unmodified primer instead.
+
+  Reference baseline: real-world cartograph session ses-mojmj4zc
+  (the original commission run), $8.08 / 14.6 min. Pre-flight
+  calibration sanity-check: this manifest run alone first; cost
+  should land within ~15% of $8.08. If not, diagnose apparatus
+  before running the paired with-tool variant.
+
+  Codex pinned to aff280e — parent of cartograph commission's sealed
+  commit (607b572). patronRole='patron' so reader-analyst uses
+  sage-primer-attended.
+
+  Frameworked at 0.1.300-x019.0 (the X019 prerelease — code-lookup
+  package is published but NOT installed in the baseline plugin set).
+
+  waitForRigTerminal=true, 30-min cap. ANTHROPIC_API_KEY flows via
+  process.env to the daemon.
+
+frameworkVersion: '0.1.300-x019.0'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      # Parent of cartograph commission's sealed commit (607b572).
+      # The codex state the original cartograph planner saw on
+      # 2026-04-29 when w-mojmj0rc was created.
+      baseSha: aff280e75add02bd25e1af0e9467e8a81bfbcd41
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # Spec-only plugin set — IDENTICAL to X018, NO code-lookup.
+      # All pinned to 0.1.300-x019.0 (the X019 prerelease).
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/ratchet-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/astrolabe-apparatus', version: '0.1.300-x019.0' }
+      config:
+        # Identical to X018 manifests for these blocks. See
+        # X018 calibration-baseline.yaml for the rationale on each.
+        settings:
+          model: opus
+        loom:
+          roles:
+            artificer:
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+            patron:
+              permissions: []
+            astrolabe.sage-primer-attended:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+              strict: true
+            astrolabe.sage-primer-solo:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+              strict: true
+            astrolabe.sage-writer:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+              strict: true
+        animator:
+          sessionProvider: 'claude-code'
+        astrolabe:
+          patronRole: 'patron'
+        spider:
+          variables:
+            role: 'artificer'
+          # lab.plan-only template — copied verbatim from
+          # experiments/lab-operations/running-trials.md#planning-only-rig
+          # and X018 manifests. Stops at observation-lift.
+          rigTemplates:
+            lab.plan-only:
+              engines:
+                - id: plan-init
+                  designId: astrolabe.plan-init
+                  upstream: []
+                  givens:
+                    writ: '${writ}'
+                - id: draft
+                  designId: draft
+                  upstream: [plan-init]
+                  givens:
+                    writ: '${writ}'
+                - id: reader-analyst
+                  designId: astrolabe.reader-analyst
+                  upstream: [draft]
+                  givens:
+                    prompt: 'Plan ID: ${yields.plan-init.planId}'
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                    metadata:
+                      engineId: reader-analyst
+                - id: inventory-check
+                  designId: astrolabe.inventory-check
+                  upstream: [reader-analyst]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: patron-anima
+                  designId: astrolabe.patron-anima
+                  upstream: [inventory-check]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                - id: decision-review
+                  designId: astrolabe.decision-review
+                  upstream: [patron-anima]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: spec-writer
+                  designId: anima-session
+                  upstream: [decision-review]
+                  givens:
+                    role: astrolabe.sage-writer
+                    prompt: |
+                      Plan ID: ${yields.plan-init.planId}
+
+                      Decision summary:
+                      ${yields.decision-review.decisionSummary}
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                    metadata:
+                      engineId: spec-writer
+                - id: plan-finalize
+                  designId: astrolabe.plan-finalize
+                  upstream: [spec-writer]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: observation-lift
+                  designId: astrolabe.observation-lift
+                  upstream: [plan-finalize]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+              resolutionEngine: observation-lift
+          rigTemplateMappings:
+            mandate: lab.plan-only
+      # Clean upstream role files — no X018 surface-map injection.
+      # Required because the loom strict-mode workaround above
+      # overrides each role at the guild level, and guild-level
+      # RoleDefinition (vs KitRoleDefinition) does NOT support
+      # `instructionsFile`. Loom resolves guild-role instructions
+      # only via `<guild-home>/roles/<rolename>.md`, so copies of
+      # the upstream files are shipped here.
+      #
+      # All sourcePaths are manifest-relative (resolved against the
+      # directory of THIS manifest at trial-post time). Cross-repo
+      # references (../../../../nexus/...) assume the standard
+      # sibling layout /workspace/nexus and /workspace/nexus-mk2.
+      files:
+        - sourcePath: ../../../../nexus/packages/plugins/astrolabe/sage-primer-attended.md
+          guildPath: roles/astrolabe.sage-primer-attended.md
+        - sourcePath: ../../../../nexus/packages/plugins/astrolabe/sage-primer-solo.md
+          guildPath: roles/astrolabe.sage-primer-solo.md
+        - sourcePath: ../../../../nexus/packages/plugins/astrolabe/sage-writer.md
+          guildPath: roles/astrolabe.sage-writer.md
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    # Manifest-relative path to X018's cartograph-replay brief.
+    briefPath: ../../X018-package-surface-map-injection/briefs/cartograph-replay.md
+    waitForRigTerminal: true
+    timeoutMs: 1800000   # 30 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
