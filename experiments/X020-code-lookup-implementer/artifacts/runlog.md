@@ -18,7 +18,7 @@ land + a quick review before posting the next.
 | # | manifest | purpose | trial writ | rig | status | impl cost | impl duration | adoption % | notes |
 |---|---|---|---|---|---|---|---|---|---|
 | 0 | `baseline-dropbook.yaml` (v0, raw-brief) | apparatus check | `w-mopib9cd` | `rig-mopuhati` | superseded | $10.94 | 23.1 min | n/a | scoped narrowly — missed cartograph + tier4 + arch docs; brief was raw `writ.body`, not plandoc spec |
-| 1 | `baseline-dropbook.yaml` (v1, plandoc spec) | calibration | — | — | pending daemon restart | — | — | n/a | gate: lab cost within ±15% of $16.15 reference |
+| 1 | `baseline-dropbook.yaml` (v1, plandoc spec) | calibration | `w-mopwwox1` | — | open, queued | — | — | n/a | gate: lab cost within ±15% of $16.15 reference |
 | 2 | `baseline-dropbook.yaml` (v1) | A/B baseline arm | — | — | — | — | — | n/a | re-run of row 1 to anchor the A/B comparator |
 | 3 | `with-tool-dropbook.yaml` | A/B variant — **H1 measurement** | — | — | — | — | — | — | gate: ≥25% reduction vs row 2 |
 
@@ -112,15 +112,22 @@ mechanism question.
   a side measurement on the elaborated-spec → raw-brief shift,
   adjacent to X016's territory.
 
-### Trial 1 — calibration on plandoc-spec brief (pending)
+### Trial 1 — calibration on plandoc-spec brief
 
-- Holding for daemon restart (Sean noted scheduler bug uncovered
-  during the trial 0 + X021/X022 concurrent run; restart pending
-  to pick up the fix).
-- **Plan:** post `baseline-dropbook.yaml` against the new brief.
-  Expected to land much closer to the $16.15 reference now that
-  the implementer has the same elaborated spec the real session
-  had. Calibration gate: ±15% of $16.15 ($13.73–$18.57).
+- **Writ:** `w-mopwwox1-618d422946da`
+- **Posted:** 2026-05-03T15:15 UTC, after Sean restarted the
+  daemon. Manifest passed pre-flight validation cleanly (last
+  posts pre-restart hit the stale `sourcePath must be absolute`
+  check; restart resolved it but the manifest still uses
+  absolute paths as a stable shape).
+- **Status:** open, queued behind X022 (`w-mopuwdsp`).
+  Per-experiment serial discipline: only one X020 trial in flight
+  at a time. X022 is Sean's, not gating this experiment.
+- **Plan:** when picked up, run `baseline-dropbook.yaml` against
+  the new plandoc-spec brief. Expected to land much closer to the
+  $16.15 reference now that the implementer has the same
+  elaborated spec the real session had. Calibration gate: ±15%
+  of $16.15 ($13.73–$18.57).
 - **If calibration passes** → post trial 2 (A/B baseline rerun)
   and trial 3 (with-tool variant) sequentially.
 - **If calibration fails outside ±15%** → diagnose before A/B.
