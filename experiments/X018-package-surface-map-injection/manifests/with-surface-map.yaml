@@ -1,0 +1,208 @@
+slug: x018-with-surface-map-cartograph
+title: X018 variant — cartograph commission, with package surface map injected
+codex: nexus
+
+description: |
+  Variant trial for X018: replays the cartograph commission with the
+  precomputed package surface map injected into the
+  `astrolabe.sage-primer-attended` role prompt (Lever A — test-guild
+  prompt override).
+
+  Identical apparatus to `calibration-baseline.yaml` (codex SHA
+  aff280e, settings.model: opus, loom-workaround guild-level role
+  overrides for sage-primer-{attended,solo} + sage-writer). The only
+  difference is the `astrolabe.sage-primer-attended` role file: this
+  trial copies the variant file built by
+  `experiments/X018-package-surface-map-injection/variants/build-variant-role.sh`
+  (which splices an "Orientation: Package Surface Map" section
+  carrying the compact surface map JSON for SHA aff280e into the
+  upstream role prompt right before `## Tools`).
+
+  Reference baseline: trial 5 (writ w-mooouo4t-aceb96daa15e),
+  reader-analyst session ses-mooova47-8d679eb4 — $9.04, 15.92 min,
+  single attempt, clean (production parity within 12% of $8.08).
+  H1 sustain criterion: ≥25% reader-analyst cost reduction with no
+  Tier 1 / Tier 2 quality regression.
+
+  waitForRigTerminal=true with a 30-min cap. NOTE: per X018 trial 5
+  observation, downstream engines (spec-writer especially) may hit
+  Anthropic rate limits and retry hourly, blowing past the cap;
+  if that happens, abandon the outer rig and reconstitute metrics
+  from the test guild's daemon HTTP API. Reader-analyst metrics
+  (the X018 target) are unaffected.
+
+frameworkVersion: '0.1.298'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      # Same SHA the baseline pinned (parent of cartograph commission's
+      # sealed commit 607b572 — codex state the original planner saw).
+      baseSha: aff280e75add02bd25e1af0e9467e8a81bfbcd41
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # Plugin set identical to calibration-baseline.yaml.
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/ratchet-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/astrolabe-apparatus', version: '0.1.298' }
+      config:
+        # Model + role overrides identical to baseline. See
+        # calibration-baseline.yaml for the rationale on each.
+        settings:
+          model: opus
+        loom:
+          roles:
+            artificer:
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+            patron:
+              permissions: []
+            astrolabe.sage-primer-attended:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+              strict: true
+            astrolabe.sage-primer-solo:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+              strict: true
+            astrolabe.sage-writer:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+              strict: true
+        animator:
+          sessionProvider: 'claude-code'
+        astrolabe:
+          patronRole: 'patron'
+        spider:
+          variables:
+            role: 'artificer'
+          # lab.plan-only template — identical to baseline.
+          rigTemplates:
+            lab.plan-only:
+              engines:
+                - id: plan-init
+                  designId: astrolabe.plan-init
+                  upstream: []
+                  givens:
+                    writ: '${writ}'
+                - id: draft
+                  designId: draft
+                  upstream: [plan-init]
+                  givens:
+                    writ: '${writ}'
+                - id: reader-analyst
+                  designId: astrolabe.reader-analyst
+                  upstream: [draft]
+                  givens:
+                    prompt: 'Plan ID: ${yields.plan-init.planId}'
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                    metadata:
+                      engineId: reader-analyst
+                - id: inventory-check
+                  designId: astrolabe.inventory-check
+                  upstream: [reader-analyst]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: patron-anima
+                  designId: astrolabe.patron-anima
+                  upstream: [inventory-check]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                - id: decision-review
+                  designId: astrolabe.decision-review
+                  upstream: [patron-anima]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: spec-writer
+                  designId: anima-session
+                  upstream: [decision-review]
+                  givens:
+                    role: astrolabe.sage-writer
+                    prompt: |
+                      Plan ID: ${yields.plan-init.planId}
+
+                      Decision summary:
+                      ${yields.decision-review.decisionSummary}
+                    cwd: '${yields.draft.path}'
+                    writ: '${writ}'
+                    metadata:
+                      engineId: spec-writer
+                - id: plan-finalize
+                  designId: astrolabe.plan-finalize
+                  upstream: [spec-writer]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+                - id: observation-lift
+                  designId: astrolabe.observation-lift
+                  upstream: [plan-finalize]
+                  givens:
+                    planId: '${yields.plan-init.planId}'
+              resolutionEngine: observation-lift
+          rigTemplateMappings:
+            mandate: lab.plan-only
+      # X018 INTERVENTION: the sage-primer-attended role file is the
+      # variant — it splices the surface-map orientation section into
+      # the upstream prompt. sage-primer-solo and sage-writer remain
+      # the upstream copies (variants table covers attended only).
+      files:
+        - sourcePath: /workspace/nexus-mk2/experiments/X018-package-surface-map-injection/variants/sage-primer-attended-with-surface-map-aff280e7.md
+          guildPath: roles/astrolabe.sage-primer-attended.md
+        - sourcePath: /workspace/nexus/packages/plugins/astrolabe/sage-primer-solo.md
+          guildPath: roles/astrolabe.sage-primer-solo.md
+        - sourcePath: /workspace/nexus/packages/plugins/astrolabe/sage-writer.md
+          guildPath: roles/astrolabe.sage-writer.md
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X018-package-surface-map-injection/briefs/cartograph-replay.md
+    waitForRigTerminal: true
+    timeoutMs: 1800000   # 30 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
