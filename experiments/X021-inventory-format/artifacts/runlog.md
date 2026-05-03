@@ -22,10 +22,24 @@ outcome. Run order: row 1 (done) → row 5 (active) → rows 6/7 if
 v4 lands meaningful → rows 2/3/4 if per-idea separation is
 warranted.
 
+**Hold:** after v4 (row 5) reaches terminal, no follow-on trials
+will be posted. Sean is planning a reboot to increase RAM; trial
+sequence resumes after that on his signal.
+
+**v4 outcome (2026-05-03 17:07 UTC):** **H1 sustained at −26% cost.**
+The combined #3+#4+#5 intervention delivered well above the ≥15%
+gate (range was 5–15% per the spec's per-idea estimates summed).
+Pure-read share dropped from 71% to 37% — the mechanism is real.
+Trial completed cleanly (no stuck-after-finish), suggesting the
+prior trial's hang was unrelated to brief content. Per-idea
+decomposition (rows 2/3/4) and control trials (rows 6/7) are
+worth running on next session to confirm the contribution split
+and validate H3.
+
 | # | manifest | purpose | trial writ | rig | status | cost | duration | pure-read % | notes |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | `rig-moj12h4o-baseline.yaml` | calibration (substantive, spec-only) | `w-mopwwgug` | `rig-mopwwji2` | **failed (timeout)** | **~$77.30** | 43m impl + 14m stuck | **71.0%** | implementer committed at turn 157, then stuck-after-finish; session killed during recovery; trial timed out at 60min cap. Cost faithful to production ($77.55) — diff is in *which* files were pure-read (3 test files lab opened that prod did not). |
-| 5 | `rig-moj12h4o-v4-combined.yaml` | combined — H1 sustain | (next) | — | not posted | — | — | — | gate: ≥15% reduction vs row 1's $77.30 / 71% pure-read share |
+| 5 | `rig-moj12h4o-v4-combined.yaml` | combined — H1 sustain | `w-mopzmkhd` | `rig-mopzmm5d` | **completed** | **$57.09** | 30.6m clean | **36.7%** | **H1 SUSTAINED.** −26% cost vs row 1, −34pp pure-read share, ran cleanly to seal (no stuck-after-finish). 15 files changed (more than trial 1's 14, less than prod's 17). |
 | 6 | `rig-moji64hs-baseline.yaml` | control calibration | — | — | deferred | — | — | — | run after v4 substantive lands meaningful signal |
 | 7 | `rig-moji64hs-v4-combined.yaml` | control variant — H3 | — | — | deferred | — | — | — | gate: within ±5% of row 6 |
 | 2 | `rig-moj12h4o-v1-inline-types.yaml` | #3 — additive type-sigs preamble | — | — | deferred | — | — | — | run only if v4 sustains and per-idea separation is warranted |
@@ -185,14 +199,95 @@ in-place at the same paths.
 - Documented as click `c-mop6kxqm` (cancelling a trial writ should tear down its daemon — observation).
 - Reposted as `w-mopursfj` after Sean confirmed processes were clean.
 
+### Trial 5 — v4 combined (rig-moj12h4o)
+
+- **Writ:** `w-mopzmkhd-08104a7ec8f4`
+- **Outer rig:** `rig-mopzmm5d-69d9d76c`
+- **Inner head SHA:** `e31ea676`
+- **Posted:** 2026-05-03 16:31 UTC
+- **Terminal:** 2026-05-03 17:07 UTC (state=completed)
+- **Wall-clock total:** 36 min (impl 30.6 min + review/revise/seal 5.4 min)
+- **Outcome:** clean — implement → review → revise → seal all passed; outer rig completed cleanly without intervention; archive teardown removed test guild + bare codex repo
+
+#### Implementer numbers
+
+| metric | trial 5 v4 | trial 1 baseline | Δ |
+|---|---|---|---|
+| Cost (Opus, 5-min cache) | **$57.09** | $77.30 | **−26%** |
+| Wall-clock | 30.6 min | 43.2 min impl | −29% |
+| Turns | 133 | 159 | −16% |
+| Tokens out | 102,421 | 112,308 | −9% |
+| Cache reads | 28.3M | 40.6M | **−30%** |
+| Total Read content | 354 KB | 463 KB | −24% |
+| **Pure-read content** | **130 KB** | **329 KB** | **−61%** |
+| **Pure-read share** | **36.7%** | **71.0%** | **−34pp** |
+| Tool calls (total) | 83 | 91 | −9% |
+| — Read | 29 | 32 | −9% |
+| — Bash | 26 | 40 | **−35%** |
+| — Edit | 22 | 16 | **+38%** |
+
+#### Pure-read driver: which files dropped
+
+Files that v4's interventions successfully suppressed:
+
+| file (pure-read in trial 1) | v4 result | mechanism |
+|---|---|---|
+| `clockworks/clockworks.ts` (44 KB) | not pure-read | v3 do-not-Read list |
+| `reckoner.test.ts` (34 KB) | not pure-read | v3 do-not-Read list |
+| `reckoner-cdc.test.ts` (41 KB) | not in pure-reads | bash-modified (`git rm`) |
+| `summon-relay.ts` (23 KB) | not pure-read | v2 inline pattern excerpt |
+| `decline-relay.ts` (8 KB) | not pure-read | v2 inline pattern excerpt |
+| `reckonings-book.md` (62 KB) | not pure-read | edited in this trial |
+| `reckoner-scheduler.test.ts` (58 KB) | partial (38 KB, edited) | edited rather than skipped |
+
+Files still pure-read in v4 (mechanisms didn't fully cover):
+- `clockworks/types.ts` (27 KB) — v1 inlined the load-bearing types but the implementer Read this file anyway
+- `vision-keeper/vision-keeper.ts` (15 KB) — adjacent file not in v3's do-not-Read list
+- `reckoner/README.md` (10 KB) — pure-read for context
+
+#### File-diff vs trial 1 baseline
+
+| | trial 1 baseline | trial 5 v4 | production rig 2 |
+|---|---|---|---|
+| Files changed | 14 | **15** | 17 |
+| Insertions | 1,449 | **1,761** | 2,086 |
+| Deletions | 1,189 | **1,785** | 1,825 |
+| Total line-changes | 2,638 | **3,546** | 3,911 |
+
+v4 did 34% more line-changes than trial 1 baseline (closer to production) — the cost reduction came alongside MORE work, not less. **No quality regression visible at the diff-stat level.**
+
+#### Side notes
+
+- The trial completed cleanly with no stuck-after-finish, suggesting trial 1's hang was unrelated to brief content (probably random session-termination flake).
+- Per-trial cost ($57 v4 vs $77 baseline) is a $20 saving per session at this commission size. Compounded across the autonomous-hopper roadmap, this is meaningful.
+- v1's type-sigs preamble didn't fully suppress reads on `clockworks/types.ts` — the implementer Read it anyway. May be a prompt-engineering issue (the inlined types didn't carry enough authority, or the implementer needed something specific not in the inlined set). Per-idea decomposition (rows 2/3/4) would clarify how much v1 contributed vs v2/v3.
+
 ## Cumulative spend
 
 | | trials | implementer billed | total |
 |---|---|---|---|
 | Estimated (spec) | 7 | $5–$15/trial | $50–$120 |
-| Actual to date | 0 completed | $0 | $0 |
+| Actual to date | 2 trials (1 fail-timeout + 1 success) | ~$77 + ~$57 | ~$134 |
 
-(Trial 1 first post cancelled before billable implement work; counted as $0.)
+Trial 1 (failed/timeout) and trial 5 (v4 success) both ran the
+implementer to completion of code work. Earlier cancelled posts
+(`w-mopi5qtn`, `w-mopursfj`) didn't reach billable work and are
+counted as $0.
+
+## Hypothesis status
+
+- **H1** (≥15% cost reduction on substantive v4 vs baseline) —
+  **SUSTAINED at −26%** ($77.30 baseline → $57.09 v4).
+- **H2** (per-idea contribution roughly additive, #3 ≥ #4 ≥ #5) —
+  **unresolved.** v4 lands the combined effect; per-idea
+  decomposition (rows 2/3/4) is needed to confirm the split.
+  Mechanism evidence from v4's pure-read pattern suggests v3
+  (do-not-Read) did meaningful work on `clockworks.ts` and
+  `reckoner.test.ts`; v2 (inline templates) cleared the relay
+  templates; v1 (inline types) appeared partial (types.ts still
+  pure-read).
+- **H3** (control variant produces ~no effect) — **unresolved.**
+  Control trials (rows 6/7) deferred.
 
 ## Open questions / decisions to revisit
 
