@@ -1,0 +1,43 @@
+commit 7c810bb3f8b3c5650852be0805c93dbcbe1c3029
+Author: Artificer <w-mopwuofn-1d3cbb02c87e@nexus.local>
+Commit: Seatec Agent <seatec@dogoodstuff.net>
+
+    reckoner: switch from per-writ-update CDC to a periodic tick relay
+    
+    Replaces the per-writ-update Phase-2 CDC handler that v0 of the
+    Reckoner shipped with a periodic `reckoner.tick` relay fired every
+    60 seconds via a kit-contributed standing order. The tick is now the
+    canonical evaluation entry — it re-reads every held petition each
+    fire, applies source/disabled gates, runs the dependency-aware-
+    consideration gate, builds one `SchedulerInput` over the entire
+    candidate set, and applies each scheduler decision. This unifies the
+    catch-up and live paths through one evaluation surface and gives
+    future schedulers (priority-walk, capacity-aware) the global
+    candidate-set view they need.
+    
+    Highlights:
+    
+    - New `packages/plugins/reckoner/src/tick.ts` exposing
+      `createTickRelay()` (production) and `runReckonerTick()` (pure
+      helper for tests).
+    - Apparatus declares `recommends: ['clockworks']` and contributes
+      the relay + a single `{ schedule: '@every 60s', run:
+      'reckoner.tick' }` standing order through its supportKit.
+    - `considerWrit`, `runScheduler`, `handleWritsChange`,
+      `runCatchUpScan`, and the `stacks.watch('clerk', 'writs')`
+      subscription are removed; the test-hook surface is replaced with
+      `runTick(event?)`.
+    - D2: disabled-source mid-flight now writes a `source_banned`
+      decline row (symmetric with the unregistered-strict path) and
+      transitions to cancelled.
+    - D3: scheduler-emitted `defer` writes a deferred row carrying
+      `deferReason: 'other'` and the decision reason in `deferNote`.
+    - D6: `tickEventId` is stamped from the triggering `clockworks.timer`
+      event id when present and omitted when absent.
+    - D8: pre-seal tick fail-loud throws rather than silently skipping.
+    - Reckoner architecture, Reckonings book, petitioner-registration,
+      and Reckoner README docs rewritten for the tick model;
+      `tickEventId` field comment in `types.ts` updated.
+    - Vision-keeper test fixtures driven through the new `runTick`
+      hook (which is now exposed via `createReckonerWithHooks` from the
+      package's public surface for downstream tests).

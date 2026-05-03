@@ -27,7 +27,7 @@ becomes single-arm against production cost as the comparator.
 
 | run order | manifest | rig | role file | trial writ | status | cost | duration | sealed commit | notes |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | `rig-moj12h4o-baseline.yaml` | substantive | baseline | `w-mopuwdsp` | running (15:13 UTC) | — | — | — | gate: lab cost within ±30% of $25–35 production-implement portion |
+| 1 | `rig-moj12h4o-baseline.yaml` | substantive | baseline | `w-mopuwdsp` | **completed** | $39.76 | 74.9 min (sessions) / 16:29 UTC scenario terminal | `7c810bb` | Tier 1 PASS. Reviewer-1 killed by 90s heartbeat-timeout reconciler at 28.9 min, framework auto-retried review (3.5 min, $2.28), revise was no-op ($0.13). Calibration: $37.35 implementer alone vs $25–35 spec estimate (~7% over upper bound, within ±30% gate). |
 | 2 | `rig-moj12h4o-combined.yaml` | substantive | combined-nudges | — | — | — | — | — | gate: ≥10% cost reduction vs row 1 (H1) |
 | 3 | `rig-moji64hs-combined.yaml` | control | combined-nudges | — | — | — | — | — | gate: lab cost ≤ $20 (production full-rig). H2 signal indirect — see decision gate below. |
 | 4 (conditional) | `rig-moji64hs-baseline.yaml` | control | baseline | — | — | — | — | — | post **only if** row 3 cost ≥ ~$20 lab — to disambiguate brief-bloat vs nudge-failure |
@@ -56,7 +56,12 @@ extraction included full plandoc context (~2.4× production input).
 guild, not the lab host. The lab host's `nsg writ show` for trial
 writs reports `$0` because no anima sessions executed there.
 Per-trial cost numbers in the table come from the test guild's
-`animator/sessions` rows (post-extract, via `nsg lab trial-extract`).
+`animator/sessions` rows — each engine stamps its own
+`$.costUsd` (note the field name; not `totalCostUsd`) into its
+session record on completion. Aggregate trial cost is the sum of
+per-engine costUsd; available either via `nsg lab trial-extract`
+or by querying the test guild's `nexus.db` directly with sqlite3
+(`SELECT json_extract(content,'$.metadata.engineId'), json_extract(content,'$.costUsd') FROM books_animator_sessions`).
 
 ## Hypothesis status
 
@@ -74,8 +79,64 @@ Per-trial cost numbers in the table come from the test guild's
 - **Writ:** `w-mopuwdsp`
 - **Posted:** 2026-05-03 14:18 UTC
 - **Picked up:** 2026-05-03 15:13 UTC after Sean restarted the daemon (post spider sync-bug fix).
-- **Lab guild:** `x022-rig-moj12h4o-baseline-a987a557` (daemon pid 114861, alive).
-- **Implementer session:** `ses-mopwus5w` started 15:13:44 UTC.
+- **Lab guild:** `x022-rig-moj12h4o-baseline-a987a557` (daemon pid 114861).
+- **Rig:** `rig-mopwus31-f5f4e2aa`.
+- **Mandate writ in test guild:** `w-mopwuofn-1d3cbb02c87e`.
+
+#### Implementer (15:13–15:56 UTC, 42.3 min, exit 0)
+
+- Session: `ses-mopwus5w-70d82f58`, role: artificer, engine: implement.
+- **Cost: $37.35** (input 253 / output 125,607 / cache-read 62,662,291 / cache-write 458,963).
+- Sealed: 1 commit `7c810bb reckoner: switch from per-writ-update CDC to a periodic tick relay` on draft branch atop codex base `0e1e81f`.
+- **Tier 1 mechanical (PASS):** `pnpm typecheck` clean; `pnpm test` 0 failures across all 25 packages (3939 passing tests, 80 in Reckoner). Audit greps confirm CDC paths gone and `reckoner.tick` spelled consistently.
+- Brief task coverage: all 6 tasks (t1–t6) addressed per implementer's completion summary.
+- Calibration: $37.35 vs spec estimate $25–35 → ~7% above the upper bound, within the ±30% gate. Reviewer + revise costs still pending.
+
+#### Reviewer attempt 1 (15:56–16:25 UTC, FAILED by reconciler)
+
+- Session: `ses-mopydk35-b6fc94c8`, role: reviewer, engine: review.
+- **Status:** failed, exitCode 1.
+- **Error:** `"No heartbeat received for 90s — session host presumed dead (reconciled)"`.
+- Duration before reconciler killed it: 29.0 min.
+- Cost: $0.00 (no API turns recorded).
+- Mechanical pre-checks (run by review engine before invoking the reviewer LLM, stamped on the session record): build ✓ (3.3 sec) / test ✓ (9.9 sec).
+- This is the seizing pattern Sean is investigating. Reconciler did its job — flipped the session to failed, freed the rig to retry.
+
+#### Reviewer attempt 2 (16:25–16:29 UTC, completed)
+
+- Spider auto-retried `review` after attempt 1 failed.
+- **Status:** completed, exitCode 0.
+- Duration: 3.5 min. Cost: $2.28 (input 26 / output 12,449 / cache-read 2,326,842).
+- No required changes (output empty in book record), revise consequently no-op.
+
+#### Revise (16:29 UTC, completed)
+
+- engine: revise, role: artificer.
+- Duration: 0.1 min. Cost: $0.13 (input 7 / output 347).
+- Effectively a no-op — review-2 had no required changes.
+
+#### Trial terminal (16:29:57 UTC)
+
+- Mandate writ in test guild reached terminal; scenario engine on lab host returned.
+- `lab.archive` engine wrote `lar-mopzkrza-d47537a11aec` capturing all probe data.
+- `lab.guild-teardown` + `lab.codex-teardown` wiped the lab guild dir + bare codex repo.
+- Trial writ `w-mopuwdsp` transitioned `open → completed (success)`.
+- Total trial cost (sum of session costs): **$39.76**. Total session wallclock: **74.9 min**.
+
+#### Tier 1 mechanical (PASS)
+
+- ✓ Sealed cleanly (1 commit `7c810bb`)
+- ✓ Build + test green at sealed commit (mechanical-checks block on review session)
+- ✓ All 6 brief task IDs covered per implementer's completion summary
+- ✓ Audit greps satisfied (CDC paths gone, `reckoner.tick` spelling consistent)
+
+#### Captured artifacts
+
+`2026-05-03-trial-1-results/`:
+- `extracted/` — full `nsg lab trial-extract` output (manifest, README, codex-history with the sealed patch, stacks-export with all books)
+- `sessions-summary.json` — per-engine cost / duration / exit / error table
+- `sealed-commit-7c810bb.patch` — 196 KB, the implementer's full diff
+- `sealed-commit-message.txt`, `sealed-commit-diffstat.txt`
 
 #### First post (cancelled, host-restart event)
 
@@ -94,12 +155,12 @@ Inherited X021's bloated baseline briefs (61 KB / 55 KB) when production saw spe
 
 ## Cumulative spend
 
-| | trials | implementer billed | total |
+| | trials | trial cost (sum-of-sessions) | total |
 |---|---|---|---|
 | Estimated (spec, post-trim) | 4 | $5–$15/trial | $30–$60 |
-| Actual to date | 0 completed | $0 | $0 |
+| Actual to date | 1 completed | $39.76 (trial 1) | **$39.76** |
 
-(Trial 1 first post cancelled before billable implement work; counted as $0.)
+(Trial 1's first post `w-mopib8yh` was cancelled before billable implement work; counted as $0. Trial 1 second post `w-mopuwdsp` ran end-to-end at $39.76 — slightly above the per-trial spec estimate because the substantive Reckoner refactor is the most expensive of the four trials; control-rig trials should run lighter.)
 
 ## Open questions / decisions to revisit
 
