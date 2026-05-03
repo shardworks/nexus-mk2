@@ -7,6 +7,13 @@ and shouldn't be restated in every spec.
 
 Experiment specs reference this directory; they don't repeat it.
 
+> **Reading cost numbers in trial outputs?** See
+> [`calculating-costs.md`](./calculating-costs.md) for what the
+> stamped `costUsd` actually represents under our Pro Max 20x
+> subscription, the systematic 3× gap between stamped values and
+> manual list-price recalculations, and the discipline for
+> keeping experiment cost numbers comparable across trials.
+
 ---
 
 ## Trial shapes
