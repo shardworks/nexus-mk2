@@ -131,7 +131,20 @@ This is a dev-mode invocation — it's running TypeScript source from the live m
 
 **Don't reflexively silence stderr.** Avoid `2>/dev/null` as a default habit when running `nsg` (or any CLI). Errors from `nsg` go to stderr; suppressing them turns real failures into silent no-ops, and you then waste calls flailing through syntax variants trying to understand why nothing came back. If you want to filter noise, filter stdout (`| head`, `| grep`, etc.) — stdout-only filtering keeps errors visible. The only time to redirect stderr is when you have a specific, known-noisy stream to discard and have already confirmed the command is working.
 
-**Verify mutating commands by reading the books, not by parsing stdout.** When you run a state-mutating `nsg` command (`writ post/cancel/transition`, `lab trial-post`, `click create/conclude`, `commission post`, `session record`, etc.), do not treat stdout as ground truth for whether it worked. Stdout shape varies: ids land near the top of JSON output, near the bottom of text output, or buried mid-response — easy to miss when filtered with `head` or `tail`. The reliable answer lives in the books: run a corresponding read command (`nsg writ list`, `nsg click list`, `nsg session list`, `ps aux`, etc.) after the mutation to confirm the new state. **If you don't see what you expect, investigate before re-running.** Re-running a mutating command in a multi-agent system creates duplicate state (extra writs, orphaned daemons) or races with running machinery. The cost of one extra read query is negligible compared to cleaning up duplicates.
+**When a command behaves unexpectedly, stop and investigate before issuing more commands.** The instinct to "try again with the right input" or "verify by re-running" is wrong in a multi-agent / persistent-state environment. Three concrete failure modes, all from a single session:
+
+- Filtered stdout missed a writ id near the top of JSON output → assumed `nsg lab trial-post` had failed → re-ran it → ended up with two trial writs.
+- Forgot that the daemon owns the crawl cadence → ran `nsg crawl one` manually to "make progress" → raced the daemon's `setInterval` and broke a trial's setup phase.
+- Noticed a `pnpm -w typecheck` was in the wrong working directory → launched a "corrected" one without first stopping the original → three concurrent `tsc` processes locked up the host.
+
+All three share the same shape: a command behaved unexpectedly, the response was MORE action instead of LESS. The right move in every case was: stop, observe, then act once with full information.
+
+Practical rules:
+
+1. **Read the books for ground truth, not stdout.** After any state-mutating `nsg` command (`writ post/cancel/transition`, `lab trial-post`, `click create/conclude`, `commission post`, `session record`, etc.), run a corresponding read command (`nsg writ list`, `nsg click list`, `nsg session list`, `ps aux`) to confirm the new state. Stdout shape varies — ids can be near the top of JSON output, near the bottom of text output, or buried mid-response. Don't infer success from stdout filtering.
+2. **Stop the broken thing before launching a corrected version.** If you realize a command is running in the wrong cwd / with the wrong args / against the wrong target, kill the original first. Two concurrent expensive operations (test runs, typechecks, fixture builds, daemon spawns) can take down the host.
+3. **One mutation at a time.** Read-only commands parallelize fine; state-mutating commands and expensive build/test runs do not. Wait for the first to complete (or confirm-stopped) before starting the next.
+4. **Cleanup is cheaper than duplication.** One extra read query, one extra `ps` check, one extra "did the previous command finish?" — far cheaper than untangling duplicate writs, orphaned daemons, racing crawls, or a wedged host.
 
 ## Git Identity
 
