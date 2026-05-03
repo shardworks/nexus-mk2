@@ -55,6 +55,7 @@ export type {
 
 import { TRIAL_WRIT_TYPE_CONFIG } from './types.ts';
 import { engines } from './engines/index.ts';
+import { blockTypes } from './block-types/index.ts';
 import { rigTemplates, rigTemplateMappings } from './template.ts';
 import { tools } from './tools/index.ts';
 import {
@@ -98,6 +99,11 @@ const laboratoryPlugin: Plugin = {
      *                               (5 phase orchestrators + fixture,
      *                               scenario, probe, and archive work
      *                               engines).
+     *   - `blockTypes`           — `lab.xguild-writ-terminal` and
+     *                               `lab.xguild-rig-terminal` — gates
+     *                               the cross-guild scenario engines
+     *                               wait on, so they don't hold the
+     *                               parent guild's spider crawl loop.
      *   - `rigTemplates`         — `post-and-collect-default` —
      *                               enumerates the five phase
      *                               orchestrators in sequence.
@@ -114,6 +120,7 @@ const laboratoryPlugin: Plugin = {
      */
     supportKit: {
       engines,
+      blockTypes,
       rigTemplates,
       rigTemplateMappings,
       tools,

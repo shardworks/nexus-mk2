@@ -25,8 +25,20 @@
  * real cross-guild engine surface is parked at click c-mom9vm3n for
  * v2.
  *
+ * BLOCK-TYPE GATING (vs. inline polling)
+ * ──────────────────────────────────────
+ * Wait modes are implemented by returning `{status: 'blocked'}` with
+ * a registered BlockType (`lab.xguild-writ-terminal` or
+ * `lab.xguild-rig-terminal`). The Spider's dispatch predicate polls
+ * the BlockType's `check()` between crawl ticks, leaving the parent
+ * guild's spider crawl loop free to run other engines in the
+ * meantime. When the gate clears, the Spider re-dispatches this
+ * engine; we detect the resume via `context.priorBlock` and shell
+ * out once to read the final state, then return `{status: 'completed'}`.
+ *
  * COMMISSION-POST FLOW
  * ────────────────────
+ * First dispatch (no priorBlock):
  * 1. Validate givens (briefPath absolute or manifest-relative; type
  *    defaults to 'mandate').
  * 2. Discover the target test guild from `context.upstream` — duck-type
@@ -38,14 +50,16 @@
  *    <title> --body <body> --type <type> [--parent-id <parentId>]`.
  *    Parse JSON response, extract writ id.
  * 5. Choose wait mode:
- *    - `waitForRigTerminal: true` → poll the spider rig dispatched
- *      from the writ until it reaches a terminal RigStatus
- *      (`completed`/`failed`/`cancelled`). Use this for spec-only
- *      and other rigs whose writ never seals.
- *    - `waitForTerminal !== false` (default true) → poll the writ
- *      until it reaches a terminal classification. Use this for
- *      full-pipeline rigs where seal transitions the writ.
- *    - Both false → return immediately after post.
+ *    - `waitForRigTerminal: true` → return blocked with
+ *      `lab.xguild-rig-terminal`. Use this for spec-only and other
+ *      rigs whose writ never seals.
+ *    - `waitForTerminal !== false` (default true) → return blocked
+ *      with `lab.xguild-writ-terminal`. Use this for full-pipeline
+ *      rigs where seal transitions the writ.
+ *    - Both false → return completed immediately.
+ *
+ * Resume dispatch (priorBlock present): shell out to read the final
+ * writ/rig state and return `{status: 'completed', yields}`.
  *
  * GIVENS (commission-post)
  * ────────────────────────
@@ -62,25 +76,25 @@
  *                                  guild's namespace).
  *   waitForTerminal    : bool?   — default true. When true and
  *                                  waitForRigTerminal is not set,
- *                                  polls the writ until terminal. When
- *                                  false, returns immediately after
- *                                  post (unless waitForRigTerminal is
- *                                  set, in which case the rig waiter
- *                                  runs instead).
- *   waitForRigTerminal : bool?   — default false. When true, polls the
- *                                  spider rig dispatched from the writ
- *                                  until terminal. Mutually exclusive
- *                                  with waitForTerminal=true (engine
- *                                  throws if both true).
- *   pollIntervalMs     : number? — only meaningful when waiting; default
- *                                  5000.
+ *                                  blocks on `lab.xguild-writ-terminal`.
+ *                                  When false, returns immediately
+ *                                  after post (unless waitForRigTerminal
+ *                                  is set).
+ *   waitForRigTerminal : bool?   — default false. When true, blocks on
+ *                                  `lab.xguild-rig-terminal`. Mutually
+ *                                  exclusive with waitForTerminal=true
+ *                                  (engine throws if both true).
+ *   pollIntervalMs     : number? — accepted for back-compat; ignored.
+ *                                  The BlockType's poll interval (5s)
+ *                                  governs check frequency.
  *   timeoutMs          : number? — only meaningful when waiting; default
- *                                  1_800_000 (30 minutes).
+ *                                  1_800_000 (30 minutes). Encoded as
+ *                                  the BlockType condition's deadline.
  *   rigDiscoveryTimeoutMs : number? — only meaningful when
- *                                  waitForRigTerminal=true; how long to
- *                                  wait for the rig to appear after post
- *                                  (rig dispatch is async); default
- *                                  60_000 (1 minute).
+ *                                  waitForRigTerminal=true; default
+ *                                  60_000 (1 minute). Added to
+ *                                  `timeoutMs` to form the combined
+ *                                  rig-terminal deadline.
  *
  * YIELDS (commission-post)
  * ────────────────────────
@@ -94,7 +108,7 @@
  * GIVENS (wait-for-writ-terminal — standalone)
  * ────────────────────────────────────────────
  *   writId           : string  — the writ id to poll.
- *   pollIntervalMs   : number? — default 5000.
+ *   pollIntervalMs   : number? — accepted for back-compat; ignored.
  *   timeoutMs        : number? — default 1_800_000 (30 minutes).
  *
  * YIELDS (wait-for-writ-terminal)
@@ -104,7 +118,7 @@
  * GIVENS (wait-for-rig-terminal — standalone)
  * ───────────────────────────────────────────
  *   writId                : string  — the writ id whose rig to poll.
- *   pollIntervalMs        : number? — default 5000.
+ *   pollIntervalMs        : number? — accepted for back-compat; ignored.
  *   timeoutMs             : number? — default 1_800_000 (30 minutes).
  *   rigDiscoveryTimeoutMs : number? — default 60_000 (1 minute).
  *
@@ -113,9 +127,6 @@
  *   { writId, rigId, rigStatus, rigResolvedAt }
  */
 
-import { execFile as execFileCb } from 'node:child_process';
-import { promisify } from 'node:util';
-import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
@@ -124,8 +135,11 @@ import type {
   EngineRunResult,
 } from '@shardworks/fabricator-apparatus';
 import type { InjectedTrialContext } from './phases.ts';
+import { exec, fetchRigForWrit, fetchRigState, fetchWritState, resolveLocalNsg } from './xguild-shell.ts';
 
-const execFile = promisify(execFileCb);
+// Re-export for back-compat — these were public exports of this module
+// before the block-type refactor.
+export { exec, resolveLocalNsg } from './xguild-shell.ts';
 
 // ── Defaults ──────────────────────────────────────────────────────────
 
@@ -134,6 +148,9 @@ export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000; // 30 minutes
 export const DEFAULT_RIG_DISCOVERY_TIMEOUT_MS = 60_000; // 1 minute
 const TERMINAL_CLASSIFICATION = 'terminal';
 const RIG_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
+const WRIT_TERMINAL_BLOCK_TYPE = 'lab.xguild-writ-terminal';
+const RIG_TERMINAL_BLOCK_TYPE = 'lab.xguild-rig-terminal';
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -147,18 +164,17 @@ interface PostedWrit {
   postedAt: string;
 }
 
-interface TerminalSnapshot {
+/**
+ * Condition payload carried on the engine's hold while it waits for
+ * the test guild's writ or rig to reach terminal. The engine's resume
+ * path reads `priorBlock.condition` and uses these fields to fetch
+ * the final state without re-posting the commission.
+ */
+interface XguildHoldCondition {
+  testGuildPath: string;
   writId: string;
-  finalState: string;
-  resolution: string | null;
-  resolvedAt: string;
-}
-
-interface RigTerminalSnapshot {
-  writId: string;
-  rigId: string;
-  rigStatus: 'completed' | 'failed' | 'cancelled';
-  rigResolvedAt: string;
+  postedAt: string;
+  deadline: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -196,46 +212,6 @@ export function extractH1Title(briefContent: string): string | null {
   return match ? match[1]!.trim() : null;
 }
 
-async function exec(
-  cmd: string,
-  args: string[],
-): Promise<{ stdout: string; stderr: string }> {
-  try {
-    const { stdout, stderr } = await execFile(cmd, args, {
-      maxBuffer: 50 * 1024 * 1024,
-    });
-    return { stdout: stdout.trim(), stderr: stderr.trim() };
-  } catch (err: unknown) {
-    const e = err as { stderr?: string; message?: string };
-    throw new Error(
-      `${cmd} ${args.join(' ')} failed: ${e.stderr || e.message || 'unknown error'}`,
-    );
-  }
-}
-
-/**
- * Resolve the test guild's locally-installed `nsg` binstub.
- *
- * The cross-guild shellouts always run against the test guild's own
- * CLI — version-matched to the test guild's `nexus` field, no
- * dependency on whatever CLI happens to be on PATH. lab.guild-setup
- * bootstraps the install via `npx -p @shardworks/nexus@<spec> nsg
- * init …`, so the binstub exists by the time any scenario engine
- * runs.
- */
-export function resolveLocalNsg(testGuildPath: string, designId: string): string {
-  const localNsg = path.join(testGuildPath, 'node_modules', '.bin', 'nsg');
-  if (!existsSync(localNsg)) {
-    throw new Error(
-      `[${designId}] no local nsg at ${localNsg}. The test guild must have been ` +
-        `bootstrapped via lab.guild-setup (which installs @shardworks/nexus locally). ` +
-        `If you're invoking this engine outside the laboratory's standard rig, ensure ` +
-        `the test guild's package.json declares @shardworks/nexus and that npm install ran.`,
-    );
-  }
-  return localNsg;
-}
-
 /**
  * Resolve the single test guild from upstream yields. Throws when zero
  * or multiple test guilds are present — explicit selection is future
@@ -261,226 +237,6 @@ function resolveTestGuild(
     );
   }
   return guilds[0]!;
-}
-
-/**
- * Poll until the target writ reaches a terminal-classification state.
- * Throws on timeout. Each poll shells out `nsg --guild-root <test-guild>
- * writ show --id <writId> --format json`.
- *
- * Exposed as a standalone helper so both engines (the post-and-wait
- * happy path, and the standalone wait engine) share its behavior.
- */
-export async function waitForWritTerminal(opts: {
-  testGuildPath: string;
-  writId: string;
-  pollIntervalMs: number;
-  timeoutMs: number;
-  designId: string;
-}): Promise<TerminalSnapshot> {
-  const startedAt = Date.now();
-  while (true) {
-    const elapsed = Date.now() - startedAt;
-    if (elapsed > opts.timeoutMs) {
-      throw new Error(
-        `[${opts.designId}] timed out after ${opts.timeoutMs}ms waiting for writ ` +
-          `${opts.writId} (test guild ${opts.testGuildPath}) to reach a terminal state.`,
-      );
-    }
-
-    const localNsg = resolveLocalNsg(opts.testGuildPath, opts.designId);
-    // `writ show` is a sub-subcommand of the `writ` group in the
-    // published 0.1.292 CLI surface — there is no top-level
-    // `writ-show` command. Earlier drafts of this engine (and a
-    // few of the engine docstrings) referred to `writ-show`; that
-    // was always wrong and only escaped notice because phase-1/2a
-    // trials all ran with `waitForTerminal: false` and never
-    // exercised this poll path. Phase 2b is the first trial to
-    // hit it and surfaced the typo.
-    const { stdout } = await exec(localNsg, [
-      '--guild-root',
-      opts.testGuildPath,
-      'writ',
-      'show',
-      '--id',
-      opts.writId,
-      '--format',
-      'json',
-    ]);
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(stdout);
-    } catch (err) {
-      throw new Error(
-        `[${opts.designId}] writ-show JSON parse failed for writ ${opts.writId}: ` +
-          `${(err as Error).message}; stdout=${stdout.slice(0, 200)}`,
-      );
-    }
-
-    if (typeof parsed !== 'object' || parsed === null) {
-      throw new Error(
-        `[${opts.designId}] writ-show response was not an object for writ ${opts.writId}.`,
-      );
-    }
-
-    const obj = parsed as Record<string, unknown>;
-    const classification = obj.classification;
-    if (classification === TERMINAL_CLASSIFICATION) {
-      return {
-        writId: opts.writId,
-        finalState: typeof obj.phase === 'string' ? obj.phase : 'unknown',
-        resolution: typeof obj.resolution === 'string' ? obj.resolution : null,
-        resolvedAt:
-          typeof obj.resolvedAt === 'string' ? obj.resolvedAt : new Date().toISOString(),
-      };
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, opts.pollIntervalMs));
-  }
-}
-
-/**
- * Resolve the spider rig dispatched from a writ. Polls
- * `nsg rig for-writ <writId>` until a rig appears or the discovery
- * timeout elapses — rig dispatch is async after writ creation, so
- * the rig may not exist for a few seconds after `commission-post`
- * returns. Returns the rig id once found.
- *
- * The Spider's `rig for-writ` command returns `null` when no rig is
- * yet bound to the writ; that's the wait condition.
- */
-export async function discoverRigForWrit(opts: {
-  testGuildPath: string;
-  writId: string;
-  pollIntervalMs: number;
-  timeoutMs: number;
-  designId: string;
-}): Promise<string> {
-  const startedAt = Date.now();
-  const localNsg = resolveLocalNsg(opts.testGuildPath, opts.designId);
-
-  while (true) {
-    const elapsed = Date.now() - startedAt;
-    if (elapsed > opts.timeoutMs) {
-      throw new Error(
-        `[${opts.designId}] timed out after ${opts.timeoutMs}ms waiting for a rig ` +
-          `to be dispatched from writ ${opts.writId} (test guild ${opts.testGuildPath}).`,
-      );
-    }
-
-    // `nsg rig for-writ` requires the FULL writ id (no prefix resolution
-    // in the rig book today). Caller must pass the full id.
-    const { stdout } = await exec(localNsg, [
-      '--guild-root',
-      opts.testGuildPath,
-      'rig',
-      'for-writ',
-      opts.writId,
-    ]);
-
-    const trimmed = stdout.trim();
-    if (trimmed && trimmed !== 'null') {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(trimmed);
-      } catch (err) {
-        throw new Error(
-          `[${opts.designId}] rig for-writ JSON parse failed for writ ${opts.writId}: ` +
-            `${(err as Error).message}; stdout=${trimmed.slice(0, 200)}`,
-        );
-      }
-      if (typeof parsed === 'object' && parsed !== null) {
-        const obj = parsed as Record<string, unknown>;
-        if (typeof obj.id === 'string' && obj.id.length > 0) {
-          return obj.id;
-        }
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, opts.pollIntervalMs));
-  }
-}
-
-/**
- * Poll until the target writ's dispatched spider rig reaches a terminal
- * RigStatus (`completed` | `failed` | `cancelled`). Throws on timeout.
- *
- * Use this for rigs whose mandate writ never seals — spec-only /
- * planning-only trials, etc. — where the rig itself is the only
- * "trial done" signal. Each poll shells out
- * `nsg --guild-root <test-guild> rig show --id <rigId> --format json`.
- */
-export async function waitForRigTerminal(opts: {
-  testGuildPath: string;
-  writId: string;
-  pollIntervalMs: number;
-  timeoutMs: number;
-  rigDiscoveryTimeoutMs: number;
-  designId: string;
-}): Promise<RigTerminalSnapshot> {
-  // First find the rig (may not exist immediately after writ creation).
-  const rigId = await discoverRigForWrit({
-    testGuildPath: opts.testGuildPath,
-    writId: opts.writId,
-    pollIntervalMs: opts.pollIntervalMs,
-    timeoutMs: opts.rigDiscoveryTimeoutMs,
-    designId: opts.designId,
-  });
-
-  const startedAt = Date.now();
-  const localNsg = resolveLocalNsg(opts.testGuildPath, opts.designId);
-
-  while (true) {
-    const elapsed = Date.now() - startedAt;
-    if (elapsed > opts.timeoutMs) {
-      throw new Error(
-        `[${opts.designId}] timed out after ${opts.timeoutMs}ms waiting for rig ` +
-          `${rigId} (writ ${opts.writId}, test guild ${opts.testGuildPath}) to ` +
-          `reach a terminal RigStatus.`,
-      );
-    }
-
-    const { stdout } = await exec(localNsg, [
-      '--guild-root',
-      opts.testGuildPath,
-      'rig',
-      'show',
-      '--id',
-      rigId,
-      '--format',
-      'json',
-    ]);
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(stdout);
-    } catch (err) {
-      throw new Error(
-        `[${opts.designId}] rig show JSON parse failed for rig ${rigId}: ` +
-          `${(err as Error).message}; stdout=${stdout.slice(0, 200)}`,
-      );
-    }
-    if (typeof parsed !== 'object' || parsed === null) {
-      throw new Error(
-        `[${opts.designId}] rig show response was not an object for rig ${rigId}.`,
-      );
-    }
-
-    const obj = parsed as Record<string, unknown>;
-    const status = obj.status;
-    if (typeof status === 'string' && RIG_TERMINAL_STATUSES.has(status)) {
-      return {
-        writId: opts.writId,
-        rigId,
-        rigStatus: status as RigTerminalSnapshot['rigStatus'],
-        rigResolvedAt:
-          typeof obj.resolvedAt === 'string' ? obj.resolvedAt : new Date().toISOString(),
-      };
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, opts.pollIntervalMs));
-  }
 }
 
 // ── Validation helpers ────────────────────────────────────────────────
@@ -542,12 +298,130 @@ function optionalPositiveNumber(
   return value;
 }
 
+// ── Resume helpers ────────────────────────────────────────────────────
+
+/**
+ * Pull a typed XguildHoldCondition out of `context.priorBlock`. Throws
+ * when the priorBlock is malformed — that's a Spider-side bug, not a
+ * runtime condition the engine can recover from.
+ */
+function readHoldCondition(
+  priorBlock: NonNullable<EngineRunContext['priorBlock']>,
+  designId: string,
+): XguildHoldCondition {
+  const cond = priorBlock.condition as Record<string, unknown> | null | undefined;
+  if (!cond || typeof cond !== 'object') {
+    throw new Error(
+      `[${designId}] priorBlock present but condition is not an object (resume after gate clear).`,
+    );
+  }
+  const { testGuildPath, writId, postedAt, deadline } = cond as Record<string, unknown>;
+  if (typeof testGuildPath !== 'string' || typeof writId !== 'string' ||
+      typeof postedAt !== 'string' || typeof deadline !== 'string') {
+    throw new Error(
+      `[${designId}] priorBlock condition is missing required fields ` +
+        `(testGuildPath, writId, postedAt, deadline).`,
+    );
+  }
+  return { testGuildPath, writId, postedAt, deadline };
+}
+
+/**
+ * On resume from `lab.xguild-writ-terminal`: read the writ's final
+ * state and assemble the engine's yields.
+ */
+async function completeWritTerminal(
+  hold: XguildHoldCondition,
+  designId: string,
+): Promise<EngineRunResult> {
+  const writ = await fetchWritState({
+    testGuildPath: hold.testGuildPath,
+    writId: hold.writId,
+    caller: designId,
+  });
+  if (writ.classification !== TERMINAL_CLASSIFICATION) {
+    throw new Error(
+      `[${designId}] gate cleared but writ ${hold.writId} is not in a terminal ` +
+        `classification (got "${String(writ.classification)}"). This indicates a stale ` +
+        `priorBlock or a writ-state regression in the test guild.`,
+    );
+  }
+  return {
+    status: 'completed',
+    yields: {
+      writId: hold.writId,
+      postedAt: hold.postedAt,
+      finalState: typeof writ.phase === 'string' ? writ.phase : 'unknown',
+      resolution: typeof writ.resolution === 'string' ? writ.resolution : null,
+      resolvedAt:
+        typeof writ.resolvedAt === 'string' ? writ.resolvedAt : new Date().toISOString(),
+    },
+  };
+}
+
+/**
+ * On resume from `lab.xguild-rig-terminal`: read the rig's final
+ * state and assemble the engine's yields. The block type already
+ * confirmed the rig is terminal before clearing.
+ */
+async function completeRigTerminal(
+  hold: XguildHoldCondition,
+  designId: string,
+): Promise<EngineRunResult> {
+  const rigId = await fetchRigForWrit({
+    testGuildPath: hold.testGuildPath,
+    writId: hold.writId,
+    caller: designId,
+  });
+  if (rigId === null) {
+    throw new Error(
+      `[${designId}] gate cleared but no rig is bound to writ ${hold.writId}. ` +
+        `This indicates a stale priorBlock or a rig-cancellation race in the test guild.`,
+    );
+  }
+  const rig = await fetchRigState({
+    testGuildPath: hold.testGuildPath,
+    rigId,
+    caller: designId,
+  });
+  if (typeof rig.status !== 'string' || !RIG_TERMINAL_STATUSES.has(rig.status)) {
+    throw new Error(
+      `[${designId}] gate cleared but rig ${rigId} is not in a terminal status ` +
+        `(got "${String(rig.status)}"). Stale priorBlock or rig-state regression.`,
+    );
+  }
+  return {
+    status: 'completed',
+    yields: {
+      writId: hold.writId,
+      postedAt: hold.postedAt,
+      rigId,
+      rigStatus: rig.status,
+      rigResolvedAt:
+        typeof rig.resolvedAt === 'string' ? rig.resolvedAt : new Date().toISOString(),
+    },
+  };
+}
+
 // ── Commission-post engine ────────────────────────────────────────────
 
 export const commissionPostXguildEngine: EngineDesign = {
   id: 'lab.commission-post-xguild',
   async run(rawGivens, context: EngineRunContext): Promise<EngineRunResult> {
     const designId = 'lab.commission-post-xguild';
+
+    // Resume path — gate cleared, fetch final state and complete.
+    if (context.priorBlock) {
+      const hold = readHoldCondition(context.priorBlock, designId);
+      if (context.priorBlock.type === RIG_TERMINAL_BLOCK_TYPE) {
+        return completeRigTerminal(hold, designId);
+      }
+      // Default to writ-terminal resume — covers the writ-terminal
+      // block type and any legacy holds without an explicit type.
+      return completeWritTerminal(hold, designId);
+    }
+
+    // Fresh dispatch — validate, post, decide wait mode.
     const trial = rawGivens._trial as InjectedTrialContext | undefined;
     const briefPath = resolvePathGiven(
       rawGivens.briefPath,
@@ -572,7 +446,9 @@ export const commissionPostXguildEngine: EngineDesign = {
           `pick one wait mode (writ vs rig) per invocation.`,
       );
     }
-    const pollIntervalMs = optionalPositiveNumber(
+    // pollIntervalMs is validated for back-compat but ignored — the
+    // BlockType's pollIntervalMs governs check frequency.
+    optionalPositiveNumber(
       rawGivens.pollIntervalMs,
       designId,
       'pollIntervalMs',
@@ -651,17 +527,20 @@ export const commissionPostXguildEngine: EngineDesign = {
     };
 
     if (shouldWaitForRig) {
-      const rigTerminal = await waitForRigTerminal({
-        testGuildPath: testGuild.guildPath,
-        writId: posted.writId,
-        pollIntervalMs,
-        timeoutMs,
-        rigDiscoveryTimeoutMs,
-        designId,
-      });
+      // Combined deadline: discovery + terminal. Slightly more
+      // permissive than the original two-phase semantics, but the
+      // stateless gate model can't carry per-phase timing without
+      // mutating the condition between checks.
+      const deadline = new Date(Date.now() + rigDiscoveryTimeoutMs + timeoutMs).toISOString();
       return {
-        status: 'completed',
-        yields: { ...posted, ...rigTerminal },
+        status: 'blocked',
+        blockType: RIG_TERMINAL_BLOCK_TYPE,
+        condition: {
+          testGuildPath: testGuild.guildPath,
+          writId: posted.writId,
+          postedAt: posted.postedAt,
+          deadline,
+        } satisfies XguildHoldCondition,
       };
     }
 
@@ -672,18 +551,15 @@ export const commissionPostXguildEngine: EngineDesign = {
       };
     }
 
-    // Inline wait until terminal.
-    const terminal = await waitForWritTerminal({
-      testGuildPath: testGuild.guildPath,
-      writId: posted.writId,
-      pollIntervalMs,
-      timeoutMs,
-      designId,
-    });
-
     return {
-      status: 'completed',
-      yields: { ...posted, ...terminal },
+      status: 'blocked',
+      blockType: WRIT_TERMINAL_BLOCK_TYPE,
+      condition: {
+        testGuildPath: testGuild.guildPath,
+        writId: posted.writId,
+        postedAt: posted.postedAt,
+        deadline: new Date(Date.now() + timeoutMs).toISOString(),
+      } satisfies XguildHoldCondition,
     };
   },
 };
@@ -694,13 +570,33 @@ export const waitForWritTerminalXguildEngine: EngineDesign = {
   id: 'lab.wait-for-writ-terminal-xguild',
   async run(rawGivens, context: EngineRunContext): Promise<EngineRunResult> {
     const designId = 'lab.wait-for-writ-terminal-xguild';
+
+    if (context.priorBlock) {
+      const hold = readHoldCondition(context.priorBlock, designId);
+      const writ = await fetchWritState({
+        testGuildPath: hold.testGuildPath,
+        writId: hold.writId,
+        caller: designId,
+      });
+      return {
+        status: 'completed',
+        yields: {
+          writId: hold.writId,
+          finalState: typeof writ.phase === 'string' ? writ.phase : 'unknown',
+          resolution: typeof writ.resolution === 'string' ? writ.resolution : null,
+          resolvedAt:
+            typeof writ.resolvedAt === 'string' ? writ.resolvedAt : new Date().toISOString(),
+        },
+      };
+    }
+
     const writId = optionalString(rawGivens.writId, designId, 'writId');
     if (writId === undefined || writId.length === 0) {
       throw new Error(
         `[${designId}] givens.writId is required (the writ id to poll in the test guild).`,
       );
     }
-    const pollIntervalMs = optionalPositiveNumber(
+    optionalPositiveNumber(
       rawGivens.pollIntervalMs,
       designId,
       'pollIntervalMs',
@@ -714,17 +610,18 @@ export const waitForWritTerminalXguildEngine: EngineDesign = {
     );
 
     const testGuild = resolveTestGuild(context.upstream, designId);
-    const terminal = await waitForWritTerminal({
-      testGuildPath: testGuild.guildPath,
-      writId,
-      pollIntervalMs,
-      timeoutMs,
-      designId,
-    });
 
     return {
-      status: 'completed',
-      yields: terminal,
+      status: 'blocked',
+      blockType: WRIT_TERMINAL_BLOCK_TYPE,
+      condition: {
+        testGuildPath: testGuild.guildPath,
+        writId,
+        // No prior post-commission step here; record the resume entry
+        // time so downstream consumers have a sensible timestamp.
+        postedAt: new Date().toISOString(),
+        deadline: new Date(Date.now() + timeoutMs).toISOString(),
+      } satisfies XguildHoldCondition,
     };
   },
 };
@@ -735,13 +632,49 @@ export const waitForRigTerminalXguildEngine: EngineDesign = {
   id: 'lab.wait-for-rig-terminal-xguild',
   async run(rawGivens, context: EngineRunContext): Promise<EngineRunResult> {
     const designId = 'lab.wait-for-rig-terminal-xguild';
+
+    if (context.priorBlock) {
+      const hold = readHoldCondition(context.priorBlock, designId);
+      const rigId = await fetchRigForWrit({
+        testGuildPath: hold.testGuildPath,
+        writId: hold.writId,
+        caller: designId,
+      });
+      if (rigId === null) {
+        throw new Error(
+          `[${designId}] gate cleared but no rig is bound to writ ${hold.writId}.`,
+        );
+      }
+      const rig = await fetchRigState({
+        testGuildPath: hold.testGuildPath,
+        rigId,
+        caller: designId,
+      });
+      if (typeof rig.status !== 'string' || !RIG_TERMINAL_STATUSES.has(rig.status)) {
+        throw new Error(
+          `[${designId}] gate cleared but rig ${rigId} is not in a terminal status ` +
+            `(got "${String(rig.status)}").`,
+        );
+      }
+      return {
+        status: 'completed',
+        yields: {
+          writId: hold.writId,
+          rigId,
+          rigStatus: rig.status,
+          rigResolvedAt:
+            typeof rig.resolvedAt === 'string' ? rig.resolvedAt : new Date().toISOString(),
+        },
+      };
+    }
+
     const writId = optionalString(rawGivens.writId, designId, 'writId');
     if (writId === undefined || writId.length === 0) {
       throw new Error(
         `[${designId}] givens.writId is required (the writ id whose dispatched rig to poll).`,
       );
     }
-    const pollIntervalMs = optionalPositiveNumber(
+    optionalPositiveNumber(
       rawGivens.pollIntervalMs,
       designId,
       'pollIntervalMs',
@@ -761,18 +694,16 @@ export const waitForRigTerminalXguildEngine: EngineDesign = {
     );
 
     const testGuild = resolveTestGuild(context.upstream, designId);
-    const terminal = await waitForRigTerminal({
-      testGuildPath: testGuild.guildPath,
-      writId,
-      pollIntervalMs,
-      timeoutMs,
-      rigDiscoveryTimeoutMs,
-      designId,
-    });
 
     return {
-      status: 'completed',
-      yields: terminal,
+      status: 'blocked',
+      blockType: RIG_TERMINAL_BLOCK_TYPE,
+      condition: {
+        testGuildPath: testGuild.guildPath,
+        writId,
+        postedAt: new Date().toISOString(),
+        deadline: new Date(Date.now() + rigDiscoveryTimeoutMs + timeoutMs).toISOString(),
+      } satisfies XguildHoldCondition,
     };
   },
 };
