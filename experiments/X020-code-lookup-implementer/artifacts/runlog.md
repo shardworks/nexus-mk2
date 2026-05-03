@@ -18,9 +18,9 @@ land + a quick review before posting the next.
 | # | manifest | purpose | trial writ | rig | status | impl cost | impl duration | adoption % | notes |
 |---|---|---|---|---|---|---|---|---|---|
 | 0 | `baseline-dropbook.yaml` (v0, raw-brief) | apparatus check | `w-mopib9cd` | `rig-mopuhati` | superseded | $10.94 | 23.1 min | n/a | scoped narrowly — missed cartograph + tier4 + arch docs; brief was raw `writ.body`, not plandoc spec |
-| 1 | `baseline-dropbook.yaml` (v1, plandoc spec) | calibration | `w-mopwwox1` | `rig-mopwx2gd` | **completed** | **$15.95** | **27.6 min** | n/a | calibration **PASSED** — −1.2% vs $16.15 reference; full scope coverage incl. cartograph + tier4 + arch docs |
-| 2 | `baseline-dropbook.yaml` (v1) | A/B baseline arm | `w-mopyh1hm` | — | open, queued | — | — | n/a | re-run of row 1 to anchor the A/B comparator |
-| 3 | `with-tool-dropbook.yaml` | A/B variant — **H1 measurement** | — | — | — | — | — | — | gate: ≥25% reduction vs row 2 |
+| 1 | `baseline-dropbook.yaml` (v1, plandoc spec) | calibration **and** A/B baseline anchor | `w-mopwwox1` | `rig-mopwx2gd` | **completed** | **$15.95** | **27.6 min** | n/a | calibration **PASSED** — −1.2% vs $16.15 reference; full scope coverage incl. cartograph + tier4 + arch docs. Single baseline doubles as the H1 comparator anchor (X019 pattern) |
+| – | `baseline-dropbook.yaml` (v1) | redundant baseline rerun | `w-mopyh1hm` | — | cancelled | — | — | n/a | posted then cancelled — Sean caught that a second baseline at N=1 with no variance machinery is just spend without measurement value |
+| 2 | `with-tool-dropbook.yaml` | A/B variant — **H1 measurement** | `w-mopyzctu` | — | open, queued | — | — | — | gate: ≥25% reduction vs row 1 ($15.95 anchor) |
 
 **Reference data (from production, for orientation):**
 
@@ -41,9 +41,11 @@ land + a quick review before posting the next.
 ## Hypothesis status
 
 - **H1** — `code-lookup` reduces implementer session cost ≥25%
-  on the dropBook commission, baseline-anchored to a paired lab
-  baseline (not the real-world reference).
-  - **Status:** unresolved. Needs row 3 vs row 2.
+  on the dropBook commission, anchored to the row 1 lab baseline
+  ($15.95), not the real-world $16.15. Comparing trial 1 to
+  trial 2 holds apparatus, codex, brief, and trial-shape constant —
+  the only difference is the code-lookup tool injection.
+  - **Status:** unresolved. Needs row 2 vs row 1.
 - **Adoption metric (secondary measurement, not a hypothesis)** —
   ≥20% of the implementer's tool calls reach for `code-lookup`
   in the with-tool variant. X019's planner-side rate was 2/67
@@ -159,6 +161,34 @@ mechanism question.
   the writ body carries. Recorded as a side measurement; not
   X020's H1 question.
 
+### Cancelled redundant trial (correction)
+
+After trial 1 landed, Coco initially posted a second baseline run
+(`w-mopyh1hm`, also `baseline-dropbook.yaml`) intending it as a
+"paired anchor" for the A/B comparison, citing X019's
+"eliminates inter-trial drift" pattern. Sean caught the
+mistake: X019 ran ONE baseline that served as both calibration
+and comparator; the second run would have spent another ~$19 to
+confirm trial 1 wasn't a fluke without any variance machinery to
+make use of the second data point. Cancelled before it picked up
+a rig — $0 spend.
+
+The cleaner pattern: trial 1's $15.95 IS the H1 comparator. The
+with-tool variant is compared directly against it. Holds
+apparatus / codex / brief / trial-shape constant; the only
+variable is the code-lookup tool injection.
+
+### Trial 2 — with-tool variant (H1 measurement, in flight)
+
+- **Writ:** `w-mopyzctu-b8992f8852da`
+- **Posted:** 2026-05-03T16:13 UTC. Watcher armed (`bz56h90z0`).
+- **Manifest:** `with-tool-dropbook.yaml` — adds the
+  `code-lookup-apparatus` plugin, `code-lookup:read` permission
+  on the artificer role, the `code-lookup-index.json` artifact
+  shipped to `<guild-root>`, and the implementer-flavored
+  tool-preference snippet inserted into `roles/artificer.md`.
+- **Status:** open, queued.
+
 ## Cumulative spend
 
 Costs reported are lab-guild billed cost (test-guild animator
@@ -169,7 +199,7 @@ LLM-backed sessions itself.
 | | trials | impl + review + revise + seal billed | total |
 |---|---|---|---|
 | Estimated (per trial) | — | $15–$25 | — |
-| Actual to date | 1 superseded + 1 calibrated | $12.10 + $19.31 | $31.41 |
+| Actual to date | 1 superseded + 1 calibrated + 1 cancelled-pre-pickup | $12.10 + $19.31 + $0 | $31.41 |
 
 ## Open questions / decisions to revisit
 
