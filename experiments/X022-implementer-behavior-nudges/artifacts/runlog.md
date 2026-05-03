@@ -18,12 +18,19 @@ The 2x2 design varies role-file × rig-brief; brief content is
 identical baseline-vs-variant (the intervention lives in
 `roles/artificer.md`, not the brief).
 
-| # | manifest | rig | role file | trial writ | status | cost | duration | sealed commit | notes |
+**Running order (revised 2026-05-03 ~16:10 UTC):** Sean asked to run
+the substantive variant immediately after the substantive baseline,
+then move to the control variant, and only post a control baseline if
+the control-variant cost lands outside the production envelope.
+The 2x2 design is preserved on the substantive side; the control side
+becomes single-arm against production cost as the comparator.
+
+| run order | manifest | rig | role file | trial writ | status | cost | duration | sealed commit | notes |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | `rig-moj12h4o-baseline.yaml` | substantive | baseline | `w-mopuwdsp` | queued | — | — | — | gate: lab cost within ±30% of $25–35 production-implement portion |
+| 1 | `rig-moj12h4o-baseline.yaml` | substantive | baseline | `w-mopuwdsp` | running (15:13 UTC) | — | — | — | gate: lab cost within ±30% of $25–35 production-implement portion |
 | 2 | `rig-moj12h4o-combined.yaml` | substantive | combined-nudges | — | — | — | — | — | gate: ≥10% cost reduction vs row 1 (H1) |
-| 3 | `rig-moji64hs-baseline.yaml` | control | baseline | — | — | — | — | — | gate: lab cost within ±30% of $10–20 production-implement portion |
-| 4 | `rig-moji64hs-combined.yaml` | control | combined-nudges | — | — | — | — | — | gate: ≥5% cost reduction vs row 3 (H2) |
+| 3 | `rig-moji64hs-combined.yaml` | control | combined-nudges | — | — | — | — | — | gate: lab cost ≤ $20 (production full-rig). H2 signal indirect — see decision gate below. |
+| 4 (conditional) | `rig-moji64hs-baseline.yaml` | control | baseline | — | — | — | — | — | post **only if** row 3 cost ≥ ~$20 lab — to disambiguate brief-bloat vs nudge-failure |
 
 **Reference data (from production, for orientation):**
 
@@ -56,7 +63,7 @@ Per-trial cost numbers in the table come from the test guild's
 - **H1** — Combined-nudges variant cuts substantive cost ≥10% on rig-moj12h4o vs baseline.
   - **Status:** unresolved. Needs row 2 vs row 1.
 - **H2** — Combined-nudges variant cuts control cost ≥5% on rig-moji64hs vs baseline.
-  - **Status:** unresolved. Needs row 4 vs row 3.
+  - **Status:** unresolved. **Comparator changed (2026-05-03 ~16:10 UTC):** row 3 (control variant) compared against production full-rig cost ($20) as a first pass; only post a paired lab control baseline (row 4) if row 3 lands outside the production envelope and disambiguation is needed.
 - **H3** — Neither variant produces an outcome-quality regression vs its baseline (Tier 1 mechanical + Tier 2 manual diff).
   - **Status:** unresolved. Tier 1 reads from probe artifacts; Tier 2 manual after each variant.
 
@@ -66,7 +73,9 @@ Per-trial cost numbers in the table come from the test guild's
 
 - **Writ:** `w-mopuwdsp`
 - **Posted:** 2026-05-03 14:18 UTC
-- **Status:** queued — spider blocked on a synchronous-scenario-engine bug Sean is resolving async.
+- **Picked up:** 2026-05-03 15:13 UTC after Sean restarted the daemon (post spider sync-bug fix).
+- **Lab guild:** `x022-rig-moj12h4o-baseline-a987a557` (daemon pid 114861, alive).
+- **Implementer session:** `ses-mopwus5w` started 15:13:44 UTC.
 
 #### First post (cancelled, host-restart event)
 
