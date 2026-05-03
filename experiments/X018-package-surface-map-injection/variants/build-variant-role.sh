@@ -26,6 +26,13 @@
 #                     re-export records, flat per-kind lines, strips
 #                     src/ and .ts predictable prefixes. ~66% smaller
 #                     than json. Used by X018 variant trial 2.
+#   yaml            — paste a YAML rendering of the original surface-map
+#                     schema (no shrinkage; same fields and structure as
+#                     the JSON form). For the YAML format pass the
+#                     `--map` artifact already converted to YAML (e.g. via
+#                     `yq -P -o yaml`). Used by X018 variant trial 3 to
+#                     test whether YAML's whitespace structure is more
+#                     LLM-readable than compact JSON.
 
 set -euo pipefail
 
@@ -54,8 +61,8 @@ done
 }
 [[ -f "$role" ]] || { echo "role not found: $role" >&2; exit 2; }
 [[ -f "$map"  ]] || { echo "map not found: $map"   >&2; exit 2; }
-[[ "$format" == "json" || "$format" == "tight" ]] || {
-  echo "format must be 'json' or 'tight' (got: $format)" >&2
+[[ "$format" == "json" || "$format" == "tight" || "$format" == "yaml" ]] || {
+  echo "format must be 'json', 'tight', or 'yaml' (got: $format)" >&2
   exit 2
 }
 
@@ -67,7 +74,7 @@ if [[ "$format" == "json" ]]; then
   # Compact the JSON for token efficiency (one-line representation).
   jq -c . "$map" > "$content"
 else
-  # Tight format is already paste-ready; pass through.
+  # Tight or YAML formats are already paste-ready; pass through.
   cp "$map" "$content"
 fi
 
@@ -118,6 +125,43 @@ INJECT_HEADER
 ```
 
 INJECT_FOOTER
+  elif [[ "$format" == "yaml" ]]; then
+    cat <<'INJECT_HEADER_YAML'
+## Orientation: Package Surface Map
+
+Below is a **precomputed package surface map** for this codex — every
+package, every source file, and every exported symbol with its kind
+(function, class, interface, type, const, etc.). It captures the
+information you would otherwise gather by `ls`-walking the package
+tree, opening `index.ts` / `types.ts` to learn what they export, and
+running existence-check Greps for symbol names.
+
+**Use the surface map FIRST for orientation.** Before reaching for
+`Bash ls`, `Glob`, `Grep` for a name, or `Read` on `index.ts` /
+`types.ts` to learn what a package exports — consult the map. The
+map lists every package, every file, and every exported symbol
+name + kind in this codex.
+
+**The map is not a substitute for reading code.** It carries
+**no signatures, no JSDoc, no implementation detail**. When you need
+the actual signature of a function, the body of an interface, the
+shape of a type, or any semantic detail beyond name and kind — read
+the file. The map is for orientation; reads are for comprehension.
+
+**The map is generated against this exact codex SHA.** It is
+authoritative for what exists. If your reading reveals a divergence
+between the map and the actual code, treat that as a bug and surface
+it — but otherwise, trust the map.
+
+```yaml
+INJECT_HEADER_YAML
+
+    cat "$content"
+
+    cat <<'INJECT_FOOTER_YAML'
+```
+
+INJECT_FOOTER_YAML
   else
     cat <<'INJECT_HEADER_TIGHT'
 ## Orientation: Package Surface Map
