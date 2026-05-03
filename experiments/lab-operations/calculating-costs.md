@@ -219,23 +219,25 @@ A-side comparison tables.
 
 ## How to read the cost field in `nsg rig show`
 
-The current display for an aggregated rig looks like:
+The aggregated rig display covers all four token classes — new
+input, output, cache-read, and cache-write — alongside the
+dollar figure. On a Claude Code session, **cache reads typically
+dominate token volume by 100–1000×** over new input, so the
+cache-read figure is the one to look at when reasoning about why
+a session cost what it cost.
 
-```
-cost: $47.2626 (402 input, 253893 output)
-```
+The per-engine breakdown follows the same shape: every engine
+that has launched at least one session contributes its own
+totals, summed across all of that engine's attempts (so a
+retried engine's cost reflects the SUM of attempts, not just the
+final attempt). Engines that ran inline as clockwork engines
+without launching a session do not appear in the cost breakdown.
 
-This is misleading, and the framework knows it
-(see clicks `c-mopzz9p7` and `c-mopzzalm` for the pending
-fixes). The "402 input, 253893 output" line excludes
-**cache-read and cache-write tokens entirely**, which on a
-Claude Code session typically dominate token volume by 100–1000×.
-That implementer session actually pushed ~41 million tokens
-through the model, almost all served from cache.
-
-Until the projection is fixed, treat the input/output line as
-"new (uncached) tokens only" and don't try to reconcile it
-against the dollar figure.
+When a session is still running or did not deliver a `result`
+message (rate-limit, timeout, kill), its cost contribution is
+zero and its token figures are absent — the projection
+faithfully reflects what the SessionDoc carries, including
+"nothing yet."
 
 ---
 
@@ -256,10 +258,6 @@ Before publishing a cost number in an experiment runlog, ask:
 
 ## References
 
-- [`packages/plugins/claude-code/src/index.ts`](../../../nexus/packages/plugins/claude-code/src/index.ts) — `parseStreamJsonMessage`, lines 277–292
-- [`packages/plugins/animator/src/animator.ts`](../../../nexus/packages/plugins/animator/src/animator.ts) — `getSessionCosts`, line 472
-- [`packages/plugins/spider/src/rig-view.ts`](../../../nexus/packages/plugins/spider/src/rig-view.ts) — `enrichRigView`, the rig-level aggregator
-- Click `c-mopzz9p7` — fix the SessionCost projection to expose
-  cache tokens
-- Click `c-mopzzalm` — fix `enrichRigView` to sum across all
-  engine attempts (not just the last)
+- [`packages/plugins/claude-code/src/index.ts`](../../../nexus/packages/plugins/claude-code/src/index.ts) — `parseStreamJsonMessage` (where `total_cost_usd` is captured)
+- [`packages/plugins/animator/src/animator.ts`](../../../nexus/packages/plugins/animator/src/animator.ts) — `getSessionCosts` (the cost projection)
+- [`packages/plugins/spider/src/rig-view.ts`](../../../nexus/packages/plugins/spider/src/rig-view.ts) — `enrichRigView` (the rig-level aggregator)
