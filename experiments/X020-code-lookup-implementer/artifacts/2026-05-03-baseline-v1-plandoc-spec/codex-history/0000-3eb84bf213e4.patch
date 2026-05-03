@@ -1,0 +1,361 @@
+
+
+diff --git a/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.test.ts b/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.test.ts
+index 51a4b73..df2bb8f 100644
+--- a/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.test.ts
++++ b/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.test.ts
+@@ -410,6 +410,54 @@ describe('clockworks-stacks-signals — CDC auto-wiring (book.* events)', () =>
+     assert.equal(rows[0].name, 'book.clockworks.event_dispatches.created');
+     assert.equal(rows[0].emitter, 'framework');
+   });
++
++  it('emits exactly one book.<owner>.<book>.book-dropped on a dropBook()', async () => {
++    const fix = await buildFixture({
++      syntheticBooks: [
++        { pluginId: 'test-plugin', bookName: 'myBook' },
++      ],
++    });
++
++    await fix.stacks.dropBook('test-plugin', 'myBook');
++
++    const rows = await fix.eventsAfter();
++    assert.equal(rows.length, 1, 'exactly one event row landed');
++    const evt = rows[0];
++    assert.equal(evt.name, 'book.test-plugin.myBook.book-dropped');
++    assert.equal(evt.emitter, 'framework');
++
++    const payload = evt.payload as { type: string; ownerId: string; book: string };
++    assert.equal(payload.type, 'delete-book');
++    assert.equal(payload.ownerId, 'test-plugin');
++    assert.equal(payload.book, 'myBook');
++    assert.equal(
++      (payload as Record<string, unknown>).entry,
++      undefined,
++      'BookDeleteEvent carries no entry payload',
++    );
++  });
++
++  it('dropBook() on the carve-out clockworks/events book emits no echo', async () => {
++    const fix = await buildFixture();
++
++    // The carve-out applies uniformly to every verb (D16): retiring the
++    // events book does not auto-emit a `book.clockworks.events.book-dropped`
++    // row. (We do not actually drop the book in production — this test
++    // proves the carve-out predicate is consistent.)
++    await fix.stacks.dropBook('clockworks', 'events');
++
++    // The events book has been dropped — re-create it so subsequent
++    // reads do not blow up. (`ensureBook` is idempotent and lazy
++    // re-creation in MemoryBackend covers fresh access.)
++    // Read from the fresh table (empty) and assert no echo emission.
++    const emitted = await fix.stacks
++      .readBook<EventDoc>('clockworks', 'events')
++      .find({});
++    const echoes = emitted.filter((r) =>
++      r.name.startsWith('book.clockworks.events.'),
++    );
++    assert.equal(echoes.length, 0, 'no book.clockworks.events.* echo row');
++  });
+ });
+ 
+ // ── Recursion guard for clockworks/events ─────────────────────────────
+diff --git a/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.ts b/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.ts
+index 59f2f78..eee98c1 100644
+--- a/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.ts
++++ b/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.ts
+@@ -98,14 +98,23 @@ import type {
+ // ── CDC verb mapping ─────────────────────────────────────────────────
+ //
+ // Stacks' CDC event tags are present-tense imperatives
+-// (`'create' | 'update' | 'delete'`). The auto-wired event names use
+-// past tense — `created`, `updated`, `deleted` — to read naturally as
+-// a log line and match the past-tense convention used elsewhere in the
+-// guild's event namespace.
+-const CDC_VERB_PAST_TENSE: Record<'create' | 'update' | 'delete', string> = {
++// (`'create' | 'update' | 'delete' | 'delete-book'`). The auto-wired
++// event names use past tense — `created`, `updated`, `deleted`,
++// `book-dropped` — to read naturally as a log line and match the
++// past-tense convention used elsewhere in the guild's event namespace.
++//
++// `book-dropped` is preferred over a bare `dropped` so the verb is
++// unambiguous against the existing row-level `deleted` verb in log
++// lines (D10 in the dropBook commission spec): a reader can tell at a
++// glance that an entire book was retired rather than a single row.
++const CDC_VERB_PAST_TENSE: Record<
++  'create' | 'update' | 'delete' | 'delete-book',
++  string
++> = {
+   create: 'created',
+   update: 'updated',
+   delete: 'deleted',
++  'delete-book': 'book-dropped',
+ };
+ 
+ // ── Carve-out predicate ──────────────────────────────────────────────
+diff --git a/packages/plugins/clockworks/src/writ-lifecycle-observer.ts b/packages/plugins/clockworks/src/writ-lifecycle-observer.ts
+index 813434b..4fbd623 100644
+--- a/packages/plugins/clockworks/src/writ-lifecycle-observer.ts
++++ b/packages/plugins/clockworks/src/writ-lifecycle-observer.ts
+@@ -110,7 +110,11 @@ export async function handleWritLifecycle(
+   deps: WritLifecycleObserverDeps,
+   event: ChangeEvent<WritDoc>,
+ ): Promise<void> {
+-  if (event.type === 'delete') return;
++  // Lifecycle events fire only for row-level create/update on the writs
++  // book; row deletes and whole-book retirement (`delete-book`, the
++  // BookDeleteEvent variant introduced by the dropBook commission) carry
++  // no `entry` to project a phase from.
++  if (event.type === 'delete' || event.type === 'delete-book') return;
+ 
+   const writ = event.entry;
+ 
+diff --git a/packages/plugins/lattice/src/lattice.ts b/packages/plugins/lattice/src/lattice.ts
+index d12e154..d0a1a67 100644
+--- a/packages/plugins/lattice/src/lattice.ts
++++ b/packages/plugins/lattice/src/lattice.ts
+@@ -365,7 +365,11 @@ export function createLattice(): Plugin {
+           'lattice',
+           'pulses',
+           async (event) => {
+-            if (event.type === 'delete') return;
++            // Row-level row removal and whole-book retirement carry no
++            // pulse to redispatch — drop the event before reading
++            // `entry`. (`delete-book` is the BookDeleteEvent variant
++            // added by the dropBook commission.)
++            if (event.type === 'delete' || event.type === 'delete-book') return;
+             const pulse = event.entry;
+             if (pulse.deliveryState !== 'pending') return;
+             if (event.type === 'update' && event.prev.deliveryState === 'pending') {
+diff --git a/packages/plugins/stacks/src/backend.ts b/packages/plugins/stacks/src/backend.ts
+index 56769fd..675ba19 100644
+--- a/packages/plugins/stacks/src/backend.ts
++++ b/packages/plugins/stacks/src/backend.ts
+@@ -78,5 +78,16 @@ export interface StacksBackend {
+   open(options: BackendOptions): void;
+   close(): void;
+   ensureBook(ref: BookRef, schema: BookSchema): void;
++
++  /**
++   * Drop a book in its entirety. Silent no-op when the book does not
++   * exist (mirrors `Book.delete(id)` precedent and SQLite's
++   * `DROP TABLE IF EXISTS` semantics — the absent state is the desired
++   * post-state). SQLite-style implementations let any indexes drop
++   * transitively with the table; explicit `DROP INDEX` statements are
++   * not required.
++   */
++  dropBook(ref: BookRef): Promise<void>;
++
+   beginTransaction(): BackendTransaction;
+ }
+diff --git a/packages/plugins/stacks/src/conformance/tier2-cdc.ts b/packages/plugins/stacks/src/conformance/tier2-cdc.ts
+index 3ca76d7..6263f04 100644
+--- a/packages/plugins/stacks/src/conformance/tier2-cdc.ts
++++ b/packages/plugins/stacks/src/conformance/tier2-cdc.ts
+@@ -269,6 +269,9 @@ export function tier2Cdc(backendFactory: () => StacksBackend): void {
+ 
+       t.stacks.watch(OWNER, bookNameA, async (event) => {
+         const booksB = t.stacks.book<BookEntry>(OWNER, bookNameB);
++        // `delete-book` is unreachable in this test (no dropBook call),
++        // but the union now requires exhaustive narrowing.
++        if (event.type === 'delete-book') return;
+         const sourceId = event.type === 'create' || event.type === 'update'
+           ? event.entry.id : event.id;
+         await booksB.put({ id: 'derived', source: sourceId });
+@@ -368,10 +371,12 @@ export function tier2Cdc(backendFactory: () => StacksBackend): void {
+       seedDocument(t.backend, REF, { id: 'a', counter: 0 });
+ 
+       t.stacks.watch(OWNER, BOOK, async (event) => {
+-        if (event.type !== 'delete') {
+-          const book = t.stacks.book<BookEntry>(OWNER, BOOK);
+-          await book.put({ ...event.entry, counter: ((event.entry as any).counter ?? 0) + 1 });
+-        }
++        // Only re-trigger on row-level create/update — the union now
++        // includes `delete-book` (book retirement) which is unreachable
++        // here but must be excluded for exhaustive narrowing.
++        if (event.type === 'delete' || event.type === 'delete-book') return;
++        const book = t.stacks.book<BookEntry>(OWNER, BOOK);
++        await book.put({ ...event.entry, counter: ((event.entry as any).counter ?? 0) + 1 });
+       }, { failOnError: true });
+ 
+       const book = t.stacks.book<BookEntry>(OWNER, BOOK);
+@@ -401,13 +406,14 @@ export function tier2Cdc(backendFactory: () => StacksBackend): void {
+       seedDocument(t.backend, REF, { id: 'a', counter: 0 });
+ 
+       t.stacks.watch(OWNER, BOOK, async (event) => {
+-        if (event.type !== 'delete') {
+-          const book = t.stacks.book<BookEntry>(OWNER, BOOK);
+-          await book.put({
+-            ...event.entry,
+-            counter: ((event.entry as any).counter ?? 0) + 1,
+-          });
+-        }
++        // Only re-trigger on row-level create/update — exhaustive
++        // narrowing keeps the union extension honest.
++        if (event.type === 'delete' || event.type === 'delete-book') return;
++        const book = t.stacks.book<BookEntry>(OWNER, BOOK);
++        await book.put({
++          ...event.entry,
++          counter: ((event.entry as any).counter ?? 0) + 1,
++        });
+       }, { failOnError: false });
+ 
+       const book = t.stacks.book<BookEntry>(OWNER, BOOK);
+diff --git a/packages/plugins/stacks/src/index.ts b/packages/plugins/stacks/src/index.ts
+index 0176fed..3d0c5a4 100644
+--- a/packages/plugins/stacks/src/index.ts
++++ b/packages/plugins/stacks/src/index.ts
+@@ -38,6 +38,7 @@ export type {
+   CreateEvent,
+   UpdateEvent,
+   DeleteEvent,
++  BookDeleteEvent,
+   ChangeHandler,
+   WatchOptions,
+ 
+diff --git a/packages/plugins/stacks/src/memory-backend.ts b/packages/plugins/stacks/src/memory-backend.ts
+index 27a3736..670c52f 100644
+--- a/packages/plugins/stacks/src/memory-backend.ts
++++ b/packages/plugins/stacks/src/memory-backend.ts
+@@ -239,6 +239,14 @@ export class MemoryBackend implements StacksBackend {
+     getBook(this.store, ref);
+   }
+ 
++  async dropBook(ref: BookRef): Promise<void> {
++    // Mirror SQLite's "table is gone" semantics by dropping the outer-map
++    // entry (D8). Lazy re-creation in `getBook` already covers any
++    // post-drop access (e.g. a subsequent `ensureBook` followed by a put).
++    // Silent no-op when the entry is absent (D2).
++    this.store.delete(refKey(ref));
++  }
++
+   beginTransaction(): BackendTransaction {
+     return new MemoryTransaction(this.store);
+   }
+diff --git a/packages/plugins/stacks/src/sqlite-backend.ts b/packages/plugins/stacks/src/sqlite-backend.ts
+index e7bc2f7..5dd24b0 100644
+--- a/packages/plugins/stacks/src/sqlite-backend.ts
++++ b/packages/plugins/stacks/src/sqlite-backend.ts
+@@ -335,6 +335,15 @@ export class SqliteBackend implements StacksBackend {
+     }
+   }
+ 
++  async dropBook(ref: BookRef): Promise<void> {
++    const db = this.requireDb();
++    const table = tableName(ref);
++    // `DROP TABLE IF EXISTS` is the silent-on-no-op posture (D2). SQLite
++    // cascades any indexes attached to the table, so explicit DROP INDEX
++    // statements are unearned structure (D7).
++    db.exec(`DROP TABLE IF EXISTS "${table}"`);
++  }
++
+   beginTransaction(): BackendTransaction {
+     return new SqliteTransaction(this.requireDb());
+   }
+diff --git a/packages/plugins/stacks/src/stacks-core.ts b/packages/plugins/stacks/src/stacks-core.ts
+index 593b6ba..185089d 100644
+--- a/packages/plugins/stacks/src/stacks-core.ts
++++ b/packages/plugins/stacks/src/stacks-core.ts
+@@ -183,6 +183,10 @@ export class StacksCore {
+       async transaction<R>(fn: (tx: TransactionContext) => Promise<R>): Promise<R> {
+         return self.runTransaction(fn);
+       },
++
++      async dropBook(ownerId: string, bookName: string): Promise<void> {
++        return self.dropBook(ownerId, bookName);
++      },
+     };
+   }
+ 
+@@ -520,6 +524,40 @@ export class StacksCore {
+     }
+   }
+ 
++  // ── Book retirement ───────────────────────────────────────────────
++
++  /**
++   * Retire a book in its entirety. Refuses to participate in an active
++   * transaction (D6) — DDL-in-DML is disallowed. On success fires a
++   * single Phase 2 `delete-book` CDC event with the minimal payload
++   * (D3, D5, D9). Idempotent on a missing book — the backend's
++   * silent-on-no-op posture (D2) carries through. Watchers registered
++   * for the dropped book remain dormant in the registry; this preserves
++   * the post-`phase:started` registry-immutability invariant (D14).
++   */
++  async dropBook(ownerId: string, bookName: string): Promise<void> {
++    if (this.activeTx) {
++      // DDL-in-DML refusal (D6). The substrate refuses the mix rather
++      // than rationalizing it — `dropBook` is a top-level imperative
++      // surface, not part of `TransactionContext`.
++      throw new Error(
++        `[stacks] dropBook("${ownerId}", "${bookName}") refused: ` +
++        `cannot drop a book inside an active transaction. ` +
++        `dropBook is a top-level imperative — call it outside transaction(...).`,
++      );
++    }
++
++    const ref: BookRef = { ownerId, book: bookName };
++    await this.backend.dropBook(ref);
++
++    // Phase 2 (post-commit notification) — book retirement is irreversible
++    // from the caller's perspective; rolling back via Phase 1 handlers
++    // would create a confusing "drop sometimes" contract (D5).
++    await this.cdc.firePhase2([
++      { type: 'delete-book', ownerId, book: bookName },
++    ]);
++  }
++
+   private requireTx(): ActiveTransaction {
+     if (!this.activeTx) {
+       throw new Error('[stacks] Write operation outside transaction — this is a bug');
+diff --git a/packages/plugins/stacks/src/types.ts b/packages/plugins/stacks/src/types.ts
+index fa5e58e..08bdd30 100644
+--- a/packages/plugins/stacks/src/types.ts
++++ b/packages/plugins/stacks/src/types.ts
+@@ -130,10 +130,27 @@ export interface DeleteEvent<T extends BookEntry> {
+   prev: T;
+ }
+ 
++/**
++ * Emitted when a book is retired in its entirety via `StacksApi.dropBook`.
++ *
++ * Delivered through the same `watch()` registration as the row-level
++ * variants. Phase 2 only — book retirement is post-commit notification,
++ * not in-transaction (see specification §6 / D5). Carries only the
++ * identifying tuple: a populated book may have any number of rows, and
++ * inflating per-row state into the event would explode cardinality and
++ * conflict with the substrate's coalescing model (D9).
++ */
++export interface BookDeleteEvent {
++  type: 'delete-book';
++  ownerId: string;
++  book: string;
++}
++
+ export type ChangeEvent<T extends BookEntry> =
+   | CreateEvent<T>
+   | UpdateEvent<T>
+-  | DeleteEvent<T>;
++  | DeleteEvent<T>
++  | BookDeleteEvent;
+ 
+ export type ChangeHandler<T extends BookEntry = BookEntry> = (
+   event: ChangeEvent<T>,
+@@ -173,4 +190,18 @@ export interface StacksApi {
+   ): void;
+ 
+   transaction<R>(fn: (tx: TransactionContext) => Promise<R>): Promise<R>;
++
++  /**
++   * Retire a book in its entirety — drop the underlying storage and
++   * fire a single Phase 2 `delete-book` CDC event. Idempotent on a
++   * missing book (silent no-op). Refuses to participate in an active
++   * `transaction(...)` — DDL-in-DML is disallowed; throws if invoked
++   * while a transaction is open in the caller's async context.
++   *
++   * Registered watchers for the dropped book remain dormant in the
++   * registry — the registry's post-`phase:started` immutability
++   * invariant is preserved. No row-level delete events are fired,
++   * regardless of book population.
++   */
++  dropBook(ownerId: string, bookName: string): Promise<void>;
+ }

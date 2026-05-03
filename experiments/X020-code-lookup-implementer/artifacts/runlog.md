@@ -18,8 +18,8 @@ land + a quick review before posting the next.
 | # | manifest | purpose | trial writ | rig | status | impl cost | impl duration | adoption % | notes |
 |---|---|---|---|---|---|---|---|---|---|
 | 0 | `baseline-dropbook.yaml` (v0, raw-brief) | apparatus check | `w-mopib9cd` | `rig-mopuhati` | superseded | $10.94 | 23.1 min | n/a | scoped narrowly — missed cartograph + tier4 + arch docs; brief was raw `writ.body`, not plandoc spec |
-| 1 | `baseline-dropbook.yaml` (v1, plandoc spec) | calibration | `w-mopwwox1` | — | open, queued | — | — | n/a | gate: lab cost within ±15% of $16.15 reference |
-| 2 | `baseline-dropbook.yaml` (v1) | A/B baseline arm | — | — | — | — | — | n/a | re-run of row 1 to anchor the A/B comparator |
+| 1 | `baseline-dropbook.yaml` (v1, plandoc spec) | calibration | `w-mopwwox1` | `rig-mopwx2gd` | **completed** | **$15.95** | **27.6 min** | n/a | calibration **PASSED** — −1.2% vs $16.15 reference; full scope coverage incl. cartograph + tier4 + arch docs |
+| 2 | `baseline-dropbook.yaml` (v1) | A/B baseline arm | `w-mopyh1hm` | — | open, queued | — | — | n/a | re-run of row 1 to anchor the A/B comparator |
 | 3 | `with-tool-dropbook.yaml` | A/B variant — **H1 measurement** | — | — | — | — | — | — | gate: ≥25% reduction vs row 2 |
 
 **Reference data (from production, for orientation):**
@@ -112,25 +112,52 @@ mechanism question.
   a side measurement on the elaborated-spec → raw-brief shift,
   adjacent to X016's territory.
 
-### Trial 1 — calibration on plandoc-spec brief
+### Trial 1 — calibration on plandoc-spec brief (PASSED)
 
 - **Writ:** `w-mopwwox1-618d422946da`
+- **Rig:** `rig-mopwx2gd`
 - **Posted:** 2026-05-03T15:15 UTC, after Sean restarted the
-  daemon. Manifest passed pre-flight validation cleanly (last
-  posts pre-restart hit the stale `sourcePath must be absolute`
-  check; restart resolved it but the manifest still uses
-  absolute paths as a stable shape).
-- **Status:** open, queued behind X022 (`w-mopuwdsp`).
-  Per-experiment serial discipline: only one X020 trial in flight
-  at a time. X022 is Sean's, not gating this experiment.
-- **Plan:** when picked up, run `baseline-dropbook.yaml` against
-  the new plandoc-spec brief. Expected to land much closer to the
-  $16.15 reference now that the implementer has the same
-  elaborated spec the real session had. Calibration gate: ±15%
-  of $16.15 ($13.73–$18.57).
-- **If calibration passes** → post trial 2 (A/B baseline rerun)
-  and trial 3 (with-tool variant) sequentially.
-- **If calibration fails outside ±15%** → diagnose before A/B.
+  daemon. Manifest passed pre-flight validation cleanly.
+- **Sealed:** 2026-05-03T15:56 UTC. Three commits, fast-forward,
+  3 inscriptions. **41-min wall-clock** start-to-seal.
+- **Lab-guild cost:**
+
+  | session | role | engine | cost | duration | output tokens | cache reads |
+  |---|---|---|---|---|---|---|
+  | `ses-mopwx8jz` | artificer | implement | **$15.95** | **27.6 min** | 67,509 | 25.0 M |
+  | `ses-mopxwuxb` | reviewer | review | $3.25 | 12.8 min | 13,772 | 4.4 M |
+  | `ses-mopyddrr` | artificer | revise | $0.10 | <1 min | 319 | 16 K |
+  | **total** | | | **$19.31** | **40.5 min** | | |
+
+- **Calibration verdict:** **−1.2% vs $16.15 reference** —
+  comfortably within ±15% gate ($13.73–$18.57). Apparatus
+  fidelity confirmed.
+
+- **Diff coverage (vs real-world c25353ff):**
+
+  | | Real | v1 | v0 (raw-brief) |
+  |---|---|---|---|
+  | Files | 22 | 23 | 16 |
+  | Insertions / deletions | +770 / -35 | +714 / -36 | +710 / -12 |
+  | Substrate (`stacks-*`) | ✅ | ✅ | ✅ |
+  | Bridge (`clockworks-stacks-signals`) | ✅ | ✅ | ✅ |
+  | Cartograph integration | ✅ | ✅ | ❌ |
+  | Tier 4 conformance | ✅ | ✅ | ❌ |
+  | Architecture docs (3 files) | ✅ | ✅ | ❌ |
+
+  Three commits (substrate / conformance + cartograph / docs)
+  vs the real-world's single commit — stylistic, not scope —
+  driven by the implementer following t1–t8 task-manifest
+  groupings.
+
+- **Tier 1 quality:** ✅ build/test passed (sealed cleanly with
+  inscriptions=3, retries=0). Reviewer + revise cycle ran cleanly.
+
+- **Lesson confirmed:** the elaborated-spec → raw-brief shift is
+  a real cost lever (~32%) in this codex; the planning pipeline
+  contributes substantial scope-prescription value beyond what
+  the writ body carries. Recorded as a side measurement; not
+  X020's H1 question.
 
 ## Cumulative spend
 
@@ -141,8 +168,8 @@ LLM-backed sessions itself.
 
 | | trials | impl + review + revise + seal billed | total |
 |---|---|---|---|
-| Estimated (per trial) | — | $10–$20 | — |
-| Actual to date | 1 (superseded) | $12.10 | $12.10 |
+| Estimated (per trial) | — | $15–$25 | — |
+| Actual to date | 1 superseded + 1 calibrated | $12.10 + $19.31 | $31.41 |
 
 ## Open questions / decisions to revisit
 

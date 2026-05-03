@@ -1,0 +1,364 @@
+
+
+diff --git a/packages/plugins/cartograph/src/cartograph.test.ts b/packages/plugins/cartograph/src/cartograph.test.ts
+index 67009a1..366a0e1 100644
+--- a/packages/plugins/cartograph/src/cartograph.test.ts
++++ b/packages/plugins/cartograph/src/cartograph.test.ts
+@@ -1006,4 +1006,136 @@ describe('Cartograph apparatus', () => {
+       );
+     });
+   });
++
++  // ── Retro-cleanup of retired companion books ─────────────────────
++  //
++  // A previous commission removed the cartograph/visions, charges, and
++  // pieces companion books in favor of `writ.ext['cartograph']`. On
++  // existing on-disk databases the underlying tables persisted as
++  // dead-but-not-dropped storage. cartograph.start() now issues
++  // stacks.dropBook(...) for each retired book before any writ-type
++  // registration. These tests assert the retro-cleanup is wired
++  // correctly — sequenced, idempotent, fires the substrate's
++  // delete-book CDC event, and runs before the writ-types appear.
++
++  describe('retro-cleanup of retired companion books', () => {
++    it('drops cartograph/visions, charges, and pieces during start()', async () => {
++      // Stand up stacks + clerk by hand so we can install a CDC watcher
++      // on the dropBook events BEFORE cartograph.start() runs.
++      const memBackend = new MemoryBackend();
++      const stacksPlugin = createStacksApparatus(memBackend);
++      const clerkPlugin = createClerk();
++      const cartographPlugin = createCartograph();
++
++      const apparatusMap = new Map<string, unknown>();
++
++      const fakeGuildConfig: GuildConfig = {
++        name: 'cartograph-retro-cleanup-guild',
++        nexus: '0.0.0',
++        plugins: [],
++      };
++      const fakeGuild: Guild = {
++        home: '/tmp/cartograph-retro-cleanup-guild',
++        apparatus<T>(name: string): T {
++          const a = apparatusMap.get(name);
++          if (!a) throw new Error(`Apparatus "${name}" not installed`);
++          return a as T;
++        },
++        tryApparatus<T>(name: string): T | null {
++          try { return this.apparatus<T>(name); } catch { return null; }
++        },
++        config<T>(_pluginId: string): T { return {} as T; },
++        writeConfig(): void {},
++        guildConfig(): GuildConfig { return fakeGuildConfig; },
++        kits(): LoadedKit[] { return []; },
++        apparatuses(): LoadedApparatus[] { return []; },
++        failedPlugins() { return []; },
++        startupWarnings(): string[] { return []; },
++      };
++      setGuild(fakeGuild);
++
++      stacksPlugin.apparatus.start!(buildCtx());
++      const stacks = stacksPlugin.apparatus.provides as StacksApi;
++      apparatusMap.set('stacks', stacks);
++
++      memBackend.ensureBook({ ownerId: 'clerk', book: 'writs' }, {
++        indexes: ['phase', 'type', 'createdAt', 'parentId'],
++      });
++      memBackend.ensureBook({ ownerId: 'clerk', book: 'links' }, {});
++
++      await clerkPlugin.apparatus.start!(buildCtx());
++      const clerk = clerkPlugin.apparatus.provides as ClerkApi;
++      apparatusMap.set('clerk', clerk);
++
++      // Pre-seed the three retired companion books with content. On a
++      // real on-disk database these are the dead-but-not-dropped tables;
++      // here we synthesize the same starting condition.
++      memBackend.ensureBook({ ownerId: 'cartograph', book: 'visions' }, {});
++      memBackend.ensureBook({ ownerId: 'cartograph', book: 'charges' }, {});
++      memBackend.ensureBook({ ownerId: 'cartograph', book: 'pieces' }, {});
++      await stacks.book('cartograph', 'visions').put({ id: 'old-v1' });
++      await stacks.book('cartograph', 'charges').put({ id: 'old-c1' });
++      await stacks.book('cartograph', 'pieces').put({ id: 'old-p1' });
++
++      // Record the delete-book events so we can assert sequencing.
++      const dropEvents: { ownerId: string; book: string }[] = [];
++      for (const book of ['visions', 'charges', 'pieces']) {
++        stacks.watch('cartograph', book, (event) => {
++          if (event.type === 'delete-book') {
++            dropEvents.push({ ownerId: event.ownerId, book: event.book });
++          }
++        }, { failOnError: false });
++      }
++
++      // Now start cartograph — the three dropBook calls should fire.
++      await cartographPlugin.apparatus.start!(buildCtx());
++      const cartograph = cartographPlugin.apparatus.provides as CartographApi;
++      apparatusMap.set('cartograph', cartograph);
++
++      // (a) Each retired book received exactly one drop event.
++      assert.deepEqual(
++        dropEvents,
++        [
++          { ownerId: 'cartograph', book: 'visions' },
++          { ownerId: 'cartograph', book: 'charges' },
++          { ownerId: 'cartograph', book: 'pieces' },
++        ],
++        'sequenced retro-cleanup: visions, then charges, then pieces',
++      );
++
++      // (b) Re-creating the books and reading them back yields empty —
++      // the seeded rows are gone.
++      memBackend.ensureBook({ ownerId: 'cartograph', book: 'visions' }, {});
++      memBackend.ensureBook({ ownerId: 'cartograph', book: 'charges' }, {});
++      memBackend.ensureBook({ ownerId: 'cartograph', book: 'pieces' }, {});
++      assert.deepEqual(await stacks.book('cartograph', 'visions').list(), []);
++      assert.deepEqual(await stacks.book('cartograph', 'charges').list(), []);
++      assert.deepEqual(await stacks.book('cartograph', 'pieces').list(), []);
++
++      // (c) Writ types are still registered after the cleanup — the
++      // cleanup hook precedes registerWritType but does not prevent it.
++      const types = clerk.listWritTypes().map((t) => t.name);
++      for (const name of ['vision', 'charge', 'piece']) {
++        assert.ok(types.includes(name), `${name} writ type registered after retro-cleanup`);
++      }
++    });
++
++    it('the dropBook calls are idempotent on subsequent boots (silent no-op)', async () => {
++      // Calling the substrate-level dropBook a second time on a
++      // missing book is exercised by Tier 4 conformance. The cartograph
++      // hook simply issues those calls; the idempotency property is
++      // inherited. Assert here that re-invoking the same dropBook
++      // sequence against the live guild does not throw.
++      const stacks = fix.stacks;
++      await stacks.dropBook('cartograph', 'visions');
++      await stacks.dropBook('cartograph', 'charges');
++      await stacks.dropBook('cartograph', 'pieces');
++      // No throw is the assertion. The writ-type registry is unaffected
++      // because dropBook does not touch the Clerk.
++      const types = fix.clerk.listWritTypes().map((t) => t.name);
++      for (const name of ['vision', 'charge', 'piece']) {
++        assert.ok(types.includes(name), `${name} writ type still registered after redundant dropBook`);
++      }
++    });
++  });
+ });
+diff --git a/packages/plugins/cartograph/src/cartograph.ts b/packages/plugins/cartograph/src/cartograph.ts
+index e0bf5b6..8807c57 100644
+--- a/packages/plugins/cartograph/src/cartograph.ts
++++ b/packages/plugins/cartograph/src/cartograph.ts
+@@ -789,11 +789,31 @@ export function createCartograph(): Plugin {
+ 
+       provides: api,
+ 
+-      start(_ctx: StartupContext): void {
++      async start(_ctx: StartupContext): Promise<void> {
+         const g = guild();
+         stacks = g.apparatus<StacksApi>('stacks');
+         clerk = g.apparatus<ClerkApi>('clerk');
+ 
++        // ── Retro-cleanup of retired companion books ────────────────
++        //
++        // A previous commission removed the `cartograph/visions`,
++        // `cartograph/charges`, and `cartograph/pieces` companion books
++        // in favor of the `writ.ext['cartograph']` sub-slot. Stacks'
++        // startup-time schema reconciliation is additive — kit
++        // contributions cannot remove a book — so on every existing
++        // on-disk database those three SQLite tables persist as
++        // dead-but-not-dropped storage. The dropBook commission added
++        // the explicit imperative retirement primitive; here we apply
++        // it to clean up the residue.
++        //
++        // Sequenced (D15) so the CDC event ordering is deterministic;
++        // each call is idempotent (D2), so subsequent boots are
++        // no-ops. This block precedes `clerk.registerWritType` per
++        // D11/D15 — "erase the dead, then declare the live."
++        await stacks.dropBook(CARTOGRAPH_PLUGIN_ID, 'visions');
++        await stacks.dropBook(CARTOGRAPH_PLUGIN_ID, 'charges');
++        await stacks.dropBook(CARTOGRAPH_PLUGIN_ID, 'pieces');
++
+         // Register the three writ types. Cartograph's `requires: ['stacks',
+         // 'clerk']` declaration ensures Clerk has already started; the
+         // registration window stays open until the framework's
+diff --git a/packages/plugins/stacks/src/conformance/tier1-data-integrity.ts b/packages/plugins/stacks/src/conformance/tier1-data-integrity.ts
+index 73cb86e..65e5725 100644
+--- a/packages/plugins/stacks/src/conformance/tier1-data-integrity.ts
++++ b/packages/plugins/stacks/src/conformance/tier1-data-integrity.ts
+@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
+ 
+ import type { StacksBackend } from '../backend.ts';
+ import type { BookEntry } from '../types.ts';
+-import { createTestStacks, OWNER, BOOK, type TestStacks } from './helpers.ts';
++import { createTestStacks, OWNER, BOOK, REF, type TestStacks } from './helpers.ts';
+ 
+ export function tier1DataIntegrity(backendFactory: () => StacksBackend): void {
+   describe('Tier 1 — Data Integrity', () => {
+@@ -109,5 +109,29 @@ export function tier1DataIntegrity(backendFactory: () => StacksBackend): void {
+       assert.deepStrictEqual(resultA, { id: 'a', name: 'Bob' });
+       assert.strictEqual(resultB, null);
+     });
++
++    it('1.12 dropBook on a populated book removes its documents', async () => {
++      // Populate the book, drop it, then re-create the book and assert
++      // it is empty. Backends differ on what raw post-drop reads do
++      // (MemoryBackend lazy-creates; SqliteBackend's table is missing
++      // and SELECT throws), so the cross-backend invariant we observe
++      // is "the documents do not survive the drop". Re-creating via
++      // ensureBook is the canonical post-drop access path (mirrors
++      // Tier 4's "ensureBook after dropBook re-creates fresh").
++      const book = t.stacks.book<BookEntry>(OWNER, BOOK);
++      await book.put({ id: 'a', name: 'Alice' });
++      await book.put({ id: 'b', name: 'Bob' });
++      assert.strictEqual(await book.count(), 2);
++
++      await t.stacks.dropBook(OWNER, BOOK);
++
++      // Re-create the book under the same ref. The previous documents
++      // must not reappear — they are gone with the storage.
++      t.backend.ensureBook(REF, {});
++      const reborn = t.stacks.book<BookEntry>(OWNER, BOOK);
++      assert.deepStrictEqual(await reborn.list(), []);
++      assert.strictEqual(await reborn.get('a'), null);
++      assert.strictEqual(await reborn.get('b'), null);
++    });
+   });
+ }
+diff --git a/packages/plugins/stacks/src/conformance/tier2-cdc.ts b/packages/plugins/stacks/src/conformance/tier2-cdc.ts
+index 6263f04..954c70c 100644
+--- a/packages/plugins/stacks/src/conformance/tier2-cdc.ts
++++ b/packages/plugins/stacks/src/conformance/tier2-cdc.ts
+@@ -599,5 +599,49 @@ export function tier2Cdc(backendFactory: () => StacksBackend): void {
+       assert.strictEqual(events.length, 1);
+       assertDeleteEvent(events[0], { id: 'a', prev: { id: 'a', name: 'Alice' } });
+     });
++
++    // ── dropBook CDC events ─────────────────────────────────────────
++
++    it('2.30 dropBook fires exactly one delete-book event with the minimal payload', async () => {
++      // Seed the book so the assertion is non-trivial — the substrate
++      // collapses any number of rows into a single book-level event
++      // (D3) regardless of population.
++      seedDocument(t.backend, REF, { id: 'a', name: 'Alice' });
++      seedDocument(t.backend, REF, { id: 'b', name: 'Bob' });
++
++      const events = collectEvents(t.stacks, OWNER, BOOK, { failOnError: false });
++
++      await t.stacks.dropBook(OWNER, BOOK);
++
++      assert.strictEqual(events.length, 1, 'exactly one event fires');
++      const evt = events[0];
++      assert.strictEqual(evt.type, 'delete-book');
++      assert.strictEqual(evt.ownerId, OWNER);
++      assert.strictEqual(evt.book, BOOK);
++
++      // No row-level fields: the event carries only the identifier
++      // tuple per D9.
++      const evtFields = evt as unknown as Record<string, unknown>;
++      assert.strictEqual(evtFields.entry, undefined);
++      assert.strictEqual(evtFields.prev, undefined);
++      assert.strictEqual(evtFields.id, undefined);
++    });
++
++    it('2.31 dropBook on a populated book emits no per-row delete events', async () => {
++      // Populate the book and drop it. The brief is explicit (D3): a
++      // book-drop fires the single book-level event, never per-row
++      // deletes for the population it carried.
++      seedDocument(t.backend, REF, { id: 'a', name: 'Alice' });
++      seedDocument(t.backend, REF, { id: 'b', name: 'Bob' });
++      seedDocument(t.backend, REF, { id: 'c', name: 'Carol' });
++
++      const events = collectEvents(t.stacks, OWNER, BOOK, { failOnError: false });
++
++      await t.stacks.dropBook(OWNER, BOOK);
++
++      const rowDeletes = events.filter((e) => e.type === 'delete');
++      assert.strictEqual(rowDeletes.length, 0, 'no per-row delete events');
++      assert.strictEqual(events.filter((e) => e.type === 'delete-book').length, 1);
++    });
+   });
+ }
+diff --git a/packages/plugins/stacks/src/conformance/tier4-edge-cases.ts b/packages/plugins/stacks/src/conformance/tier4-edge-cases.ts
+index 2e23019..d29cd3d 100644
+--- a/packages/plugins/stacks/src/conformance/tier4-edge-cases.ts
++++ b/packages/plugins/stacks/src/conformance/tier4-edge-cases.ts
+@@ -259,5 +259,82 @@ export function tier4EdgeCases(backendFactory: () => StacksBackend): void {
+         result2.map(d => d.id),
+       );
+     });
++
++    // ── dropBook edge cases ─────────────────────────────────────────
++
++    it('4.12 dropBook on a missing book is a silent no-op', async () => {
++      // D2: mirrors `Book.delete(id)` precedent and SQLite's
++      // `DROP TABLE IF EXISTS` semantics. The absent state is the
++      // desired post-state — repeated drops must not throw.
++      await t.stacks.dropBook(OWNER, 'never-existed');
++      // Drop the existing book, then drop it again — second drop is the
++      // missing-book case and must not throw.
++      await t.stacks.dropBook(OWNER, BOOK);
++      await t.stacks.dropBook(OWNER, BOOK);
++    });
++
++    it('4.13 ensureBook after dropBook re-creates a fresh empty book', async () => {
++      const book = t.stacks.book<BookEntry>(OWNER, BOOK);
++      await book.put({ id: 'a', name: 'Alice' });
++      await book.put({ id: 'b', name: 'Bob' });
++
++      await t.stacks.dropBook(OWNER, BOOK);
++
++      // Re-create with a new schema (different indexes to prove it is
++      // a fresh book, not a re-attached old one).
++      t.backend.ensureBook(REF, { indexes: ['name'] });
++
++      const reborn = t.stacks.book<BookEntry>(OWNER, BOOK);
++      assert.deepStrictEqual(await reborn.list(), []);
++      assert.strictEqual(await reborn.count(), 0);
++
++      // And it must accept fresh writes that succeed cleanly.
++      await reborn.put({ id: 'x', name: 'Xena' });
++      assert.deepStrictEqual(await reborn.get('x'), { id: 'x', name: 'Xena' });
++      assert.strictEqual(await reborn.get('a'), null);
++    });
++
++    it('4.14 dropBook inside an active transaction throws (D6)', async () => {
++      // DDL-in-DML refusal: dropBook is a top-level imperative and
++      // must NOT participate in `transaction(...)`. The substrate
++      // refuses the mix rather than rationalizing it.
++      await assert.rejects(
++        () =>
++          t.stacks.transaction(async () => {
++            await t.stacks.dropBook(OWNER, BOOK);
++          }),
++        /dropBook|transaction|active/i,
++      );
++
++      // The book must still exist and remain usable — the rejected
++      // drop did not partially execute against the backend.
++      const book = t.stacks.book<BookEntry>(OWNER, BOOK);
++      await book.put({ id: 'a', name: 'Alice' });
++      assert.deepStrictEqual(await book.get('a'), { id: 'a', name: 'Alice' });
++    });
++
++    it('4.15 dropBook succeeds when watchers are registered for the dropped book (D14)', async () => {
++      // A registered watcher does not block dropBook; the post-
++      // `phase:started` registry-immutability invariant means we leave
++      // the watcher entry dormant in the registry rather than
++      // unregistering it. The dormant entry is harmless: no future
++      // writes can reach the (dropped) book to fire it.
++      const rowEvents: string[] = [];
++      t.stacks.watch<BookEntry>(OWNER, BOOK, (event) => {
++        rowEvents.push(event.type);
++      }, { failOnError: false });
++
++      // Seed via the API so the watcher records the create — proves
++      // the watcher is live before the drop.
++      await t.stacks.book<BookEntry>(OWNER, BOOK).put({ id: 'a', name: 'Alice' });
++      assert.deepStrictEqual(rowEvents, ['create']);
++
++      // The drop must succeed with the watcher registered. The watcher
++      // also receives the book-level retirement event through its
++      // existing registration (D4).
++      await t.stacks.dropBook(OWNER, BOOK);
++
++      assert.deepStrictEqual(rowEvents, ['create', 'delete-book']);
++    });
+   });
+ }
