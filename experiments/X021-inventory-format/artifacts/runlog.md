@@ -13,15 +13,19 @@ Run order is sequential. Spider concurrency on the lab host
 serializes trials anyway, but we deliberately wait for each to
 land + a quick review before posting the next.
 
+**Note:** all trials wait for guild restart. Briefs and manifests
+were redesigned 2026-05-03 ~15:00 UTC after a brief-content flaw
+was found mid-trial-1. See trial 1 history below for details.
+
 | # | manifest | purpose | trial writ | rig | status | cost | duration | pure-read % | notes |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | `rig-moj12h4o-baseline.yaml` | calibration (substantive) | `w-mopursfj` | (queued) | open | — | — | — | gate: lab cost within ±30% of $25–35 production-implement portion |
-| 2 | `rig-moj12h4o-v1-inline-types.yaml` | #3 alone | — | — | — | — | — | — | predicted: drops Reads on types.ts files (~25K chars) |
-| 3 | `rig-moj12h4o-v2-inline-templates.yaml` | #4 alone | — | — | — | — | — | — | predicted: drops Reads on summon-relay/decline-relay (~31K chars) |
-| 4 | `rig-moj12h4o-v3-do-not-read.yaml` | #5 alone | — | — | — | — | — | — | predicted: drops Reads on 4 no-change files (~38K chars) |
+| 1 | `rig-moj12h4o-baseline.yaml` | calibration (substantive, spec-only) | (next) | — | not posted | — | — | — | first post `w-mopursfj` cancelled — used wrong brief content; brief redesigned |
+| 2 | `rig-moj12h4o-v1-inline-types.yaml` | #3 — additive type-sigs preamble | — | — | — | — | — | — | targets autonomous-orientation reads on types.ts files (~63 KB pure-read in production) |
+| 3 | `rig-moj12h4o-v2-inline-templates.yaml` | #4 — pattern excerpt in `## Existing Patterns` | — | — | — | — | — | — | targets template-cite reads on summon-relay/decline-relay (~31 KB pure-read) |
+| 4 | `rig-moj12h4o-v3-do-not-read.yaml` | #5 — additive do-not-Read list | — | — | — | — | — | — | targets speculative reads on adjacent/barrel/test files (~50 KB pure-read) |
 | 5 | `rig-moj12h4o-v4-combined.yaml` | combined — H1 sustain | — | — | — | — | — | — | gate: ≥15% reduction vs row 1 |
 | 6 | `rig-moji64hs-baseline.yaml` | control calibration | — | — | — | — | — | — | — |
-| 7 | `rig-moji64hs-v4-combined.yaml` | control variant — H3 | — | — | — | — | — | — | gate: within ±5% of row 6 |
+| 7 | `rig-moji64hs-v4-combined.yaml` | control variant — H3 | — | — | — | — | — | — | gate: within ±5% of row 6 (only #4 has surface on this rig) |
 
 **Reference data (from production, for orientation):**
 
@@ -44,6 +48,59 @@ land + a quick review before posting the next.
 - **Writ:** `w-mopursfj`
 - **Posted:** 2026-05-03T14:15 UTC
 - **Status:** open, queued
+
+#### Pickup delay (2026-05-03 ~14:30 UTC)
+
+Sean noted that spider was blocked on a bug in the scenario
+engine (synchronous, blocking the spider thread). He resolved it
+and the trial picked up.
+
+#### Pickup (2026-05-03 14:34 UTC)
+
+Rig `rig-mopvfpog-a628ccab` spawned. Setup / scenario / probes /
+archive / teardown phase engines all completed (orchestration
+scaffold). The actual `scenario` engine (`lab.commission-post-xguild`)
+is running — this is where the implementer commission lives.
+Probes and archive phases are pending the scenario terminal.
+
+#### Cancelled (2026-05-03 ~15:00 UTC) — design flaw discovered
+
+While trial 1 was running, Sean flagged a flaw in X020's design
+(it was using the original writ body as the implementer brief
+instead of the plandoc's spec content). Coco verified by
+inspecting both production implementer transcripts:
+
+- The production rig-moj12h4o implementer received a **26 KB
+  prompt** consisting only of the plandoc's `spec` section.
+- The production rig-moji64hs implementer received a **22 KB
+  prompt**, same shape.
+- Neither implementer made any plandoc tool calls, `.nexus/`
+  reads, or MCP tool calls — confirming the spec content in the
+  initial prompt was the entire input.
+
+The X021 baseline brief I'd extracted was 61 KB (inventory + scope
++ decisions + observations + spec all concatenated) — 2.4× the
+content production saw, with most of the variance in sections
+production never received. The variants v1/v3 transformed the
+inventory section, which the production implementer never sees.
+v2's pattern-citation transformation was on a transformation
+target that *did* exist in the spec, so v2 was salvageable.
+
+**Decision:** redesign cleanly (option A — cancel + re-extract).
+Variants reframed as additive interventions to the spec:
+
+- v1 (#3) → ADD a `## Type signatures (inlined)` section
+- v2 (#4) → TRANSFORM the spec's `## Existing Patterns` section
+- v3 (#5) → ADD a `## Files you do not need to Read` section
+- v4 → all three combined
+
+Trial 1 cancelled at 15:00 UTC. No follow-on trials to be posted —
+Sean will restart the guild when ready.
+
+The original (broken) briefs and manifests are preserved in the
+git history as commits `cd740482` (verbatim baselines) and
+`0b931770` (variant briefs). The corrected briefs replace them
+in-place at the same paths.
 
 #### First post (cancelled, host-restart timing)
 

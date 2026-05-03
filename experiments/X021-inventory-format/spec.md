@@ -10,24 +10,65 @@ format) of the Apr 29 cost-optimization landscape under
 
 ## Research question
 
-Does rewriting the planner-produced **inventory** to inline
-type signatures, inline pattern templates, and explicit
-"do-not-Read" markers reduce **implementer** session cost ≥15%
-without meaningfully degrading commission outcomes?
+Does augmenting the implementer's **spec** with inline type
+signatures, inline pattern templates, and explicit
+"files-you-do-not-need-to-Read" guidance reduce implementer
+session cost ≥15% without meaningfully degrading commission
+outcomes?
 
 ## Pipeline placement
 
 Unlike X018 / X019 (which target the **planner**), X021 targets
-the **implementer**. The intervention is the **inventory artifact
-itself** — the markdown the planner hands forward. We do not
-modify any role prompt, plugin, or framework code on the trial
-guild; we hand-craft variant inventories and feed them as the
-brief into the `lab.implement-only` rig shape.
+the **implementer**. The intervention is **edits and additions to
+the spec the planner hands forward** — the only artifact the
+implementer actually sees in its initial prompt. We do not modify
+any role prompt, plugin, or framework code on the trial guild;
+we hand-edit variant specs and feed them as the brief into the
+`lab.implement-only` rig shape.
 
 The trial shape is **implement-only** — see
 [Lab Operations / Trial Shapes](../lab-operations/running-trials.md#trial-shapes).
-No astrolabe engines run. The brief markdown IS the spec; the
-implementer reads it directly.
+No astrolabe engines run. The brief IS the plandoc's `spec`
+section; the implementer reads it directly.
+
+## Design correction (2026-05-03)
+
+The original framing of this experiment targeted the planner's
+**inventory** section. Mid-experiment inspection of two production
+implementer transcripts (rig-moj12h4o and rig-moji64hs) revealed
+that **the implementer never sees the inventory in its prompt**,
+and **never fetches the plandoc out-of-band** (zero plandoc tool
+calls, zero `.nexus/` reads, zero MCP tool calls in either
+transcript). The implementer's prompt is **only the plandoc's
+`spec` section** (~26 KB substantive, ~22 KB control).
+
+This invalidates the original transformation surface: there is no
+inventory in the implementer's input to reformat. The cite-by-path
+patterns we measured do exist — but they live in the spec's
+`## Existing Patterns` section, in task `<files>` blocks, and as
+autonomous-orientation reads on adjacent type files. Pure-reads
+arise from three distinct mechanisms, only one of which is
+spec-resident:
+
+1. **Pattern citations in `## Existing Patterns`** (e.g.,
+   "summon-relay.ts and decline-relay.ts are the templates")
+   — drives reads on those template files.
+2. **Autonomous orientation on type files** — implementer Reads
+   `types.ts` files on its own when wiring up new code, even when
+   the spec doesn't direct it.
+3. **Speculative reads on adjacent files** — implementer Reads
+   index.ts, package.json, adjacent test files for context, even
+   when not in the change scope.
+
+X021 is reframed accordingly: variants now apply *to the spec*,
+and #3 / #5 become **additive interventions** (insertions of new
+content into the spec) rather than format transformations of an
+existing inventory section.
+
+Original transformation-of-inventory variants and the briefs
+extracted from the full plandoc (inventory + scope + decisions +
+observations + spec, 61 KB) are preserved in commit `cd740482`
+and `0b931770` for the historical record.
 
 ## Background
 
@@ -41,35 +82,49 @@ clockworks/src/types.ts:116 for StandingOrder shape`), and the
 implementer Reads the cited file in full to extract the
 information.
 
-Empirical inventory scan (this experiment, 2026-05-03):
+Pure-read driver scan in production transcripts (2026-05-03,
+post-correction):
 
-| pattern | rig-moj12h4o (substantive) | rig-moji64hs (mechanical) |
-|---|---|---|
-| "see X.ts ~NNN for type" cites | 10+ | 0 |
-| "no changes expected" annotations | 5 | 0 |
-| "follow X.ts pattern" template cites | 3–4 | 0 (conceptual only) |
+| pure-read source | rig-moj12h4o examples |
+|---|---|
+| `## Existing Patterns` cites in spec | summon-relay.ts (23 KB read), decline-relay.ts (8 KB read) |
+| Autonomous orientation on types | clockworks/types.ts (27 KB), reckoner/types.ts (28 KB), clockworks/relay.ts (8.6 KB) |
+| Speculative adjacent-file reads | index.ts barrels, reckoner.test.ts, schedulers/always-approve.ts, clockworks.ts (44 KB) |
 
-Three of the five Category 2 ideas are well-defined transformations
-with clear before/after on rig-moj12h4o's inventory; two are not:
+Total pure-read content on rig-moj12h4o's substantive implement:
+**225 KB across 13 files** — the 49% headline rate. The
+intervention surface is in the spec for #4; for #3 and #5 the
+intervention is *additive* — content the spec doesn't currently
+carry.
 
-- **#3 Inline type signatures** — replace cite-by-line with the
-  type def itself inlined (~200 chars per cite). Estimated
-  savings: 15–20%. Tested.
-- **#4 Inline pattern templates** — replace "see X.ts as the
-  template" with a 30-line excerpt + apply note. Estimated
-  savings: 5–10%. Tested.
-- **#5 "Do not Read" markers** — explicit annotation on
-  no-change-expected files. Estimated savings: ~5%. Tested.
+Three of the five Category 2 ideas have viable shapes for X021,
+two are out of scope:
+
+- **#3 Inline type signatures** (additive) — insert a `## Type
+  signatures (inlined)` section near the top of the spec carrying
+  the load-bearing type defs (StandingOrder, RelayDefinition,
+  RelayContext, GuildEvent, ClockworksKit, ReckoningDoc,
+  SchedulerInput, etc.). Targets autonomous-orientation reads.
+  Estimated savings: 10–15%.
+- **#4 Inline pattern templates** (transformation) — edit the
+  spec's `## Existing Patterns` section to replace
+  cite-by-path template references with a 30-line factory-shape
+  excerpt + explicit "do not Read" instruction. Estimated savings:
+  5–10%.
+- **#5 "Do not Read" guidance** (additive) — insert a `## Files
+  you do not need to Read` section listing the adjacent / barrel /
+  out-of-scope-test files that the production implementer
+  pure-read. Targets speculative reads. Estimated savings: ~5%.
 - **#6 Vestigial-reference cleanup** — out of scope for X021.
   Requires a planner-side detector for about-to-be-deleted files;
-  not an inventory-format change.
+  not a spec-format change.
 - **#7 Pre-quoted source excerpts** — out of scope for X021.
   Targets doc-edit work, not code-edit work; deserves its own
   experiment with a doc-heavy commission.
 
 ## Hypothesis
 
-**H1.** Rewriting the inventory with all three interventions
+**H1.** Augmenting the spec with all three interventions
 (combined #3 + #4 + #5) reduces implementer session cost (USD)
 by ≥15% on the substantive (rig-moj12h4o) replay, without
 meaningfully degrading outcome.
@@ -77,12 +132,21 @@ meaningfully degrading outcome.
 **H2 (mechanism).** Per-idea contribution is roughly additive
 (#3 ≥ #4 ≥ #5 by effect size, summing to H1's combined figure).
 Single-idea variants on the substantive replay separate the
-contributions.
+contributions:
 
-**H3 (control).** On rig-moji64hs (mechanical, no cite-by-path
-patterns), the combined variant produces ~no cost reduction
-(within ±5% of baseline). This confirms the mechanism is
-"cite-by-path → inline" and not "smaller spec is cheaper."
+- **v1** targets autonomous-orientation pure-reads on types files
+  (~63 KB pure-read on rig-moj12h4o)
+- **v2** targets pattern-citation pure-reads on template files
+  (~31 KB)
+- **v3** targets speculative pure-reads on adjacent / barrel /
+  out-of-scope-test files (~50 KB)
+
+**H3 (control).** On rig-moji64hs (mechanical, near-zero
+intervention surface — only #4 has any applicable site), the v4
+variant produces ~no cost reduction (within ±5% of baseline). This
+confirms the mechanism is "spec content augmentation works on
+substantive code commissions, not on doc-cleanup commissions" and
+not "smaller spec is cheaper."
 
 "Meaningfully degrading" is operationalized via the same three-tier
 quality regime as X018/X019. Tier 1 mechanical and Tier 2 manual
@@ -92,18 +156,25 @@ trial flags concern. Adapted for implement-only — see
 
 ## Variants
 
-| variant | description |
-|---|---|
-| baseline | original inventory + scope + decisions + spec extracted verbatim from the production plan |
-| v1 inline-types | baseline with idea #3 applied: "see types.ts ~340–460 for X" replaced with the actual type defs inlined |
-| v2 inline-templates | baseline with idea #4 applied: "Mirrors summon-relay.ts pattern" replaced with a 30-line excerpt + apply note |
-| v3 do-not-read | baseline with idea #5 applied: "no changes expected" lines amended with explicit "**Do not Read.**" annotation |
-| v4 combined | baseline with #3 + #4 + #5 all applied |
+| variant | description | size |
+|---|---|---|
+| baseline | the plandoc's `spec` section verbatim (the only content the production implementer received in its prompt) | ~25 KB |
+| v1 inline-types (additive) | baseline with a `## Type signatures (inlined)` section inserted after `## Intent`, carrying the load-bearing types verbatim from source at the codex SHA | ~41 KB |
+| v2 inline-templates (transformation) | baseline with the `## Existing Patterns` section's `summon-relay.ts / decline-relay.ts` cites replaced by a verbatim 30-line factory excerpt + explicit "do not Read" instruction | ~26 KB |
+| v3 do-not-read (additive) | baseline with a `## Files you do not need to Read` section inserted before `## Existing Patterns`, listing files observed pure-read in the production implementer transcript | ~27 KB |
+| v4 combined | baseline with all three applied | ~44 KB |
 
-The baseline must be the **verbatim original spec** — extracted
-from `astrolabe/plans` book in the production guild — so we are
-testing the inventory format change in isolation, not introducing
+The baseline must be **the verbatim plandoc `spec` section** —
+extracted from `astrolabe/plans` book in the production guild — so
+we are testing only the augmentations / transformations, not
 phrasing drift.
+
+For the control rig (rig-moji64hs), only v2 has any applicable
+site (the `integration.test.ts` `tester.kind` precedent
+citation); #3 and #5 have no applicable surface on a doc-cleanup
+commission. The control v4 brief therefore only differs from
+baseline in one inlined excerpt — by design, this is what makes
+H3 a meaningful control rather than a re-run.
 
 ## Metrics
 
@@ -181,50 +252,63 @@ commission). Coco does it inline before trial 1.
 
 ### Phase 1 — Extract the verbatim baseline specs
 
-For each of the two candidate rigs, extract the full plan
-artifact from `vibers/.nexus`'s `astrolabe/plans` book and write
+For each of the two candidate rigs, extract the **plan's `spec`
+section** from `vibers/.nexus`'s `astrolabe/plans` book and write
 it to `experiments/X021-inventory-format/briefs/`:
 
 - `rig-moj12h4o-baseline.md` — substantive (Reckoner periodic
-  tick)
+  tick), ~25 KB
 - `rig-moji64hs-baseline.md` — mechanical (vision-keeper
-  deletion)
+  deletion), ~22 KB
 
-The baseline brief is the inventory + scope + decisions +
-observations + spec sections concatenated as markdown. This
-becomes the "baseline" trial's brief verbatim.
+The baseline brief is **just the spec section** — matching
+exactly what the production implementer received in its prompt.
+The plandoc's separate inventory / scope / decisions /
+observations sections are intermediate planner artifacts the
+implementer never sees, so they are deliberately excluded.
 
-### Phase 2 — Hand-craft variant inventories
+### Phase 2 — Hand-craft variant briefs
 
 For rig-moj12h4o (substantive), produce four variant briefs:
 
-- `rig-moj12h4o-v1-inline-types.md` — apply #3
-- `rig-moj12h4o-v2-inline-templates.md` — apply #4
-- `rig-moj12h4o-v3-do-not-read.md` — apply #5
+- `rig-moj12h4o-v1-inline-types.md` — apply #3 (additive)
+- `rig-moj12h4o-v2-inline-templates.md` — apply #4 (transformation)
+- `rig-moj12h4o-v3-do-not-read.md` — apply #5 (additive)
 - `rig-moj12h4o-v4-combined.md` — apply #3 + #4 + #5
 
-Transformations:
+Interventions:
 
-- **#3 inline-types** — for each "see X.ts ~NNN for `T`" cite,
-  open the cited file at the cited line, copy the type def
-  (interface body, type alias, enum body) verbatim into the
-  inventory, drop the file:line pointer. Goal: every cited type
-  is fully readable without opening the source file.
-- **#4 inline-templates** — for each "Mirrors X.ts pattern"
-  citation, copy a 20–30 line excerpt of the pattern shape
-  (factory signature, key call shape, the bones of the
-  implementation) into the inventory with an "apply identically
-  to <target>" note. Goal: implementer doesn't need to Read
-  the template file to learn the pattern shape.
-- **#5 do-not-read** — for each file in the inventory tagged
-  "no changes expected" / "should pass unchanged", append an
-  explicit "**Do not Read.**" annotation. Goal: implementer
-  doesn't speculatively Read no-change files.
+- **#3 inline-types (additive)** — insert a `## Type signatures
+  (inlined)` section after `## Intent` carrying the load-bearing
+  types verbatim from source at the codex SHA. Targets:
+  `RelayContext`, `RelayHandler`, `RelayDefinition`,
+  `StandingOrder`, `ClockworksKit`, `HeldWrit`, `CapacitySnapshot`,
+  `SchedulerOutcome`, `SchedulerDecision`, `SchedulerInput`,
+  `Scheduler`, `ReckoningOutcome`, `ReckoningDoc`. The section
+  carries an explicit "do not Read these source files" instruction
+  for `clockworks/types.ts`, `clockworks/relay.ts`,
+  `reckoner/types.ts`. Goal: implementer doesn't autonomously
+  orient on type files.
+- **#4 inline-templates (transformation)** — replace the spec's
+  `## Existing Patterns` section's first bullet (the
+  `summon-relay.ts / decline-relay.ts are the templates` reference)
+  with a verbatim 30-line excerpt of `decline-relay.ts`'s factory
+  shape + an explicit "do not Read either source file" note. Goal:
+  implementer doesn't Read template files to learn the pattern.
+- **#5 do-not-read (additive)** — insert a `## Files you do not
+  need to Read` section before `## Existing Patterns` listing the
+  files observed pure-read in the production transcript:
+  `clockworks/clockworks.ts`, `clockworks/index.ts`,
+  `reckoner/index.ts`, `reckoner/schedulers/always-approve.ts`,
+  `reckoner/reckoner.test.ts`. Goal: implementer skips speculative
+  reads on adjacent / barrel / out-of-scope-test files.
 
 For rig-moji64hs (control), produce only:
 
-- `rig-moji64hs-v4-combined.md` — apply #3 + #4 + #5 (which
-  collectively change very little, validating H3)
+- `rig-moji64hs-v4-combined.md` — apply only #4 (the only
+  intervention with applicable surface; the spec's
+  `## Existing Patterns` cites `integration.test.ts` for the
+  `tester.kind` precedent, which gets inlined as a 12-line excerpt)
 
 ### Phase 3 — Trial run
 
