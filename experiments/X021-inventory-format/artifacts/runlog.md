@@ -13,19 +13,24 @@ Run order is sequential. Spider concurrency on the lab host
 serializes trials anyway, but we deliberately wait for each to
 land + a quick review before posting the next.
 
-**Note:** all trials wait for guild restart. Briefs and manifests
-were redesigned 2026-05-03 ~15:00 UTC after a brief-content flaw
-was found mid-trial-1. See trial 1 history below for details.
+**Note:** plan revised after trial 1 cost diagnosis (2026-05-03
+~16:30 UTC) — implementer cost is faithful to production at
+~$77/trial, but that's ~6× the spec's per-trial budget estimate.
+Sequence trimmed to v4-only on substantive first; per-idea
+decomposition (v1/v2/v3) and control rig deferred pending v4
+outcome. Run order: row 1 (done) → row 5 (active) → rows 6/7 if
+v4 lands meaningful → rows 2/3/4 if per-idea separation is
+warranted.
 
 | # | manifest | purpose | trial writ | rig | status | cost | duration | pure-read % | notes |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | `rig-moj12h4o-baseline.yaml` | calibration (substantive, spec-only) | `w-mopwwgug` | `rig-mopwwji2` | **failed (timeout)** | **~$77.30** | 43m impl + 14m stuck | **71.0%** | implementer committed at turn 157, then stuck; session killed during recovery; trial timed out at 60min |
-| 2 | `rig-moj12h4o-v1-inline-types.yaml` | #3 — additive type-sigs preamble | — | — | — | — | — | — | targets autonomous-orientation reads on types.ts files (~63 KB pure-read in production) |
-| 3 | `rig-moj12h4o-v2-inline-templates.yaml` | #4 — pattern excerpt in `## Existing Patterns` | — | — | — | — | — | — | targets template-cite reads on summon-relay/decline-relay (~31 KB pure-read) |
-| 4 | `rig-moj12h4o-v3-do-not-read.yaml` | #5 — additive do-not-Read list | — | — | — | — | — | — | targets speculative reads on adjacent/barrel/test files (~50 KB pure-read) |
-| 5 | `rig-moj12h4o-v4-combined.yaml` | combined — H1 sustain | — | — | — | — | — | — | gate: ≥15% reduction vs row 1 |
-| 6 | `rig-moji64hs-baseline.yaml` | control calibration | — | — | — | — | — | — | — |
-| 7 | `rig-moji64hs-v4-combined.yaml` | control variant — H3 | — | — | — | — | — | — | gate: within ±5% of row 6 (only #4 has surface on this rig) |
+| 1 | `rig-moj12h4o-baseline.yaml` | calibration (substantive, spec-only) | `w-mopwwgug` | `rig-mopwwji2` | **failed (timeout)** | **~$77.30** | 43m impl + 14m stuck | **71.0%** | implementer committed at turn 157, then stuck-after-finish; session killed during recovery; trial timed out at 60min cap. Cost faithful to production ($77.55) — diff is in *which* files were pure-read (3 test files lab opened that prod did not). |
+| 5 | `rig-moj12h4o-v4-combined.yaml` | combined — H1 sustain | (next) | — | not posted | — | — | — | gate: ≥15% reduction vs row 1's $77.30 / 71% pure-read share |
+| 6 | `rig-moji64hs-baseline.yaml` | control calibration | — | — | deferred | — | — | — | run after v4 substantive lands meaningful signal |
+| 7 | `rig-moji64hs-v4-combined.yaml` | control variant — H3 | — | — | deferred | — | — | — | gate: within ±5% of row 6 |
+| 2 | `rig-moj12h4o-v1-inline-types.yaml` | #3 — additive type-sigs preamble | — | — | deferred | — | — | — | run only if v4 sustains and per-idea separation is warranted |
+| 3 | `rig-moj12h4o-v2-inline-templates.yaml` | #4 — pattern excerpt in `## Existing Patterns` | — | — | deferred | — | — | — | run only if v4 sustains and per-idea separation is warranted |
+| 4 | `rig-moj12h4o-v3-do-not-read.yaml` | #5 — additive do-not-Read list | — | — | deferred | — | — | — | run only if v4 sustains and per-idea separation is warranted |
 
 **Reference data (from production, for orientation):**
 
