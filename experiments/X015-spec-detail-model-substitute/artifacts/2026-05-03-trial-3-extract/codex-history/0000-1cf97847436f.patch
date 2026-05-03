@@ -1,0 +1,2615 @@
+
+
+diff --git a/docs/architecture/apparatus/animator.md b/docs/architecture/apparatus/animator.md
+index 66191a4..9ba6ea3 100644
+--- a/docs/architecture/apparatus/animator.md
++++ b/docs/architecture/apparatus/animator.md
+@@ -36,19 +36,19 @@ recommends: ['loom']
+ 
+ ## Kit Contribution
+ 
+-The Animator contributes two books and session tools via its supportKit:
++The Animator contributes four books and session tools via its supportKit:
+ 
+ ```typescript
+ supportKit: {
+   books: {
+-    sessions: {
+-      indexes: ['startedAt', 'status', 'conversationId', 'provider'],
+-    },
+-    transcripts: {
+-      indexes: ['sessionId'],
+-    },
++    sessions:        { indexes: ['startedAt', 'status', 'conversationId', 'provider'] },
++    transcripts:     { indexes: ['sessionId'] },
++    state:           {},
++    animator_status: {},
+   },
+-  tools: [sessionList, sessionShow, summon],
++  tools: [sessionList, sessionShow, summon, sessionCancel, sessionRunning,
++          sessionRecord, sessionHeartbeat, animatorStatus],
++  routes: animatorRoutes,   // GET /api/animator/status, /sessions, /session-transcript, /session-stream
+ },
+ ```
+ 
+@@ -58,7 +58,7 @@ List recent sessions with optional filters. Returns session summaries ordered by
+ 
+ | Parameter | Type | Description |
+ |---|---|---|
+-| `status` | `'running' \| 'completed' \| 'failed' \| 'timeout'` | Filter by terminal status |
++| `status` | `'running' \| 'completed' \| 'failed' \| 'timeout' \| 'cancelled' \| 'rate-limited'` | Filter by status |
+ | `provider` | `string` | Filter by provider name |
+ | `conversationId` | `string` | Filter by conversation |
+ | `limit` | `number` | Maximum results (default: 20) |
+@@ -88,6 +88,12 @@ Summon an anima from the CLI. Calls `animator.summon()` with the guild home as w
+ 
+ Returns: session summary (id, status, provider, durationMs, exitCode, costUsd, tokenUsage, error).
+ 
++### `animator-status` tool
++
++Show current Animator rate-limit status. Returns the `AnimatorStatusDoc`. Useful for checking whether the Animator is in a back-off pause before dispatching work. `permission: 'read'`.
++
++Returns: `AnimatorStatusDoc` — the full status document (state, backoffLevel, pausedUntil, etc.).
++
+ ---
+ 
+ ## `AnimatorApi` Interface (`provides`)
+@@ -122,17 +128,27 @@ interface AnimatorApi {
+   animate(request: AnimateRequest): AnimateHandle
+ 
+   /**
+-   * Bulk per-session cost/token lookup — the first read-side helper on
+-   * AnimatorApi. Resolves cost and token-usage snapshots for the given
+-   * session ids in a single round-trip against the sessions book.
++   * Bulk per-session cost/token lookup. Resolves cost and token-usage
++   * snapshots for the given session ids in a single round-trip against
++   * the sessions book.
+    *
+-   * Used by Spider's rig-view cost aggregation (rig-level totals and
+-   * per-engine breakdowns). Session ids not present in the book are
+-   * omitted from the returned Map — callers decide whether that means
+-   * "zero contribution" or something else. Empty input returns an empty
+-   * Map without touching The Stacks.
++   * Used by Spider's rig-view cost aggregation. Session ids not present
++   * in the book are omitted from the returned Map. Empty input returns an
++   * empty Map without touching The Stacks.
+    */
+   getSessionCosts(sessionIds: string[]): Promise<Map<string, SessionCost>>
++
++  /**
++   * Return the current rate-limit / back-off status doc.
++   *
++   * Returns a default `{ id: 'current', state: 'running', backoffLevel: 0 }`
++   * if no back-off has been recorded yet. Never throws — on read error it
++   * falls back to the default doc.
++   *
++   * Callers (Spider, the status CLI tool, the Oculus route) use this to
++   * decide whether to gate new session launches or display a pause banner.
++   */
++  getStatus(): Promise<AnimatorStatusDoc>
+ }
+ 
+ interface SessionCost {
+@@ -144,6 +160,34 @@ interface SessionCost {
+   outputTokens?: number
+ }
+ 
++/**
++ * Animator rate-limit / back-off status.
++ * Persisted in the `animator_status` book under id `'current'`.
++ * A missing document is equivalent to the default running state.
++ */
++interface AnimatorStatusDoc {
++  /** Always the literal 'current' — single-row document. */
++  id: 'current'
++  /** Whether the Animator is currently dispatching sessions. */
++  state: 'running' | 'paused'
++  /** ISO timestamp when the current pause started. */
++  pausedSince?: string
++  /** ISO timestamp when the back-off window lifts and dispatch resumes. */
++  pausedUntil?: string
++  /** Why the Animator is paused. Currently only 'rate-limit'. */
++  pauseReason?: 'rate-limit'
++  /**
++   * Number of consecutive rate-limit hits since the last clean run.
++   * Reset to 0 after any session that completes without a rate-limit trigger.
++   * Used to compute the escalating back-off window.
++   */
++  backoffLevel: number
++  /** ISO timestamp of the most recent rate-limit hit. */
++  backoffLastHitAt?: string
++  /** Session id of the session that most recently triggered a rate-limit. */
++  lastTriggeringSession?: string
++}
++
+ /** The return value from animate() and summon(). */
+ interface AnimateHandle {
+   /** Session ID, available immediately after launch — before the session completes. */
+@@ -223,7 +267,7 @@ interface SessionResult {
+   /** Unique session id (generated by The Animator). */
+   id: string
+   /** Terminal status. */
+-  status: 'completed' | 'failed' | 'timeout'
++  status: 'completed' | 'failed' | 'timeout' | 'cancelled' | 'rate-limited'
+   /** When the session started (ISO-8601). */
+   startedAt: string
+   /** When the session ended (ISO-8601). */
+@@ -413,14 +457,93 @@ The Animator guarantees that **step 5 (recording) always executes**, even if the
+ If the Stacks write itself fails (e.g. database locked), the error is logged but does not propagate — the Animator returns or re-throws the provider error, not a recording error. Session data loss is preferable to masking the original failure.
+ 
+ ```
+-Provider succeeds  → record status 'completed', return result
+-Provider fails     → record status 'failed' + error, re-throw provider error
+-Provider times out → record status 'timeout', return result with error
+-Recording fails    → log warning, continue with return/re-throw
++Provider succeeds          → record status 'completed', return result
++Provider fails             → record status 'failed' + error, re-throw provider error
++Provider times out         → record status 'timeout', return result with error
++Provider hits rate-limit   → record status 'rate-limited', trigger back-off, return result
++Animator paused (gate hit) → record status 'rate-limited' without launching, return result
++Recording fails            → log warning, continue with return/re-throw
+ ```
+ 
+ ---
+ 
++## Rate-Limit Back-Off
++
++The Animator implements a first-class rate-limit awareness layer. When a session terminates with a provider-detected rate-limit error, the Animator enters a **paused** state and refuses to launch new sessions until the back-off window elapses.
++
++### Detection cascade
++
++Rate-limit detection happens at three levels, in priority order:
++
++1. **NDJSON result** — the provider's NDJSON stream includes an `is_error: true` message whose text matches a rate-limit pattern (e.g. `"rate limit"`, `"too many requests"`, `"429"`, `"quota exceeded"`).
++2. **Stderr** — the accumulated stderr text matches the same patterns (catches rate-limit errors that arrive only on stderr).
++3. **Exit code** — exit code `29` is a reserved sentinel for rate-limit detection (future providers may use this).
++
++The first matching stage wins. If none match, the session is recorded as `failed` or `completed` as normal.
++
++### Back-off state machine
++
++When a rate-limit is detected, the Animator transitions to `paused` and computes a back-off window:
++
++```
++pauseMs = min(initialMs × factor^backoffLevel, maxMs)
++```
++
++Default configuration:
++
++| Parameter | Default | Description |
++|---|---|---|
++| `initialMs` | `900_000` (15 min) | Initial window for backoffLevel 0 |
++| `maxMs` | `3_600_000` (1 hour) | Maximum window cap |
++| `factor` | `2` | Escalation multiplier per consecutive hit |
++
++`backoffLevel` is incremented on each rate-limit hit and reset to `0` after any session that completes without a rate-limit trigger (the session was `completed`, `failed`, `timeout`, or `cancelled` — not `rate-limited`).
++
++Example escalation with defaults:
++
++| backoffLevel | Window |
++|---|---|
++| 0 | 15 min |
++| 1 | 30 min |
++| 2 | 60 min (capped) |
++| 3+ | 60 min (capped) |
++
++Configure via `guild.json`:
++
++```json
++{
++  "animator": {
++    "sessionProvider": "claude-code",
++    "rateLimitBackoff": {
++      "initialMs": 900000,
++      "maxMs": 3600000,
++      "factor": 2
++    }
++  }
++}
++```
++
++### Pause gate in `animate()`
++
++Before launching any session, `animate()` checks the current `AnimatorStatusDoc`:
++
++- If `state === 'paused'` and `pausedUntil > now`: return a `rate-limited` `SessionResult` immediately without calling the provider. The session is recorded to The Stacks as `rate-limited`.
++- If `state === 'paused'` and `pausedUntil <= now`: the window has elapsed — reset state to `running` and proceed with the launch.
++- If `state === 'running'`: proceed normally.
++
++### Spider integration
++
++Spider's `tryRun()` also checks the Animator status before dispatching any engine. If the Animator is paused and the window has not elapsed, the engine is blocked with block type `animator-paused`. The `animator-paused` block type checker polls every 30 seconds and clears the block when `getStatus()` returns `state: 'running'` or when `pausedUntil <= now`.
++
++### Observability
++
++- **`getStatus()`** — read current status from `AnimatorApi`.
++- **`animator-status` tool** — CLI tool for inspecting pause state.
++- **`GET /api/animator/status`** — Oculus HTTP route returning the `AnimatorStatusDoc` as JSON.
++- **Spider pause banner** — the Spider Oculus page polls `/api/animator/status` every 30 seconds and shows a banner when the Animator is paused.
++
++---
++
+ ## Caller Metadata
+ 
+ The `metadata` field on `AnimateRequest` is an opaque pass-through. The Animator records it in the session's Stacks entry without interpreting it. This allows callers to attach contextual information that the Animator itself doesn't understand:
+diff --git a/packages/plugins/animator/README.md b/packages/plugins/animator/README.md
+index 1cdabb3..3f6a0fb 100644
+--- a/packages/plugins/animator/README.md
++++ b/packages/plugins/animator/README.md
+@@ -48,7 +48,7 @@ const { result } = animator.summon({
+ });
+ 
+ const session = await result;
+-console.log(session.status);           // 'completed' | 'failed' | 'timeout' | 'cancelled'
++console.log(session.status);           // 'completed' | 'failed' | 'timeout' | 'cancelled' | 'rate-limited'
+ console.log(session.costUsd);          // 0.42
+ console.log(session.output);           // final assistant message text
+ console.log(session.metadata?.trigger); // 'summon' (auto-populated)
+@@ -144,6 +144,20 @@ costs.get('ses-missing');  // undefined — ids not present in the book are omit
+ 
+ **Shape:** deliberately minimal — `costUsd` (zero when the session exists but has not reported cost), plus optional `inputTokens` / `outputTokens` when the provider reported token usage. Consumers that need other `SessionDoc` fields should look them up separately.
+ 
++### `getStatus(): Promise<AnimatorStatusDoc>`
++
++Return the current rate-limit / back-off status. Returns a default running state document if no back-off has been recorded. Use this to check whether the Animator is paused before dispatching work.
++
++```typescript
++const status = await animator.getStatus();
++if (status.state === 'paused') {
++  console.log('Paused until', status.pausedUntil);
++  console.log('Back-off level', status.backoffLevel);
++}
++```
++
++See § Rate-Limit Back-Off for the full back-off configuration and escalation table.
++
+ ### Types
+ 
+ ```typescript
+@@ -174,7 +188,7 @@ interface AnimateHandle {
+ 
+ interface SessionResult {
+   id: string;                    // Generated by The Animator (ses-{hex})
+-  status: 'completed' | 'failed' | 'timeout' | 'cancelled';
++  status: 'completed' | 'failed' | 'timeout' | 'cancelled' | 'rate-limited';
+   startedAt: string;             // ISO-8601
+   endedAt: string;               // ISO-8601
+   durationMs: number;
+@@ -208,7 +222,12 @@ The Animator reads its config from `guild.json["animator"]`:
+ ```json
+ {
+   "animator": {
+-    "sessionProvider": "claude-code"
++    "sessionProvider": "claude-code",
++    "rateLimitBackoff": {
++      "initialMs": 900000,
++      "maxMs": 3600000,
++      "factor": 2
++    }
+   }
+ }
+ ```
+@@ -216,6 +235,15 @@ The Animator reads its config from `guild.json["animator"]`:
+ | Field | Type | Default | Description |
+ |---|---|---|---|
+ | `sessionProvider` | `string` | `'claude-code'` | Plugin id of the apparatus that implements `AnimatorSessionProvider`. Looked up via `guild().apparatus()`. |
++| `rateLimitBackoff.initialMs` | `number` | `900_000` (15 min) | Initial back-off window for the first rate-limit hit (backoffLevel 0). |
++| `rateLimitBackoff.maxMs` | `number` | `3_600_000` (1 hour) | Maximum back-off window cap — window never exceeds this. |
++| `rateLimitBackoff.factor` | `number` | `2` | Escalation multiplier: `window = min(initialMs × factor^backoffLevel, maxMs)`. Must be > 1. |
++
++## Rate-Limit Back-Off
++
++The Animator detects rate-limit errors from the provider and automatically enters a paused state. While paused, `animate()` returns a `rate-limited` `SessionResult` immediately without launching the provider. The back-off window escalates with each consecutive hit and resets to 0 after any clean (non-rate-limited) session.
++
++See `docs/architecture/apparatus/animator.md` § Rate-Limit Back-Off for the full detection cascade, state machine, and escalation table.
+ 
+ ## Session Provider Interface
+ 
+@@ -242,7 +270,7 @@ interface SessionProviderConfig {
+ }
+ 
+ interface SessionProviderResult {
+-  status: 'completed' | 'failed' | 'timeout' | 'cancelled';
++  status: 'completed' | 'failed' | 'timeout' | 'cancelled' | 'rate-limited';
+   exitCode: number;
+   error?: string;
+   providerSessionId?: string;
+@@ -272,17 +300,18 @@ Click a session row to view full metadata, a real-time session log (SSE streamin
+ 
+ ### Custom Routes
+ 
+-Three API routes under `/api/animator/`:
++Four API routes under `/api/animator/`:
+ 
+ | Route | Description |
+ |---|---|
++| `GET /api/animator/status` | Current rate-limit / back-off status (`AnimatorStatusDoc` as JSON). |
+ | `GET /api/animator/sessions` | Enriched session list with `role`, `writTitle` (resolved from Clerk), and `tokenUsage`. Supports `status`, `from`, `to`, `limit` query params. |
+ | `GET /api/animator/session-transcript` | Returns `{ messages, sessionStatus }` for a session. |
+ | `GET /api/animator/session-stream` | SSE stream — emits `chunk`, `transcript`, and `done` events. Handles completed sessions, running sessions with/without broadcaster. |
+ 
+ ## Support Kit
+ 
+-The Animator contributes two books, inspection/dispatch tools, an Oculus page, and custom routes:
++The Animator contributes four books, inspection/dispatch tools, an Oculus page, and custom routes:
+ 
+ ### Books
+ 
+@@ -291,6 +320,7 @@ The Animator contributes two books, inspection/dispatch tools, an Oculus page, a
+ | `sessions` | `startedAt`, `status`, `conversationId`, `provider` | Session records — one per `animate()` call. Includes `output` (final assistant text). |
+ | `transcripts` | `sessionId` | Full NDJSON transcripts — one per session. Drives web UIs, operational logs, debugging. |
+ | `state` | — | Operational state (guild self-heartbeat). Single well-known document `guild-heartbeat`. |
++| `animator_status` | — | Rate-limit back-off state. Single well-known document `current` (`AnimatorStatusDoc`). |
+ 
+ ### Tools
+ 
+@@ -298,6 +328,7 @@ The Animator contributes two books, inspection/dispatch tools, an Oculus page, a
+ |---|---|---|
+ | `session-list` | `read` | List recent sessions with optional filters (status, provider, conversationId, limit) |
+ | `session-show` | `read` | Show full detail for a single session by id |
++| `animator-status` | `read` | Show current rate-limit / back-off status |
+ | `summon` | `animate` | Summon an anima from the CLI — compose context and launch a session |
+ | `session-cancel` | `animate` | Cancel a running session by id, with optional reason |
+ | `session-running` | `write` | Record initial "running" state for a detached session |
+diff --git a/packages/plugins/animator/src/animator.test.ts b/packages/plugins/animator/src/animator.test.ts
+index 5e9f09c..bff7dfe 100644
+--- a/packages/plugins/animator/src/animator.test.ts
++++ b/packages/plugins/animator/src/animator.test.ts
+@@ -30,6 +30,7 @@ import type {
+   SessionChunk,
+   SessionDoc,
+   TranscriptDoc,
++  AnimatorStatusDoc,
+ } from './types.ts';
+ 
+ // ── Shared empty chunks iterable ─────────────────────────────────────
+@@ -1483,4 +1484,309 @@ describe('Animator', () => {
+       assert.equal(result.size, 0);
+     });
+   });
++
++  // ── getStatus() and rate-limit back-off ───────────────────────────
++
++  describe('getStatus()', () => {
++    beforeEach(() => {
++      setup();
++    });
++
++    it('returns a default running state when no status doc exists', async () => {
++      const status = await animator.getStatus();
++      assert.equal(status.id, 'current');
++      assert.equal(status.state, 'running');
++      assert.equal(status.backoffLevel, 0);
++      assert.equal(status.pausedSince, undefined);
++      assert.equal(status.pausedUntil, undefined);
++    });
++
++    it('returns the persisted status doc when one has been written', async () => {
++      const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
++      const future = new Date(Date.now() + 60_000).toISOString();
++      await statusBook.put({
++        id: 'current',
++        state: 'paused',
++        pausedSince: new Date().toISOString(),
++        pausedUntil: future,
++        pauseReason: 'rate-limit',
++        backoffLevel: 2,
++      });
++
++      const status = await animator.getStatus();
++      assert.equal(status.state, 'paused');
++      assert.equal(status.backoffLevel, 2);
++      assert.equal(status.pauseReason, 'rate-limit');
++      assert.equal(status.pausedUntil, future);
++    });
++  });
++
++  describe('animate() — rate-limit gate', () => {
++    it('gates the session (returns rate-limited) when animator is paused within the window', async () => {
++      setup();
++      const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
++      await statusBook.put({
++        id: 'current',
++        state: 'paused',
++        pausedSince: new Date().toISOString(),
++        pausedUntil: new Date(Date.now() + 120_000).toISOString(),
++        pauseReason: 'rate-limit',
++        backoffLevel: 1,
++      });
++
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      assert.equal(result.status, 'rate-limited');
++      assert.match(result.error!, /back-off/i);
++    });
++
++    it('does NOT gate the session when pausedUntil has elapsed', async () => {
++      setup();
++      const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
++      await statusBook.put({
++        id: 'current',
++        state: 'paused',
++        pausedSince: new Date(Date.now() - 120_000).toISOString(),
++        pausedUntil: new Date(Date.now() - 1_000).toISOString(), // 1 second ago
++        pauseReason: 'rate-limit',
++        backoffLevel: 1,
++      });
++
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      // Fake provider returns 'completed' when not gated
++      assert.equal(result.status, 'completed');
++    });
++
++    it('transitions state back to running when the back-off window has elapsed', async () => {
++      setup();
++      const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
++      await statusBook.put({
++        id: 'current',
++        state: 'paused',
++        pausedSince: new Date(Date.now() - 120_000).toISOString(),
++        pausedUntil: new Date(Date.now() - 1_000).toISOString(),
++        pauseReason: 'rate-limit',
++        backoffLevel: 1,
++      });
++
++      await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      const statusAfter = await animator.getStatus();
++      assert.equal(statusAfter.state, 'running');
++      assert.equal(statusAfter.pausedSince, undefined);
++      assert.equal(statusAfter.pausedUntil, undefined);
++    });
++
++    it('does NOT gate the session when state is running', async () => {
++      setup();
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      assert.equal(result.status, 'completed');
++    });
++  });
++
++  describe('animate() — back-off state machine', () => {
++    it('writes a paused AnimatorStatusDoc after a rate-limited session', async () => {
++      setup(createFakeProvider({ status: 'rate-limited', exitCode: 1 }));
++
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      assert.equal(result.status, 'rate-limited');
++
++      const status = await animator.getStatus();
++      assert.equal(status.state, 'paused');
++      assert.equal(status.backoffLevel, 1);
++      assert.equal(status.pauseReason, 'rate-limit');
++      assert.ok(status.pausedUntil, 'pausedUntil should be set');
++      assert.ok(
++        new Date(status.pausedUntil!).getTime() > Date.now(),
++        'pausedUntil should be in the future',
++      );
++      assert.equal(status.lastTriggeringSession, result.id);
++    });
++
++    it('escalates the back-off window on repeated rate-limit hits', async () => {
++      setup(createFakeProvider({ status: 'rate-limited', exitCode: 1 }));
++      const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
++
++      // Seed backoffLevel: 1 so the next hit produces level 2 window
++      await statusBook.put({
++        id: 'current',
++        state: 'running',
++        backoffLevel: 1,
++      });
++
++      await animator.animate({ context: { systemPrompt: '' }, cwd: '/tmp' }).result;
++
++      const status = await animator.getStatus();
++      assert.equal(status.backoffLevel, 2);
++      // Level 2 window: initialMs(900_000) * factor(2)^1 = 1_800_000 ms
++      const pauseWindowMs = new Date(status.pausedUntil!).getTime() - new Date(status.pausedSince!).getTime();
++      // Allow ±5s tolerance for test execution time
++      assert.ok(pauseWindowMs >= 1_800_000 - 5_000 && pauseWindowMs <= 1_800_000 + 5_000,
++        `Expected ~1_800_000ms window, got ${pauseWindowMs}ms`);
++    });
++
++    it('caps the pause window at maxMs', async () => {
++      // Use a very small initialMs so it hits the cap quickly
++      clearGuild();
++      const memBackend = new MemoryBackend();
++      const stacksPlugin = createStacksApparatus(memBackend);
++      const animatorPlugin = createAnimator();
++      const provider = createFakeProvider({ status: 'rate-limited', exitCode: 1 });
++      const apparatusMap = new Map<string, unknown>();
++      apparatusMap.set('fake-provider', provider);
++      setGuild({
++        home: '/tmp/fake-guild',
++        apparatus<T>(name: string): T {
++          const api = apparatusMap.get(name);
++          if (!api) throw new Error(`Apparatus "${name}" not installed`);
++          return api as T;
++        },
++        config<T>(_pluginId: string): T { return {} as T; },
++        writeConfig() {},
++        guildConfig() {
++          return {
++            name: 'test', nexus: '0.0.0', workshops: {}, roles: {},
++            baseTools: [], plugins: [], settings: { model: 'sonnet' },
++            animator: {
++              sessionProvider: 'fake-provider',
++              rateLimitBackoff: { initialMs: 1_000, maxMs: 5_000, factor: 10 },
++            },
++          };
++        },
++        kits: () => [],
++        apparatuses: () => [],
++        startupWarnings: () => [],
++      });
++
++      const sa = (stacksPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
++      sa.start({ on: () => {}, kits: () => [] });
++      stacks = sa.provides as StacksApi;
++      apparatusMap.set('stacks', stacks);
++
++      const aa = (animatorPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
++      aa.start({ on: () => {}, kits: () => [] });
++      animator = aa.provides as AnimatorApi;
++
++      // Seed backoffLevel: 5 — would be 1000 * 10^5 = 100_000_000 ms without cap
++      const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
++      await statusBook.put({ id: 'current', state: 'running', backoffLevel: 5 });
++
++      await animator.animate({ context: { systemPrompt: '' }, cwd: '/tmp' }).result;
++
++      const status = await animator.getStatus();
++      const windowMs = new Date(status.pausedUntil!).getTime() - new Date(status.pausedSince!).getTime();
++      assert.ok(windowMs <= 5_000 + 5_000, `Window should be capped at maxMs (5000ms), got ${windowMs}ms`);
++    });
++
++    it('resets backoffLevel to 0 after any non-rate-limited terminal (D7)', async () => {
++      setup();
++      const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
++      // Seed a high back-off level
++      await statusBook.put({ id: 'current', state: 'running', backoffLevel: 3 });
++
++      // Run a successful session
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      assert.equal(result.status, 'completed');
++
++      const statusAfter = await animator.getStatus();
++      assert.equal(statusAfter.backoffLevel, 0);
++    });
++
++    it('resets backoffLevel to 0 after a failed session (D7)', async () => {
++      setup(createFakeProvider({ status: 'failed', exitCode: 1 }));
++      const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
++      await statusBook.put({ id: 'current', state: 'running', backoffLevel: 2 });
++
++      await animator.animate({ context: { systemPrompt: '' }, cwd: '/tmp' }).result;
++
++      const statusAfter = await animator.getStatus();
++      assert.equal(statusAfter.backoffLevel, 0);
++    });
++  });
++
++  describe('start() — rateLimitBackoff config validation', () => {
++    function setupWithBackoffConfig(
++      rateLimitBackoff: Record<string, unknown>,
++    ): () => void {
++      clearGuild();
++      const memBackend = new MemoryBackend();
++      const stacksPlugin = createStacksApparatus(memBackend);
++      const animatorPlugin = createAnimator();
++      const apparatusMap = new Map<string, unknown>();
++      apparatusMap.set('fake-provider', createFakeProvider());
++      setGuild({
++        home: '/tmp/fake-guild',
++        apparatus<T>(name: string): T {
++          const api = apparatusMap.get(name);
++          if (!api) throw new Error(`Apparatus "${name}" not installed`);
++          return api as T;
++        },
++        config<T>(_pluginId: string): T { return {} as T; },
++        writeConfig() {},
++        guildConfig() {
++          return {
++            name: 'test', nexus: '0.0.0', workshops: {}, roles: {},
++            baseTools: [], plugins: [], settings: { model: 'sonnet' },
++            animator: { sessionProvider: 'fake-provider', rateLimitBackoff: rateLimitBackoff as never },
++          };
++        },
++        kits: () => [],
++        apparatuses: () => [],
++        startupWarnings: () => [],
++      });
++      const sa = (stacksPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
++      sa.start({ on: () => {}, kits: () => [] });
++      apparatusMap.set('stacks', sa.provides);
++      const aa = (animatorPlugin as { apparatus: { start: (ctx: unknown) => void; provides: unknown } }).apparatus;
++
++      return () => aa.start({ on: () => {}, kits: () => [] });
++    }
++
++    it('throws on non-positive initialMs', () => {
++      const startFn = setupWithBackoffConfig({ initialMs: 0, maxMs: 60_000, factor: 2 });
++      assert.throws(startFn, /initialMs/);
++    });
++
++    it('throws on non-positive maxMs', () => {
++      const startFn = setupWithBackoffConfig({ initialMs: 1_000, maxMs: -1, factor: 2 });
++      assert.throws(startFn, /maxMs/);
++    });
++
++    it('throws when factor is <= 1', () => {
++      const startFn = setupWithBackoffConfig({ initialMs: 1_000, maxMs: 60_000, factor: 1 });
++      assert.throws(startFn, /factor/);
++    });
++
++    it('throws when maxMs < initialMs', () => {
++      const startFn = setupWithBackoffConfig({ initialMs: 5_000, maxMs: 1_000, factor: 2 });
++      assert.throws(startFn, /maxMs.*initialMs|initialMs.*maxMs/);
++    });
++
++    it('does not throw on valid rateLimitBackoff config', () => {
++      const startFn = setupWithBackoffConfig({ initialMs: 60_000, maxMs: 3_600_000, factor: 2 });
++      assert.doesNotThrow(startFn);
++    });
++  });
+ });
+diff --git a/packages/plugins/animator/src/animator.ts b/packages/plugins/animator/src/animator.ts
+index 399806d..a61518d 100644
+--- a/packages/plugins/animator/src/animator.ts
++++ b/packages/plugins/animator/src/animator.ts
+@@ -30,9 +30,10 @@ import type {
+   SessionProviderConfig,
+   SessionProviderResult,
+   GuildStateDoc,
++  AnimatorStatusDoc,
+ } from './types.ts';
+ 
+-import { sessionList, sessionShow, summon as summonTool, sessionCancel, sessionRunning, sessionRecord, sessionHeartbeat } from './tools/index.ts';
++import { sessionList, sessionShow, summon as summonTool, sessionCancel, sessionRunning, sessionRecord, sessionHeartbeat, animatorStatus } from './tools/index.ts';
+ import { animatorRoutes } from './oculus-routes.ts';
+ import { drainDlq, recoverOrphans } from './startup.ts';
+ 
+@@ -357,7 +358,7 @@ async function recordRunning(
+ }
+ 
+ /** Terminal status values — any of these means the session is done. */
+-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled']);
++const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled', 'rate-limited']);
+ 
+ // ── Apparatus factory ────────────────────────────────────────────────
+ 
+@@ -369,10 +370,98 @@ const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled'
+  * - `provides: AnimatorApi` — the session launch API
+  * - `supportKit` — contributes `sessions` book + inspection tools
+  */
++/** Well-known document id for the Animator status book. */
++const ANIMATOR_STATUS_DOC_ID = 'current' as const;
++
++/** Default synthesised running status when no status doc exists. */
++function defaultStatusDoc(): AnimatorStatusDoc {
++  return {
++    id: ANIMATOR_STATUS_DOC_ID,
++    state: 'running',
++    backoffLevel: 0,
++  };
++}
++
++// Back-off defaults matching the spec (D7).
++const DEFAULT_BACKOFF_INITIAL_MS = 900_000;  // 15 minutes
++const DEFAULT_BACKOFF_MAX_MS = 3_600_000;    // 1 hour
++const DEFAULT_BACKOFF_FACTOR = 2;
++
++/**
++ * Apply the rate-limit back-off state machine after a rate-limited session.
++ *
++ * Reads the current status doc, computes the next pause window using the
++ * escalating formula, and writes the updated doc back to the status book.
++ *
++ * Window formula: min(initialMs * factor^backoffLevel, maxMs)
++ *
++ * The `backoffLevel` here is the level BEFORE this hit (the level stored
++ * in the current doc). After writing, backoffLevel is incremented by one.
++ */
++async function applyRateBackoff(
++  triggeringSessionId: string,
++  statusBook: Book<AnimatorStatusDoc>,
++  cfg: AnimatorConfig,
++): Promise<void> {
++  const initialMs = cfg.rateLimitBackoff?.initialMs ?? DEFAULT_BACKOFF_INITIAL_MS;
++  const maxMs = cfg.rateLimitBackoff?.maxMs ?? DEFAULT_BACKOFF_MAX_MS;
++  const factor = cfg.rateLimitBackoff?.factor ?? DEFAULT_BACKOFF_FACTOR;
++
++  let current: AnimatorStatusDoc;
++  try {
++    current = (await statusBook.get(ANIMATOR_STATUS_DOC_ID)) ?? defaultStatusDoc();
++  } catch {
++    current = defaultStatusDoc();
++  }
++
++  const level = current.backoffLevel ?? 0;
++  const windowMs = Math.min(initialMs * Math.pow(factor, level), maxMs);
++  const now = new Date();
++  const pausedUntil = new Date(now.getTime() + windowMs).toISOString();
++
++  await statusBook.put({
++    id: ANIMATOR_STATUS_DOC_ID,
++    state: 'paused',
++    pausedSince: now.toISOString(),
++    pausedUntil,
++    pauseReason: 'rate-limit',
++    backoffLevel: level + 1,
++    backoffLastHitAt: now.toISOString(),
++    lastTriggeringSession: triggeringSessionId,
++  });
++}
++
++/**
++ * Reset the back-off level to 0 after a successful (non-rate-limited) session.
++ *
++ * Called when a session completes, fails, times out, or is cancelled — any
++ * outcome that confirms the API is responsive. Does not change the
++ * running/paused state (a reset may arrive while we're still paused from
++ * a concurrent session).
++ */
++async function resetBackoffLevel(
++  statusBook: Book<AnimatorStatusDoc>,
++): Promise<void> {
++  let current: AnimatorStatusDoc;
++  try {
++    current = (await statusBook.get(ANIMATOR_STATUS_DOC_ID)) ?? defaultStatusDoc();
++  } catch {
++    return; // Can't read — skip reset silently.
++  }
++
++  if (current.backoffLevel === 0) return; // Already at floor — no-op.
++
++  await statusBook.put({
++    ...current,
++    backoffLevel: 0,
++  });
++}
++
+ export function createAnimator(): Plugin {
+   let config: AnimatorConfig = {};
+   let sessions: Book<SessionDoc>;
+   let transcripts: Book<TranscriptDoc>;
++  let animatorStatusBook: Book<AnimatorStatusDoc>;
+ 
+   /**
+    * In-memory registry of active session broadcasters.
+@@ -388,6 +477,15 @@ export function createAnimator(): Plugin {
+       return broadcaster.subscribe();
+     },
+ 
++    async getStatus(): Promise<AnimatorStatusDoc> {
++      try {
++        const doc = await animatorStatusBook.get(ANIMATOR_STATUS_DOC_ID);
++        return doc ?? defaultStatusDoc();
++      } catch {
++        return defaultStatusDoc();
++      }
++    },
++
+     async getSessionCosts(sessionIds: string[]): Promise<Map<string, SessionCost>> {
+       const result = new Map<string, SessionCost>();
+       if (sessionIds.length === 0) return result;
+@@ -533,47 +631,97 @@ export function createAnimator(): Plugin {
+     },
+ 
+     animate(request: AnimateRequest): AnimateHandle {
++      // Fast validation — provider lookup happens at call time so misconfiguration
++      // (e.g. unknown sessionProvider in guild config) surfaces synchronously
++      // before any async work begins. The resolved value is re-used inside the
++      // async result promise to avoid a second lookup.
+       const provider = resolveProvider(config);
+-      const model = resolveModel();
+ 
+-      // Step 1: use pre-generated session id if provided (from summon()),
+-      // otherwise generate one. Capture startedAt.
++      // Generate session id and capture startedAt immediately so both the
++      // handle (synchronous) and the async result share the same identity.
+       const id = request.sessionId ?? generateId('ses', 4);
+       const startedAt = new Date().toISOString();
+ 
+-      const providerConfig = buildProviderConfig(request, model, id);
+-
+-      // Single path — the provider returns { chunks, result } regardless
+-      // of whether streaming is enabled. Providers that don't support
+-      // streaming return empty chunks; the Animator doesn't branch.
+-      const { chunks: providerChunks, result: providerResultPromise, processInfo: processInfoPromise } = provider.launch(providerConfig);
+-
+-      // Set up an in-process broadcaster for this session.
+-      // All chunks are fanned out through the broadcaster so that both the
+-      // returned handle.chunks and any subscribeToSession() callers receive
+-      // the full stream with history replay for late subscribers.
++      // Set up the broadcaster immediately so subscribeToSession() works from
++      // the moment animate() returns (history replay for late subscribers).
+       const broadcaster = createSessionBroadcaster();
+       activeSessions.set(id, broadcaster);
+ 
+-      // Consume provider chunks in the background and push to the broadcaster.
+-      // This drives the fan-out to all subscribers (including handle.chunks).
+-      (async () => {
++      const result = (async () => {
++        // ── Rate-limit gate ────────────────────────────────────────────
++        // Check the animator status before launching any provider process.
++        // If we're within a back-off window, return a rate-limited result
++        // immediately without consuming provider resources.
+         try {
+-          for await (const chunk of providerChunks) {
+-            broadcaster.push(chunk);
++          const statusDoc = await api.getStatus();
++          if (statusDoc.state === 'paused') {
++            const resumeAt = statusDoc.pausedUntil
++              ? new Date(statusDoc.pausedUntil).getTime()
++              : Infinity;
++            if (resumeAt > Date.now()) {
++              // Still within the back-off window — gate the session.
++              broadcaster.close();
++              setTimeout(() => activeSessions.delete(id), 30_000);
++              const endedAt = new Date().toISOString();
++              const gatedResult: SessionResult = {
++                id,
++                status: 'rate-limited',
++                startedAt,
++                endedAt,
++                durationMs: new Date(endedAt).getTime() - new Date(startedAt).getTime(),
++                provider: provider.name,
++                exitCode: 0,
++                error: 'Animator paused due to rate limit — back-off in effect',
++                conversationId: request.conversationId,
++                metadata: request.metadata,
++              };
++              await sessions.put(toSessionDoc(gatedResult)).catch((err) => {
++                console.warn(`[animator] Failed to write gated session ${id}: ${err instanceof Error ? err.message : err}`);
++              });
++              return gatedResult;
++            }
++            // Back-off window has elapsed — transition back to running.
++            await animatorStatusBook.put({
++              ...statusDoc,
++              state: 'running' as const,
++              pausedSince: undefined,
++              pausedUntil: undefined,
++              pauseReason: undefined,
++            }).catch((err) => {
++              console.warn(`[animator] Failed to resume animator status: ${err instanceof Error ? err.message : err}`);
++            });
+           }
+         } catch (err) {
+-          console.warn(
+-            `[animator] Error consuming chunks for session ${id}: ${err instanceof Error ? err.message : err}`,
+-          );
+-        } finally {
+-          broadcaster.close();
++          // Status check failure must not block the session — degrade gracefully.
++          console.warn(`[animator] Status gate check failed (proceeding): ${err instanceof Error ? err.message : err}`);
+         }
+-      })();
+ 
+-      // Write initial record (fire and forget — don't block streaming).
+-      // Await processInfo so cancelHandle is persisted with the running record.
+-      const initPromise = (async () => {
++        // ── Normal launch path ─────────────────────────────────────────
++        const model = resolveModel();
++        const providerConfig = buildProviderConfig(request, model, id);
++
++        // Single path — the provider returns { chunks, result } regardless
++        // of whether streaming is enabled. Providers that don't support
++        // streaming return empty chunks; the Animator doesn't branch.
++        const { chunks: providerChunks, result: providerResultPromise, processInfo: processInfoPromise } = provider.launch(providerConfig);
++
++        // Consume provider chunks in the background and push to the broadcaster.
++        // This drives the fan-out to all subscribers (including handle.chunks).
++        (async () => {
++          try {
++            for await (const chunk of providerChunks) {
++              broadcaster.push(chunk);
++            }
++          } catch (err) {
++            console.warn(
++              `[animator] Error consuming chunks for session ${id}: ${err instanceof Error ? err.message : err}`,
++            );
++          } finally {
++            broadcaster.close();
++          }
++        })();
++
++        // Await processInfo so cancelHandle is persisted with the running record.
+         let cancelHandle: Record<string, unknown> | undefined;
+         if (processInfoPromise) {
+           try {
+@@ -583,10 +731,6 @@ export function createAnimator(): Plugin {
+           }
+         }
+         await recordRunning(sessions, id, startedAt, provider.name, request, cancelHandle);
+-      })();
+-
+-      const result = (async () => {
+-        await initPromise;
+ 
+         let sessionResult: SessionResult;
+         try {
+@@ -628,6 +772,21 @@ export function createAnimator(): Plugin {
+           }
+ 
+           sessionResult = buildSessionResult(id, startedAt, provider.name, providerResult, request);
++
++          // ── Back-off state machine ─────────────────────────────────
++          if (sessionResult.status === 'rate-limited') {
++            // A live rate-limited result: escalate the back-off window.
++            await applyRateBackoff(id, animatorStatusBook, config).catch((err) => {
++              console.warn(`[animator] Back-off update failed: ${err instanceof Error ? err.message : err}`);
++            });
++          } else {
++            // Any other terminal outcome confirms the API is responsive: reset
++            // back-off level to 0 so the next hit starts from the initial window.
++            await resetBackoffLevel(animatorStatusBook).catch((err) => {
++              console.warn(`[animator] Back-off reset failed: ${err instanceof Error ? err.message : err}`);
++            });
++          }
++
+           await recordSession(sessions, transcripts, sessionResult, providerResult.transcript);
+         } catch (err) {
+           // Check if session was cancelled — if so, resolve instead of rejecting.
+@@ -679,8 +838,9 @@ export function createAnimator(): Plugin {
+             indexes: ['sessionId'],
+           },
+           state: {},
++          animator_status: {},
+         },
+-        tools: [sessionList, sessionShow, summonTool, sessionCancel, sessionRunning, sessionRecord, sessionHeartbeat],
++        tools: [sessionList, sessionShow, summonTool, sessionCancel, sessionRunning, sessionRecord, sessionHeartbeat, animatorStatus],
+         pages: [
+           { id: 'animator', title: 'Animator', dir: 'src/static' },
+         ],
+@@ -693,9 +853,35 @@ export function createAnimator(): Plugin {
+         const g = guild();
+         config = g.guildConfig().animator ?? {};
+ 
++        // Validate rateLimitBackoff config if present (D10).
++        if (config.rateLimitBackoff !== undefined) {
++          const { initialMs, maxMs, factor } = config.rateLimitBackoff;
++          if (typeof initialMs !== 'number' || initialMs <= 0) {
++            throw new Error(
++              `[animator] Invalid rateLimitBackoff.initialMs: expected positive number, got ${initialMs}`,
++            );
++          }
++          if (typeof maxMs !== 'number' || maxMs <= 0) {
++            throw new Error(
++              `[animator] Invalid rateLimitBackoff.maxMs: expected positive number, got ${maxMs}`,
++            );
++          }
++          if (typeof factor !== 'number' || factor <= 1) {
++            throw new Error(
++              `[animator] Invalid rateLimitBackoff.factor: expected number > 1, got ${factor}`,
++            );
++          }
++          if (maxMs < initialMs) {
++            throw new Error(
++              `[animator] Invalid rateLimitBackoff: maxMs (${maxMs}) must be >= initialMs (${initialMs})`,
++            );
++          }
++        }
++
+         const stacks = g.apparatus<StacksApi>('stacks');
+         sessions = stacks.book<SessionDoc>('animator', 'sessions');
+         transcripts = stacks.book<TranscriptDoc>('animator', 'transcripts');
++        animatorStatusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
+ 
+         const GUILD_HEARTBEAT_INTERVAL_MS = 30_000;
+         const GUILD_HEARTBEAT_DOC_ID = 'guild-heartbeat';
+diff --git a/packages/plugins/animator/src/oculus-routes.test.ts b/packages/plugins/animator/src/oculus-routes.test.ts
+index a1295cc..f3e3958 100644
+--- a/packages/plugins/animator/src/oculus-routes.test.ts
++++ b/packages/plugins/animator/src/oculus-routes.test.ts
+@@ -1,10 +1,11 @@
+ /**
+  * Animator Oculus routes tests.
+  *
+- * Tests the three custom API routes:
+- * - GET /api/animator/sessions — enriched session list
++ * Tests the four custom API routes:
++ * - GET /api/animator/status          — current rate-limit / back-off status
++ * - GET /api/animator/sessions        — enriched session list
+  * - GET /api/animator/session-transcript — transcript and status
+- * - GET /api/animator/session-stream — SSE streaming
++ * - GET /api/animator/session-stream  — SSE streaming
+  *
+  * Uses a fake guild with in-memory Stacks to test route handler logic
+  * without running a real HTTP server.
+@@ -19,7 +20,7 @@ import { createStacksApparatus } from '@shardworks/stacks-apparatus';
+ import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
+ import type { StacksApi, Book } from '@shardworks/stacks-apparatus';
+ 
+-import type { SessionDoc, AnimatorApi, SessionChunk } from './types.ts';
++import type { SessionDoc, AnimatorApi, AnimatorStatusDoc, SessionChunk } from './types.ts';
+ import { animatorRoutes } from './oculus-routes.ts';
+ 
+ // ── Types for test data ─────────────────────────────────────────────
+@@ -82,17 +83,23 @@ let writsBook: Book<WritDoc>;
+ let memBackend: InstanceType<typeof MemoryBackend>;
+ let mockAnimatorApi: AnimatorApi;
+ 
+-function setup(subscribeResult: AsyncIterable<SessionChunk> | null = null) {
++function setup(
++  subscribeResult: AsyncIterable<SessionChunk> | null = null,
++  statusDoc: AnimatorStatusDoc = { id: 'current', state: 'running', backoffLevel: 0 },
++) {
+   memBackend = new MemoryBackend();
+   const stacksPlugin = createStacksApparatus(memBackend);
+ 
+   const apparatusMap = new Map<string, unknown>();
+ 
+-  // Create a minimal AnimatorApi mock for subscribeToSession
++  // Create a minimal AnimatorApi mock
+   mockAnimatorApi = {
+-    subscribeToSession(sessionId: string) {
++    subscribeToSession(_sessionId: string) {
+       return subscribeResult;
+     },
++    async getStatus() {
++      return statusDoc;
++    },
+   } as unknown as AnimatorApi;
+ 
+   const fakeGuild: Guild = {
+@@ -561,13 +568,51 @@ describe('Animator Oculus Routes', () => {
+     });
+   });
+ 
++  // ── GET /api/animator/status ────────────────────────────────────────
++
++  describe('GET /api/animator/status', () => {
++    it('returns running status when animator is running', async () => {
++      setup(null, { id: 'current', state: 'running', backoffLevel: 0 });
++      const handler = getHandler('GET', '/api/animator/status');
++      const { ctx, getResponse } = createMockContext();
++      await handler(ctx as any);
++      const { data, status } = getResponse();
++      assert.equal(status, 200);
++      assert.deepEqual(data, { id: 'current', state: 'running', backoffLevel: 0 });
++    });
++
++    it('returns paused status with back-off details when animator is paused', async () => {
++      const pausedUntil = new Date(Date.now() + 900_000).toISOString();
++      const pausedSince = new Date().toISOString();
++      setup(null, {
++        id: 'current',
++        state: 'paused',
++        backoffLevel: 1,
++        pausedSince,
++        pausedUntil,
++        pauseReason: 'rate-limit',
++      });
++      const handler = getHandler('GET', '/api/animator/status');
++      const { ctx, getResponse } = createMockContext();
++      await handler(ctx as any);
++      const { data, status } = getResponse();
++      assert.equal(status, 200);
++      const d = data as AnimatorStatusDoc;
++      assert.equal(d.state, 'paused');
++      assert.equal(d.backoffLevel, 1);
++      assert.equal(d.pauseReason, 'rate-limit');
++      assert.equal(d.pausedUntil, pausedUntil);
++    });
++  });
++
+   // ── Route structure ─────────────────────────────────────────────────
+ 
+   describe('Route definitions', () => {
+-    it('exports three routes with correct methods and paths', () => {
+-      assert.equal(animatorRoutes.length, 3);
++    it('exports four routes with correct methods and paths', () => {
++      assert.equal(animatorRoutes.length, 4);
+ 
+       const paths = animatorRoutes.map((r) => `${r.method} ${r.path}`);
++      assert.ok(paths.includes('GET /api/animator/status'));
+       assert.ok(paths.includes('GET /api/animator/sessions'));
+       assert.ok(paths.includes('GET /api/animator/session-transcript'));
+       assert.ok(paths.includes('GET /api/animator/session-stream'));
+diff --git a/packages/plugins/animator/src/oculus-routes.ts b/packages/plugins/animator/src/oculus-routes.ts
+index 3af3385..3758133 100644
+--- a/packages/plugins/animator/src/oculus-routes.ts
++++ b/packages/plugins/animator/src/oculus-routes.ts
+@@ -2,9 +2,10 @@
+  * Animator — custom Oculus API routes.
+  *
+  * Contributes:
+- * - GET /api/animator/sessions — enriched session list with role, writ title, token usage
++ * - GET /api/animator/status          — current rate-limit / back-off status
++ * - GET /api/animator/sessions        — enriched session list with role, writ title, token usage
+  * - GET /api/animator/session-transcript — session transcript and status
+- * - GET /api/animator/session-stream — SSE stream of real-time session chunks
++ * - GET /api/animator/session-stream  — SSE stream of real-time session chunks
+  *
+  * Does NOT import from @shardworks/oculus-apparatus to avoid a circular
+  * package dependency. The route shape is compatible with RouteContribution
+@@ -32,6 +33,15 @@ interface WritEntry {
+ }
+ 
+ export const animatorRoutes = [
++  {
++    method: 'GET',
++    path: '/api/animator/status',
++    handler: async (c: Context) => {
++      const animator = guild().apparatus<AnimatorApi>('animator');
++      const status = await animator.getStatus();
++      return c.json(status);
++    },
++  },
+   {
+     method: 'GET',
+     path: '/api/animator/sessions',
+diff --git a/packages/plugins/animator/src/session-record-handler.ts b/packages/plugins/animator/src/session-record-handler.ts
+index fa533aa..b524175 100644
+--- a/packages/plugins/animator/src/session-record-handler.ts
++++ b/packages/plugins/animator/src/session-record-handler.ts
+@@ -11,7 +11,7 @@ import type { SessionDoc, TranscriptDoc, TranscriptMessage } from './types.ts';
+ 
+ export interface SessionRecordParams {
+   sessionId: string;
+-  status: 'completed' | 'failed' | 'timeout';
++  status: 'completed' | 'failed' | 'timeout' | 'rate-limited';
+   exitCode: number;
+   error?: string;
+   costUsd?: number;
+@@ -36,7 +36,7 @@ export async function handleSessionRecord(
+ 
+   // Step 1: Check if session is already in a terminal state — don't overwrite.
+   const currentDoc = await sessions.get(params.sessionId);
+-  const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled']);
++  const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled', 'rate-limited']);
+   if (currentDoc && TERMINAL_STATUSES.has(currentDoc.status)) {
+     // Session already terminal — don't overwrite. Write transcript if provided.
+     console.log(
+diff --git a/packages/plugins/animator/src/tools/animator-status.ts b/packages/plugins/animator/src/tools/animator-status.ts
+new file mode 100644
+index 0000000..26d86ae
+--- /dev/null
++++ b/packages/plugins/animator/src/tools/animator-status.ts
+@@ -0,0 +1,29 @@
++/**
++ * animator-status tool — show current Animator rate-limit status.
++ *
++ * Returns the AnimatorStatusDoc: state (running | paused), pausedUntil,
++ * backoffLevel, and related metadata. Callers use this to determine whether
++ * new sessions will be dispatched or held until the back-off window clears.
++ *
++ * See: docs/architecture/apparatus/animator.md
++ */
++
++import { tool } from '@shardworks/tools-apparatus';
++import { guild } from '@shardworks/nexus-core';
++import type { AnimatorApi } from '../types.ts';
++
++export default tool({
++  name: 'animator-status',
++  description: 'Show current Animator rate-limit status',
++  instructions:
++    'Returns the Animator\'s current dispatch state. When state is "paused" ' +
++    'the Animator is in a rate-limit back-off window and no new sessions will ' +
++    'be launched until pausedUntil elapses. backoffLevel indicates how many ' +
++    'consecutive rate-limit hits have occurred (resets to 0 after a clean run).',
++  params: {},
++  permission: 'read',
++  handler: async () => {
++    const animator = guild().apparatus<AnimatorApi>('animator');
++    return animator.getStatus();
++  },
++});
+diff --git a/packages/plugins/animator/src/tools/index.ts b/packages/plugins/animator/src/tools/index.ts
+index d0ec9fd..e59bf3f 100644
+--- a/packages/plugins/animator/src/tools/index.ts
++++ b/packages/plugins/animator/src/tools/index.ts
+@@ -9,3 +9,4 @@ export { default as sessionCancel } from './session-cancel.ts';
+ export { default as sessionRunning } from './session-running.ts';
+ export { default as sessionRecord } from './session-record.ts';
+ export { default as sessionHeartbeat } from './session-heartbeat.ts';
++export { default as animatorStatus } from './animator-status.ts';
+diff --git a/packages/plugins/animator/src/tools/session-heartbeat.ts b/packages/plugins/animator/src/tools/session-heartbeat.ts
+index 0a59364..b0dd9c7 100644
+--- a/packages/plugins/animator/src/tools/session-heartbeat.ts
++++ b/packages/plugins/animator/src/tools/session-heartbeat.ts
+@@ -15,7 +15,7 @@ import type { StacksApi } from '@shardworks/stacks-apparatus';
+ import type { SessionDoc } from '../types.ts';
+ 
+ /** Terminal status values — any of these means the session is done. */
+-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled']);
++const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled', 'rate-limited']);
+ 
+ export default tool({
+   name: 'session-heartbeat',
+diff --git a/packages/plugins/animator/src/tools/session-list.ts b/packages/plugins/animator/src/tools/session-list.ts
+index 835c54a..af02b9b 100644
+--- a/packages/plugins/animator/src/tools/session-list.ts
++++ b/packages/plugins/animator/src/tools/session-list.ts
+@@ -21,7 +21,7 @@ export default tool({
+     'Use for investigating recent activity, debugging, or reporting. ' +
+     'Filters by indexed fields only — use Stacks queries directly for metadata fields.',
+   params: {
+-    status: z.enum(['running', 'completed', 'failed', 'timeout', 'cancelled']).optional()
++    status: z.enum(['running', 'completed', 'failed', 'timeout', 'cancelled', 'rate-limited']).optional()
+       .describe('Filter by session status'),
+     provider: z.string().optional()
+       .describe('Filter by provider name (e.g. "claude-code")'),
+diff --git a/packages/plugins/animator/src/tools/session-record.ts b/packages/plugins/animator/src/tools/session-record.ts
+index e05de77..8510ec0 100644
+--- a/packages/plugins/animator/src/tools/session-record.ts
++++ b/packages/plugins/animator/src/tools/session-record.ts
+@@ -26,7 +26,7 @@ export default tool({
+     'Not intended for patron or anima use.',
+   params: {
+     sessionId: z.string().describe('The session ID'),
+-    status: z.enum(['completed', 'failed', 'timeout']).describe('Terminal session status'),
++    status: z.enum(['completed', 'failed', 'timeout', 'rate-limited']).describe('Terminal session status'),
+     exitCode: z.number().describe('Process exit code'),
+     error: z.string().optional().describe('Error message if failed'),
+     costUsd: z.number().optional().describe('Cost in USD'),
+diff --git a/packages/plugins/animator/src/tools/session-running.ts b/packages/plugins/animator/src/tools/session-running.ts
+index 36f06c9..4b24be1 100644
+--- a/packages/plugins/animator/src/tools/session-running.ts
++++ b/packages/plugins/animator/src/tools/session-running.ts
+@@ -48,7 +48,7 @@ export default tool({
+ 
+     // Terminal-state guard: a late or duplicate ready report must not regress
+     // a session that has already reached a terminal state.
+-    const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled']);
++    const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled', 'rate-limited']);
+     if (existing && TERMINAL_STATUSES.has(existing.status)) {
+       console.warn(
+         `[animator] Ignoring session-running for ${params.sessionId} (already ${existing.status})`,
+diff --git a/packages/plugins/animator/src/tools/session-tools.test.ts b/packages/plugins/animator/src/tools/session-tools.test.ts
+index d580a3a..7202d50 100644
+--- a/packages/plugins/animator/src/tools/session-tools.test.ts
++++ b/packages/plugins/animator/src/tools/session-tools.test.ts
+@@ -15,10 +15,11 @@ import { createStacksApparatus } from '@shardworks/stacks-apparatus';
+ import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
+ import type { StacksApi, Book } from '@shardworks/stacks-apparatus';
+ 
+-import type { SessionDoc, AnimatorApi } from '../types.ts';
++import type { SessionDoc, AnimatorApi, AnimatorStatusDoc } from '../types.ts';
+ import sessionList from './session-list.ts';
+ import sessionShow from './session-show.ts';
+ import sessionCancel from './session-cancel.ts';
++import animatorStatus from './animator-status.ts';
+ 
+ // ── Test harness ────────────────────────────────────────────────────
+ 
+@@ -345,3 +346,62 @@ describe('session-cancel tool', () => {
+     assert.equal(sessionCancel.permission, 'animate');
+   });
+ });
++
++// ── animator-status tool tests ─────────────────────────────────────
++
++describe('animator-status tool', () => {
++  beforeEach(() => {
++    setup();
++  });
++
++  afterEach(() => {
++    clearGuild();
++  });
++
++  it('returns running status from animator.getStatus()', async () => {
++    const runningDoc: AnimatorStatusDoc = { id: 'current', state: 'running', backoffLevel: 0 };
++    const fakeAnimator: AnimatorApi = {
++      summon() { throw new Error('not used'); },
++      animate() { throw new Error('not used'); },
++      subscribeToSession() { return null; },
++      async cancel() { throw new Error('not used'); },
++      async getStatus() { return runningDoc; },
++      async getSessionCosts() { return new Map(); },
++    };
++    apparatusMap.set('animator', fakeAnimator);
++
++    const result = await animatorStatus.handler({});
++    assert.deepEqual(result, runningDoc);
++  });
++
++  it('returns paused status with back-off details', async () => {
++    const pausedUntil = new Date(Date.now() + 900_000).toISOString();
++    const pausedDoc: AnimatorStatusDoc = {
++      id: 'current',
++      state: 'paused',
++      backoffLevel: 2,
++      pausedUntil,
++      pauseReason: 'rate-limit',
++    };
++    const fakeAnimator: AnimatorApi = {
++      summon() { throw new Error('not used'); },
++      animate() { throw new Error('not used'); },
++      subscribeToSession() { return null; },
++      async cancel() { throw new Error('not used'); },
++      async getStatus() { return pausedDoc; },
++      async getSessionCosts() { return new Map(); },
++    };
++    apparatusMap.set('animator', fakeAnimator);
++
++    const result = await animatorStatus.handler({});
++    assert.equal(result.state, 'paused');
++    assert.equal(result.backoffLevel, 2);
++    assert.equal(result.pausedUntil, pausedUntil);
++    assert.equal(result.pauseReason, 'rate-limit');
++  });
++
++  it('has name "animator-status" and permission read', () => {
++    assert.equal(animatorStatus.name, 'animator-status');
++    assert.equal(animatorStatus.permission, 'read');
++  });
++});
+diff --git a/packages/plugins/animator/src/types.ts b/packages/plugins/animator/src/types.ts
+index e332929..d0eaa0a 100644
+--- a/packages/plugins/animator/src/types.ts
++++ b/packages/plugins/animator/src/types.ts
+@@ -71,7 +71,7 @@ export interface SessionResult {
+   /** Unique session id (generated by The Animator). */
+   id: string;
+   /** Terminal status. */
+-  status: 'completed' | 'failed' | 'timeout' | 'cancelled';
++  status: 'completed' | 'failed' | 'timeout' | 'cancelled' | 'rate-limited';
+   /** When the session started (ISO-8601). */
+   startedAt: string;
+   /** When the session ended (ISO-8601). */
+@@ -261,6 +261,18 @@ export interface AnimatorApi {
+    */
+   cancel(sessionId: string, options?: { reason?: string }): Promise<SessionDoc>;
+ 
++  /**
++   * Read the current Animator status document.
++   *
++   * Returns the `AnimatorStatusDoc` from the `animator_status` book,
++   * or a synthesized running state when no doc has been persisted yet
++   * (first boot before any rate-limit has been encountered).
++   *
++   * Callers that need to determine whether dispatches are currently
++   * allowed should check `state === 'running'` OR `pausedUntil <= now`.
++   */
++  getStatus(): Promise<AnimatorStatusDoc>;
++
+   /**
+    * Bulk per-session cost/token lookup — the first read-side helper on
+    * AnimatorApi. Resolves cost and token-usage snapshots for the given
+@@ -381,9 +393,23 @@ export interface SessionProviderConfig {
+ /** A single message from the NDJSON stream. Untyped — shape varies by provider. */
+ export type TranscriptMessage = Record<string, unknown>;
+ 
++/**
++ * A structured tag attached to a SessionProviderResult when the provider
++ * has detected a specific termination reason (e.g. rate-limiting).
++ * Carried from provider → Animator so Animator can act on the reason
++ * (e.g. transition the rate-limit back-off state machine) without
++ * pattern-matching freeform strings.
++ */
++export interface TerminationTag {
++  /** Why the session terminated. */
++  reason: 'rate-limited';
++  /** Which detection signal fired first in the cascade. */
++  detectedBy: 'ndjson' | 'stderr' | 'exit-code';
++}
++
+ export interface SessionProviderResult {
+   /** Exit status. */
+-  status: 'completed' | 'failed' | 'timeout' | 'cancelled';
++  status: 'completed' | 'failed' | 'timeout' | 'cancelled' | 'rate-limited';
+   /** Numeric exit code from the process. */
+   exitCode: number;
+   /** Error message if failed. */
+@@ -411,6 +437,12 @@ export interface SessionProviderResult {
+   output?: string;
+   /** Process signal name if the session was killed by signal (e.g. 'SIGTERM', 'SIGKILL'). */
+   signal?: string;
++  /**
++   * Structured termination tag attached by the provider when it detects
++   * a specific reason for termination. Only present for non-generic outcomes
++   * (e.g. rate-limiting). Undefined for normal completion, failure, and timeout.
++   */
++  terminationTag?: TerminationTag;
+ }
+ 
+ // ── Stacks document type ─────────────────────────────────────────────
+@@ -424,11 +456,11 @@ export interface SessionDoc {
+   /**
+    * Session status. Initially written as `'running'` when the session is
+    * launched, then updated to a terminal status (`'completed'`, `'failed'`,
+-   * `'timeout'`, or `'cancelled'`) after the provider exits or cancel is called.
+-   * The `'running'` state is transient.
++   * `'timeout'`, `'cancelled'`, or `'rate-limited'`) after the provider exits
++   * or cancel is called. The `'running'` state is transient.
+    * `SessionResult.status` only includes terminal states.
+    */
+-  status: 'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled';
++  status: 'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'rate-limited';
+   startedAt: string;
+   endedAt?: string;
+   durationMs?: number;
+@@ -504,8 +536,59 @@ export interface GuildStateDoc {
+   [key: string]: unknown;
+ }
+ 
++/**
++ * Rate-limit back-off state document stored in the Animator's
++ * 'animator_status' book with well-known id 'current'.
++ *
++ * `state === 'running'` means the Animator is accepting new dispatches.
++ * `state === 'paused'` means dispatches are blocked until `pausedUntil`.
++ *
++ * Consumers that need to determine dispatchability should check both
++ * `state === 'running'` AND `pausedUntil <= now` — the "natural probe"
++ * semantic means `running` is a stronger claim than clock-elapsed alone.
++ */
++export interface AnimatorStatusDoc {
++  /** Well-known document id — always 'current'. */
++  id: 'current';
++  /** Current operating state. */
++  state: 'running' | 'paused';
++  /** ISO timestamp when the current pause started. Undefined when running. */
++  pausedSince?: string;
++  /** ISO timestamp when the pause is expected to lift. Undefined when running. */
++  pausedUntil?: string;
++  /** Why the pause was triggered. Currently only 'rate-limit'. */
++  pauseReason?: 'rate-limit';
++  /**
++   * Current back-off level (0-based). 0 on the first pause. Incremented after
++   * each post-resume probe that still rate-limits. Reset to 0 after any
++   * non-rate-limit terminal (D7).
++   */
++  backoffLevel: number;
++  /** ISO timestamp of the last rate-limit hit. */
++  backoffLastHitAt?: string;
++  /** Session id that triggered the most recent rate-limit pause. */
++  lastTriggeringSession?: string;
++  /** Index signature required by BookEntry. */
++  [key: string]: unknown;
++}
++
+ // ── Animator config ──────────────────────────────────────────────────
+ 
++/**
++ * Rate-limit back-off configuration (sub-block of AnimatorConfig).
++ * All durations are in milliseconds.
++ *
++ * Validation: missing block → use defaults; present but malformed → throw at startup (D10).
++ */
++export interface RateLimitBackoffConfig {
++  /** Pause duration for the first hit. Default: 15 minutes (900_000 ms). */
++  initialMs: number;
++  /** Maximum pause duration cap. Default: 1 hour (3_600_000 ms). */
++  maxMs: number;
++  /** Multiplier applied per consecutive post-resume failure. Default: 2. */
++  factor: number;
++}
++
+ /** Plugin configuration stored at guild.json["animator"]. */
+ export interface AnimatorConfig {
+   /**
+@@ -514,6 +597,11 @@ export interface AnimatorConfig {
+    * Defaults to 'claude-code' if not specified.
+    */
+   sessionProvider?: string;
++  /**
++   * Rate-limit back-off tuning. Missing → use defaults.
++   * Present but malformed → throw at startup.
++   */
++  rateLimitBackoff?: RateLimitBackoffConfig;
+ }
+ 
+ // Augment GuildConfig so `guild().guildConfig().animator` is typed without
+diff --git a/packages/plugins/claude-code/src/babysitter.test.ts b/packages/plugins/claude-code/src/babysitter.test.ts
+index e42b6e9..5f3cda1 100644
+--- a/packages/plugins/claude-code/src/babysitter.test.ts
++++ b/packages/plugins/claude-code/src/babysitter.test.ts
+@@ -633,6 +633,121 @@ describe('reportResult()', () => {
+     assert.equal(dlqContent.sessionId, 'sess-dlq-2');
+     assert.equal(dlqContent.status, 'completed');
+   });
++
++  // ── Rate-limit cascade ──────────────────────────────────────────────
++
++  it('reports rate-limited when result.rateLimitDetected is set (cascade stage 1)', async () => {
++    mockServer = await startMockServer(() => ({
++      status: 200,
++      body: { ok: true },
++    }));
++
++    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-test-'));
++    const config = makeConfig({ guildToolUrl: mockServer.url, cwd: tmpDir });
++
++    await reportResult(config, {
++      exitCode: 1,
++      transcript: [],
++      rateLimitDetected: true,
++      rateLimitDetectedBy: 'ndjson',
++    }, []);
++
++    const body = JSON.parse(mockServer.requests[0]!.body);
++    assert.equal(body.status, 'rate-limited');
++    assert.match(body.error, /rate limit detected/i);
++    assert.match(body.error, /ndjson/i);
++  });
++
++  it('reports rate-limited from stderr accumulator (cascade stage 2)', async () => {
++    mockServer = await startMockServer(() => ({
++      status: 200,
++      body: { ok: true },
++    }));
++
++    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-stderr-test-'));
++    const config = makeConfig({ guildToolUrl: mockServer.url, cwd: tmpDir });
++
++    // No NDJSON detection, but stderr contains rate-limit text
++    await reportResult(
++      config,
++      { exitCode: 1, transcript: [] },
++      [],
++      undefined,
++      undefined,
++      'Error: HTTP 429 Too Many Requests\n',
++    );
++
++    const body = JSON.parse(mockServer.requests[0]!.body);
++    assert.equal(body.status, 'rate-limited');
++    assert.match(body.error, /rate limit detected/i);
++    assert.match(body.error, /stderr/i);
++  });
++
++  it('ndjson cascade takes priority over stderr match', async () => {
++    mockServer = await startMockServer(() => ({
++      status: 200,
++      body: { ok: true },
++    }));
++
++    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-priority-test-'));
++    const config = makeConfig({ guildToolUrl: mockServer.url, cwd: tmpDir });
++
++    await reportResult(
++      config,
++      { exitCode: 1, transcript: [], rateLimitDetected: true, rateLimitDetectedBy: 'ndjson' },
++      [],
++      undefined,
++      undefined,
++      'rate limit exceeded',  // also matches stderr
++    );
++
++    const body = JSON.parse(mockServer.requests[0]!.body);
++    assert.equal(body.status, 'rate-limited');
++    assert.match(body.error, /ndjson/i);
++  });
++
++  it('cancelled override wins over rate-limit detection', async () => {
++    mockServer = await startMockServer(() => ({
++      status: 200,
++      body: { ok: true },
++    }));
++
++    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-cancel-test-'));
++    const config = makeConfig({ guildToolUrl: mockServer.url, cwd: tmpDir });
++
++    await reportResult(
++      config,
++      { exitCode: 1, transcript: [], rateLimitDetected: true, rateLimitDetectedBy: 'ndjson' },
++      [],
++      undefined,
++      'cancelled',
++    );
++
++    const body = JSON.parse(mockServer.requests[0]!.body);
++    assert.equal(body.status, 'cancelled');
++  });
++
++  it('reports failed when stderr has no rate-limit text and exit code is 1', async () => {
++    mockServer = await startMockServer(() => ({
++      status: 200,
++      body: { ok: true },
++    }));
++
++    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-failed-test-'));
++    const config = makeConfig({ guildToolUrl: mockServer.url, cwd: tmpDir });
++
++    await reportResult(
++      config,
++      { exitCode: 1, transcript: [] },
++      [],
++      undefined,
++      undefined,
++      'Some unrelated error output\n',
++    );
++
++    const body = JSON.parse(mockServer.requests[0]!.body);
++    assert.equal(body.status, 'failed');
++  });
+ });
+ 
+ // ── runBabysitter (end-to-end) ─────────────────────────────────────────
+diff --git a/packages/plugins/claude-code/src/babysitter.ts b/packages/plugins/claude-code/src/babysitter.ts
+index 36613b3..eacd335 100644
+--- a/packages/plugins/claude-code/src/babysitter.ts
++++ b/packages/plugins/claude-code/src/babysitter.ts
+@@ -36,6 +36,7 @@ import {
+   processNdjsonBuffer,
+   parseStreamJsonMessage,
+   extractFinalAssistantText,
++  isRateLimitText,
+   type StreamJsonResult,
+ } from './index.ts';
+ 
+@@ -565,6 +566,14 @@ export async function reportRunning(
+  * Report the final session result to the guild via the session-record tool.
+  *
+  * If the guild is unreachable, writes the payload to the DLQ.
++ *
++ * Rate-limit detection cascade (D5):
++ * 1. NDJSON result message detection fires first (via parseStreamJsonMessage).
++ * 2. Stderr pattern match (passed as stderrAccumulator) fires second.
++ * 3. Exit code is not sufficient on its own (claude uses code 1 for all errors).
++ *
++ * When any cascade branch fires, the session is reported as 'rate-limited'
++ * so the Animator's back-off state machine can act.
+  */
+ export async function reportResult(
+   config: BabysitterConfig,
+@@ -572,18 +581,43 @@ export async function reportResult(
+   transcript: Record<string, unknown>[],
+   timeoutMs?: number,
+   statusOverride?: 'cancelled',
++  stderrAccumulator?: string,
+ ): Promise<void> {
+   const route = toolNameToRoute('session-record');
+   const url = `${config.guildToolUrl}${route}`;
+-  const status = statusOverride ?? (result.exitCode === 0 ? 'completed' : 'failed');
+   const output = extractFinalAssistantText(transcript);
+ 
++  // Determine terminal status via the detection cascade.
++  let status: 'completed' | 'failed' | 'timeout' | 'rate-limited' | 'cancelled';
++  let rateLimitDetectedBy: 'ndjson' | 'stderr' | undefined;
++
++  if (statusOverride === 'cancelled') {
++    status = 'cancelled';
++  } else if (result.rateLimitDetected) {
++    // Stage 1: NDJSON result message fired in parseStreamJsonMessage.
++    status = 'rate-limited';
++    // rateLimitDetectedBy on StreamJsonResult can also be 'exit-code' but the
++    // babysitter only writes 'ndjson' here; normalize to the narrower type.
++    rateLimitDetectedBy = result.rateLimitDetectedBy === 'stderr' ? 'stderr' : 'ndjson';
++  } else if (stderrAccumulator && isRateLimitText(stderrAccumulator)) {
++    // Stage 2: Stderr pattern match.
++    status = 'rate-limited';
++    rateLimitDetectedBy = 'stderr';
++  } else {
++    // Normal outcome.
++    status = result.exitCode === 0 ? 'completed' : 'failed';
++  }
++
+   const payload = {
+     sessionId: config.sessionId,
+     status,
+     exitCode: result.exitCode,
+     signal: result.signal,
+-    error: status === 'failed' ? `claude exited with code ${result.exitCode}` : undefined,
++    error: status === 'failed'
++      ? `claude exited with code ${result.exitCode}`
++      : status === 'rate-limited'
++        ? `Rate limit detected (${rateLimitDetectedBy ?? 'unknown'})`
++        : undefined,
+     costUsd: result.costUsd,
+     tokenUsage: result.tokenUsage,
+     output,
+@@ -728,9 +762,12 @@ export async function runBabysitter(
+     }
+     claudeProc.stdin!.end();
+ 
+-    // Forward claude's stderr through the babysitter's redirected stderr
++    // Forward claude's stderr through the babysitter's redirected stderr,
++    // and accumulate it for rate-limit detection (stage 2 of the cascade).
++    let stderrAccumulator = '';
+     claudeProc.stderr?.on('data', (chunk: Buffer) => {
+       process.stderr.write(chunk);
++      stderrAccumulator += chunk.toString();
+     });
+ 
+     // 5. Report "running" status (don't await — fire and forget with retry)
+@@ -837,8 +874,8 @@ export async function runBabysitter(
+       signal: exitSignal,
+     };
+ 
+-    // 8. Report result
+-    await reportResult(config, result, acc.transcript, retryTimeoutMs, cancelledBySignal ? 'cancelled' : undefined);
++    // 8. Report result (pass accumulated stderr for cascade stage 2)
++    await reportResult(config, result, acc.transcript, retryTimeoutMs, cancelledBySignal ? 'cancelled' : undefined, stderrAccumulator);
+   } catch (err) {
+     // Top-level error: attempt to report failure
+     const message = err instanceof Error ? err.message : String(err);
+diff --git a/packages/plugins/claude-code/src/detached.ts b/packages/plugins/claude-code/src/detached.ts
+index 10dea0e..a781557 100644
+--- a/packages/plugins/claude-code/src/detached.ts
++++ b/packages/plugins/claude-code/src/detached.ts
+@@ -311,6 +311,11 @@ function docToProviderResult(doc: SessionDoc): SessionProviderResult {
+     output: doc.output,
+     // Note: transcript is not included here — it's in the transcripts book.
+     // The babysitter writes it directly to SQLite.
++    // Rate-limited sessions carry a termination tag so the Animator's
++    // back-off state machine can act without pattern-matching strings.
++    ...(doc.status === 'rate-limited'
++      ? { terminationTag: { reason: 'rate-limited' as const, detectedBy: 'ndjson' as const } }
++      : {}),
+   };
+ }
+ 
+diff --git a/packages/plugins/claude-code/src/index.ts b/packages/plugins/claude-code/src/index.ts
+index 7d3b9a1..8b4a7dd 100644
+--- a/packages/plugins/claude-code/src/index.ts
++++ b/packages/plugins/claude-code/src/index.ts
+@@ -131,6 +131,44 @@ export interface StreamJsonResult {
+   providerSessionId?: string;
+   /** Process signal name if killed by signal (e.g. 'SIGTERM'). */
+   signal?: string;
++  /**
++   * Set to 'rate-limited' when the detection cascade fires.
++   * The back-off state machine in the Animator consumes this.
++   */
++  rateLimitDetected?: true;
++  /** Which detection branch in the cascade fired. */
++  rateLimitDetectedBy?: 'ndjson' | 'stderr' | 'exit-code';
++}
++
++// ── Rate-limit detection ─────────────────────────────────────────────
++
++/**
++ * Rate-limit signal patterns.
++ *
++ * The Anthropic API returns HTTP 429 when rate-limited. The Claude CLI
++ * surfaces this as an error in various forms depending on the signal source:
++ * - NDJSON `result` message: `is_error: true` with `result` containing the
++ *   HTTP error text (e.g. "rate limit exceeded", "429", "Too Many Requests").
++ * - Stderr: error text written by the CLI before exit.
++ * - Exit code: The Claude CLI exits with code 1 for all errors, so we only
++ *   use exit code as a fallback when combined with a stderr pattern match.
++ *
++ * @internal Exported for testing only.
++ */
++export const RATE_LIMIT_PATTERNS: readonly RegExp[] = [
++  /rate.?limit/i,
++  /too many requests/i,
++  /\b429\b/,
++  /overloaded/i,
++  /quota.?exceeded/i,
++];
++
++/**
++ * Returns true if the given text matches any rate-limit signal pattern.
++ * @internal Exported for testing only.
++ */
++export function isRateLimitText(text: string): boolean {
++  return RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(text));
+ }
+ 
+ /**
+@@ -194,6 +232,18 @@ export function parseStreamJsonMessage(
+           ? usage.cache_creation_input_tokens : undefined,
+       };
+     }
++
++    // Rate-limit detection in NDJSON result message (cascade stage 1).
++    // Claude CLI emits a `result` message with `is_error: true` and a
++    // `result` field containing the error text when the API returns 429.
++    // We pattern-match on the error text as the field name is unspecified.
++    if (msg.is_error === true) {
++      const resultText = typeof msg.result === 'string' ? msg.result : '';
++      if (isRateLimitText(resultText)) {
++        (acc as StreamJsonResult).rateLimitDetected = true;
++        (acc as StreamJsonResult).rateLimitDetectedBy = 'ndjson';
++      }
++    }
+   }
+ 
+   return chunks;
+diff --git a/packages/plugins/claude-code/src/stream-parser.test.ts b/packages/plugins/claude-code/src/stream-parser.test.ts
+index 24973b5..546a7b2 100644
+--- a/packages/plugins/claude-code/src/stream-parser.test.ts
++++ b/packages/plugins/claude-code/src/stream-parser.test.ts
+@@ -13,6 +13,8 @@ import {
+   parseStreamJsonMessage,
+   processNdjsonBuffer,
+   extractFinalAssistantText,
++  isRateLimitText,
++  RATE_LIMIT_PATTERNS,
+   type StreamJsonResult,
+ } from './index.ts';
+ 
+@@ -399,3 +401,133 @@ describe('processNdjsonBuffer()', () => {
+     assert.equal(buf, '');
+   });
+ });
++
++// ── isRateLimitText ─────────────────────────────────────────────────
++
++describe('isRateLimitText()', () => {
++  it('returns true for "rate limit" (space variant)', () => {
++    assert.equal(isRateLimitText('Error: rate limit exceeded'), true);
++  });
++
++  it('returns true for "rate-limit" (hyphen variant)', () => {
++    assert.equal(isRateLimitText('rate-limit hit on your account'), true);
++  });
++
++  it('returns true for "Too Many Requests"', () => {
++    assert.equal(isRateLimitText('HTTP 429 Too Many Requests'), true);
++  });
++
++  it('returns true for bare "429"', () => {
++    assert.equal(isRateLimitText('received 429 from upstream'), true);
++  });
++
++  it('returns true for "overloaded"', () => {
++    assert.equal(isRateLimitText('API is currently overloaded'), true);
++  });
++
++  it('returns true for "quota exceeded"', () => {
++    assert.equal(isRateLimitText('quota exceeded for this period'), true);
++  });
++
++  it('returns true for "quota-exceeded" (hyphen variant)', () => {
++    assert.equal(isRateLimitText('quota-exceeded error'), true);
++  });
++
++  it('returns false for an unrelated error message', () => {
++    assert.equal(isRateLimitText('Something went wrong with the file'), false);
++  });
++
++  it('returns false for empty string', () => {
++    assert.equal(isRateLimitText(''), false);
++  });
++
++  it('is case-insensitive for all patterns', () => {
++    assert.equal(isRateLimitText('RATE LIMIT EXCEEDED'), true);
++    assert.equal(isRateLimitText('too many requests'), true);
++    assert.equal(isRateLimitText('OVERLOADED'), true);
++  });
++});
++
++describe('RATE_LIMIT_PATTERNS', () => {
++  it('exports a non-empty readonly array', () => {
++    assert.ok(Array.isArray(RATE_LIMIT_PATTERNS));
++    assert.ok(RATE_LIMIT_PATTERNS.length > 0);
++  });
++});
++
++// ── Rate-limit detection in parseStreamJsonMessage ──────────────────
++
++describe('parseStreamJsonMessage() rate-limit detection', () => {
++  it('sets rateLimitDetected when result has is_error and rate-limit text', () => {
++    const acc = freshAcc() as StreamJsonResult & typeof acc;
++    parseStreamJsonMessage({
++      type: 'result',
++      is_error: true,
++      result: 'Error: rate limit exceeded for your account',
++      total_cost_usd: 0,
++      session_id: 'sess-1',
++    }, acc as Parameters<typeof parseStreamJsonMessage>[1]);
++
++    assert.equal((acc as unknown as StreamJsonResult).rateLimitDetected, true);
++    assert.equal((acc as unknown as StreamJsonResult).rateLimitDetectedBy, 'ndjson');
++  });
++
++  it('sets rateLimitDetected for "429 Too Many Requests" in result text', () => {
++    const acc = freshAcc() as ReturnType<typeof freshAcc> & Partial<StreamJsonResult>;
++    parseStreamJsonMessage({
++      type: 'result',
++      is_error: true,
++      result: 'HTTP 429 Too Many Requests from Anthropic API',
++      total_cost_usd: 0,
++    }, acc as Parameters<typeof parseStreamJsonMessage>[1]);
++
++    assert.equal(acc.rateLimitDetected, true);
++    assert.equal(acc.rateLimitDetectedBy, 'ndjson');
++  });
++
++  it('does NOT set rateLimitDetected when is_error is false', () => {
++    const acc = freshAcc() as ReturnType<typeof freshAcc> & Partial<StreamJsonResult>;
++    parseStreamJsonMessage({
++      type: 'result',
++      is_error: false,
++      result: 'rate limit exceeded',
++      total_cost_usd: 0.01,
++      session_id: 'sess-ok',
++    }, acc as Parameters<typeof parseStreamJsonMessage>[1]);
++
++    assert.equal(acc.rateLimitDetected, undefined);
++  });
++
++  it('does NOT set rateLimitDetected when is_error but text is unrelated', () => {
++    const acc = freshAcc() as ReturnType<typeof freshAcc> & Partial<StreamJsonResult>;
++    parseStreamJsonMessage({
++      type: 'result',
++      is_error: true,
++      result: 'Something went wrong internally',
++      total_cost_usd: 0,
++    }, acc as Parameters<typeof parseStreamJsonMessage>[1]);
++
++    assert.equal(acc.rateLimitDetected, undefined);
++  });
++
++  it('does NOT set rateLimitDetected when result field is missing', () => {
++    const acc = freshAcc() as ReturnType<typeof freshAcc> & Partial<StreamJsonResult>;
++    parseStreamJsonMessage({
++      type: 'result',
++      is_error: true,
++      total_cost_usd: 0,
++    }, acc as Parameters<typeof parseStreamJsonMessage>[1]);
++
++    assert.equal(acc.rateLimitDetected, undefined);
++  });
++
++  it('does not set rateLimitDetected on non-result message types', () => {
++    const acc = freshAcc() as ReturnType<typeof freshAcc> & Partial<StreamJsonResult>;
++    parseStreamJsonMessage({
++      type: 'assistant',
++      message: { content: [{ type: 'text', text: 'rate limit exceeded' }] },
++    }, acc as Parameters<typeof parseStreamJsonMessage>[1]);
++
++    assert.equal(acc.rateLimitDetected, undefined);
++  });
++});
+diff --git a/packages/plugins/spider/src/block-types/animator-paused.ts b/packages/plugins/spider/src/block-types/animator-paused.ts
+new file mode 100644
+index 0000000..bb49f75
+--- /dev/null
++++ b/packages/plugins/spider/src/block-types/animator-paused.ts
+@@ -0,0 +1,51 @@
++/**
++ * Built-in block type: animator-paused.
++ *
++ * Blocks an engine while the Animator is within a rate-limit back-off window.
++ * Clears when:
++ *   - Animator state is 'running', OR
++ *   - Animator state is 'paused' but pausedUntil <= now (window has elapsed)
++ *
++ * Condition: {} (empty — the block type carries no per-engine payload;
++ * the Animator status doc is the single source of truth)
++ *
++ * See: docs/architecture/apparatus/animator.md
++ */
++
++import { z } from 'zod';
++import { guild } from '@shardworks/nexus-core';
++import type { AnimatorApi } from '@shardworks/animator-apparatus';
++import type { BlockType, CheckResult } from '../types.ts';
++
++const conditionSchema = z.object({});
++
++const animatorPausedBlockType: BlockType = {
++  id: 'animator-paused',
++  conditionSchema,
++  pollIntervalMs: 30_000,
++  async check(_condition: unknown): Promise<CheckResult> {
++    let animatorApi: AnimatorApi;
++    try {
++      animatorApi = guild().apparatus<AnimatorApi>('animator');
++    } catch {
++      // Animator not installed — treat as cleared so the engine doesn't
++      // get stuck forever in environments without the Animator.
++      return { status: 'cleared' };
++    }
++
++    const status = await animatorApi.getStatus();
++
++    if (status.state === 'running') {
++      return { status: 'cleared' };
++    }
++
++    // Paused: check if the window has elapsed (natural probe semantic).
++    if (status.pausedUntil && new Date(status.pausedUntil).getTime() <= Date.now()) {
++      return { status: 'cleared' };
++    }
++
++    return { status: 'pending' };
++  },
++};
++
++export default animatorPausedBlockType;
+diff --git a/packages/plugins/spider/src/block-types/index.ts b/packages/plugins/spider/src/block-types/index.ts
+index db37596..56ad359 100644
+--- a/packages/plugins/spider/src/block-types/index.ts
++++ b/packages/plugins/spider/src/block-types/index.ts
+@@ -2,3 +2,4 @@ export { default as writPhaseBlockType } from './writ-phase.ts';
+ export { default as scheduledTimeBlockType } from './scheduled-time.ts';
+ export { default as bookUpdatedBlockType } from './book-updated.ts';
+ export { default as patronInputBlockType } from './patron-input.ts';
++export { default as animatorPausedBlockType } from './animator-paused.ts';
+diff --git a/packages/plugins/spider/src/spider.test.ts b/packages/plugins/spider/src/spider.test.ts
+index 1e3a7e9..a960721 100644
+--- a/packages/plugins/spider/src/spider.test.ts
++++ b/packages/plugins/spider/src/spider.test.ts
+@@ -322,6 +322,12 @@ function buildFixture(
+     subscribeToSession(): AsyncIterable<SessionChunk> | null {
+       return null;
+     },
++    async getStatus() {
++      return { id: 'current' as const, state: 'running' as const, backoffLevel: 0 };
++    },
++    async getSessionCosts() {
++      return new Map();
++    },
+     async cancel(sessionId: string, options?: { reason?: string }): Promise<SessionDoc> {
+       cancelCalls.push({ sessionId, options });
+       const sessBook = stacks.book<SessionDoc>('animator', 'sessions');
+@@ -3341,6 +3347,7 @@ describe('Spider — engine blocking on external conditions', () => {
+     fire: (event: string, ...args: unknown[]) => Promise<void>;
+     summonCalls: SummonRequest[];
+     setSessionOutcome: (outcome: { status: 'completed' | 'failed'; error?: string; output?: string }) => void;
++    setAnimatorStatus: (status: { state: 'running' | 'paused'; pausedUntil?: string; backoffLevel?: number }) => void;
+   } {
+     const memBackend = new MemoryBackend();
+     const stacksPlugin = createStacksApparatus(memBackend);
+@@ -3446,6 +3453,7 @@ describe('Spider — engine blocking on external conditions', () => {
+     });
+ 
+     let currentSessionOutcome: { status: 'completed' | 'failed'; error?: string; output?: string } = { status: 'completed' };
++    let currentAnimatorStatus: { state: 'running' | 'paused'; pausedUntil?: string; backoffLevel?: number } = { state: 'running' };
+     const summonCalls: SummonRequest[] = [];
+     const cancelCalls: Array<{ sessionId: string; options?: { reason?: string } }> = [];
+     const mockAnimatorApi: AnimatorApi = {
+@@ -3490,6 +3498,12 @@ describe('Spider — engine blocking on external conditions', () => {
+       subscribeToSession(): AsyncIterable<SessionChunk> | null {
+         return null;
+       },
++      async getStatus() {
++        return { id: 'current' as const, backoffLevel: currentAnimatorStatus.backoffLevel ?? 0, ...currentAnimatorStatus };
++      },
++      async getSessionCosts() {
++        return new Map();
++      },
+       async cancel(sessionId: string, options?: { reason?: string }): Promise<SessionDoc> {
+         cancelCalls.push({ sessionId, options });
+         const sessBook = stacks.book<SessionDoc>('animator', 'sessions');
+@@ -3535,6 +3549,9 @@ describe('Spider — engine blocking on external conditions', () => {
+       setSessionOutcome(outcome: { status: 'completed' | 'failed'; error?: string; output?: string }) {
+         currentSessionOutcome = outcome;
+       },
++      setAnimatorStatus(status: { state: 'running' | 'paused'; pausedUntil?: string; backoffLevel?: number }) {
++        currentAnimatorStatus = status;
++      },
+     };
+   }
+ 
+@@ -3614,11 +3631,13 @@ describe('Spider — engine blocking on external conditions', () => {
+   // ── Block type registry (V3, R5, R6) ──────────────────────────────────
+ 
+   describe('Block type registry', () => {
+-    it('getBlockType returns the three built-in block types after startup (V3, R6)', () => {
++    it('getBlockType returns all five built-in block types after startup (V3, R6)', () => {
+       const { spider } = buildBlockingFixture();
+       assert.ok(spider.getBlockType('writ-phase') !== undefined, 'writ-phase should be registered');
+       assert.ok(spider.getBlockType('scheduled-time') !== undefined, 'scheduled-time should be registered');
+       assert.ok(spider.getBlockType('book-updated') !== undefined, 'book-updated should be registered');
++      assert.ok(spider.getBlockType('patron-input') !== undefined, 'patron-input should be registered');
++      assert.ok(spider.getBlockType('animator-paused') !== undefined, 'animator-paused should be registered');
+     });
+ 
+     it('getBlockType returns undefined for an unknown block type id (R6)', () => {
+@@ -3646,6 +3665,7 @@ describe('Spider — engine blocking on external conditions', () => {
+       assert.ok(ids.includes('scheduled-time'), 'scheduled-time should be in list');
+       assert.ok(ids.includes('book-updated'), 'book-updated should be in list');
+       assert.ok(ids.includes('patron-input'), 'patron-input should be in list');
++      assert.ok(ids.includes('animator-paused'), 'animator-paused should be in list');
+ 
+       const writStatus = result.find((bt) => bt.id === 'writ-phase');
+       assert.ok(writStatus, 'writ-phase should be found');
+@@ -5146,6 +5166,121 @@ describe('Spider — engine blocking on external conditions', () => {
+ 
+   }); // Built-in block types
+ 
++  // ── animator-paused block type ────────────────────────────────────────
++
++  describe('animator-paused block type (unit)', () => {
++    it('check() returns cleared when animator state is running', async () => {
++      const { spider } = buildBlockingFixture();
++      const bt = spider.getBlockType('animator-paused');
++      assert.ok(bt, 'animator-paused should be registered');
++      const result = await bt!.check({});
++      assert.equal(result.status, 'cleared');
++    });
++
++    it('check() returns pending when animator is paused with future pausedUntil', async () => {
++      const { spider, setAnimatorStatus } = buildBlockingFixture();
++      setAnimatorStatus({
++        state: 'paused',
++        pausedUntil: new Date(Date.now() + 60_000).toISOString(),
++        backoffLevel: 1,
++      });
++      const bt = spider.getBlockType('animator-paused')!;
++      const result = await bt.check({});
++      assert.equal(result.status, 'pending');
++    });
++
++    it('check() returns cleared when animator is paused but pausedUntil has elapsed', async () => {
++      const { spider, setAnimatorStatus } = buildBlockingFixture();
++      setAnimatorStatus({
++        state: 'paused',
++        pausedUntil: new Date(Date.now() - 1_000).toISOString(), // 1 second ago
++        backoffLevel: 1,
++      });
++      const bt = spider.getBlockType('animator-paused')!;
++      const result = await bt.check({});
++      assert.equal(result.status, 'cleared');
++    });
++
++    it('check() has 30s pollIntervalMs', () => {
++      const { spider } = buildBlockingFixture();
++      const bt = spider.getBlockType('animator-paused')!;
++      assert.equal(bt.pollIntervalMs, 30_000);
++    });
++  });
++
++  // ── tryRun — animator-paused gate ────────────────────────────────────
++
++  describe('tryRun — animator-paused gate', () => {
++    it('blocks a pending engine when animator is paused within the back-off window', async () => {
++      const { clerk, spider, stacks, setAnimatorStatus } = buildBlockingFixture();
++      setAnimatorStatus({
++        state: 'paused',
++        pausedUntil: new Date(Date.now() + 120_000).toISOString(),
++        backoffLevel: 1,
++      });
++
++      await clerk.post({ title: 'Gate test writ', body: 'body' });
++      await spider.crawl(); // spawn rig
++
++      const result = await spider.crawl(); // tryRun — should be blocked
++      assert.ok(result, 'should return a result');
++      assert.equal(result!.action, 'engine-blocked');
++      assert.equal((result as { blockType?: string }).blockType, 'animator-paused');
++
++      // Engine should be blocked in the rig
++      const rigs = await rigsBook(stacks).list();
++      const rig = rigs[0];
++      assert.ok(rig, 'rig should exist');
++      const engine = rig.engines.find((e: EngineInstance) => e.status === 'blocked');
++      assert.ok(engine, 'one engine should be blocked');
++      assert.equal(engine!.block?.type, 'animator-paused');
++    });
++
++    it('does NOT block a pending engine when animator is running', async () => {
++      // Use a simple custom engine that completes immediately (no external deps)
++      const quickEngine: EngineDesign = {
++        id: 'quick-passthrough',
++        async run() { return { status: 'completed' as const, yields: {} }; },
++      };
++      const { clerk, spider } = buildBlockingFixture(
++        { 'quick-passthrough': quickEngine },
++        { engines: [{ id: 'e1', designId: 'quick-passthrough', givens: {} }] },
++      );
++      // Animator is running (default)
++
++      await clerk.post({ title: 'Normal dispatch writ', body: 'body' });
++      await spider.crawl(); // spawn rig
++
++      const result = await spider.crawl(); // tryRun — should NOT be blocked
++      // When the animator is running the gate is skipped and the engine dispatches
++      assert.ok(result, 'should return a result');
++      assert.notEqual(result!.action, 'engine-blocked', 'engine should not be blocked when animator is running');
++    });
++
++    it('unblocks the engine when animator resumes (back-off window elapses)', async () => {
++      const { clerk, spider, setAnimatorStatus } = buildBlockingFixture();
++
++      // Start paused
++      setAnimatorStatus({
++        state: 'paused',
++        pausedUntil: new Date(Date.now() + 120_000).toISOString(),
++        backoffLevel: 1,
++      });
++
++      await clerk.post({ title: 'Unblock test writ', body: 'body' });
++      await spider.crawl(); // spawn
++      await spider.crawl(); // blocked (tryRun gate)
++
++      // Simulate pause expiry
++      setAnimatorStatus({ state: 'running' });
++
++      // checkBlocked should clear it
++      const result = await spider.crawl();
++      assert.ok(result, 'should return a result after resuming');
++      assert.equal(result!.action, 'engine-unblocked');
++    });
++  });
++
+ }); // Spider — engine blocking on external conditions
+ 
+ // ── Kit contributions — rig templates and mappings ─────────────────
+@@ -6087,6 +6222,10 @@ describe('${yields.*} reference support', () => {
+         animate(): AnimateHandle {
+           throw new Error('animate() not expected in yield-ref tests');
+         },
++        async getStatus() {
++          return { id: 'current' as const, state: 'running' as const, backoffLevel: 0 };
++        },
++        async getSessionCosts() { return new Map(); },
+       };
+       apparatusMap.set('animator', mockAnimatorApi);
+ 
+@@ -8211,6 +8350,10 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+         animate(): AnimateHandle {
+           throw new Error('animate not used');
+         },
++        async getStatus() {
++          return { id: 'current' as const, state: 'running' as const, backoffLevel: 0 };
++        },
++        async getSessionCosts() { return new Map(); },
+       };
+       apparatusMap.set('animator', mockAnimator);
+ 
+@@ -8378,6 +8521,7 @@ describe('Spider — when conditions, cascade skipping, and grafting', () => {
+       assert.equal(engineB?.when, '${yields.A.go}', 'when field should be copied to engine instance');
+     });
+   });
++
+ });
+ 
+ // ── Rig cancellation tests ──────────────────────────────────────────────
+diff --git a/packages/plugins/spider/src/spider.ts b/packages/plugins/spider/src/spider.ts
+index a3dfb96..deb27cd 100644
+--- a/packages/plugins/spider/src/spider.ts
++++ b/packages/plugins/spider/src/spider.ts
+@@ -71,6 +71,7 @@ import {
+   scheduledTimeBlockType,
+   bookUpdatedBlockType,
+   patronInputBlockType,
++  animatorPausedBlockType,
+ } from './block-types/index.ts';
+ 
+ import {
+@@ -1501,6 +1502,32 @@ export function createSpider(): Plugin {
+           return { action: 'rig-completed', rigId: rig.id, writId: rig.writId, outcome: 'stuck' };
+         }
+ 
++        // Rate-limited — Animator has paused dispatch; block this engine
++        // until the Animator resumes. The animator-paused block type checker
++        // drives the unblock when the pause window elapses.
++        // NOTE: animator-paused block type registration and full block logic
++        // are added in the animator-paused block type task; this branch
++        // ensures rate-limited sessions are never silently treated as completed.
++        if (session.status === 'rate-limited') {
++          const blockedEngines = rig.engines.map((e) =>
++            e.id === engine.id
++              ? {
++                  ...e,
++                  status: 'blocked' as const,
++                  block: {
++                    type: 'animator-paused',
++                    condition: {},
++                    blockedAt: new Date().toISOString(),
++                    message: 'Animator rate-limited — waiting for pause to lift',
++                  },
++                }
++              : e,
++          );
++          const rigStatus = isRigBlocked(blockedEngines) ? 'blocked' : 'running';
++          await rigsBook.patch(rig.id, { engines: blockedEngines, status: rigStatus });
++          return { action: 'engine-blocked', rigId: rig.id, engineId: engine.id, blockType: 'animator-paused' };
++        }
++
+         if (session.status === 'cancelled') {
+           await cancelEngine(rig, engine.id, session.error ?? 'Session cancelled');
+           await rejectPendingInputRequests(rig.id);
+@@ -1808,6 +1835,39 @@ export function createSpider(): Plugin {
+         continue;
+       }
+ 
++      // ── Animator-pause gate ──────────────────────────────────────
++      // Check before dispatching any engine. If the Animator is paused
++      // (rate-limit back-off), block this engine until the pause lifts.
++      // The animator-paused block type checker drives the unblock.
++      try {
++        const animatorStatus = await animator.getStatus();
++        const isPaused =
++          animatorStatus.state === 'paused' &&
++          (!animatorStatus.pausedUntil || new Date(animatorStatus.pausedUntil).getTime() > Date.now());
++        if (isPaused) {
++          const blockedEngines = rig.engines.map((e) =>
++            e.id === pending.id
++              ? {
++                  ...e,
++                  status: 'blocked' as const,
++                  block: {
++                    type: 'animator-paused' as const,
++                    condition: {},
++                    blockedAt: new Date().toISOString(),
++                    message: 'Animator paused due to rate limit — waiting for back-off window to elapse',
++                  },
++                }
++              : e,
++          );
++          const rigStatus = isRigBlocked(blockedEngines) ? 'blocked' : 'running';
++          await rigsBook.patch(rig.id, { engines: blockedEngines, status: rigStatus });
++          return { action: 'engine-blocked', rigId: rig.id, engineId: pending.id, blockType: 'animator-paused' };
++        }
++      } catch (err) {
++        // Animator status check failed — proceed rather than stalling the crawl.
++        console.warn(`[spider] Animator status gate check failed (proceeding): ${err instanceof Error ? err.message : err}`);
++      }
++
+       const now = new Date().toISOString();
+       const upstream = buildUpstreamMap(rig);
+ 
+@@ -2617,10 +2677,11 @@ export function createSpider(): Plugin {
+           },
+         } satisfies Record<string, KitRoleDefinition>,
+         blockTypes: {
+-          'writ-phase':     writPhaseBlockType,
+-          'scheduled-time': scheduledTimeBlockType,
+-          'book-updated':   bookUpdatedBlockType,
+-          'patron-input':   patronInputBlockType,
++          'writ-phase':       writPhaseBlockType,
++          'scheduled-time':   scheduledTimeBlockType,
++          'book-updated':     bookUpdatedBlockType,
++          'patron-input':     patronInputBlockType,
++          'animator-paused':  animatorPausedBlockType,
+         },
+         rigTemplates: {
+           default: defaultRigTemplate,
+diff --git a/packages/plugins/spider/src/static/index.html b/packages/plugins/spider/src/static/index.html
+index 3a77ddd..bc08249 100644
+--- a/packages/plugins/spider/src/static/index.html
++++ b/packages/plugins/spider/src/static/index.html
+@@ -7,6 +7,11 @@
+   <link rel="stylesheet" href="spider.css">
+ </head>
+ <body>
++<div id="pause-banner" class="pause-banner" style="display:none" role="alert" aria-live="polite">
++  <span class="pause-banner__icon">⏸</span>
++  <span id="pause-banner__msg">Animator paused — rate-limit back-off in effect. New engines will not be dispatched until the window clears.</span>
++  <span id="pause-banner__until"></span>
++</div>
+ <main style="padding: 24px;">
+   <h1>Spider</h1>
+ 
+diff --git a/packages/plugins/spider/src/static/spider-ui.test.ts b/packages/plugins/spider/src/static/spider-ui.test.ts
+index 02736a8..1b1e97c 100644
+--- a/packages/plugins/spider/src/static/spider-ui.test.ts
++++ b/packages/plugins/spider/src/static/spider-ui.test.ts
+@@ -1403,3 +1403,94 @@ describe('spider.js rigEndTime read order', () => {
+     );
+   });
+ });
++
++// ── Pause banner ────────────────────────────────────────────────────────
++
++describe('spider.js — pause banner', () => {
++  it('defines fetchAnimatorStatus function', () => {
++    assert.match(
++      spiderJs,
++      /function fetchAnimatorStatus\(\)/,
++      'should define fetchAnimatorStatus',
++    );
++  });
++
++  it('fetchAnimatorStatus fetches /api/animator/status', () => {
++    const block = spiderJs.match(/function fetchAnimatorStatus\(\)[\s\S]*?\n  \}/);
++    assert.ok(block, 'should find fetchAnimatorStatus body');
++    assert.match(
++      block[0],
++      /fetch\(['"]\/api\/animator\/status['"]\)/,
++      'fetchAnimatorStatus should fetch /api/animator/status',
++    );
++  });
++
++  it('defines updatePauseBanner function', () => {
++    assert.match(
++      spiderJs,
++      /function updatePauseBanner\(status\)/,
++      'should define updatePauseBanner',
++    );
++  });
++
++  it('updatePauseBanner hides banner when status is null', () => {
++    const block = spiderJs.match(/function updatePauseBanner\(status\)[\s\S]*?\n  \}/);
++    assert.ok(block, 'should find updatePauseBanner body');
++    // Banner is hidden when !isPaused
++    assert.match(
++      block[0],
++      /banner\.style\.display\s*=\s*['"]none['"]/,
++      'updatePauseBanner should hide banner when not paused',
++    );
++  });
++
++  it('updatePauseBanner shows banner when state is paused', () => {
++    const block = spiderJs.match(/function updatePauseBanner\(status\)[\s\S]*?\n  \}/);
++    assert.ok(block, 'should find updatePauseBanner body');
++    // Banner is shown when isPaused
++    assert.match(
++      block[0],
++      /banner\.style\.display\s*=\s*['"]['"];/,
++      'updatePauseBanner should show banner when paused',
++    );
++  });
++
++  it('defines startAnimatorStatusPoll and stopAnimatorStatusPoll', () => {
++    assert.match(spiderJs, /function startAnimatorStatusPoll\(\)/, 'should define startAnimatorStatusPoll');
++    assert.match(spiderJs, /function stopAnimatorStatusPoll\(\)/, 'should define stopAnimatorStatusPoll');
++  });
++
++  it('ANIMATOR_STATUS_POLL_INTERVAL is 30000', () => {
++    assert.match(
++      spiderJs,
++      /ANIMATOR_STATUS_POLL_INTERVAL\s*=\s*30000/,
++      'poll interval should be 30 seconds',
++    );
++  });
++
++  it('initial load calls fetchAnimatorStatus and startAnimatorStatusPoll', () => {
++    // Both should be called after fetchRigs in the DOMContentLoaded handler
++    assert.match(spiderJs, /fetchAnimatorStatus\(\)/, 'should call fetchAnimatorStatus on load');
++    assert.match(spiderJs, /startAnimatorStatusPoll\(\)/, 'should call startAnimatorStatusPoll on load');
++  });
++});
++
++describe('index.html — pause banner element', () => {
++  it('contains pause-banner div', () => {
++    assert.match(indexHtml, /id="pause-banner"/, 'should have pause-banner element');
++  });
++
++  it('pause-banner is hidden by default', () => {
++    assert.match(indexHtml, /id="pause-banner"[^>]*style="display:none"/, 'pause-banner should be hidden by default');
++  });
++
++  it('contains pause-banner__until element for resumption time', () => {
++    assert.match(indexHtml, /id="pause-banner__until"/, 'should have pause-banner__until element');
++  });
++});
++
++describe('spider.css — pause banner styles', () => {
++  it('defines .pause-banner class', () => {
++    assert.match(spiderCss, /\.pause-banner\s*\{/, 'should define .pause-banner CSS class');
++  });
++});
+diff --git a/packages/plugins/spider/src/static/spider.css b/packages/plugins/spider/src/static/spider.css
+index dbc85c1..1444963 100644
+--- a/packages/plugins/spider/src/static/spider.css
++++ b/packages/plugins/spider/src/static/spider.css
+@@ -1,6 +1,27 @@
+ /* Spider page — page-specific styles */
+ /* Uses CSS custom properties from the shared Oculus stylesheet */
+ 
++/* ── Pause banner ────────────────────────────────────────────────────── */
++
++.pause-banner {
++  align-items: center;
++  background: var(--warning-bg, #2a1f00);
++  border-bottom: 2px solid var(--warning, #f5a623);
++  color: var(--warning, #f5a623);
++  display: flex;
++  font-size: 13px;
++  gap: 8px;
++  padding: 10px 24px;
++  position: sticky;
++  top: 0;
++  z-index: 100;
++}
++
++.pause-banner__icon {
++  font-size: 16px;
++  flex-shrink: 0;
++}
++
+ /* ── Tab bar ─────────────────────────────────────────────────────────── */
+ 
+ .tab-bar {
+diff --git a/packages/plugins/spider/src/static/spider.js b/packages/plugins/spider/src/static/spider.js
+index 80dd89b..da1fe99 100644
+--- a/packages/plugins/spider/src/static/spider.js
++++ b/packages/plugins/spider/src/static/spider.js
+@@ -20,6 +20,12 @@
+   var rigListPollTimer = null;
+   var currentRigPollTimer = null;
+ 
++  // Animator pause banner polling state.
++  // Polls GET /api/animator/status independently of the rig list poll so the
++  // banner reflects reality even when no rigs are in flight.
++  var animatorStatusPollTimer = null;
++  var ANIMATOR_STATUS_POLL_INTERVAL = 30000; // 30 s — matches the animator-paused block type poll
++
+   // Session transcript polling state.
+   // transcriptPollSessionId tracks the sessionId the current 2 s polling
+   // loop is bound to. startSessionTranscriptPoll dedupes against this so
+@@ -386,6 +392,71 @@
+     }
+   }
+ 
++  // ── Animator pause banner ──────────────────────────────────────────────
++
++  /**
++   * Fetch /api/animator/status and show or hide the pause banner.
++   * Called on page load and every ANIMATOR_STATUS_POLL_INTERVAL ms.
++   * Errors are silently swallowed — if the Animator apparatus is not
++   * installed the banner stays hidden.
++   */
++  function fetchAnimatorStatus() {
++    fetch('/api/animator/status')
++      .then(function (r) {
++        if (!r.ok) return null;
++        return r.json();
++      })
++      .then(function (status) {
++        updatePauseBanner(status);
++      })
++      .catch(function () {
++        // Animator not installed or network error — keep banner hidden
++        updatePauseBanner(null);
++      });
++  }
++
++  /**
++   * Show or hide the pause banner based on the Animator status doc.
++   * @param {object|null} status - AnimatorStatusDoc or null
++   */
++  function updatePauseBanner(status) {
++    var banner = document.getElementById('pause-banner');
++    if (!banner) return;
++
++    var isPaused = status &&
++      status.state === 'paused' &&
++      (!status.pausedUntil || new Date(status.pausedUntil).getTime() > Date.now());
++
++    if (!isPaused) {
++      banner.style.display = 'none';
++      return;
++    }
++
++    banner.style.display = '';
++
++    // Update "resumes at" suffix if we know when the pause lifts
++    var untilEl = document.getElementById('pause-banner__until');
++    if (untilEl) {
++      if (status.pausedUntil) {
++        untilEl.textContent = ' Resumes at: ' + formatDate(status.pausedUntil) + '.';
++      } else {
++        untilEl.textContent = '';
++      }
++    }
++  }
++
++  function stopAnimatorStatusPoll() {
++    if (animatorStatusPollTimer !== null) {
++      clearInterval(animatorStatusPollTimer);
++      animatorStatusPollTimer = null;
++    }
++  }
++
++  function startAnimatorStatusPoll() {
++    stopAnimatorStatusPoll();
++    animatorStatusPollTimer = setInterval(fetchAnimatorStatus, ANIMATOR_STATUS_POLL_INTERVAL);
++  }
++
+   function startRigListPollIfNeeded() {
+     stopRigListPoll();
+     var hasInFlight = rigs.some(isRigInFlight);
+@@ -1630,5 +1701,7 @@
+ 
+     // Initial load
+     fetchRigs('');
++    fetchAnimatorStatus();
++    startAnimatorStatusPoll();
+   });
+ })();

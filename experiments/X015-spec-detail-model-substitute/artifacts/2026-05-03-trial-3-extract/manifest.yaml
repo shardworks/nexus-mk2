@@ -1,0 +1,81 @@
+slug: x015-trial-3-rate-limit-n1
+frameworkVersion: 0.1.294
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: 03d36cb849c92d0ab434c9bd4a066716c8f50fbb
+  - id: test-guild
+    engineId: lab.guild-setup
+    givens:
+      plugins:
+        - name: "@shardworks/stacks-apparatus"
+          version: 0.1.294
+        - name: "@shardworks/tools-apparatus"
+          version: 0.1.294
+        - name: "@shardworks/codexes-apparatus"
+          version: 0.1.294
+        - name: "@shardworks/clerk-apparatus"
+          version: 0.1.294
+        - name: "@shardworks/fabricator-apparatus"
+          version: 0.1.294
+        - name: "@shardworks/animator-apparatus"
+          version: 0.1.294
+        - name: "@shardworks/loom-apparatus"
+          version: 0.1.294
+        - name: "@shardworks/claude-code-apparatus"
+          version: 0.1.294
+        - name: "@shardworks/spider-apparatus"
+          version: 0.1.294
+        - name: "@shardworks/clockworks-apparatus"
+          version: 0.1.294
+      config:
+        loom:
+          roles:
+            artificer:
+              model: sonnet
+              permissions:
+                - clerk:read
+                - tools:*
+            reviewer:
+              model: opus
+              permissions: []
+        animator:
+          sessionProvider: claude-code
+        spider:
+          variables:
+            role: artificer
+            buildCommand: pnpm -w typecheck
+            testCommand: pnpm -w test
+      files:
+        - sourcePath: /workspace/nexus-mk2/experiments/X015-spec-detail-model-substitute/fixtures/test-guild/roles/artificer.md
+          guildPath: roles/artificer.md
+        - sourcePath: /workspace/nexus-mk2/experiments/X015-spec-detail-model-substitute/fixtures/test-guild/roles/patron.md
+          guildPath: roles/patron.md
+    dependsOn:
+      - codex
+  - id: daemon
+    engineId: lab.daemon-setup
+    givens: {}
+    dependsOn:
+      - test-guild
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: /workspace/nexus-mk2/experiments/X015-spec-detail-model-substitute/briefs/trial-3-rate-limit-aware-scheduling.md
+    waitForTerminal: true
+    timeoutMs: 10800000
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+archive:
+  engineId: lab.archive
+  givens: {}

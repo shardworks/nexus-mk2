@@ -1,0 +1,740 @@
+
+
+diff --git a/docs/architecture/apparatus/animator.md b/docs/architecture/apparatus/animator.md
+index 9ba6ea3..153611b 100644
+--- a/docs/architecture/apparatus/animator.md
++++ b/docs/architecture/apparatus/animator.md
+@@ -461,7 +461,8 @@ Provider succeeds          → record status 'completed', return result
+ Provider fails             → record status 'failed' + error, re-throw provider error
+ Provider times out         → record status 'timeout', return result with error
+ Provider hits rate-limit   → record status 'rate-limited', trigger back-off, return result
+-Animator paused (gate hit) → record status 'rate-limited' without launching, return result
++Animator paused (gate hit) → synthesize rate-limited SessionResult, return immediately
++                             (no SessionDoc written, no provider call made)
+ Recording fails            → log warning, continue with return/re-throw
+ ```
+ 
+@@ -497,16 +498,18 @@ Default configuration:
+ | `maxMs` | `3_600_000` (1 hour) | Maximum window cap |
+ | `factor` | `2` | Escalation multiplier per consecutive hit |
+ 
+-`backoffLevel` is incremented on each rate-limit hit and reset to `0` after any session that completes without a rate-limit trigger (the session was `completed`, `failed`, `timeout`, or `cancelled` — not `rate-limited`).
++`backoffLevel` controls the escalation window. It is incremented at **probe-dispatch time** — when `animate()` detects that the back-off window has elapsed and a probe session is about to be dispatched. It is NOT incremented on every rate-limit hit (in-flight concurrent sessions that complete rate-limited during an active window are coalesced). It resets to `0` after any non-rate-limited terminal (the session was `completed`, `failed`, `timeout`, or `cancelled`).
+ 
+-Example escalation with defaults:
++Escalation sequence with defaults:
+ 
+-| backoffLevel | Window |
+-|---|---|
+-| 0 | 15 min |
+-| 1 | 30 min |
+-| 2 | 60 min (capped) |
+-| 3+ | 60 min (capped) |
++| Event | backoffLevel after | Window |
++|---|---|---|
++| First rate-limit hit | 0 | 15 min |
++| Probe dispatched (window elapsed) | 1 | — |
++| Probe returns rate-limited | 1 | 30 min |
++| Probe dispatched again | 2 | — |
++| Probe returns rate-limited | 2 | 60 min (capped) |
++| Probe succeeds (any non-rate-limited) | 0 (reset) | — |
+ 
+ Configure via `guild.json`:
+ 
+@@ -527,13 +530,15 @@ Configure via `guild.json`:
+ 
+ Before launching any session, `animate()` checks the current `AnimatorStatusDoc`:
+ 
+-- If `state === 'paused'` and `pausedUntil > now`: return a `rate-limited` `SessionResult` immediately without calling the provider. The session is recorded to The Stacks as `rate-limited`.
+-- If `state === 'paused'` and `pausedUntil <= now`: the window has elapsed — reset state to `running` and proceed with the launch.
++- If `state === 'paused'` and `pausedUntil > now`: synthesize a `rate-limited` `SessionResult` immediately and return it without calling the provider. **No `SessionDoc` is written to The Stacks for gated calls** — the synthesized result is returned directly to the caller.
++- If `state === 'paused'` and `pausedUntil <= now`: the window has elapsed — increment `backoffLevel` (probe-dispatch escalation) and flip `state` to `running`, then proceed with the launch. If this probe also returns rate-limited, `applyRateBackoff` will use the incremented level for the new window.
+ - If `state === 'running'`: proceed normally.
+ 
+ ### Spider integration
+ 
+-Spider's `tryRun()` also checks the Animator status before dispatching any engine. If the Animator is paused and the window has not elapsed, the engine is blocked with block type `animator-paused`. The `animator-paused` block type checker polls every 30 seconds and clears the block when `getStatus()` returns `state: 'running'` or when `pausedUntil <= now`.
++Spider's `crawl()` checks the Animator status after `tryCheckBlocked` and `autoUnstick`, before `tryRun` and `trySpawn`. If the Animator is paused within the active back-off window, `crawl()` returns `null` immediately — no dispatch phases run and no engines are transitioned to `blocked` by the gate itself. Pending engines stay `pending` until the gate clears.
++
++When a session that was already in-flight completes with `rate-limited`, `tryCollect` transitions its engine to `blocked` with block type `animator-paused`. The `animator-paused` block type checker polls every 30 seconds and clears the block when `getStatus()` returns `state: 'running'` or when `pausedUntil <= now`.
+ 
+ ### Observability
+ 
+diff --git a/packages/plugins/animator/src/animator.test.ts b/packages/plugins/animator/src/animator.test.ts
+index bff7dfe..fe47563 100644
+--- a/packages/plugins/animator/src/animator.test.ts
++++ b/packages/plugins/animator/src/animator.test.ts
+@@ -1543,6 +1543,58 @@ describe('Animator', () => {
+       assert.match(result.error!, /back-off/i);
+     });
+ 
++    it('does NOT write a SessionDoc to the sessions book for gated calls (D12)', async () => {
++      setup();
++      const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
++      await statusBook.put({
++        id: 'current',
++        state: 'paused',
++        pausedSince: new Date().toISOString(),
++        pausedUntil: new Date(Date.now() + 120_000).toISOString(),
++        pauseReason: 'rate-limit',
++        backoffLevel: 0,
++      });
++
++      const result = await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      assert.equal(result.status, 'rate-limited');
++
++      // No SessionDoc should be written for gated calls (D12).
++      const sessionsBook = stacks.readBook<SessionDoc>('animator', 'sessions');
++      const allDocs = await sessionsBook.list();
++      assert.equal(allDocs.length, 0, 'no SessionDoc should be written for a gated animate() call');
++    });
++
++    it('gated call returns empty chunks iterable', async () => {
++      setup();
++      const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
++      await statusBook.put({
++        id: 'current',
++        state: 'paused',
++        pausedSince: new Date().toISOString(),
++        pausedUntil: new Date(Date.now() + 120_000).toISOString(),
++        pauseReason: 'rate-limit',
++        backoffLevel: 0,
++      });
++
++      const handle = animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      });
++
++      const collected: SessionChunk[] = [];
++      for await (const chunk of handle.chunks) {
++        collected.push(chunk);
++      }
++      assert.equal(collected.length, 0, 'gated call should yield no chunks');
++
++      const result = await handle.result;
++      assert.equal(result.status, 'rate-limited');
++    });
++
+     it('does NOT gate the session when pausedUntil has elapsed', async () => {
+       setup();
+       const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
+@@ -1585,6 +1637,39 @@ describe('Animator', () => {
+       assert.equal(statusAfter.state, 'running');
+       assert.equal(statusAfter.pausedSince, undefined);
+       assert.equal(statusAfter.pausedUntil, undefined);
++      // backoffLevel: incremented at probe-dispatch time (1 → 2), then reset
++      // to 0 by the successful probe result (resetBackoffLevel). Net result: 0.
++      assert.equal(statusAfter.backoffLevel, 0);
++    });
++
++    it('probe-dispatch flip increments backoffLevel; observable when probe fails', async () => {
++      // Use a rate-limited provider so the probe fails → applyRateBackoff runs
++      // (not resetBackoffLevel). The flip incremented the level, so the new
++      // window uses the incremented level.
++      setup(createFakeProvider({ status: 'rate-limited', exitCode: 1 }));
++      const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
++      await statusBook.put({
++        id: 'current',
++        state: 'paused',
++        pausedSince: new Date(Date.now() - 120_000).toISOString(),
++        pausedUntil: new Date(Date.now() - 1_000).toISOString(),
++        pauseReason: 'rate-limit',
++        backoffLevel: 1,
++      });
++
++      await animator.animate({
++        context: { systemPrompt: 'Test' },
++        cwd: '/tmp/workdir',
++      }).result;
++
++      const statusAfter = await animator.getStatus();
++      assert.equal(statusAfter.state, 'paused');
++      // Flip: 1 → 2. applyRateBackoff uses level 2 (not reset because probe failed).
++      assert.equal(statusAfter.backoffLevel, 2);
++      // Window: initialMs * factor^2 = 900_000 * 4 = 3_600_000ms (which equals maxMs → capped).
++      const windowMs = new Date(statusAfter.pausedUntil!).getTime() - new Date(statusAfter.pausedSince!).getTime();
++      assert.ok(windowMs <= 3_600_000 + 5_000 && windowMs >= 3_600_000 - 5_000,
++        `Expected ~3_600_000ms window, got ${windowMs}ms`);
+     });
+ 
+     it('does NOT gate the session when state is running', async () => {
+@@ -1599,7 +1684,8 @@ describe('Animator', () => {
+   });
+ 
+   describe('animate() — back-off state machine', () => {
+-    it('writes a paused AnimatorStatusDoc after a rate-limited session', async () => {
++    it('writes a paused AnimatorStatusDoc after a rate-limited session (first hit: backoffLevel=0)', async () => {
++      // First hit from clean state (no prior pauses): backoffLevel must be 0 (D8, acceptance #6).
+       setup(createFakeProvider({ status: 'rate-limited', exitCode: 1 }));
+ 
+       const result = await animator.animate({
+@@ -1611,9 +1697,12 @@ describe('Animator', () => {
+ 
+       const status = await animator.getStatus();
+       assert.equal(status.state, 'paused');
+-      assert.equal(status.backoffLevel, 1);
++      // First hit: backoffLevel stays 0. Level is incremented only at probe-dispatch
++      // time (animate() flip), not at hit time (D8).
++      assert.equal(status.backoffLevel, 0, 'first hit must store backoffLevel: 0');
+       assert.equal(status.pauseReason, 'rate-limit');
+       assert.ok(status.pausedUntil, 'pausedUntil should be set');
++      // First hit window: initialMs * factor^0 = initialMs (15 min default).
+       assert.ok(
+         new Date(status.pausedUntil!).getTime() > Date.now(),
+         'pausedUntil should be in the future',
+@@ -1621,11 +1710,14 @@ describe('Animator', () => {
+       assert.equal(status.lastTriggeringSession, result.id);
+     });
+ 
+-    it('escalates the back-off window on repeated rate-limit hits', async () => {
++    it('escalates the back-off window on post-resume probe failure', async () => {
++      // Simulate a post-probe-dispatch scenario: state='running', backoffLevel=1
++      // (represents: first pause elapsed, animate() flip incremented level to 1).
+       setup(createFakeProvider({ status: 'rate-limited', exitCode: 1 }));
+       const statusBook = stacks.book<AnimatorStatusDoc>('animator', 'animator_status');
+ 
+-      // Seed backoffLevel: 1 so the next hit produces level 2 window
++      // Seed state after the first pause elapsed and animate() flipped to running
++      // (incrementing backoffLevel from 0 to 1 at flip time).
+       await statusBook.put({
+         id: 'current',
+         state: 'running',
+@@ -1635,14 +1727,67 @@ describe('Animator', () => {
+       await animator.animate({ context: { systemPrompt: '' }, cwd: '/tmp' }).result;
+ 
+       const status = await animator.getStatus();
+-      assert.equal(status.backoffLevel, 2);
+-      // Level 2 window: initialMs(900_000) * factor(2)^1 = 1_800_000 ms
++      // applyRateBackoff uses current level (1) without incrementing.
++      // Level is incremented at the next probe-dispatch flip, not here.
++      assert.equal(status.backoffLevel, 1);
++      // Level 1 window: initialMs(900_000) * factor(2)^1 = 1_800_000 ms
+       const pauseWindowMs = new Date(status.pausedUntil!).getTime() - new Date(status.pausedSince!).getTime();
+       // Allow ±5s tolerance for test execution time
+       assert.ok(pauseWindowMs >= 1_800_000 - 5_000 && pauseWindowMs <= 1_800_000 + 5_000,
+         `Expected ~1_800_000ms window, got ${pauseWindowMs}ms`);
+     });
+ 
++    it('coalesces rate-limited hits during an active pause window (D8)', async () => {
++      // Two concurrent in-flight sessions both complete with rate-limited.
++      // The first triggers the pause (backoffLevel=0).
++      // The second arrives during the already-active window → coalesces (no increment).
++      const resolvers: Array<(r: SessionProviderResult) => void> = [];
++      const concurrentProvider: AnimatorSessionProvider = {
++        name: 'fake-concurrent',
++        launch() {
++          return {
++            chunks: emptyChunks,
++            result: new Promise<SessionProviderResult>((resolve) => {
++              resolvers.push(resolve);
++            }),
++          };
++        },
++      };
++      setup(concurrentProvider);
++
++      // Launch two sessions concurrently (both in-flight before any rate-limit hit).
++      const handle1 = animator.animate({ context: { systemPrompt: '' }, cwd: '/tmp' });
++      const handle2 = animator.animate({ context: { systemPrompt: '' }, cwd: '/tmp' });
++
++      // Wait for both sessions to be registered (running records written).
++      await new Promise((r) => setTimeout(r, 20));
++      assert.equal(resolvers.length, 2, 'both sessions should be in-flight');
++
++      const rateLimitedResult: SessionProviderResult = { status: 'rate-limited', exitCode: 1 };
++
++      // Resolve the first → triggers pause, backoffLevel=0.
++      resolvers[0]!(rateLimitedResult);
++      await handle1.result;
++
++      const statusAfterFirst = await animator.getStatus();
++      assert.equal(statusAfterFirst.state, 'paused');
++      assert.equal(statusAfterFirst.backoffLevel, 0, 'first hit must store backoffLevel: 0');
++      const pausedUntilAfterFirst = statusAfterFirst.pausedUntil!;
++
++      // Resolve the second → arrives during the active window → must coalesce.
++      resolvers[1]!(rateLimitedResult);
++      await handle2.result;
++
++      const statusAfterSecond = await animator.getStatus();
++      assert.equal(statusAfterSecond.state, 'paused');
++      // Coalesce: backoffLevel must NOT be incremented.
++      assert.equal(statusAfterSecond.backoffLevel, 0, 'coalesced hit must not increment backoffLevel');
++      // pausedUntil must NOT change (window unchanged).
++      assert.equal(statusAfterSecond.pausedUntil, pausedUntilAfterFirst, 'coalesced hit must not change pausedUntil');
++      // lastTriggeringSession updated to second session.
++      assert.equal(statusAfterSecond.lastTriggeringSession, handle2.sessionId);
++    });
++
+     it('caps the pause window at maxMs', async () => {
+       // Use a very small initialMs so it hits the cap quickly
+       clearGuild();
+diff --git a/packages/plugins/animator/src/animator.ts b/packages/plugins/animator/src/animator.ts
+index a61518d..86518c2 100644
+--- a/packages/plugins/animator/src/animator.ts
++++ b/packages/plugins/animator/src/animator.ts
+@@ -390,13 +390,20 @@ const DEFAULT_BACKOFF_FACTOR = 2;
+ /**
+  * Apply the rate-limit back-off state machine after a rate-limited session.
+  *
+- * Reads the current status doc, computes the next pause window using the
+- * escalating formula, and writes the updated doc back to the status book.
++ * Reads the current status doc and either coalesces (if already within an
++ * active pause window) or opens a new pause window using the current
++ * backoffLevel.
+  *
+  * Window formula: min(initialMs * factor^backoffLevel, maxMs)
+  *
+- * The `backoffLevel` here is the level BEFORE this hit (the level stored
+- * in the current doc). After writing, backoffLevel is incremented by one.
++ * The `backoffLevel` in the stored doc is NOT incremented here. It is
++ * incremented at probe-dispatch time inside `animate()` when the pause
++ * window is detected as elapsed (the flip from 'paused' → 'running').
++ * This means:
++ *   - First hit (state='running', level=0): window=initialMs, stored level=0.
++ *   - Hits during an active window: coalesce — no level change.
++ *   - Post-resume probe failure: level was already incremented at flip time,
++ *     so applyRateBackoff just uses the incremented level. (D8)
+  */
+ async function applyRateBackoff(
+   triggeringSessionId: string,
+@@ -414,10 +421,34 @@ async function applyRateBackoff(
+     current = defaultStatusDoc();
+   }
+ 
++  const now = new Date();
++  const nowMs = now.getTime();
++
++  // D8 coalesce: hits arriving during an already-active pause window do not
++  // increment backoffLevel or change pausedUntil. Only update tracking fields
++  // so the most recent triggering session is recorded.
++  const activelyPaused =
++    current.state === 'paused' &&
++    current.pausedUntil !== undefined &&
++    new Date(current.pausedUntil).getTime() > nowMs;
++
++  if (activelyPaused) {
++    await statusBook.put({
++      ...current,
++      backoffLastHitAt: now.toISOString(),
++      lastTriggeringSession: triggeringSessionId,
++    });
++    return;
++  }
++
++  // New pause (state='running', or state='paused' but window already elapsed).
++  // Use the CURRENT backoffLevel — it was already incremented when animate()
++  // detected the elapsed window (probe-dispatch flip). For the very first hit
++  // (state has always been 'running', level=0), this produces window=initialMs
++  // and stores level=0. (D8, acceptance #6)
+   const level = current.backoffLevel ?? 0;
+   const windowMs = Math.min(initialMs * Math.pow(factor, level), maxMs);
+-  const now = new Date();
+-  const pausedUntil = new Date(now.getTime() + windowMs).toISOString();
++  const pausedUntil = new Date(nowMs + windowMs).toISOString();
+ 
+   await statusBook.put({
+     id: ANIMATOR_STATUS_DOC_ID,
+@@ -425,7 +456,7 @@ async function applyRateBackoff(
+     pausedSince: now.toISOString(),
+     pausedUntil,
+     pauseReason: 'rate-limit',
+-    backoffLevel: level + 1,
++    backoffLevel: level,
+     backoffLastHitAt: now.toISOString(),
+     lastTriggeringSession: triggeringSessionId,
+   });
+@@ -644,14 +675,17 @@ export function createAnimator(): Plugin {
+ 
+       // Set up the broadcaster immediately so subscribeToSession() works from
+       // the moment animate() returns (history replay for late subscribers).
++      // For gated calls, the broadcaster is closed immediately (not after 30 s)
++      // and removed from activeSessions — no lingering in-memory entry.
+       const broadcaster = createSessionBroadcaster();
+       activeSessions.set(id, broadcaster);
+ 
+       const result = (async () => {
+-        // ── Rate-limit gate ────────────────────────────────────────────
+-        // Check the animator status before launching any provider process.
+-        // If we're within a back-off window, return a rate-limited result
+-        // immediately without consuming provider resources.
++        // ── Rate-limit gate (D12 / D13) ────────────────────────────────
++        // FIRST: before any SessionDoc write or provider call.
++        // If we're within a back-off window, return a synthesized rate-limited
++        // result immediately without consuming provider resources or writing
++        // a SessionDoc to The Stacks.
+         try {
+           const statusDoc = await api.getStatus();
+           if (statusDoc.state === 'paused') {
+@@ -660,12 +694,14 @@ export function createAnimator(): Plugin {
+               : Infinity;
+             if (resumeAt > Date.now()) {
+               // Still within the back-off window — gate the session.
++              // Close and remove the broadcaster immediately (no 30 s timer).
++              // No SessionDoc is written for gated calls. (D12)
+               broadcaster.close();
+-              setTimeout(() => activeSessions.delete(id), 30_000);
++              activeSessions.delete(id);
+               const endedAt = new Date().toISOString();
+-              const gatedResult: SessionResult = {
++              return {
+                 id,
+-                status: 'rate-limited',
++                status: 'rate-limited' as const,
+                 startedAt,
+                 endedAt,
+                 durationMs: new Date(endedAt).getTime() - new Date(startedAt).getTime(),
+@@ -674,16 +710,16 @@ export function createAnimator(): Plugin {
+                 error: 'Animator paused due to rate limit — back-off in effect',
+                 conversationId: request.conversationId,
+                 metadata: request.metadata,
+-              };
+-              await sessions.put(toSessionDoc(gatedResult)).catch((err) => {
+-                console.warn(`[animator] Failed to write gated session ${id}: ${err instanceof Error ? err.message : err}`);
+-              });
+-              return gatedResult;
++              } satisfies SessionResult;
+             }
+             // Back-off window has elapsed — transition back to running.
++            // Increment backoffLevel here (probe-dispatch flip) so that
++            // applyRateBackoff uses the escalated level if this probe fails.
++            // If the probe succeeds, resetBackoffLevel will reset it to 0. (D8)
+             await animatorStatusBook.put({
+               ...statusDoc,
+               state: 'running' as const,
++              backoffLevel: (statusDoc.backoffLevel ?? 0) + 1,
+               pausedSince: undefined,
+               pausedUntil: undefined,
+               pauseReason: undefined,
+@@ -705,19 +741,22 @@ export function createAnimator(): Plugin {
+         // streaming return empty chunks; the Animator doesn't branch.
+         const { chunks: providerChunks, result: providerResultPromise, processInfo: processInfoPromise } = provider.launch(providerConfig);
+ 
++        // `broadcaster` is captured from the outer scope (created synchronously above).
++        const activeBroadcaster = broadcaster;
++
+         // Consume provider chunks in the background and push to the broadcaster.
+         // This drives the fan-out to all subscribers (including handle.chunks).
+         (async () => {
+           try {
+             for await (const chunk of providerChunks) {
+-              broadcaster.push(chunk);
++              activeBroadcaster.push(chunk);
+             }
+           } catch (err) {
+             console.warn(
+               `[animator] Error consuming chunks for session ${id}: ${err instanceof Error ? err.message : err}`,
+             );
+           } finally {
+-            broadcaster.close();
++            activeBroadcaster.close();
+           }
+         })();
+ 
+@@ -775,7 +814,7 @@ export function createAnimator(): Plugin {
+ 
+           // ── Back-off state machine ─────────────────────────────────
+           if (sessionResult.status === 'rate-limited') {
+-            // A live rate-limited result: escalate the back-off window.
++            // A live rate-limited result: open or coalesce into the back-off window.
+             await applyRateBackoff(id, animatorStatusBook, config).catch((err) => {
+               console.warn(`[animator] Back-off update failed: ${err instanceof Error ? err.message : err}`);
+             });
+@@ -820,6 +859,8 @@ export function createAnimator(): Plugin {
+ 
+       // The handle's chunks is a broadcaster subscription, providing history
+       // replay and real-time delivery for this session's caller.
++      // For gated calls the broadcaster is closed immediately inside the gate
++      // path, so the subscription completes with no chunks.
+       return { sessionId: id, chunks: broadcaster.subscribe(), result };
+     },
+   };
+diff --git a/packages/plugins/spider/src/spider.test.ts b/packages/plugins/spider/src/spider.test.ts
+index a960721..d0d7f94 100644
+--- a/packages/plugins/spider/src/spider.test.ts
++++ b/packages/plugins/spider/src/spider.test.ts
+@@ -10,7 +10,7 @@
+ import { describe, it, beforeEach, afterEach } from 'node:test';
+ import assert from 'node:assert/strict';
+ 
+-import { setGuild, clearGuild, generateId, shortId } from '@shardworks/nexus-core';
++import { guild, setGuild, clearGuild, generateId, shortId } from '@shardworks/nexus-core';
+ import type { Guild, GuildConfig, LoadedKit, LoadedApparatus, StartupContext, KitEntry } from '@shardworks/nexus-core';
+ 
+ import { createStacksApparatus } from '@shardworks/stacks-apparatus';
+@@ -3346,7 +3346,7 @@ describe('Spider — engine blocking on external conditions', () => {
+     memBackend: InstanceType<typeof MemoryBackend>;
+     fire: (event: string, ...args: unknown[]) => Promise<void>;
+     summonCalls: SummonRequest[];
+-    setSessionOutcome: (outcome: { status: 'completed' | 'failed'; error?: string; output?: string }) => void;
++    setSessionOutcome: (outcome: { status: 'completed' | 'failed' | 'rate-limited'; error?: string; output?: string }) => void;
+     setAnimatorStatus: (status: { state: 'running' | 'paused'; pausedUntil?: string; backoffLevel?: number }) => void;
+   } {
+     const memBackend = new MemoryBackend();
+@@ -3452,7 +3452,7 @@ describe('Spider — engine blocking on external conditions', () => {
+       indexes: ['startedAt', 'status'],
+     });
+ 
+-    let currentSessionOutcome: { status: 'completed' | 'failed'; error?: string; output?: string } = { status: 'completed' };
++    let currentSessionOutcome: { status: 'completed' | 'failed' | 'rate-limited'; error?: string; output?: string } = { status: 'completed' };
+     let currentAnimatorStatus: { state: 'running' | 'paused'; pausedUntil?: string; backoffLevel?: number } = { state: 'running' };
+     const summonCalls: SummonRequest[] = [];
+     const cancelCalls: Array<{ sessionId: string; options?: { reason?: string } }> = [];
+@@ -3546,7 +3546,7 @@ describe('Spider — engine blocking on external conditions', () => {
+       memBackend,
+       fire: fireFabricator,
+       summonCalls,
+-      setSessionOutcome(outcome: { status: 'completed' | 'failed'; error?: string; output?: string }) {
++      setSessionOutcome(outcome: { status: 'completed' | 'failed' | 'rate-limited'; error?: string; output?: string }) {
+         currentSessionOutcome = outcome;
+       },
+       setAnimatorStatus(status: { state: 'running' | 'paused'; pausedUntil?: string; backoffLevel?: number }) {
+@@ -5208,35 +5208,40 @@ describe('Spider — engine blocking on external conditions', () => {
+     });
+   });
+ 
+-  // ── tryRun — animator-paused gate ────────────────────────────────────
++  // ── crawl() — animator-paused gate (D14 / D15) ──────────────────────
+ 
+-  describe('tryRun — animator-paused gate', () => {
+-    it('blocks a pending engine when animator is paused within the back-off window', async () => {
++  describe('crawl() — animator-paused gate', () => {
++    it('returns null when animator is paused within the back-off window (D15)', async () => {
++      // Gate fires at the crawl() level: tryRun and trySpawn are skipped,
++      // crawl() returns null. Both dispatch phases are short-circuited (D14).
+       const { clerk, spider, stacks, setAnimatorStatus } = buildBlockingFixture();
++
++      // Post the writ and spawn the rig WHILE ANIMATOR IS RUNNING.
++      // trySpawn is also gated, so we must spawn before setting paused.
++      await clerk.post({ title: 'Gate test writ', body: 'body' });
++      await spider.crawl(); // spawn rig (animator running)
++
++      // Now pause the animator
+       setAnimatorStatus({
+         state: 'paused',
+         pausedUntil: new Date(Date.now() + 120_000).toISOString(),
+         backoffLevel: 1,
+       });
+ 
+-      await clerk.post({ title: 'Gate test writ', body: 'body' });
+-      await spider.crawl(); // spawn rig
+-
+-      const result = await spider.crawl(); // tryRun — should be blocked
+-      assert.ok(result, 'should return a result');
+-      assert.equal(result!.action, 'engine-blocked');
+-      assert.equal((result as { blockType?: string }).blockType, 'animator-paused');
++      const result = await spider.crawl(); // gate fires → null (D15)
++      assert.equal(result, null, 'crawl() must return null when Animator is paused');
+ 
+-      // Engine should be blocked in the rig
++      // Engine stays in pending — the crawl-level gate does not block engines (D14).
+       const rigs = await rigsBook(stacks).list();
+       const rig = rigs[0];
+       assert.ok(rig, 'rig should exist');
+-      const engine = rig.engines.find((e: EngineInstance) => e.status === 'blocked');
+-      assert.ok(engine, 'one engine should be blocked');
+-      assert.equal(engine!.block?.type, 'animator-paused');
++      const pendingEngine = rig.engines.find((e: EngineInstance) => e.status === 'pending');
++      assert.ok(pendingEngine, 'engine must stay in pending state when gate fires');
++      const blockedEngine = rig.engines.find((e: EngineInstance) => e.status === 'blocked');
++      assert.equal(blockedEngine, undefined, 'engine must NOT be blocked by the crawl-level gate');
+     });
+ 
+-    it('does NOT block a pending engine when animator is running', async () => {
++    it('dispatches the pending engine when animator is running', async () => {
+       // Use a simple custom engine that completes immediately (no external deps)
+       const quickEngine: EngineDesign = {
+         id: 'quick-passthrough',
+@@ -5246,18 +5251,19 @@ describe('Spider — engine blocking on external conditions', () => {
+         { 'quick-passthrough': quickEngine },
+         { engines: [{ id: 'e1', designId: 'quick-passthrough', givens: {} }] },
+       );
+-      // Animator is running (default)
++      // Animator is running (default) — gate does not fire
+ 
+       await clerk.post({ title: 'Normal dispatch writ', body: 'body' });
+       await spider.crawl(); // spawn rig
+ 
+-      const result = await spider.crawl(); // tryRun — should NOT be blocked
+-      // When the animator is running the gate is skipped and the engine dispatches
++      const result = await spider.crawl(); // tryRun — dispatches normally
+       assert.ok(result, 'should return a result');
+-      assert.notEqual(result!.action, 'engine-blocked', 'engine should not be blocked when animator is running');
++      assert.notEqual(result!.action, 'engine-blocked', 'engine must not be blocked when animator is running');
+     });
+ 
+-    it('unblocks the engine when animator resumes (back-off window elapses)', async () => {
++    it('resumes dispatching pending engines when animator transitions back to running', async () => {
++      // Scenario: gate fires (crawl returns null), then animator resumes,
++      // next crawl dispatches the pending engine via tryRun.
+       const { clerk, spider, setAnimatorStatus } = buildBlockingFixture();
+ 
+       // Start paused
+@@ -5267,17 +5273,68 @@ describe('Spider — engine blocking on external conditions', () => {
+         backoffLevel: 1,
+       });
+ 
+-      await clerk.post({ title: 'Unblock test writ', body: 'body' });
+-      await spider.crawl(); // spawn
+-      await spider.crawl(); // blocked (tryRun gate)
++      await clerk.post({ title: 'Resume test writ', body: 'body' });
++      await spider.crawl(); // spawn rig
++      const gatedResult = await spider.crawl(); // gate fires → null
++      assert.equal(gatedResult, null, 'gate must return null while paused');
+ 
+-      // Simulate pause expiry
++      // Animate resumes
+       setAnimatorStatus({ state: 'running' });
+ 
+-      // checkBlocked should clear it
+-      const result = await spider.crawl();
+-      assert.ok(result, 'should return a result after resuming');
+-      assert.equal(result!.action, 'engine-unblocked');
++      // Next crawl: gate no longer fires → tryRun dispatches the pending engine
++      const resumedResult = await spider.crawl();
++      assert.ok(resumedResult, 'should produce a result after animator resumes');
++      assert.notEqual(resumedResult!.action, null, 'engine should be dispatched after resume');
++    });
++
++    it('engine blocked via rate-limited collect clears when animator resumes (tryCheckBlocked path)', async () => {
++      // When tryCollect finds a rate-limited session, it transitions the engine
++      // to blocked(animator-paused). tryCheckBlocked drives the unblock when
++      // the animator resumes.
++      //
++      // Uses a custom "launched" engine (calls animator.summon()) so the engine
++      // enters the running+sessionId state that tryCollect inspects. The
++      // standard draft engine is a clockwork engine that throws without a codex,
++      // so it cannot be used for this scenario.
++      const launchedEngine: EngineDesign = {
++        id: 'launched-engine',
++        async run() {
++          const animatorApi = guild().apparatus<AnimatorApi>('animator');
++          const handle = animatorApi.summon({ prompt: 'test', cwd: '/tmp', role: 'test' });
++          return { status: 'launched' as const, sessionId: handle.sessionId };
++        },
++      };
++
++      const { clerk, spider, stacks, setSessionOutcome, setAnimatorStatus } = buildBlockingFixture(
++        { 'launched-engine': launchedEngine },
++        { engines: [{ id: 'e1', designId: 'launched-engine', givens: {} }] },
++      );
++
++      // Post a writ and spawn its rig. The mock captures the outcome at summon()
++      // time, so set the rate-limited outcome BEFORE the engine-dispatch crawl.
++      await clerk.post({ title: 'Rate-limit collect test', body: 'body' });
++      await spider.crawl(); // spawn rig
++
++      setSessionOutcome({ status: 'rate-limited' });
++      await spider.crawl(); // tryRun dispatches engine; session written as rate-limited
++
++      const collectResult = await spider.crawl(); // tryCollect → engine-blocked(animator-paused)
++      assert.ok(collectResult, 'collect should produce a result');
++      assert.equal(collectResult!.action, 'engine-blocked');
++      assert.equal((collectResult as { blockType?: string }).blockType, 'animator-paused');
++
++      // Verify engine is blocked
++      const rigs = await rigsBook(stacks).list();
++      const rig = rigs[0];
++      const blockedEngine = rig.engines.find((e: EngineInstance) => e.status === 'blocked');
++      assert.ok(blockedEngine, 'engine should be blocked after rate-limited collect');
++      assert.equal(blockedEngine!.block?.type, 'animator-paused');
++
++      // Animator resumes; tryCheckBlocked clears the block on next crawl
++      setAnimatorStatus({ state: 'running' });
++      const unblockedResult = await spider.crawl();
++      assert.ok(unblockedResult, 'should produce a result after animator resumes');
++      assert.equal(unblockedResult!.action, 'engine-unblocked', 'tryCheckBlocked should unblock the engine');
+     });
+   });
+ 
+diff --git a/packages/plugins/spider/src/spider.ts b/packages/plugins/spider/src/spider.ts
+index deb27cd..e01fb8e 100644
+--- a/packages/plugins/spider/src/spider.ts
++++ b/packages/plugins/spider/src/spider.ts
+@@ -1835,39 +1835,6 @@ export function createSpider(): Plugin {
+         continue;
+       }
+ 
+-      // ── Animator-pause gate ──────────────────────────────────────
+-      // Check before dispatching any engine. If the Animator is paused
+-      // (rate-limit back-off), block this engine until the pause lifts.
+-      // The animator-paused block type checker drives the unblock.
+-      try {
+-        const animatorStatus = await animator.getStatus();
+-        const isPaused =
+-          animatorStatus.state === 'paused' &&
+-          (!animatorStatus.pausedUntil || new Date(animatorStatus.pausedUntil).getTime() > Date.now());
+-        if (isPaused) {
+-          const blockedEngines = rig.engines.map((e) =>
+-            e.id === pending.id
+-              ? {
+-                  ...e,
+-                  status: 'blocked' as const,
+-                  block: {
+-                    type: 'animator-paused' as const,
+-                    condition: {},
+-                    blockedAt: new Date().toISOString(),
+-                    message: 'Animator paused due to rate limit — waiting for back-off window to elapse',
+-                  },
+-                }
+-              : e,
+-          );
+-          const rigStatus = isRigBlocked(blockedEngines) ? 'blocked' : 'running';
+-          await rigsBook.patch(rig.id, { engines: blockedEngines, status: rigStatus });
+-          return { action: 'engine-blocked', rigId: rig.id, engineId: pending.id, blockType: 'animator-paused' };
+-        }
+-      } catch (err) {
+-        // Animator status check failed — proceed rather than stalling the crawl.
+-        console.warn(`[spider] Animator status gate check failed (proceeding): ${err instanceof Error ? err.message : err}`);
+-      }
+-
+       const now = new Date().toISOString();
+       const upstream = buildUpstreamMap(rig);
+ 
+@@ -2460,16 +2427,36 @@ export function createSpider(): Plugin {
+       const checked = await tryCheckBlocked();
+       if (checked) return checked;
+ 
+-      const ran = await tryRun();
+-      if (ran) return ran;
+-
+-      // Before trySpawn: re-evaluate writs Spider previously stuck via the
+-      // gating path. `autoUnstick` skips writs without
++      // Re-evaluate writs Spider previously stuck via the gating path.
++      // Runs before the animator-pause gate because autoUnstick is not
++      // short-circuited by the gate (D14). `autoUnstick` skips writs without
+       // `status.spider?.stuckCause` so the engine-cascade stuck path stays
+       // untouched (D6).
+       const unstuck = await autoUnstick();
+       if (unstuck) return unstuck;
+ 
++      // ── Animator-pause gate (D14 / D15) ───────────────────────────
++      // Short-circuit tryRun and trySpawn when the Animator is within a
++      // rate-limit back-off window. tryCollect, tryProcessGrafts,
++      // tryCheckBlocked, and autoUnstick (above) continue unconditionally.
++      // Returns null — no new CrawlResult variant (D15).
++      try {
++        const animStatus = await animator.getStatus();
++        const isPaused =
++          animStatus.state === 'paused' &&
++          animStatus.pausedUntil !== undefined &&
++          new Date(animStatus.pausedUntil).getTime() > Date.now();
++        if (isPaused) {
++          return null;
++        }
++      } catch (err) {
++        // Status check failed — proceed rather than stalling the crawl.
++        console.warn(`[spider] Animator status gate check failed (proceeding): ${err instanceof Error ? err.message : err}`);
++      }
++
++      const ran = await tryRun();
++      if (ran) return ran;
++
+       const spawned = await trySpawn();
+       if (spawned) return spawned;
+ 
