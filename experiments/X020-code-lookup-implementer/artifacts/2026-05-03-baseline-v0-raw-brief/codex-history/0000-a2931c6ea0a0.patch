@@ -1,0 +1,999 @@
+
+
+diff --git a/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.ts b/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.ts
+index 59f2f78..e5aa353 100644
+--- a/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.ts
++++ b/packages/plugins/clockworks-stacks-signals/src/clockworks-stacks-signals.ts
+@@ -98,14 +98,23 @@ import type {
+ // ── CDC verb mapping ─────────────────────────────────────────────────
+ //
+ // Stacks' CDC event tags are present-tense imperatives
+-// (`'create' | 'update' | 'delete'`). The auto-wired event names use
+-// past tense — `created`, `updated`, `deleted` — to read naturally as
+-// a log line and match the past-tense convention used elsewhere in the
+-// guild's event namespace.
+-const CDC_VERB_PAST_TENSE: Record<'create' | 'update' | 'delete', string> = {
++// (`'create' | 'update' | 'delete' | 'delete-book'`). The auto-wired
++// event names use past tense — `created`, `updated`, `deleted`,
++// `dropped` — to read naturally as a log line and match the past-tense
++// convention used elsewhere in the guild's event namespace.
++//
++// `delete-book` maps to `dropped` to disambiguate the wholesale
++// book-retirement signal from per-row `delete` events. Subscribers that
++// care about a book disappearing entirely can listen for
++// `book.<owner>.<book>.dropped`.
++const CDC_VERB_PAST_TENSE: Record<
++  'create' | 'update' | 'delete' | 'delete-book',
++  string
++> = {
+   create: 'created',
+   update: 'updated',
+   delete: 'deleted',
++  'delete-book': 'dropped',
+ };
+ 
+ // ── Carve-out predicate ──────────────────────────────────────────────
+diff --git a/packages/plugins/clockworks/src/writ-lifecycle-observer.ts b/packages/plugins/clockworks/src/writ-lifecycle-observer.ts
+index 813434b..dc0acb4 100644
+--- a/packages/plugins/clockworks/src/writ-lifecycle-observer.ts
++++ b/packages/plugins/clockworks/src/writ-lifecycle-observer.ts
+@@ -110,7 +110,7 @@ export async function handleWritLifecycle(
+   deps: WritLifecycleObserverDeps,
+   event: ChangeEvent<WritDoc>,
+ ): Promise<void> {
+-  if (event.type === 'delete') return;
++  if (event.type !== 'create' && event.type !== 'update') return;
+ 
+   const writ = event.entry;
+ 
+diff --git a/packages/plugins/lattice/src/lattice.ts b/packages/plugins/lattice/src/lattice.ts
+index d12e154..5b6fc2b 100644
+--- a/packages/plugins/lattice/src/lattice.ts
++++ b/packages/plugins/lattice/src/lattice.ts
+@@ -365,7 +365,7 @@ export function createLattice(): Plugin {
+           'lattice',
+           'pulses',
+           async (event) => {
+-            if (event.type === 'delete') return;
++            if (event.type !== 'create' && event.type !== 'update') return;
+             const pulse = event.entry;
+             if (pulse.deliveryState !== 'pending') return;
+             if (event.type === 'update' && event.prev.deliveryState === 'pending') {
+diff --git a/packages/plugins/stacks/docs/specification-conformance-tests.md b/packages/plugins/stacks/docs/specification-conformance-tests.md
+index 5f327d5..ff13f77 100644
+--- a/packages/plugins/stacks/docs/specification-conformance-tests.md
++++ b/packages/plugins/stacks/docs/specification-conformance-tests.md
+@@ -119,6 +119,58 @@ The `id` field in the patch payload must be silently ignored. The document's ide
+ 
+ The spec's type signature (`Partial<Omit<T, 'id'>>`) prevents this at compile time, but runtime callers (JavaScript, `as any`) can bypass the type. Backends must enforce id immutability regardless of the caller's type safety.
+ 
++### 1.12 dropBook removes all documents wholesale
++
++```
++put({ id: 'a' }); put({ id: 'b' }); put({ id: 'c' })
++dropBook(owner, book)
++ensureBook(owner, book)
++get('a'), get('b'), get('c') → all null
++count() → 0
++```
++
++The drop must remove every document. Re-creating the book (via `ensureBook`) yields a fresh, empty book.
++
++### 1.13 dropBook is idempotent
++
++```
++dropBook(owner, book)             → ok
++dropBook(owner, book)             → ok (no-op)
++dropBook(owner, 'never-existed')  → ok (no-op)
++```
++
++Repeated drops, and drops of a never-existed book, must not throw.
++
++### 1.14 dropBook then ensureBook yields a fresh empty book
++
++```
++dropBook(owner, book); ensureBook(owner, book)
++count() → 0; put({ id: 'z' }); get('z') → { id: 'z' }
++```
++
++The recreated book accepts writes and reads correctly with no residue from the prior incarnation.
++
++### 1.15 dropBook of one book leaves sibling books untouched
++
++```
++ensureBook(owner, otherBook); put to otherBook: { id: 'x' }
++dropBook(owner, book)
++get from otherBook: 'x' → present
++```
++
++Drops are scoped to the named book; sibling books under the same owner survive.
++
++### 1.16 dropBook with same name but different owner leaves owner-A book intact
++
++```
++ensureBook(ownerA, name); put to (ownerA, name): { id: '1' }
++ensureBook(ownerB, name); put to (ownerB, name): { id: '1' }
++dropBook(ownerB, name)
++get from (ownerA, name): '1' → present
++```
++
++Book identity is `(ownerId, bookName)`. A drop must not touch a same-named book belonging to a different owner.
++
+ ---
+ 
+ ## Tier 2 — CDC Behavioral Correctness
+@@ -650,6 +702,78 @@ All 8 rows of the spec's coalescing table are now covered:
+ | update → delete | `delete` (prev=pre-tx) | 2.21 |
+ | delete | `delete` (prev=pre-tx) | 2.22 |
+ 
++### 2.30 dropBook fires a single `delete-book` event
++
++```
++watch('owner', 'book', handler)
++put({ id: 'a' }); put({ id: 'b' })
++dropBook('owner', 'book')
++handler received → exactly one event:
++  { type: 'delete-book', ownerId: 'owner', book: 'book' }
++```
++
++No per-row `delete` events fire when a book is dropped — the wholesale `delete-book` event is the only signal.
++
++### 2.31 dropBook with no registered watchers fires no events
++
++```
++// No watch() calls
++put({ id: 'a' })
++dropBook('owner', 'book') → no error, no events
++```
++
++The drop must succeed silently when there are no subscribers.
++
++### 2.32 dropBook of a never-existed book still fires `delete-book` to watchers
++
++```
++watch('owner', 'ghost-book', handler)
++dropBook('owner', 'ghost-book')
++handler received → { type: 'delete-book', ownerId: 'owner', book: 'ghost-book' }
++```
++
++Subscribers may have registered against a book they expected to exist; the wholesale signal still fires so they can react.
++
++### 2.33 dropBook fires only to watchers of the same `(ownerId, book)`
++
++```
++watch('owner', 'book', mainHandler)
++watch('owner', 'otherbook', otherHandler)
++dropBook('owner', 'book')
++mainHandler  → 1 delete-book event
++otherHandler → 0 events
++```
++
++### 2.34 dropBook handler errors do not fail the drop
++
++```
++watch('owner', 'book', () => { throw new Error('subscriber went bang') })
++dropBook('owner', 'book') → resolves (no rejection)
++```
++
++Handler errors are logged-and-continued. The drop is irreversible by the time the event fires; `failOnError: true` does not cause rollback.
++
++### 2.35 dropBook fires `delete-book` to BOTH Phase 1 and Phase 2 watchers
++
++```
++watch('owner', 'book', phase1Handler, { failOnError: true })
++watch('owner', 'book', phase2Handler, { failOnError: false })
++dropBook('owner', 'book')
++order → ['phase1', 'phase2']  // registration order
++```
++
++Both phases see the wholesale signal; the failOnError distinction loses meaning at this point because the drop is irreversible.
++
++### 2.36 dropBook inside `transaction()` throws
++
++```
++transaction(async () => {
++  await dropBook('owner', 'book')
++}) → rejects with /dropBook.*transaction|transaction.*dropBook/i
++```
++
++`dropBook` is schema-level; mixing it with row-level rollback semantics inside an explicit transaction would muddy partial-commit reasoning.
++
+ ---
+ 
+ ## Tier 2.5 — Transaction Semantics
+diff --git a/packages/plugins/stacks/docs/specification.md b/packages/plugins/stacks/docs/specification.md
+index e311c4b..bd23c01 100644
+--- a/packages/plugins/stacks/docs/specification.md
++++ b/packages/plugins/stacks/docs/specification.md
+@@ -33,7 +33,7 @@ Documents are stored and retrieved as plain JSON objects. Nested objects are ful
+ 
+ ## 2. Book Declaration (Kit Contribution)
+ 
+-Kits declare the books they own via a `books` contribution field. The Stacks reads this at startup and creates or reconciles the necessary indexes. Schema changes are **additive only** — new books and new indexes are always safe; nothing is ever dropped automatically.
++Kits declare the books they own via a `books` contribution field. The Stacks reads this at startup and creates or reconciles the necessary indexes. Automatic schema reconciliation is **additive only** — new books and new indexes are always safe; nothing is ever dropped automatically. The explicit `dropBook()` primitive (see §3) is the *only* path that retires a book; it must be invoked deliberately, never inferred from a missing kit declaration.
+ 
+ ```typescript
+ // In a kit export
+@@ -133,6 +133,27 @@ interface StacksApi {
+    * and interaction with CDC handlers.
+    */
+   transaction<R>(fn: (tx: TransactionContext) => Promise<R>): Promise<R>
++
++  /**
++   * Retire a book — drops the backend table (or memory entry) and any
++   * associated indexes. Idempotent: dropping a book that does not exist
++   * is a silent no-op.
++   *
++   * Fires a single coalesced `delete-book` CDC event after the drop
++   * completes. No per-row `delete` events are emitted; the event is the
++   * wholesale signal. Subscribers get one chance to react. See §6.5.
++   *
++   * Schema-level operation: must not be called inside an explicit
++   * `transaction()`. Calling it inside one throws — DDL doesn't compose
++   * with row-level rollback semantics, and SQLite's DDL would commit
++   * the surrounding transaction implicitly anyway.
++   *
++   * Intended use: one-shot startup migrations (or operator tooling)
++   * that retire a book that is no longer declared by any kit. Not a
++   * runtime data lifecycle primitive — for per-row deletion use
++   * `Book.delete()`.
++   */
++  dropBook(ownerId: string, bookName: string): Promise<void>
+ }
+ 
+ /**
+@@ -295,6 +316,7 @@ type ChangeEvent<T extends BookEntry> =
+   | CreateEvent<T>
+   | UpdateEvent<T>
+   | DeleteEvent<T>
++  | DeleteBookEvent
+ 
+ interface CreateEvent<T> {
+   type:    'create'
+@@ -318,6 +340,14 @@ interface DeleteEvent<T> {
+   id:      string    // the deleted document's id
+   prev:    T         // the document before deletion (always provided)
+ }
++
++/** Wholesale signal — fired once when a book is dropped via dropBook(). */
++interface DeleteBookEvent {
++  type:    'delete-book'
++  ownerId: string
++  book:    string
++  // No `entry`, `prev`, or `id` — the drop is wholesale, not per-row.
++}
+ ```
+ 
+ **`prev` policy:** `prev` is always populated for `update` and `delete` events. This requires one pre-read per write when handlers are registered, but cascade use cases (e.g. "propagate cancellation to child writs") depend on `prev` being available without making handlers awkward. The pre-read cost is acceptable given CDC is infrastructure-level behavior.
+@@ -589,6 +619,20 @@ const children = await writs.find({
+ 
+ The `StacksBackend` interface includes transaction primitives. See §8.
+ 
++### 6.5 Book retirement (`dropBook`)
++
++`StacksApi.dropBook(ownerId, bookName)` is the wholesale retirement primitive. It drops the backend table and any associated indexes — for SQLite, the table and *all* its indexes (including historic indexes from earlier schema versions) are removed; for the in-memory backend, the book entry is deleted from the store. The operation is idempotent: dropping a book that does not exist is a silent no-op.
++
++After the backend method returns, a single coalesced `delete-book` CDC event fires to every watcher registered for `(ownerId, bookName)` — both Phase 1 and Phase 2 watchers. Per-row `delete` events are intentionally *not* fired; the `delete-book` event is the only signal subscribers receive. This matches the `DROP TABLE` semantics of the underlying store: retirement is wholesale, not row-by-row.
++
++Handlers fire in registration order, mirroring the per-document event ordering contract. Errors thrown by `delete-book` handlers are logged-and-continued — `failOnError: true` does not roll back the drop, because the drop is irreversible by the time the event fires. Subscribers that need transactional rollback semantics for cleanup should not rely on `delete-book`; they should run their cleanup before invoking `dropBook` (or skip `dropBook` entirely and use per-row `Book.delete()`).
++
++**`dropBook` may not be called inside an explicit `transaction()`.** Mixing schema-level DDL with row-level rollback semantics would muddy partial-commit reasoning, and SQLite would commit the surrounding transaction implicitly when the `DROP TABLE` runs. Calling `dropBook` inside `transaction()` throws.
++
++**Intended use.** `dropBook` is a one-shot migration primitive — meant for apparatus startup paths or operator tooling that retires a book that is no longer declared by any kit. It is not a runtime data lifecycle primitive. For per-row deletion use `Book.delete()`. Authors retiring a book should treat the `delete-book` event as a notification hook for downstream caches or external indexes, not as the final transactional step in a multi-table mutation.
++
++**Schema-reconciliation interaction.** The auto-reconciliation loop in §2 is additive only — it never drops anything implicitly. `dropBook` is the *only* path that retires a book; it must be invoked deliberately. This asymmetry is intentional: missing kit declarations frequently mean "this kit didn't load" rather than "this book is retired," and silently dropping tables on missing declarations would be a data-loss footgun.
++
+ ---
+ 
+ ## 7. Use Case Coverage
+@@ -611,6 +655,7 @@ Explicit enumeration of all conceivable use cases. The "status" column is the de
+ | Read-modify-write safety | ✅ `transaction()` | Read and conditional write in one atomic unit — see note below |
+ | Conditional update (CAS / optimistic locking) | ❌ Out of scope | Use `transaction()` for read-modify-write instead |
+ | Soft delete | ❌ User-space concern | Add your own `deletedAt` field; use `IS NULL` filter |
++| Wholesale book retirement (drop table + indexes) | ✅ `dropBook()` | Idempotent; fires single `delete-book` CDC event; not transactional with row writes (see §6.5) |
+ | Raw SQL write | ❌ Permanently out of scope | CDC contract depends on this |
+ 
+ > **⚠️ Read-modify-write without a transaction is a silent-clobber risk.** A `get()` → modify → `put()` sequence without wrapping in `transaction()` will silently overwrite any changes made between the read and the write — including changes from cascade handlers or other plugins. This is especially relevant in Nexus because LLM-driven agents (Anima) may read a document, deliberate (taking time), and then put the result back, easily clobbering an intervening status change. **Always wrap read-modify-write in `transaction()`:**
+@@ -659,7 +704,8 @@ Explicit enumeration of all conceivable use cases. The "status" column is the de
+ | Notify on create | ✅ `type: 'create'` | |
+ | Notify on update (with prev value) | ✅ `type: 'update'`, `prev` always provided | |
+ | Notify on delete (with prev value) | ✅ `type: 'delete'`, `prev` always provided | |
+-| Notify on any change | ✅ Handle all three event types in one handler | |
++| Notify on book retirement (table dropped) | ✅ `type: 'delete-book'` | Single wholesale event; no per-row deletes (see §6.5) |
++| Notify on any change | ✅ Handle all four event types in one handler | |
+ | Conditional CDC (only fire if a specific field changed) | ❌ Handler-space concern | Check `event.prev.field !== event.entry.field` yourself |
+ | Declarative `watches` on kit export | ❌ Deferred | Imperative `watch()` in apparatus `start()` covers the use case |
+ | Async CDC (non-blocking, queued) | ❌ Out of scope for Stacks | Clockworks handles async dispatch at a higher level |
+@@ -704,6 +750,22 @@ interface StacksBackend {
+    */
+   ensureBook(ref: BookRef, schema: BookSchema): Promise<void>
+ 
++  /**
++   * Drop a book — remove the backing table (or memory entry) and any
++   * associated indexes. Idempotent: dropping a book that does not exist
++   * is a silent no-op (no error).
++   *
++   * Schema-level operation; not transactional with document writes. The
++   * apparatus layer is responsible for refusing to invoke this inside an
++   * explicit transaction.
++   *
++   * SQLite backend: drops historic indexes too — the implementation
++   * looks up associated indexes via `sqlite_master` so an index declared
++   * by an earlier schema (and no longer present in any current
++   * `BookSchema`) is still removed alongside the table.
++   */
++  dropBook(ref: BookRef): Promise<void>
++
+   // ── Transactions ───────────────────────────────────────────────────────
+   /**
+    * Begin a new transaction. Returns a handle whose read/write methods
+diff --git a/packages/plugins/stacks/src/backend.ts b/packages/plugins/stacks/src/backend.ts
+index 56769fd..0befdba 100644
+--- a/packages/plugins/stacks/src/backend.ts
++++ b/packages/plugins/stacks/src/backend.ts
+@@ -78,5 +78,12 @@ export interface StacksBackend {
+   open(options: BackendOptions): void;
+   close(): void;
+   ensureBook(ref: BookRef, schema: BookSchema): void;
++  /**
++   * Drop a book — remove the backing table (or memory entry) and any
++   * associated indexes. Idempotent: dropping a book that does not exist is
++   * a silent no-op (no error). Schema-level operation; not transactional
++   * with document writes.
++   */
++  dropBook(ref: BookRef): void;
+   beginTransaction(): BackendTransaction;
+ }
+diff --git a/packages/plugins/stacks/src/cdc.ts b/packages/plugins/stacks/src/cdc.ts
+index 0a2a0ad..53995a4 100644
+--- a/packages/plugins/stacks/src/cdc.ts
++++ b/packages/plugins/stacks/src/cdc.ts
+@@ -252,4 +252,33 @@ export class CdcRegistry {
+       }
+     }
+   }
++
++  /**
++   * Fire a single `delete-book` event to every watcher registered for the
++   * book — both Phase 1 and Phase 2. The drop is irreversible by the time
++   * this fires, so failOnError no longer makes sense as a meaningful
++   * distinction: handler errors are logged-and-continued in either case.
++   *
++   * Handlers fire in registration order, mirroring the per-document event
++   * ordering contract.
++   */
++  async fireDeleteBook(ownerId: string, bookName: string): Promise<void> {
++    const key = `${ownerId}/${bookName}`;
++    const entries = this.watchers.get(key) ?? [];
++    const event: ChangeEvent<BookEntry> = {
++      type: 'delete-book',
++      ownerId,
++      book: bookName,
++    };
++    for (const entry of entries) {
++      try {
++        await entry.handler(event);
++      } catch (err) {
++        const msg = err instanceof Error ? err.message : String(err);
++        console.warn(
++          `[stacks] delete-book handler error (${ownerId}/${bookName}): ${msg}`,
++        );
++      }
++    }
++  }
+ }
+diff --git a/packages/plugins/stacks/src/conformance/helpers.ts b/packages/plugins/stacks/src/conformance/helpers.ts
+index c2544a2..7890fdc 100644
+--- a/packages/plugins/stacks/src/conformance/helpers.ts
++++ b/packages/plugins/stacks/src/conformance/helpers.ts
+@@ -15,6 +15,7 @@ import type {
+   CreateEvent,
+   UpdateEvent,
+   DeleteEvent,
++  DeleteBookEvent,
+   WatchOptions,
+ } from '../types.ts';
+ import { createTestableStacks } from './testable-stacks.ts';
+@@ -149,6 +150,16 @@ export function assertDeleteEvent(
+   if (expected.book !== undefined) assert.strictEqual(event.book, expected.book);
+ }
+ 
++/** Assert the event is a `delete-book` and check its fields. */
++export function assertDeleteBookEvent(
++  event: ChangeEvent<BookEntry>,
++  expected: { ownerId?: string; book?: string },
++): asserts event is DeleteBookEvent {
++  assert.strictEqual(event.type, 'delete-book');
++  if (expected.ownerId !== undefined) assert.strictEqual(event.ownerId, expected.ownerId);
++  if (expected.book !== undefined) assert.strictEqual(event.book, expected.book);
++}
++
+ // ── Default book ref ─────────────────────────────────────────────────
+ 
+ export const OWNER = 'test-owner';
+diff --git a/packages/plugins/stacks/src/conformance/tier1-data-integrity.ts b/packages/plugins/stacks/src/conformance/tier1-data-integrity.ts
+index 73cb86e..5dfb4ed 100644
+--- a/packages/plugins/stacks/src/conformance/tier1-data-integrity.ts
++++ b/packages/plugins/stacks/src/conformance/tier1-data-integrity.ts
+@@ -109,5 +109,92 @@ export function tier1DataIntegrity(backendFactory: () => StacksBackend): void {
+       assert.deepStrictEqual(resultA, { id: 'a', name: 'Bob' });
+       assert.strictEqual(resultB, null);
+     });
++
++    it('1.12 dropBook removes all documents wholesale', async () => {
++      const book = t.stacks.book<BookEntry>(OWNER, BOOK);
++      await book.put({ id: 'a', name: 'Alice' });
++      await book.put({ id: 'b', name: 'Bob' });
++      await book.put({ id: 'c', name: 'Charlie' });
++
++      assert.strictEqual(await book.count(), 3);
++
++      await t.stacks.dropBook(OWNER, BOOK);
++
++      // Re-create the book so reads succeed (otherwise SQLite would
++      // raise "no such table" — the drop is wholesale, schema and all).
++      t.ensureBook(OWNER, BOOK);
++
++      const fresh = t.stacks.book<BookEntry>(OWNER, BOOK);
++      assert.strictEqual(await fresh.get('a'), null);
++      assert.strictEqual(await fresh.get('b'), null);
++      assert.strictEqual(await fresh.get('c'), null);
++      assert.strictEqual(await fresh.count(), 0);
++    });
++
++    it('1.13 dropBook is idempotent', async () => {
++      const book = t.stacks.book<BookEntry>(OWNER, BOOK);
++      await book.put({ id: 'a', name: 'Alice' });
++
++      // First drop succeeds.
++      await t.stacks.dropBook(OWNER, BOOK);
++
++      // Second drop on the now-empty book is a silent no-op.
++      await assert.doesNotReject(() => t.stacks.dropBook(OWNER, BOOK));
++
++      // Drop on a never-existed book is also a silent no-op.
++      await assert.doesNotReject(() => t.stacks.dropBook(OWNER, 'never-existed'));
++    });
++
++    it('1.14 dropBook then ensureBook yields a fresh empty book', async () => {
++      const book = t.stacks.book<BookEntry>(OWNER, BOOK);
++      await book.put({ id: 'a', name: 'Alice' });
++      await book.put({ id: 'b', name: 'Bob' });
++
++      await t.stacks.dropBook(OWNER, BOOK);
++      t.ensureBook(OWNER, BOOK);
++
++      const fresh = t.stacks.book<BookEntry>(OWNER, BOOK);
++      assert.strictEqual(await fresh.count(), 0);
++
++      // The new book must accept writes and reads correctly.
++      await fresh.put({ id: 'z', name: 'Zoe' });
++      assert.deepStrictEqual(await fresh.get('z'), { id: 'z', name: 'Zoe' });
++    });
++
++    it('1.15 dropBook of one book leaves sibling books untouched', async () => {
++      const otherBook = 'otherbook';
++      t.ensureBook(OWNER, otherBook);
++
++      const main = t.stacks.book<BookEntry>(OWNER, BOOK);
++      const other = t.stacks.book<BookEntry>(OWNER, otherBook);
++
++      await main.put({ id: 'a', name: 'Alice' });
++      await other.put({ id: 'x', name: 'Xander' });
++
++      await t.stacks.dropBook(OWNER, BOOK);
++
++      // The sibling book must remain intact.
++      assert.deepStrictEqual(await other.get('x'), { id: 'x', name: 'Xander' });
++      assert.strictEqual(await other.count(), 1);
++    });
++
++    it('1.16 dropBook with same name but different owner leaves owner-A book intact', async () => {
++      const ownerA = 'plugin-a';
++      const ownerB = 'plugin-b';
++      const sharedName = 'items';
++      t.ensureBook(ownerA, sharedName);
++      t.ensureBook(ownerB, sharedName);
++
++      const bookA = t.stacks.book<BookEntry>(ownerA, sharedName);
++      const bookB = t.stacks.book<BookEntry>(ownerB, sharedName);
++
++      await bookA.put({ id: '1', from: 'a' });
++      await bookB.put({ id: '1', from: 'b' });
++
++      await t.stacks.dropBook(ownerB, sharedName);
++
++      // Owner A's book must be untouched — book identity is (owner, name).
++      assert.deepStrictEqual(await bookA.get('1'), { id: '1', from: 'a' });
++    });
+   });
+ }
+diff --git a/packages/plugins/stacks/src/conformance/tier2-cdc.ts b/packages/plugins/stacks/src/conformance/tier2-cdc.ts
+index 3ca76d7..3734aa5 100644
+--- a/packages/plugins/stacks/src/conformance/tier2-cdc.ts
++++ b/packages/plugins/stacks/src/conformance/tier2-cdc.ts
+@@ -17,6 +17,7 @@ import {
+   assertCreateEvent,
+   assertUpdateEvent,
+   assertDeleteEvent,
++  assertDeleteBookEvent,
+   OWNER,
+   BOOK,
+   REF,
+@@ -268,6 +269,7 @@ export function tier2Cdc(backendFactory: () => StacksBackend): void {
+       t.ensureBook(OWNER, bookNameB);
+ 
+       t.stacks.watch(OWNER, bookNameA, async (event) => {
++        if (event.type === 'delete-book') return;
+         const booksB = t.stacks.book<BookEntry>(OWNER, bookNameB);
+         const sourceId = event.type === 'create' || event.type === 'update'
+           ? event.entry.id : event.id;
+@@ -368,7 +370,7 @@ export function tier2Cdc(backendFactory: () => StacksBackend): void {
+       seedDocument(t.backend, REF, { id: 'a', counter: 0 });
+ 
+       t.stacks.watch(OWNER, BOOK, async (event) => {
+-        if (event.type !== 'delete') {
++        if (event.type === 'create' || event.type === 'update') {
+           const book = t.stacks.book<BookEntry>(OWNER, BOOK);
+           await book.put({ ...event.entry, counter: ((event.entry as any).counter ?? 0) + 1 });
+         }
+@@ -401,7 +403,7 @@ export function tier2Cdc(backendFactory: () => StacksBackend): void {
+       seedDocument(t.backend, REF, { id: 'a', counter: 0 });
+ 
+       t.stacks.watch(OWNER, BOOK, async (event) => {
+-        if (event.type !== 'delete') {
++        if (event.type === 'create' || event.type === 'update') {
+           const book = t.stacks.book<BookEntry>(OWNER, BOOK);
+           await book.put({
+             ...event.entry,
+@@ -593,5 +595,98 @@ export function tier2Cdc(backendFactory: () => StacksBackend): void {
+       assert.strictEqual(events.length, 1);
+       assertDeleteEvent(events[0], { id: 'a', prev: { id: 'a', name: 'Alice' } });
+     });
++
++    // ── delete-book event (dropBook signal) ──────────────────────────
++
++    it('2.30 dropBook fires a single delete-book event', async () => {
++      const events = collectEvents(t.stacks, OWNER, BOOK, { failOnError: false });
++      const book = t.stacks.book<BookEntry>(OWNER, BOOK);
++      await book.put({ id: 'a', name: 'Alice' });
++      await book.put({ id: 'b', name: 'Bob' });
++
++      // Reset the collector to focus on the drop event only.
++      events.length = 0;
++
++      await t.stacks.dropBook(OWNER, BOOK);
++
++      // Exactly one delete-book event — no per-row delete events.
++      assert.strictEqual(events.length, 1);
++      assertDeleteBookEvent(events[0], { ownerId: OWNER, book: BOOK });
++    });
++
++    it('2.31 dropBook with no registered watchers fires no events', async () => {
++      // No watchers registered — the drop must succeed silently.
++      const book = t.stacks.book<BookEntry>(OWNER, BOOK);
++      await book.put({ id: 'a', name: 'Alice' });
++
++      await assert.doesNotReject(() => t.stacks.dropBook(OWNER, BOOK));
++    });
++
++    it('2.32 dropBook of a never-existed book still fires delete-book to watchers', async () => {
++      // Subscribers may have registered against a book they expected to
++      // exist; the wholesale signal still fires so they can react.
++      const ghostBook = 'ghost-book';
++      const events = collectEvents(t.stacks, OWNER, ghostBook, { failOnError: false });
++
++      await t.stacks.dropBook(OWNER, ghostBook);
++
++      assert.strictEqual(events.length, 1);
++      assertDeleteBookEvent(events[0], { ownerId: OWNER, book: ghostBook });
++    });
++
++    it('2.33 dropBook fires only to watchers of the same (ownerId, book)', async () => {
++      const otherBook = 'otherbook';
++      t.ensureBook(OWNER, otherBook);
++
++      const mainEvents = collectEvents(t.stacks, OWNER, BOOK, { failOnError: false });
++      const otherEvents = collectEvents(t.stacks, OWNER, otherBook, { failOnError: false });
++
++      await t.stacks.dropBook(OWNER, BOOK);
++
++      assert.strictEqual(mainEvents.length, 1);
++      assertDeleteBookEvent(mainEvents[0], { ownerId: OWNER, book: BOOK });
++      assert.strictEqual(otherEvents.length, 0);
++    });
++
++    it('2.34 dropBook handler errors do not fail the drop', async () => {
++      // A delete-book handler that throws must not cause dropBook to
++      // reject — the drop is irreversible by the time the event fires.
++      t.stacks.watch(OWNER, BOOK, async (event) => {
++        if (event.type === 'delete-book') {
++          throw new Error('subscriber went bang');
++        }
++      }, { failOnError: false });
++
++      await assert.doesNotReject(() => t.stacks.dropBook(OWNER, BOOK));
++    });
++
++    it('2.35 dropBook fires delete-book to BOTH Phase 1 and Phase 2 watchers', async () => {
++      // The drop is a wholesale signal; both phases see it (the spec
++      // notes that failOnError no longer carries meaning at this point).
++      const order: string[] = [];
++      t.stacks.watch(OWNER, BOOK, (event) => {
++        if (event.type === 'delete-book') order.push('phase1');
++      }, { failOnError: true });
++      t.stacks.watch(OWNER, BOOK, (event) => {
++        if (event.type === 'delete-book') order.push('phase2');
++      }, { failOnError: false });
++
++      await t.stacks.dropBook(OWNER, BOOK);
++
++      // Both watchers fire, in registration order.
++      assert.deepStrictEqual(order, ['phase1', 'phase2']);
++    });
++
++    it('2.36 dropBook inside transaction throws', async () => {
++      // dropBook is schema-level; mixing it with row-level rollback
++      // semantics inside an explicit transaction would muddy partial-
++      // commit reasoning — and DDL implicitly commits in SQLite anyway.
++      await assert.rejects(
++        () => t.stacks.transaction(async () => {
++          await t.stacks.dropBook(OWNER, BOOK);
++        }),
++        /dropBook.*transaction|transaction.*dropBook/i,
++      );
++    });
+   });
+ }
+diff --git a/packages/plugins/stacks/src/index.ts b/packages/plugins/stacks/src/index.ts
+index 0176fed..05b5a0b 100644
+--- a/packages/plugins/stacks/src/index.ts
++++ b/packages/plugins/stacks/src/index.ts
+@@ -38,6 +38,7 @@ export type {
+   CreateEvent,
+   UpdateEvent,
+   DeleteEvent,
++  DeleteBookEvent,
+   ChangeHandler,
+   WatchOptions,
+ 
+diff --git a/packages/plugins/stacks/src/memory-backend.ts b/packages/plugins/stacks/src/memory-backend.ts
+index 27a3736..dacebef 100644
+--- a/packages/plugins/stacks/src/memory-backend.ts
++++ b/packages/plugins/stacks/src/memory-backend.ts
+@@ -239,6 +239,11 @@ export class MemoryBackend implements StacksBackend {
+     getBook(this.store, ref);
+   }
+ 
++  dropBook(ref: BookRef): void {
++    // Idempotent: silent no-op if the book never existed.
++    this.store.delete(refKey(ref));
++  }
++
+   beginTransaction(): BackendTransaction {
+     return new MemoryTransaction(this.store);
+   }
+diff --git a/packages/plugins/stacks/src/sqlite-backend.test.ts b/packages/plugins/stacks/src/sqlite-backend.test.ts
+new file mode 100644
+index 0000000..a877c0a
+--- /dev/null
++++ b/packages/plugins/stacks/src/sqlite-backend.test.ts
+@@ -0,0 +1,168 @@
++/**
++ * SQLite-backend-specific tests.
++ *
++ * These complement the backend-agnostic conformance suite by verifying
++ * SQLite-level state that the public StacksApi cannot observe — most
++ * importantly, that `dropBook()` actually removes the underlying table
++ * and its associated indexes from `sqlite_master`, not just the data
++ * inside them. This is the precise drift that the dropBook primitive
++ * was introduced to remediate (per the commission brief): retired books
++ * must not leave dead tables behind on existing on-disk databases.
++ */
++
++import { describe, it, beforeEach, afterEach } from 'node:test';
++import assert from 'node:assert/strict';
++import os from 'node:os';
++import path from 'node:path';
++import fs from 'node:fs';
++import Database from 'better-sqlite3';
++
++import { SqliteBackend, tableName } from './sqlite-backend.ts';
++
++const OWNER = 'sqlite-test-owner';
++const BOOK = 'sqlite-test-book';
++
++interface TempHome {
++  home: string;
++  cleanup: () => void;
++}
++
++function tempHome(): TempHome {
++  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'stacks-sqlite-'));
++  fs.mkdirSync(path.join(home, '.nexus'), { recursive: true });
++  return {
++    home,
++    cleanup: () => fs.rmSync(home, { recursive: true, force: true }),
++  };
++}
++
++function inspectDb(home: string): Database.Database {
++  return new Database(path.join(home, '.nexus', 'nexus.db'));
++}
++
++function tablesByPrefix(db: Database.Database, prefix: string): string[] {
++  const rows = db
++    .prepare(
++      `SELECT name FROM sqlite_master
++       WHERE type = 'table' AND name LIKE ?
++       ORDER BY name`,
++    )
++    .all(`${prefix}%`) as Array<{ name: string }>;
++  return rows.map((r) => r.name);
++}
++
++function indexesForTable(db: Database.Database, table: string): string[] {
++  const rows = db
++    .prepare(
++      `SELECT name FROM sqlite_master
++       WHERE type = 'index' AND tbl_name = ?
++         AND name NOT LIKE 'sqlite_autoindex_%'
++       ORDER BY name`,
++    )
++    .all(table) as Array<{ name: string }>;
++  return rows.map((r) => r.name);
++}
++
++describe('SqliteBackend — dropBook removes table and indexes from sqlite_master', () => {
++  let env: TempHome;
++  let backend: SqliteBackend;
++
++  beforeEach(() => {
++    env = tempHome();
++    backend = new SqliteBackend();
++    backend.open({ home: env.home });
++  });
++
++  afterEach(() => {
++    backend.close();
++    env.cleanup();
++  });
++
++  it('drops the backing table from sqlite_master', () => {
++    backend.ensureBook({ ownerId: OWNER, book: BOOK }, {});
++    const table = tableName({ ownerId: OWNER, book: BOOK });
++
++    // Pre-condition: the table exists.
++    {
++      const db = inspectDb(env.home);
++      assert.ok(tablesByPrefix(db, table).includes(table));
++      db.close();
++    }
++
++    backend.dropBook({ ownerId: OWNER, book: BOOK });
++
++    // Post-condition: the table is gone — not just the rows.
++    const db = inspectDb(env.home);
++    assert.deepStrictEqual(tablesByPrefix(db, table), []);
++    db.close();
++  });
++
++  it('drops associated indexes alongside the table', () => {
++    backend.ensureBook(
++      { ownerId: OWNER, book: BOOK },
++      { indexes: ['status', 'createdAt', ['status', 'createdAt']] },
++    );
++    const table = tableName({ ownerId: OWNER, book: BOOK });
++
++    // Pre-condition: indexes exist.
++    {
++      const db = inspectDb(env.home);
++      const idxs = indexesForTable(db, table);
++      // 3 declared indexes: status, createdAt, compound(status,createdAt)
++      assert.strictEqual(idxs.length, 3, `expected 3 indexes, got: ${idxs.join(', ')}`);
++      db.close();
++    }
++
++    backend.dropBook({ ownerId: OWNER, book: BOOK });
++
++    // Post-condition: no indexes survive once the table is gone.
++    const db = inspectDb(env.home);
++    assert.deepStrictEqual(indexesForTable(db, table), []);
++    // Belt-and-suspenders: even querying sqlite_master for indexes that
++    // start with this table's idx prefix should return nothing.
++    const orphans = db
++      .prepare(
++        `SELECT name FROM sqlite_master
++         WHERE type = 'index' AND name LIKE ?`,
++      )
++      .all(`idx_${table}_%`) as Array<{ name: string }>;
++    assert.deepStrictEqual(orphans, []);
++    db.close();
++  });
++
++  it('drops historic indexes that the current schema no longer declares', () => {
++    // First schema declares a `status` index.
++    backend.ensureBook(
++      { ownerId: OWNER, book: BOOK },
++      { indexes: ['status'] },
++    );
++    const table = tableName({ ownerId: OWNER, book: BOOK });
++
++    // Confirm the index exists.
++    {
++      const db = inspectDb(env.home);
++      assert.ok(indexesForTable(db, table).some((n) => n.includes('status')));
++      db.close();
++    }
++
++    // Drop the book — must drop the historic `status` index even though
++    // we never re-declared it before dropping. dropBook is wholesale.
++    backend.dropBook({ ownerId: OWNER, book: BOOK });
++
++    const db = inspectDb(env.home);
++    assert.deepStrictEqual(tablesByPrefix(db, table), []);
++    assert.deepStrictEqual(indexesForTable(db, table), []);
++    db.close();
++  });
++
++  it('is idempotent at the backend level', () => {
++    backend.ensureBook({ ownerId: OWNER, book: BOOK }, {});
++    backend.dropBook({ ownerId: OWNER, book: BOOK });
++    // Second call must not throw.
++    assert.doesNotThrow(() => backend.dropBook({ ownerId: OWNER, book: BOOK }));
++    // A drop on a never-existed book must also not throw.
++    assert.doesNotThrow(() =>
++      backend.dropBook({ ownerId: OWNER, book: 'never-existed' }),
++    );
++  });
++});
+diff --git a/packages/plugins/stacks/src/sqlite-backend.ts b/packages/plugins/stacks/src/sqlite-backend.ts
+index e7bc2f7..74eff2d 100644
+--- a/packages/plugins/stacks/src/sqlite-backend.ts
++++ b/packages/plugins/stacks/src/sqlite-backend.ts
+@@ -335,6 +335,35 @@ export class SqliteBackend implements StacksBackend {
+     }
+   }
+ 
++  dropBook(ref: BookRef): void {
++    const db = this.requireDb();
++    const table = tableName(ref);
++
++    // Look up associated indexes via SQLite's catalog so that any historic
++    // indexes — including ones declared by an earlier schema and no longer
++    // present in the current `BookSchema` — are dropped along with the
++    // table. Index names follow the `idx_<table>_<field>` convention used
++    // by `ensureBook`, so prefix-matching against the table name is enough
++    // to catch all of them.
++    const idxRows = db
++      .prepare(
++        `SELECT name FROM sqlite_master
++         WHERE type = 'index' AND tbl_name = ?`,
++      )
++      .all(table) as Array<{ name: string }>;
++
++    for (const { name } of idxRows) {
++      // Skip auto-indexes (e.g. those backing UNIQUE/PRIMARY KEY); they
++      // are dropped automatically when the table goes.
++      if (name.startsWith('sqlite_autoindex_')) continue;
++      db.exec(`DROP INDEX IF EXISTS "${name}"`);
++    }
++
++    // DROP TABLE IF EXISTS — idempotent; SQLite is silent if the table is
++    // already gone. This is the wholesale retirement primitive.
++    db.exec(`DROP TABLE IF EXISTS "${table}"`);
++  }
++
+   beginTransaction(): BackendTransaction {
+     return new SqliteTransaction(this.requireDb());
+   }
+diff --git a/packages/plugins/stacks/src/stacks-core.ts b/packages/plugins/stacks/src/stacks-core.ts
+index 593b6ba..1e3fa94 100644
+--- a/packages/plugins/stacks/src/stacks-core.ts
++++ b/packages/plugins/stacks/src/stacks-core.ts
+@@ -183,6 +183,10 @@ export class StacksCore {
+       async transaction<R>(fn: (tx: TransactionContext) => Promise<R>): Promise<R> {
+         return self.runTransaction(fn);
+       },
++
++      async dropBook(ownerId: string, bookName: string): Promise<void> {
++        return self.doDropBook({ ownerId, book: bookName });
++      },
+     };
+   }
+ 
+@@ -520,6 +524,37 @@ export class StacksCore {
+     }
+   }
+ 
++  // ── Schema-level operations ───────────────────────────────────────
++
++  /**
++   * Drop a book — wholesale retirement primitive.
++   *
++   * Calls `backend.dropBook` to remove the table (or memory entry) and
++   * any associated indexes, then fires a single coalesced
++   * `delete-book` CDC event to all registered watchers for this book.
++   * No per-row `delete` events are emitted.
++   *
++   * Schema-level operation: must not be called inside an explicit
++   * `transaction()`. Called inside one, it throws — DDL doesn't compose
++   * with row-level rollback semantics, and quietly tearing down a table
++   * during a row write would muddy partial-commit reasoning.
++   *
++   * Errors thrown by `delete-book` handlers are logged and swallowed —
++   * the drop is irreversible by the time the event fires.
++   */
++  async doDropBook(ref: BookRef): Promise<void> {
++    if (this.activeTx) {
++      throw new Error(
++        '[stacks] dropBook() cannot be called inside an active transaction. ' +
++        'Drop schema-level state outside any open transaction.',
++      );
++    }
++
++    this.backend.dropBook(ref);
++
++    await this.cdc.fireDeleteBook(ref.ownerId, ref.book);
++  }
++
+   private requireTx(): ActiveTransaction {
+     if (!this.activeTx) {
+       throw new Error('[stacks] Write operation outside transaction — this is a bug');
+diff --git a/packages/plugins/stacks/src/types.ts b/packages/plugins/stacks/src/types.ts
+index fa5e58e..ffc0639 100644
+--- a/packages/plugins/stacks/src/types.ts
++++ b/packages/plugins/stacks/src/types.ts
+@@ -130,10 +130,26 @@ export interface DeleteEvent<T extends BookEntry> {
+   prev: T;
+ }
+ 
++/**
++ * Fired once when a book is dropped via `StacksApi.dropBook()`.
++ *
++ * Unlike per-document `delete` events, no per-row events are emitted when a
++ * book is retired — `delete-book` is the wholesale signal. Subscribers that
++ * cared about content within the book see exactly one event marking that the
++ * book (and all its data) is gone. Errors thrown by handlers are logged and
++ * do not roll back the drop — `dropBook` is irreversible by design.
++ */
++export interface DeleteBookEvent {
++  type: 'delete-book';
++  ownerId: string;
++  book: string;
++}
++
+ export type ChangeEvent<T extends BookEntry> =
+   | CreateEvent<T>
+   | UpdateEvent<T>
+-  | DeleteEvent<T>;
++  | DeleteEvent<T>
++  | DeleteBookEvent;
+ 
+ export type ChangeHandler<T extends BookEntry = BookEntry> = (
+   event: ChangeEvent<T>,
+@@ -173,4 +189,24 @@ export interface StacksApi {
+   ): void;
+ 
+   transaction<R>(fn: (tx: TransactionContext) => Promise<R>): Promise<R>;
++
++  /**
++   * Retire a book — drops the backend table (or memory entry) and any
++   * associated indexes. Idempotent: dropping a book that does not exist is
++   * a silent no-op.
++   *
++   * Fires a single `delete-book` CDC event after the drop completes. No
++   * per-row `delete` events are emitted — subscribers that cared about
++   * content within the book see only the wholesale signal.
++   *
++   * `dropBook` is a schema-level operation and may not be called inside an
++   * explicit `transaction()`. Calling it inside one throws. The drop is not
++   * transactional with document writes — once the backend method returns,
++   * the book is gone.
++   *
++   * Intended use: one-shot startup migrations or operator tooling that
++   * retires a book that is no longer declared by any kit. Not for runtime
++   * data lifecycle management.
++   */
++  dropBook(ownerId: string, bookName: string): Promise<void>;
+ }

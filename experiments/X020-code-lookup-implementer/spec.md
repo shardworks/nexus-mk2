@@ -70,6 +70,23 @@ the role's prompt is augmented with a tool-preference snippet
 The trial shape is **implement-only** — same as X016. See [Lab
 Operations / Trial Shapes](../lab-operations/running-trials.md#implement-only).
 
+## Brief shape
+
+The brief shipped to the implement engine is the **planner-elaborated
+spec** from the original plandoc (`w-mojnftby-473d4e94c053`,
+`$.spec`), not the raw `writ.body`. The real-world session received
+the spec via `spider`'s `plan-and-ship` rig (`spec-writer` →
+`implement` with the spec passed as `prompt`). The implement-only
+trial shape skips planning, so without this substitution the lab
+implementer would work from a less-elaborated input than production
+and cost would shift. X018 / X019 already followed this pattern
+(`cartograph-replay.md` is the cartograph plandoc spec, not the raw
+brief). The X020 brief at `briefs/dropbook-replay.md` was extracted
+via `nsg plan show w-mojnftby-473d4e94c053` and includes the full
+`<task-manifest>` (t1–t8). The implement engine's
+`EXECUTION_EPILOGUE` keys on the manifest to drive task-by-task
+execution.
+
 ## Codex selection
 
 **`w-mojnftby` — Stacks `dropBook` primitive** (real production
