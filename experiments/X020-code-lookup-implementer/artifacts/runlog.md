@@ -20,7 +20,7 @@ land + a quick review before posting the next.
 | 0 | `baseline-dropbook.yaml` (v0, raw-brief) | apparatus check | `w-mopib9cd` | `rig-mopuhati` | superseded | $10.94 | 23.1 min | n/a | scoped narrowly — missed cartograph + tier4 + arch docs; brief was raw `writ.body`, not plandoc spec |
 | 1 | `baseline-dropbook.yaml` (v1, plandoc spec) | calibration **and** A/B baseline anchor | `w-mopwwox1` | `rig-mopwx2gd` | **completed** | **$15.95** | **27.6 min** | n/a | calibration **PASSED** — −1.2% vs $16.15 reference; full scope coverage incl. cartograph + tier4 + arch docs. Single baseline doubles as the H1 comparator anchor (X019 pattern) |
 | – | `baseline-dropbook.yaml` (v1) | redundant baseline rerun | `w-mopyh1hm` | — | cancelled | — | — | n/a | posted then cancelled — Sean caught that a second baseline at N=1 with no variance machinery is just spend without measurement value |
-| 2 | `with-tool-dropbook.yaml` | A/B variant — **H1 measurement** | `w-mopyzctu` | — | open, queued | — | — | — | gate: ≥25% reduction vs row 1 ($15.95 anchor) |
+| 2 | `with-tool-dropbook.yaml` | A/B variant — **H1 measurement** | `w-mopyzctu` | `rig-mopz01jq` | **completed** | **$12.67** | **17.9 min** | **0%** | −20.6% cost vs row 1; **mechanism falsified** — code-lookup never invoked despite authorization + snippet + index shipped |
 
 **Reference data (from production, for orientation):**
 
@@ -40,18 +40,45 @@ land + a quick review before posting the next.
 
 ## Hypothesis status
 
-- **H1** — `code-lookup` reduces implementer session cost ≥25%
-  on the dropBook commission, anchored to the row 1 lab baseline
-  ($15.95), not the real-world $16.15. Comparing trial 1 to
-  trial 2 holds apparatus, codex, brief, and trial-shape constant —
-  the only difference is the code-lookup tool injection.
-  - **Status:** unresolved. Needs row 2 vs row 1.
-- **Adoption metric (secondary measurement, not a hypothesis)** —
-  ≥20% of the implementer's tool calls reach for `code-lookup`
-  in the with-tool variant. X019's planner-side rate was 2/67
-  (3%); converting mechanism → cost requires roughly an order of
-  magnitude more.
-  - **Status:** unresolved. Measured from row 3.
+- **H1 (cost target)** — `code-lookup` reduces implementer
+  session cost ≥25% vs the row 1 baseline.
+  - **Status:** **NOT supported on N=1.** Measured **−20.6%**
+    ($12.67 vs $15.95). Real signal direction, below threshold.
+- **H1 (mechanism)** — the model invokes `code-lookup` to
+  realize the cost reduction. Spec set ≥20% of tool calls as
+  the adoption target.
+  - **Status:** **FALSIFIED on N=1.** Adoption was **0/116
+    calls (0%)** in the successful implementer attempt; 0/80
+    in the failed first attempt. The tool was authorized, the
+    role file shipped the implementer-flavored snippet, and the
+    pre-built index was at `<guild-root>/code-lookup-index.json`
+    — yet the model never reached for the tool.
+
+The −20.6% cost gap with 0% mechanism adoption is the central
+puzzle. Possibilities (not exhaustive):
+
+1. **N=1 session variance.** Implementer behavior on this brief
+   may have ≥20% session-to-session noise floor; a paired
+   re-run on either arm would surface variance.
+2. **Partial scope shift.** With-tool skipped 3 supplementary
+   doc files (`docs/architecture/apparatus/clockworks-stacks-signals.md`,
+   `cartograph/README.md`, `clockworks-stacks-signals/README.md`).
+   Accounts for a few-percent of the gap; doesn't explain the rest.
+3. **Snippet behavioral side-effect.** The snippet's framing
+   ("use Grep only for textual searches, code-lookup for
+   structural") may have nudged the model toward a more focused
+   session shape even without invoking code-lookup. Compatible
+   with the halved Edit count (44 → 21), 25% fewer total tool
+   calls (155 → 116), and 24% fewer output tokens.
+4. **Some other artifact of trial 2 specifically.** First
+   implement attempt failed mid-flow (80 tool calls done, then
+   $0/0-token termination, retried). The second attempt may have
+   benefited from an implicit state effect, though caches don't
+   carry across sessions.
+
+The result rules out the simplest version of "the model uses
+code-lookup, code-lookup queries are cheaper than Grep+Read,
+therefore cost drops." That mechanism didn't fire.
 
 ## Trial run history
 
@@ -178,16 +205,70 @@ with-tool variant is compared directly against it. Holds
 apparatus / codex / brief / trial-shape constant; the only
 variable is the code-lookup tool injection.
 
-### Trial 2 — with-tool variant (H1 measurement, in flight)
+### Trial 2 — with-tool variant (H1 measurement, completed)
 
 - **Writ:** `w-mopyzctu-b8992f8852da`
-- **Posted:** 2026-05-03T16:13 UTC. Watcher armed (`bz56h90z0`).
+- **Rig:** `rig-mopz01jq`
+- **Posted:** 2026-05-03T16:13 UTC.
+- **Sealed:** 2026-05-03T16:53 UTC. One commit (`c25eae44`),
+  fast-forward, 1 inscription. **40-min wall-clock**.
 - **Manifest:** `with-tool-dropbook.yaml` — adds the
   `code-lookup-apparatus` plugin, `code-lookup:read` permission
   on the artificer role, the `code-lookup-index.json` artifact
   shipped to `<guild-root>`, and the implementer-flavored
   tool-preference snippet inserted into `roles/artificer.md`.
-- **Status:** open, queued.
+
+- **Lab-guild cost:**
+
+  | session | role | engine | attempt | cost | duration | output tokens | cache reads |
+  |---|---|---|---|---|---|---|---|
+  | `ses-mopz01mk` | artificer | implement | 1 (failed) | $0.00 | 11.6 min | 0 | 0 |
+  | `ses-mopzflid` | artificer | implement | 2 (success) | **$12.67** | **17.9 min** | 51,012 | 19.4 M |
+  | `ses-moq02rjm` | reviewer | review | 1 | $2.97 | 8.8 min | 13,436 | 3.9 M |
+  | `ses-moq0e4wy` | artificer | revise | 1 | $0.12 | 0.2 min | 426 | 47 K |
+  | **trial total** | | | | **$15.76** | **38.4 min** | | |
+
+  First implement attempt completed 80 tool calls of progress
+  before crashing at $0 / 0 tokens billed (likely an external
+  failure mid-flow, not a model issue). Retry succeeded.
+
+- **A/B comparison vs trial 1 (baseline):**
+
+  | | Trial 1 (baseline) | Trial 2 (with-tool) | Δ |
+  |---|---|---|---|
+  | Implementer cost | $15.95 | $12.67 | **−20.6%** |
+  | Implementer duration | 27.6 min | 17.9 min | −35.1% |
+  | Output tokens | 67,509 | 51,012 | −24.4% |
+  | Cache reads | 25.0 M | 19.4 M | −22.4% |
+  | Total tool calls | 155 | 116 | −25.2% |
+  | Edit calls | 44 | 21 | −52.3% |
+  | Grep calls | 8 | 11 | +37.5% |
+  | code-lookup calls | n/a | **0** | mechanism falsified |
+  | Files touched | 23 | 20 | scope: 3 fewer doc files |
+
+- **Tier 1 quality:** ✅ build/test passed cleanly. Sealed with
+  inscriptions=1, retries=0 on the engine-level retry counter
+  (the failed-then-succeeded implement attempt is logged
+  separately).
+
+- **Tier 2 quality:** the substrate primitive, bridge update,
+  cartograph integration, and full conformance suite (Tier 1+2+4)
+  all landed. With-tool **skipped** 3 supplementary
+  documentation files vs the trial 1 baseline:
+  `docs/architecture/apparatus/clockworks-stacks-signals.md`,
+  `packages/plugins/cartograph/README.md`,
+  `packages/plugins/clockworks-stacks-signals/README.md`. With-tool
+  also added `conformance.sqlite.test.ts` (a test entry-point
+  file) that baseline didn't.
+
+- **Adoption diagnostic:** the snippet was loaded (loom
+  auto-loads `<home>/roles/<roleName>.md` for guild-configured
+  roles; the with-tool manifest ships
+  `variants/artificer-with-code-lookup.md` to that path).
+  `code-lookup` appears in the session's `authorizedTools`. The
+  pre-built index file is at `<guild-root>/code-lookup-index.json`.
+  Yet the model invoked code-lookup zero times across two
+  implementer attempts (196 total tool calls combined).
 
 ## Cumulative spend
 
@@ -199,7 +280,7 @@ LLM-backed sessions itself.
 | | trials | impl + review + revise + seal billed | total |
 |---|---|---|---|
 | Estimated (per trial) | — | $15–$25 | — |
-| Actual to date | 1 superseded + 1 calibrated + 1 cancelled-pre-pickup | $12.10 + $19.31 + $0 | $31.41 |
+| Actual to date | 1 superseded + 1 calibration + 1 cancelled + 1 with-tool | $12.10 + $19.31 + $0 + $15.76 | $47.17 |
 
 ## Open questions / decisions to revisit
 

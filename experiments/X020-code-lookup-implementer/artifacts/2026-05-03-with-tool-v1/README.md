@@ -1,0 +1,167 @@
+# Trial extract — X020 variant — dropBook commission, code-lookup tool exposed to artificer
+
+- **Trial id**: `w-mopyzctu-b8992f8852da`
+- **Archive id**: `lar-moq0egii-40c3d9365bd2`
+- **Archived at**: 2026-05-03T16:53:01.338Z
+- **Writ phase**: completed
+- **Writ resolved at**: 2026-05-03T16:53:01.966Z
+
+## Probes
+
+### context — `lab.probe-trial-context`
+
+```yaml
+trialId: w-mopyzctu-b8992f8852da
+rigId: rig-mopyzea2-82808689
+rigTemplate: null
+labHostFrameworkVersion: 0.0.0
+labHostPluginsInstalled:
+  - animator
+  - astrolabe
+  - claude-code
+  - clerk
+  - clockworks
+  - codexes
+  - fabricator
+  - laboratory
+  - lattice
+  - lattice-discord
+  - loom
+  - oculus
+  - parlour
+  - ratchet
+  - spider
+  - stacks
+  - tools
+manifestSnapshot:
+  slug: x020-with-tool-dropbook
+  frameworkVersion: 0.1.300-x019.0
+  fixtures:
+    - id: codex
+      engineId: lab.codex-setup
+      givens:
+        upstreamRepo: /workspace/nexus
+        baseSha: 93f8ce5089e0a115775c166534ca46f7ec196b8d
+    - id: test-guild
+      engineId: lab.guild-setup
+      givens:
+        plugins:
+          - name: "@shardworks/stacks-apparatus"
+            version: 0.1.300-x019.0
+          - name: "@shardworks/tools-apparatus"
+            version: 0.1.300-x019.0
+          - name: "@shardworks/codexes-apparatus"
+            version: 0.1.300-x019.0
+          - name: "@shardworks/clerk-apparatus"
+            version: 0.1.300-x019.0
+          - name: "@shardworks/ratchet-apparatus"
+            version: 0.1.300-x019.0
+          - name: "@shardworks/fabricator-apparatus"
+            version: 0.1.300-x019.0
+          - name: "@shardworks/animator-apparatus"
+            version: 0.1.300-x019.0
+          - name: "@shardworks/loom-apparatus"
+            version: 0.1.300-x019.0
+          - name: "@shardworks/claude-code-apparatus"
+            version: 0.1.300-x019.0
+          - name: "@shardworks/spider-apparatus"
+            version: 0.1.300-x019.0
+          - name: "@shardworks/clockworks-apparatus"
+            version: 0.1.300-x019.0
+          - name: "@shardworks/code-lookup-apparatus"
+            version: 0.1.300-x019.0
+        config:
+          settings:
+            model: opus
+          loom:
+            roles:
+              artificer:
+                permissions:
+                  - clerk:*
+                  - tools:*
+                  - code-lookup:read
+          animator:
+            sessionProvider: claude-code
+          code-lookup:
+            indexPath: code-lookup-index.json
+          spider:
+            variables:
+              role: artificer
+              buildCommand: pnpm --filter @shardworks/stacks-apparatus --filter
+                @shardworks/clockworks-stacks-signals-apparatus --filter
+                @shardworks/lattice-apparatus --filter
+                @shardworks/cartograph-apparatus build
+              testCommand: pnpm --filter @shardworks/stacks-apparatus --filter
+                @shardworks/clockworks-stacks-signals-apparatus --filter
+                @shardworks/lattice-apparatus --filter
+                @shardworks/cartograph-apparatus test
+        files:
+          - sourcePath: /workspace/nexus-mk2/experiments/X020-code-lookup-implementer/variants/artificer-with-code-lookup.md
+            guildPath: roles/artificer.md
+          - sourcePath: /workspace/nexus-mk2/experiments/X020-code-lookup-implementer/artifacts/2026-05-03-code-lookup-index-93f8ce50.json
+            guildPath: code-lookup-index.json
+      dependsOn:
+        - codex
+    - id: daemon
+      engineId: lab.daemon-setup
+      givens: {}
+      dependsOn:
+        - test-guild
+  scenario:
+    engineId: lab.commission-post-xguild
+    givens:
+      briefPath: ../briefs/dropbook-replay.md
+      waitForRigTerminal: true
+      timeoutMs: 3600000
+  probes:
+    - id: context
+      engineId: lab.probe-trial-context
+      givens: {}
+    - id: stacks
+      engineId: lab.probe-stacks-dump
+      givens: {}
+    - id: commits
+      engineId: lab.probe-git-range
+      givens: {}
+  archive:
+    engineId: lab.archive
+    givens: {}
+  manifestPath: /workspace/nexus-mk2/experiments/X020-code-lookup-implementer/manifests/with-tool-dropbook.yaml
+capturedAt: 2026-05-03T16:53:01.217Z
+```
+
+### stacks — `lab.probe-stacks-dump`
+
+```yaml
+bookCounts:
+  animator/sessions: 4
+  animator/state: 1
+  animator/transcripts: 4
+  clerk/links: 0
+  clerk/writs: 1
+  clockworks/event_dispatches: 0
+  clockworks/events: 15
+  ratchet/click_links: 0
+  ratchet/clicks: 0
+  spider/input-requests: 0
+  spider/rigs: 1
+totalRows: 26
+capturedAt: 2026-05-03T16:53:01.220Z
+```
+
+### commits — `lab.probe-git-range`
+
+```yaml
+codexName: x020-with-tool-dropbook-b8992f88
+baseSha: 93f8ce5089e0a115775c166534ca46f7ec196b8d
+headSha: c25eae44eeb81964db60b4d90acd1b1222db170f
+commitCount: 1
+totalDiffBytes: 59367
+capturedAt: 2026-05-03T16:53:01.335Z
+```
+
+## Layout
+
+- `manifest.yaml` — `ext.laboratory.config` from the trial writ.
+- `README.md` — this file.
+- Per-probe subdirectories — see each probe's extractor.
