@@ -1,0 +1,116 @@
+slug: x021-rig-moji64hs-v4-combined
+title: X021 control v4 — vision-keeper deletion replay (combined #3+#4+#5)
+codex: nexus
+
+description: |
+  X021 control v4. Same as rig-moji64hs-baseline but with the
+  three Category 2 transformations applied wherever applicable.
+
+  The transformation surface on rig-moji64hs is near-zero; only
+  one applicable site fires (the integration.test.ts 'tester.kind'
+  precedent is inlined as a 12-line excerpt rather than cited by
+  path). Compared against rig-moji64hs-baseline.yaml; H3 sustained
+  when cost delta is within ±5% — confirming the mechanism is
+  "cite-by-path → inline" rather than "smaller spec is cheaper."
+
+  Brief: ../briefs/rig-moji64hs-v4-combined.md (verbatim baseline
+  inventory + scope + decisions + observations + spec, with the
+  one applicable transformation applied).
+
+  Artificer role file shipped from X021 fixtures dir, same as the
+  control baseline. Codex pinned to d6e34097 — the codex state the
+  original implementer saw on 2026-04-29 when draft-moji64zc was
+  created. Frameworked at 0.1.300-x019.0.
+
+  Build/test commands are workspace-wide (matching the control
+  baseline). waitForRigTerminal=true with a 60-min cap.
+
+frameworkVersion: '0.1.300-x019.0'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      # Base SHA of draft-moj12hm9 — the codex state the original
+      # implementer saw when starting work on the periodic-tick
+      # commission (2026-04-28).
+      baseSha: d6e34097f698df66d595f81f928320eafde8276f
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # Implement-only plugin set per
+      # experiments/lab-operations/running-trials.md#standard-plugin-sets.
+      # Mirrors X020's set (which Sean validated).
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/ratchet-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.300-x019.0' }
+      config:
+        settings:
+          model: opus
+        loom:
+          roles:
+            artificer:
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+        animator:
+          sessionProvider: 'claude-code'
+        spider:
+          variables:
+            role: 'artificer'
+            # rig-moj12h4o touches the reckoner apparatus
+            # (core source + new tick.ts + replacement test surface)
+            # plus a kit-contribution edge to clockworks. Build/test
+            # the affected packages directly. The reckoner package's
+            # test surface is the load-bearing verification.
+            buildCommand: 'pnpm -w build'
+            testCommand: 'pnpm -w test'
+      # Production artificer role file — snapshotted under fixtures/
+      # at X021 activation. Sean's note (2026-05-03): the artificer
+      # role instructions live in vibers/roles/artificer.md, not in
+      # the framework or any plugin. The framework's loom auto-loads
+      # <home>/roles/<roleName>.md for every guild-configured role,
+      # so for production fidelity we must ship this file into the
+      # fresh test guild via files:.
+      files:
+        - sourcePath: ../fixtures/test-guild/roles/artificer.md
+          guildPath: roles/artificer.md
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: ../briefs/rig-moji64hs-v4-combined.md
+    waitForRigTerminal: true
+    timeoutMs: 3600000   # 60 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

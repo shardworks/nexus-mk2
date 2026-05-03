@@ -1,0 +1,112 @@
+slug: x021-rig-moj12h4o-v2-inline-templates
+title: X021 v2 — Reckoner periodic-tick replay (inline pattern templates, idea #4)
+codex: nexus
+
+description: |
+  Substantive variant v2 — applies idea #4 (inline pattern
+  templates) to the rig-moj12h4o brief. Brief replaces the
+  "Stdlib relay co-located with apparatus" pointer (which cites
+  summon-relay.ts and decline-relay.ts in the production
+  inventory) with a verbatim 30-line excerpt of decline-relay.ts's
+  relay() factory pattern plus an explicit "do not Read" note.
+  Predicted reduction: pure-reads on summon-relay.ts (~23K chars)
+  and decline-relay.ts (~8K chars).
+
+  Compared against rig-moj12h4o-baseline.yaml. All apparatus
+  identical to baseline; only the brief content differs.
+
+  The artificer role file is shipped from the X021 fixtures dir
+  (snapshot of /workspace/vibers/roles/artificer.md). Codex pinned
+  to b92dc905. Frameworked at 0.1.300-x019.0.
+
+  waitForRigTerminal=true with a 60-min cap.
+
+frameworkVersion: '0.1.300-x019.0'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      # Base SHA of draft-moj12hm9 — the codex state the original
+      # implementer saw when starting work on the periodic-tick
+      # commission (2026-04-28).
+      baseSha: b92dc90502dc0e38a92012cbd238c9eae0e65b0d
+
+  - id: test-guild
+    engineId: lab.guild-setup
+    dependsOn: [codex]
+    givens:
+      # Implement-only plugin set per
+      # experiments/lab-operations/running-trials.md#standard-plugin-sets.
+      # Mirrors X020's set (which Sean validated).
+      plugins:
+        - { name: '@shardworks/stacks-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/tools-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/codexes-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clerk-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/ratchet-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/fabricator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/animator-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/loom-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/claude-code-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/spider-apparatus', version: '0.1.300-x019.0' }
+        - { name: '@shardworks/clockworks-apparatus', version: '0.1.300-x019.0' }
+      config:
+        settings:
+          model: opus
+        loom:
+          roles:
+            artificer:
+              permissions:
+                - 'clerk:*'
+                - 'tools:*'
+        animator:
+          sessionProvider: 'claude-code'
+        spider:
+          variables:
+            role: 'artificer'
+            # rig-moj12h4o touches the reckoner apparatus
+            # (core source + new tick.ts + replacement test surface)
+            # plus a kit-contribution edge to clockworks. Build/test
+            # the affected packages directly. The reckoner package's
+            # test surface is the load-bearing verification.
+            buildCommand: 'pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus build'
+            testCommand: 'pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus test'
+      # Production artificer role file — snapshotted under fixtures/
+      # at X021 activation. Sean's note (2026-05-03): the artificer
+      # role instructions live in vibers/roles/artificer.md, not in
+      # the framework or any plugin. The framework's loom auto-loads
+      # <home>/roles/<roleName>.md for every guild-configured role,
+      # so for production fidelity we must ship this file into the
+      # fresh test guild via files:.
+      files:
+        - sourcePath: ../fixtures/test-guild/roles/artificer.md
+          guildPath: roles/artificer.md
+
+  - id: daemon
+    engineId: lab.daemon-setup
+    dependsOn: [test-guild]
+    givens: {}
+
+scenario:
+  engineId: lab.commission-post-xguild
+  givens:
+    briefPath: ../briefs/rig-moj12h4o-v2-inline-templates.md
+    waitForRigTerminal: true
+    timeoutMs: 3600000   # 60 min cap
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: stacks
+    engineId: lab.probe-stacks-dump
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
