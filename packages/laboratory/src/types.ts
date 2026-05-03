@@ -183,6 +183,20 @@ export interface LaboratoryTrialConfig {
   /** Trial slug (used in disposable-surface naming). */
   slug: TrialSlug;
   /**
+   * Absolute path of the manifest file at trial-post time. Stamped
+   * by `lab-trial-post` so manifest-relative paths in givens
+   * (e.g. `files[].sourcePath`, `briefPath`) can be resolved against
+   * `path.dirname(manifestPath)` at engine-execution time. The
+   * orchestrator surfaces it to engines via `_trial.manifestDir`
+   * (see `InjectedTrialContext` in engines/phases.ts).
+   *
+   * Optional for forward compatibility — writs posted via paths
+   * that bypass `lab-trial-post` (e.g. direct `clerk.post` +
+   * `setWritExt`) lack this field, in which case engines fall back
+   * to the legacy absolute-only path validation.
+   */
+  manifestPath?: string;
+  /**
    * Framework version pin used to bootstrap the test guild. Resolved
    * at trial-post time: manifest field if specified, otherwise the
    * lab-host's installed `@shardworks/nexus-core` VERSION (rejected

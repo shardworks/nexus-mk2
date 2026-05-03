@@ -472,3 +472,73 @@ describe('staged-phase composition matches the unified flat graph', () => {
     assert.equal(tail, 'fixture-codex-teardown');
   });
 });
+
+// ── _trial.manifestDir injection (manifest-relative path support) ───
+
+describe('_trial.manifestDir injection', () => {
+  const MANIFEST_PATH = '/workspace/exp/X019/manifests/with-tool.yaml';
+  const EXPECTED_DIR = '/workspace/exp/X019/manifests';
+
+  it('injects manifestDir into setup graft engines when config.manifestPath is set', () => {
+    const { graft } = buildSetupGraft(
+      trialConfig({ manifestPath: MANIFEST_PATH, fixtures: [fixture('codex')] }),
+      HEAD,
+      WRIT_ID,
+    );
+    const setup = graft.find((e) => e.id === 'fixture-codex-setup')!;
+    const trial = (setup.givens as { _trial: Record<string, unknown> })._trial;
+    assert.equal(trial.manifestDir, EXPECTED_DIR);
+  });
+
+  it('injects manifestDir into scenario graft when config.manifestPath is set', () => {
+    const graft = buildScenarioGraft(
+      trialConfig({ manifestPath: MANIFEST_PATH }),
+      HEAD,
+      WRIT_ID,
+    );
+    const trial = (graft[0]!.givens as { _trial: Record<string, unknown> })._trial;
+    assert.equal(trial.manifestDir, EXPECTED_DIR);
+  });
+
+  it('injects manifestDir into probes graft when config.manifestPath is set', () => {
+    const graft = buildProbesGraft(
+      trialConfig({
+        manifestPath: MANIFEST_PATH,
+        probes: [{ id: 'p1', engineId: 'lab.probe-trial-context', givens: {} }],
+      }),
+      WRIT_ID,
+    );
+    const trial = (graft[0]!.givens as { _trial: Record<string, unknown> })._trial;
+    assert.equal(trial.manifestDir, EXPECTED_DIR);
+  });
+
+  it('injects manifestDir into archive graft when config.manifestPath is set', () => {
+    const graft = buildArchiveGraft(
+      trialConfig({ manifestPath: MANIFEST_PATH }),
+      WRIT_ID,
+    );
+    const trial = (graft[0]!.givens as { _trial: Record<string, unknown> })._trial;
+    assert.equal(trial.manifestDir, EXPECTED_DIR);
+  });
+
+  it('injects manifestDir into teardown graft when config.manifestPath is set', () => {
+    const { graft } = buildTeardownGraft(
+      trialConfig({ manifestPath: MANIFEST_PATH, fixtures: [fixture('codex')] }),
+      WRIT_ID,
+    );
+    const teardown = graft.find((e) => e.id === 'fixture-codex-teardown')!;
+    const trial = (teardown.givens as { _trial: Record<string, unknown> })._trial;
+    assert.equal(trial.manifestDir, EXPECTED_DIR);
+  });
+
+  it('omits manifestDir when config.manifestPath is undefined (legacy fallback)', () => {
+    const { graft } = buildSetupGraft(
+      trialConfig({ fixtures: [fixture('codex')] }),  // no manifestPath
+      HEAD,
+      WRIT_ID,
+    );
+    const setup = graft.find((e) => e.id === 'fixture-codex-setup')!;
+    const trial = (setup.givens as { _trial: Record<string, unknown> })._trial;
+    assert.equal('manifestDir' in trial, false);
+  });
+});

@@ -24,6 +24,8 @@
  * otherwise the call fails with a clear error.
  */
 
+import { resolve as resolvePath } from 'node:path';
+
 import { z } from 'zod';
 import { guild, VERSION as LAB_HOST_VERSION } from '@shardworks/nexus-core';
 import { tool } from '@shardworks/tools-apparatus';
@@ -71,6 +73,14 @@ export default tool({
   handler: async (params) => {
     const manifest = await readManifestFile(params.manifest);
     const { title, body, parentId, codex, trialConfig } = manifestToWritShape(manifest);
+
+    // Stamp the absolute manifest path so engines can resolve
+    // manifest-relative paths in givens (files[].sourcePath,
+    // briefPath, …). resolvePath() makes it absolute against the
+    // current process cwd if the user passed a relative path on the
+    // CLI; ALWAYS-ABSOLUTE in the writ keeps the engine-side
+    // resolution simple (just dirname + path.resolve).
+    trialConfig.manifestPath = resolvePath(params.manifest);
 
     // Resolve frameworkVersion: manifest → lab-host VERSION → fail.
     // Refuses dev source ('0.0.0') because dev artifacts aren't

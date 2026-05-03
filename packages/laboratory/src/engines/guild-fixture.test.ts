@@ -33,6 +33,7 @@ import {
   discoverCodexes,
   guildSetupEngine,
   guildTeardownEngine,
+  validateGivens,
 } from './guild-fixture.ts';
 import { StacksTestStub } from '../archive/test-stacks-stub.ts';
 import { LAB_TRIAL_ARCHIVES_BOOK, type LabTrialArchive } from '../archive/book.ts';
@@ -313,7 +314,7 @@ describe('lab.guild-setup — validation', () => {
     );
   });
 
-  it('rejects relative sourcePath in files entries', async () => {
+  it('rejects relative sourcePath when no manifest directory is available', async () => {
     await assert.rejects(
       () =>
         guildSetupEngine.run(
@@ -323,7 +324,7 @@ describe('lab.guild-setup — validation', () => {
           },
           makeContext(),
         ),
-      /sourcePath must be absolute/,
+      /sourcePath is relative .* no manifest directory is available/s,
     );
   });
 
@@ -380,6 +381,74 @@ describe('lab.guild-setup — validation', () => {
         ),
       /already exists/,
     );
+  });
+});
+
+// ── files[].sourcePath manifest-relative resolution ──────────────────
+//
+// These tests pass an explicit `guildPath` so validateGivens never
+// calls guild() — keeps the resolution logic isolated from the
+// guild-bootstrap branch.
+
+describe('lab.guild-setup — manifest-relative sourcePath', () => {
+  const baseGivens = { guildName: 'g', guildPath: '/abs/guild' };
+
+  it('resolves a relative sourcePath against _trial.manifestDir', () => {
+    const resolved = validateGivens(
+      {
+        ...baseGivens,
+        files: [{ sourcePath: 'variants/role.md', guildPath: 'roles/role.md' }],
+        _trial: { ...TRIAL, manifestDir: '/path/to/manifest-dir' },
+      },
+      'lab.guild-setup',
+    );
+    assert.equal(resolved.files.length, 1);
+    assert.equal(resolved.files[0]!.sourcePath, '/path/to/manifest-dir/variants/role.md');
+    assert.equal(resolved.files[0]!.guildPath, 'roles/role.md');
+  });
+
+  it('resolves multiple relative entries independently', () => {
+    const resolved = validateGivens(
+      {
+        ...baseGivens,
+        files: [
+          { sourcePath: './a.md', guildPath: 'a.md' },
+          { sourcePath: '../shared/b.json', guildPath: 'b.json' },
+        ],
+        _trial: { ...TRIAL, manifestDir: '/exp/X019/manifests' },
+      },
+      'lab.guild-setup',
+    );
+    assert.equal(resolved.files[0]!.sourcePath, '/exp/X019/manifests/a.md');
+    assert.equal(resolved.files[1]!.sourcePath, '/exp/X019/shared/b.json');
+  });
+
+  it('keeps absolute sourcePath unchanged when manifestDir is set', () => {
+    const resolved = validateGivens(
+      {
+        ...baseGivens,
+        files: [{ sourcePath: '/absolute/role.md', guildPath: 'role.md' }],
+        _trial: { ...TRIAL, manifestDir: '/path/to/manifest-dir' },
+      },
+      'lab.guild-setup',
+    );
+    assert.equal(resolved.files[0]!.sourcePath, '/absolute/role.md');
+  });
+
+  it('resolves mixed absolute + relative entries correctly', () => {
+    const resolved = validateGivens(
+      {
+        ...baseGivens,
+        files: [
+          { sourcePath: '/absolute/a.md', guildPath: 'a.md' },
+          { sourcePath: 'rel/b.md', guildPath: 'b.md' },
+        ],
+        _trial: { ...TRIAL, manifestDir: '/manifest-dir' },
+      },
+      'lab.guild-setup',
+    );
+    assert.equal(resolved.files[0]!.sourcePath, '/absolute/a.md');
+    assert.equal(resolved.files[1]!.sourcePath, '/manifest-dir/rel/b.md');
   });
 });
 

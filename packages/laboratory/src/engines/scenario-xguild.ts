@@ -27,7 +27,8 @@
  *
  * COMMISSION-POST FLOW
  * ────────────────────
- * 1. Validate givens (briefPath absolute; type defaults to 'mandate').
+ * 1. Validate givens (briefPath absolute or manifest-relative; type
+ *    defaults to 'mandate').
  * 2. Discover the target test guild from `context.upstream` — duck-type
  *    detection: any upstream yield with `{guildName: string, guildPath:
  *    string}` (the guild-fixture's yield shape).
@@ -48,7 +49,11 @@
  *
  * GIVENS (commission-post)
  * ────────────────────────
- *   briefPath          : string  — absolute path to the brief markdown.
+ *   briefPath          : string  — path to the brief markdown.
+ *                                   Absolute is used as-is; relative is
+ *                                   resolved against `_trial.manifestDir`
+ *                                   (the directory of the manifest file
+ *                                   at trial-post time).
  *   title              : string? — optional explicit title; defaults to
  *                                  first H1 of the brief, or
  *                                  "Commission from <basename>".
@@ -118,6 +123,7 @@ import type {
   EngineRunContext,
   EngineRunResult,
 } from '@shardworks/fabricator-apparatus';
+import type { InjectedTrialContext } from './phases.ts';
 
 const execFile = promisify(execFileCb);
 
@@ -479,17 +485,32 @@ export async function waitForRigTerminal(opts: {
 
 // ── Validation helpers ────────────────────────────────────────────────
 
-function requireAbsolutePath(
+/**
+ * Resolve a path-typed given. Absolute paths are taken as-is; relative
+ * paths are resolved against `manifestDir` when available. Falls back
+ * to fail-loud when the path is relative and `manifestDir` is absent
+ * (legacy writs posted without the manifestPath stamp).
+ */
+function resolvePathGiven(
   value: unknown,
   designId: string,
   fieldName: string,
+  manifestDir: string | undefined,
 ): string {
-  if (typeof value !== 'string' || !path.isAbsolute(value)) {
+  if (typeof value !== 'string' || value.length === 0) {
     throw new Error(
-      `[${designId}] givens.${fieldName} must be an absolute path; got "${String(value)}".`,
+      `[${designId}] givens.${fieldName} must be a non-empty string; got "${String(value)}".`,
     );
   }
-  return value;
+  if (path.isAbsolute(value)) return value;
+  if (manifestDir === undefined) {
+    throw new Error(
+      `[${designId}] givens.${fieldName} is relative ("${value}") but no manifest directory ` +
+        `is available — _trial.manifestDir was not injected. Either pass an absolute path ` +
+        `or post the trial via lab-trial-post (which stamps the manifest path on the writ).`,
+    );
+  }
+  return path.resolve(manifestDir, value);
 }
 
 function optionalString(
@@ -527,7 +548,13 @@ export const commissionPostXguildEngine: EngineDesign = {
   id: 'lab.commission-post-xguild',
   async run(rawGivens, context: EngineRunContext): Promise<EngineRunResult> {
     const designId = 'lab.commission-post-xguild';
-    const briefPath = requireAbsolutePath(rawGivens.briefPath, designId, 'briefPath');
+    const trial = rawGivens._trial as InjectedTrialContext | undefined;
+    const briefPath = resolvePathGiven(
+      rawGivens.briefPath,
+      designId,
+      'briefPath',
+      trial?.manifestDir,
+    );
     const explicitTitle = optionalString(rawGivens.title, designId, 'title');
     const type = optionalString(rawGivens.type, designId, 'type') ?? 'mandate';
     const parentId = optionalString(rawGivens.parentId, designId, 'parentId');

@@ -165,18 +165,38 @@ describe('lab.commission-post-xguild — validation', () => {
   it('rejects missing briefPath', async () => {
     await assert.rejects(
       () => commissionPostXguildEngine.run({}, makeContext()),
-      /briefPath must be an absolute path/,
+      /briefPath must be a non-empty string/,
     );
   });
 
-  it('rejects relative briefPath', async () => {
+  it('rejects relative briefPath when no manifest directory is available', async () => {
     await assert.rejects(
       () =>
         commissionPostXguildEngine.run(
           { briefPath: 'relative/brief.md' },
           makeContext(),
         ),
-      /briefPath must be an absolute path/,
+      /briefPath is relative .* no manifest directory is available/s,
+    );
+  });
+
+  it('resolves a relative briefPath against _trial.manifestDir (file-not-found surfaces resolved path)', async () => {
+    // Pass a relative briefPath + manifestDir. The engine's file
+    // read will fail because the resolved path doesn't exist, but
+    // the error message includes the resolved absolute path —
+    // which proves the resolution happened.
+    await assert.rejects(
+      () =>
+        commissionPostXguildEngine.run(
+          {
+            briefPath: 'briefs/missing.md',
+            _trial: { slug: 's', writId: 'w-1', manifestDir: '/some/manifest-dir' },
+          },
+          makeContext({
+            upstream: { 'fixture-tg-setup': { guildName: 'g', guildPath: '/p' } },
+          }),
+        ),
+      /failed to read brief at \/some\/manifest-dir\/briefs\/missing\.md/,
     );
   });
 

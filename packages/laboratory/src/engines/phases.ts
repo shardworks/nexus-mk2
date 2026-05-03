@@ -37,6 +37,8 @@
  * upstream refs, not graftTail propagation.
  */
 
+import { dirname } from 'node:path';
+
 import type { EngineDesign, EngineRunResult } from '@shardworks/fabricator-apparatus';
 import type { WritDoc } from '@shardworks/clerk-apparatus';
 import type { RigTemplateEngine, SpiderEngineRunResult } from '@shardworks/spider-apparatus';
@@ -175,6 +177,15 @@ export interface InjectedTrialContext {
    * `npx -p @shardworks/nexus@<spec> nsg init …` bootstrap.
    */
   frameworkVersion?: string;
+  /**
+   * Absolute directory containing the manifest file. Engines resolve
+   * relative path givens (e.g. `files[].sourcePath`, `briefPath`)
+   * against this. Derived at injection time from the writ's stamped
+   * `config.manifestPath` (set by `lab-trial-post`). Absent when
+   * `manifestPath` is missing from the writ's config — engines fall
+   * back to absolute-only validation in that case.
+   */
+  manifestDir?: string;
 }
 
 function withTrialContext(
@@ -188,6 +199,17 @@ function withTrialContext(
     if (v !== undefined) clean[k] = v;
   }
   return { ...givens, _trial: clean };
+}
+
+/**
+ * Derive `manifestDir` from a config's stamped `manifestPath`. The
+ * dir is the canonical anchor for resolving manifest-relative path
+ * givens at engine-execution time. Returns undefined when the writ
+ * lacks `manifestPath` (legacy writs posted before the field was
+ * introduced, or writs posted via paths that bypass `lab-trial-post`).
+ */
+function manifestDirFromConfig(config: LaboratoryTrialConfig): string | undefined {
+  return config.manifestPath !== undefined ? dirname(config.manifestPath) : undefined;
 }
 
 // ── Per-phase graft builders (pure; tested directly) ───────────────
@@ -220,6 +242,7 @@ export function buildSetupGraft(
         writId,
         fixtureId: fixture.id,
         frameworkVersion: config.frameworkVersion,
+        manifestDir: manifestDirFromConfig(config),
       }),
     });
   }
@@ -250,6 +273,7 @@ export function buildScenarioGraft(
         slug: config.slug,
         writId,
         frameworkVersion: config.frameworkVersion,
+        manifestDir: manifestDirFromConfig(config),
       }),
     },
   ];
@@ -271,6 +295,7 @@ export function buildProbesGraft(
       slug: config.slug,
       writId,
       frameworkVersion: config.frameworkVersion,
+      manifestDir: manifestDirFromConfig(config),
     }),
   }));
 }
@@ -309,6 +334,7 @@ export function buildArchiveGraft(
           slug: config.slug,
           writId,
           frameworkVersion: config.frameworkVersion,
+          manifestDir: manifestDirFromConfig(config),
         },
       ),
     },
@@ -343,6 +369,7 @@ export function buildTeardownGraft(
         writId,
         fixtureId: fixture.id,
         frameworkVersion: config.frameworkVersion,
+        manifestDir: manifestDirFromConfig(config),
       }),
     });
     prevTail = id;

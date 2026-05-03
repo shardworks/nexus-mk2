@@ -33,8 +33,10 @@
  *    entries — no manifest-level dependsOn declaration of "this is
  *    the codex" needed.
  * 6. Deep-merge `givens.config` into `<guildPath>/guild.json`.
- * 7. Copy each `givens.files[]` entry from `sourcePath` (absolute only
- *    in v1) to `<guildPath>/<guildPath>` (per-entry guildPath).
+ * 7. Copy each `givens.files[]` entry from `sourcePath` (absolute or
+ *    manifest-relative — relative paths are resolved against
+ *    `_trial.manifestDir`) to `<guildPath>/<guildPath>` (per-entry
+ *    guildPath; always relative to the guild root).
  * 8. Yield guildPath, pluginsResolved, codexesAdded, filesCopied.
  *
  * After bootstrap (step 3), the lab-host's `nsg` is **not** invoked
@@ -74,9 +76,11 @@
  *   config    : object?   — Optional. Deep-merged into the guild's
  *                          `guild.json` after init.
  *   files     : Array<{sourcePath, guildPath}>?  — Optional. File copies.
- *                          sourcePath must be absolute in v1 (throws on
- *                          relative). guildPath is relative to the guild
- *                          root.
+ *                          sourcePath: absolute is used as-is; relative
+ *                          is resolved against `_trial.manifestDir` (the
+ *                          directory of the manifest file at trial-post
+ *                          time, stamped on the writ by `lab-trial-post`).
+ *                          guildPath is relative to the guild root.
  *
  * YIELDS (setup)
  * ──────────────
@@ -162,7 +166,15 @@ export function defaultGuildPath(labHostGuildHome: string, guildName: string): s
   return path.join(labHostGuildHome, '.nexus', 'laboratory', 'guilds', guildName);
 }
 
-function validateGivens(
+/**
+ * Validate and resolve the engine's givens. Exported for unit tests so
+ * they can assert on the resolved shape (especially the resolved
+ * `files[].sourcePath` after manifest-relative resolution) without
+ * driving through the full engine + subprocess shellouts.
+ *
+ * @internal
+ */
+export function validateGivens(
   rawGivens: Record<string, unknown>,
   designId: string,
 ): ResolvedGuildFixtureGivens {
@@ -225,7 +237,12 @@ function validateGivens(
     );
   }
 
-  // Files.
+  // Files. sourcePath: absolute is taken as-is; relative is resolved
+  // against the manifest's directory (injected as `_trial.manifestDir`
+  // by the phase orchestrator). guildPath is always relative to the
+  // guild root.
+  const trial = rawGivens._trial as InjectedTrialContext | undefined;
+  const manifestDir = trial?.manifestDir;
   const rawFiles = rawGivens.files ?? [];
   if (!Array.isArray(rawFiles)) {
     throw new Error(
@@ -242,11 +259,17 @@ function validateGivens(
           `got ${JSON.stringify(f)}.`,
       );
     }
-    if (!path.isAbsolute(f.sourcePath)) {
-      throw new Error(
-        `[${designId}] givens.files[${i}].sourcePath must be absolute in v1 ` +
-          `(manifest-relative resolution is future work); got "${f.sourcePath}".`,
-      );
+    let resolvedSourcePath = f.sourcePath;
+    if (!path.isAbsolute(resolvedSourcePath)) {
+      if (manifestDir === undefined) {
+        throw new Error(
+          `[${designId}] givens.files[${i}].sourcePath is relative ("${f.sourcePath}") ` +
+            `but no manifest directory is available — _trial.manifestDir was not injected. ` +
+            `Either pass an absolute path or post the trial via lab-trial-post (which stamps ` +
+            `the manifest path on the writ).`,
+        );
+      }
+      resolvedSourcePath = path.resolve(manifestDir, f.sourcePath);
     }
     if (path.isAbsolute(f.guildPath)) {
       throw new Error(
@@ -254,15 +277,15 @@ function validateGivens(
           `got absolute "${f.guildPath}".`,
       );
     }
-    files.push({ sourcePath: f.sourcePath, guildPath: f.guildPath });
+    files.push({ sourcePath: resolvedSourcePath, guildPath: f.guildPath });
   }
 
   // Pull frameworkVersion from the framework-injected _trial context.
   // trial-post.ts resolves an undefined manifest value before stamping
   // the writ, so on a posted trial this should always be set —
   // teardown calls don't need it (we early-return here for
-  // teardown).
-  const trial = rawGivens._trial as InjectedTrialContext | undefined;
+  // teardown). `trial` is already declared above for the files-block
+  // manifestDir lookup.
   const frameworkVersion =
     trial && typeof trial.frameworkVersion === 'string' && trial.frameworkVersion.length > 0
       ? trial.frameworkVersion
