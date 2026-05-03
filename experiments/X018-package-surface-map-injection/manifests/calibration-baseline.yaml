@@ -57,6 +57,7 @@ fixtures:
         - { name: '@shardworks/tools-apparatus', version: '0.1.298' }
         - { name: '@shardworks/codexes-apparatus', version: '0.1.298' }
         - { name: '@shardworks/clerk-apparatus', version: '0.1.298' }
+        - { name: '@shardworks/ratchet-apparatus', version: '0.1.298' }
         - { name: '@shardworks/fabricator-apparatus', version: '0.1.298' }
         - { name: '@shardworks/animator-apparatus', version: '0.1.298' }
         - { name: '@shardworks/loom-apparatus', version: '0.1.298' }
@@ -81,6 +82,49 @@ fixtures:
                 - 'tools:*'
             patron:
               permissions: []
+            # Override astrolabe's kit roles at guild level. Loom's kit
+            # role validator drops permissions referencing plugins not
+            # in the contributing kit's `requires + recommends + self`
+            # set — but the lookup of `requires` happens before astrolabe
+            # has fully registered as an apparatus, so it falls back to
+            # an empty deps list, dropping clerk:read and ratchet:read.
+            # Calibration trial 4 (Opus, no role override) had only 10
+            # of 20 expected tools authorized — missing all writ-* and
+            # click-* tools, leading the planner to do ~50% less
+            # exploration than production.
+            #
+            # Permissions copied verbatim from
+            # `packages/plugins/astrolabe/src/astrolabe.ts` kit role
+            # definitions. Guild-level override fast-paths past the
+            # kit validator entirely.
+            # NOTE: guild-level RoleDefinition (vs KitRoleDefinition) does
+            # NOT support `instructions` or `instructionsFile`. Loom
+            # resolves guild-role instructions only via
+            # `<guild-home>/roles/<rolename>.md`. The astrolabe role
+            # files are copied into the test guild's `roles/` dir
+            # below via `files:`, with the dotted-name convention
+            # (`roles/astrolabe.sage-primer-attended.md`).
+            astrolabe.sage-primer-attended:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+              strict: true
+            astrolabe.sage-primer-solo:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+              strict: true
+            astrolabe.sage-writer:
+              permissions:
+                - 'astrolabe:read'
+                - 'astrolabe:write'
+                - 'clerk:read'
+                - 'ratchet:read'
+              strict: true
         animator:
           sessionProvider: 'claude-code'
         astrolabe:
@@ -157,6 +201,16 @@ fixtures:
               resolutionEngine: observation-lift
           rigTemplateMappings:
             mandate: lab.plan-only
+      # Copy astrolabe role .md files into the test guild's roles/ dir
+      # under the dotted-name convention so loom can resolve
+      # instructions for the guild-level role overrides above.
+      files:
+        - sourcePath: /workspace/nexus/packages/plugins/astrolabe/sage-primer-attended.md
+          guildPath: roles/astrolabe.sage-primer-attended.md
+        - sourcePath: /workspace/nexus/packages/plugins/astrolabe/sage-primer-solo.md
+          guildPath: roles/astrolabe.sage-primer-solo.md
+        - sourcePath: /workspace/nexus/packages/plugins/astrolabe/sage-writer.md
+          guildPath: roles/astrolabe.sage-writer.md
 
   - id: daemon
     engineId: lab.daemon-setup
