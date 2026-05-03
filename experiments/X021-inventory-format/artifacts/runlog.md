@@ -19,7 +19,7 @@ was found mid-trial-1. See trial 1 history below for details.
 
 | # | manifest | purpose | trial writ | rig | status | cost | duration | pure-read % | notes |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | `rig-moj12h4o-baseline.yaml` | calibration (substantive, spec-only) | (next) | — | not posted | — | — | — | first post `w-mopursfj` cancelled — used wrong brief content; brief redesigned |
+| 1 | `rig-moj12h4o-baseline.yaml` | calibration (substantive, spec-only) | `w-mopwwgug` | `rig-mopwwji2` | **failed (timeout)** | **~$77.30** | 43m impl + 14m stuck | **71.0%** | implementer committed at turn 157, then stuck; session killed during recovery; trial timed out at 60min |
 | 2 | `rig-moj12h4o-v1-inline-types.yaml` | #3 — additive type-sigs preamble | — | — | — | — | — | — | targets autonomous-orientation reads on types.ts files (~63 KB pure-read in production) |
 | 3 | `rig-moj12h4o-v2-inline-templates.yaml` | #4 — pattern excerpt in `## Existing Patterns` | — | — | — | — | — | — | targets template-cite reads on summon-relay/decline-relay (~31 KB pure-read) |
 | 4 | `rig-moj12h4o-v3-do-not-read.yaml` | #5 — additive do-not-Read list | — | — | — | — | — | — | targets speculative reads on adjacent/barrel/test files (~50 KB pure-read) |
@@ -62,6 +62,74 @@ archive / teardown phase engines all completed (orchestration
 scaffold). The actual `scenario` engine (`lab.commission-post-xguild`)
 is running — this is where the implementer commission lives.
 Probes and archive phases are pending the scenario terminal.
+
+#### Reposted (2026-05-03 15:15 UTC) — corrected baseline
+
+After redesign committed (commit `fcc00fef`), reposted the
+substantive baseline with the spec-only brief (~25 KB matching
+production prompt). Trial writ `w-mopwwgug`. Outer rig
+`rig-mopwwji2-522df98b` spawned.
+
+#### Failed (2026-05-03 16:16 UTC) — timeout, stuck-after-finish
+
+The implementer ran cleanly from 15:15:28 → 15:58:39 UTC (43 min,
+159 turns), reaching turn 157 with `git commit -m "feat(reckoner):
+switch evaluation from CDC to periodic tick"` followed by `git
+status -s` to verify clean. **Implementer's actual code work was
+complete.**
+
+But the babysitter never signaled the implement engine terminal
+(documented click `c-moj6ue1g` — stuck-after-finish). The session
+sat idle for 14 minutes. At ~16:11 UTC, in an attempt to unstick,
+Coco killed the claude+babysitter+test-guild daemon and restarted
+just the daemon. Sean clarified afterward that he meant only the
+daemon should be killed (not the implementer); by then it was too
+late.
+
+The outer scenario engine timed out at the 60-min cap (16:16 UTC)
+because the inner test-guild rig never reached terminal. Trial
+writ + outer rig both transitioned to **failed**.
+
+**Implementer-side data captured (substantive output despite trial-level failure):**
+
+| metric | value |
+|---|---|
+| First turn | 2026-05-03T15:15:28.658Z |
+| Last turn | 2026-05-03T15:58:39.481Z (committing the work) |
+| Wall-clock (actual implement time) | 43 min |
+| Wall-clock (idle stuck-after-finish) | +14 min before killed |
+| Turns | 159 |
+| Tokens in | 169 |
+| Tokens out | 112,308 |
+| Cache reads (cumulative across turns) | 40,617,827 |
+| Cache creates | 423,779 |
+| **Estimated cost (Opus, 5-min cache TTL)** | **$77.30** |
+| Total Read content | 462,879 chars |
+| Pure-read content | 328,826 chars across 18 files |
+| **Pure-read share** | **71.0%** |
+
+**Comparison with production rig 2:**
+
+| metric | production rig 2 (full rig) | X021 lab baseline (impl only) |
+|---|---|---|
+| Pure-read share | 49.1% | **71.0%** (+22pp) |
+| Pure-read content | 225 KB | **329 KB** (+46%) |
+| Total Read content | 459 KB | 463 KB (≈) |
+| Cost | $47.26 (whole 13-engine rig) | **$77.30** (just implement) |
+
+**Cost concern.** The implement engine alone in the lab cost ~1.6x
+the entire production rig (planning + implement + review + revise
++ seal + observation lift). At $77/trial, the seven-trial sequence
+projects to **~$540** vs the spec's $50–$120 estimate.
+
+The pure-read share went *up* (49% → 71%), not down — the lab
+implementer is reading more orientation/test/source content than
+production did, despite the brief now matching production's spec
+content byte-for-byte modulo the cwd preamble. Diagnosis pending.
+
+The committed code is in the test-guild's draft worktree at
+`x021-rig-moj12h4o-baseline-f754b5c7/.nexus/worktrees/.../draft-mopwwxrg-c7178434`
+should we want to inspect work quality.
 
 #### Cancelled (2026-05-03 ~15:00 UTC) — design flaw discovered
 
