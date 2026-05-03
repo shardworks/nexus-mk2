@@ -33,9 +33,15 @@ test guild's `roles/artificer.md`.
 The trial shape is **implement-only** — see
 [Lab Operations / Trial Shapes](../lab-operations/running-trials.md#trial-shapes).
 No astrolabe engines run. The brief markdown IS the spec; the
-implementer reads it directly. We reuse X021's verbatim baseline
-briefs (the production planner spec extracted from
-`astrolabe/plans`).
+implementer reads it directly. We use the **PlanDoc `spec` field
+verbatim** — the same content the production implementer received
+when its session was launched (Astrolabe writes only `plandoc.spec`
+into the implementer brief, not the inventory / scope / decisions
+/ observations fields). Initial X022 drafts inherited X021's
+larger-than-production briefs (full plandoc concatenation,
+~2.4× production size); these were trimmed to spec-only on
+2026-05-03 (commit `5a7ff5ae`) once the X021 trial-runner
+identified the mismatch.
 
 ## Background
 
@@ -162,16 +168,29 @@ astrolabe doesn't run in implement-only trials.
 
 ### Phase 2 — Briefs
 
-Reuse X021's verbatim baseline briefs without modification:
+Two briefs, one per candidate rig, each carrying **only the
+PlanDoc `spec` field** for the production commission — the same
+content Astrolabe wrote into the production implementer's brief
+when its session was launched:
 
-- `briefs/rig-moj12h4o-baseline.md` (symlinked or copied from
-  X021)
-- `briefs/rig-moji64hs-baseline.md` (symlinked or copied from
-  X021)
+- `briefs/rig-moj12h4o-baseline.md` — 25 KB / 253 lines
+  (production size: ~26 KB)
+- `briefs/rig-moji64hs-baseline.md` — 22 KB / 147 lines
 
-These are the production planner spec dumps for the two
-candidate rigs. No baseline-vs-variant brief difference — the
-intervention is role-file only.
+The brief opens with the spec's `# <commission title>` /
+`## Intent` and runs through the trailing `</task-manifest>`.
+No inventory / scope / decisions / observations content (those
+are separate PlanDoc fields the Astrolabe pipeline does not put
+into the implementer brief).
+
+Note: initial drafts (commits prior to `5a7ff5ae`) inherited
+X021's then-untrimmed baseline briefs (~61 KB / 55 KB), which
+concatenated all PlanDoc sections. The X021 trial-runner
+identified the mismatch on 2026-05-03; both X021 and X022
+trimmed at the same time.
+
+No baseline-vs-variant brief difference — the intervention is
+role-file only.
 
 ### Phase 3 — Trial sequence
 
@@ -205,9 +224,12 @@ Production cost was $47 (substantive full-rig with planning) and
 $20 (control full-rig with planning). Implement-only is the
 back-half of that; X016 phase 2c on the same substantive rig
 ran $6.50 with a partial handoff. Full implement on the
-substantive rig should run $15–$30; control should run $10–$20.
+substantive rig should run $15–$30; control should run $10–$20
+against a production-faithful (spec-only) brief.
 
-Estimate: **$50–$100 total** for the 4-trial sequence.
+Estimate: **$30–$60 total** for the 4-trial sequence with
+trimmed briefs. (Initial draft estimate of $50–$100 assumed
+the bloated 2.4×-production briefs.)
 
 ### Manifest plumbing
 
