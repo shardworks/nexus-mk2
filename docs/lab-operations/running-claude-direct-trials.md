@@ -93,9 +93,28 @@ codex it clones is what gets pinned per trial via `baseSha`.
 
 ---
 
+## Architectural shape
+
+A claude-direct trial is composed from three pieces:
+
+1. **`spider.graft-rig-template`** *(framework primitive, lands at v0.1.304)* — a generic Spider engine that resolves a named rig template, overlays caller givens onto its `${vars.X}` references, and grafts the template's engines as a tail set. This is the manifest's `scenario` engine.
+2. **A rig template** *(authored manifest-locally for now)* — declares the implement → optional-review → optional-revise → verify chain as a regular DAG of engines. Each stage is a normal Spider engine, runs as its own attempt, gets its own animator/sessions row.
+3. **`lab.claude-session`** and **`lab.shell-command`** *(laboratory engines)* — the per-stage primitives. `lab.claude-session` spawns claude with role + prompt + model + cwd and stamps a normal animator/sessions row. `lab.shell-command` runs `verifyCommand` and captures exit code + stderr tail.
+
+The trial writ runs the standard `post-and-collect-default` rig template (codex-setup → scenario → probes → archive → teardowns). The scenario slot is `spider.graft-rig-template`, which grafts the trial-shape template into the rig in place. From `nsg rig list <trialId>`'s perspective, every stage shows up as a separate engine row.
+
+### Why this shape
+
+- **Real per-stage observability.** `nsg rig list --writ <trialId>` shows `implement`, `review`, `revise`, `verify` as discrete engines with their own attempts, costs, statuses.
+- **Real per-stage retry semantics.** If `revise` crashes mid-run, Spider's existing engine-retry budget kicks in. No reinvented loop.
+- **Cost stamping uses normal `animator/sessions` rows** — no custom per-trial book. Existing extraction tools (cost calculators, tool-use metrics) work unchanged.
+- **Trial shapes are declarative.** Authoring a new shape (e.g. multi-iter, sonnet-implement-opus-review) is a new rig template, not a new engine.
+
+---
+
 ## Manifest shape
 
-Minimal:
+Minimal — implement-only (no review):
 
 ```yaml
 slug: x023-variant-a
@@ -103,7 +122,7 @@ title: X023 — variant A (no review)
 description: |
   Tests <intervention> on <rig>. Implement-only, no review pass.
 
-frameworkVersion: '0.1.301'
+frameworkVersion: '0.1.304'
 
 fixtures:
   - id: codex
@@ -112,16 +131,40 @@ fixtures:
       upstreamRepo: /workspace/nexus
       baseSha: 0e1e81f4a219179fd264625b869e12bd00778365
 
+config:
+  spider:
+    rigTemplates:
+      lab.claude-direct-monolithic:
+        engines:
+          - id: implement
+            designId: lab.claude-session
+            upstream: []
+            givens:
+              rolePath: '${vars.rolePath}'
+              briefPath: '${vars.briefPath}'
+              model: '${vars.model}'
+              cwd: '${yields.codex.workdir}'
+              executionWrap: '${vars.executionWrap}'
+          - id: verify
+            designId: lab.shell-command
+            upstream: [implement]
+            givens:
+              command: '${vars.verifyCommand}'
+              cwd: '${yields.codex.workdir}'
+        resolutionEngine: verify
+
 scenario:
-  engineId: lab.claude-direct
+  engineId: spider.graft-rig-template
   givens:
-    rolePath: /abs/path/to/roles/artificer-variant-a.md
-    briefPath: /abs/path/to/briefs/variant-a.md
-    model: opus
-    verifyCommand: |
-      pnpm --filter @shardworks/reckoner-apparatus build && \
-      pnpm --filter @shardworks/reckoner-apparatus test
-    timeoutMs: 5400000   # 90 min cap on the whole stage chain
+    template: lab.claude-direct-monolithic
+    givens:
+      rolePath: /abs/path/to/roles/artificer-variant-a.md
+      briefPath: /abs/path/to/briefs/variant-a.md
+      model: opus
+      executionWrap: production
+      verifyCommand: |
+        pnpm --filter @shardworks/reckoner-apparatus build && \
+        pnpm --filter @shardworks/reckoner-apparatus test
 
 probes:
   - id: context
@@ -130,8 +173,8 @@ probes:
   - id: commits
     engineId: lab.probe-git-range
     givens: {}
-  - id: session
-    engineId: lab.probe-claude-session
+  - id: sessions
+    engineId: lab.probe-trial-sessions
     givens: {}
 
 archive:
@@ -139,110 +182,141 @@ archive:
   givens: {}
 ```
 
-### `lab.claude-direct` givens
+### How the substitution flows
+
+1. Manifest declares `rigTemplates.lab.claude-direct-monolithic` under `config.spider.rigTemplates`. The lab-host spider picks it up at startup along with kit-contributed templates.
+2. The trial writ runs the canonical `post-and-collect-default` rig: `codex-setup` → `scenario` → probes → archive → teardowns.
+3. The `scenario` engine is `spider.graft-rig-template` with `template: 'lab.claude-direct-monolithic'` and a `givens: { ... }` map.
+4. At run time, `spider.graft-rig-template` resolves the template, walks each engine's givens, and substitutes `${vars.<key>}` references against the caller-given map (so `${vars.rolePath}` → the absolute role path). All other expressions (`${writ}`, `${yields.codex.workdir}`, etc.) are left untouched.
+5. The engine returns the substituted engines as a graft with `graftTail: 'verify'` (from the template's `resolutionEngine`). Spider splices them in; everything downstream of the scenario slot (probes, archive) waits for `verify` to complete.
+
+### `spider.graft-rig-template` givens
+
+| field | type | required | meaning |
+|---|---|---|---|
+| `template` | string | yes | name of the rig template to graft. Resolved via the spider's effective rigTemplates map. |
+| `givens` | object | no | caller-supplied overlay. Keys here populate `${vars.<key>}` references in the template's engine givens. Other `${...}` expressions survive untouched for Spider's normal pipeline. |
+
+Failure modes are loud — bad template name, bad givens shape, missing template all throw immediately. See `docs/architecture/apparatus/spider.md` § `spider.graft-rig-template` in the framework repo for the full behavioral contract.
+
+### `lab.claude-session` givens
 
 | field | type | required | meaning |
 |---|---|---|---|
 | `rolePath` | abs path | yes | role file → `--system-prompt-file` |
-| `briefPath` | abs path | yes | brief content → piped to claude's stdin |
-| `model` | string | yes | claude model id (e.g. `opus`, `sonnet`, `claude-sonnet-4-5`) |
-| `verifyCommand` | string | **yes** | shell command run after the last session, in the codex working dir; exit code + tail captured into the archive |
-| `timeoutMs` | number | no (default 90 min) | wallclock cap on the whole stage chain |
-| `executionWrap` | enum | no (default `production`) | `production` carries the implement-engine PROLOGUE/EPILOGUE; `bare` runs role + brief alone |
-| `review` | object | no | opt-in review loop (see below) |
+| `briefPath` | abs path | yes | initial-prompt content piped to claude's stdin |
+| `promptTemplate` | string | (alternative to `briefPath`) | inline prompt; supports `${yields.*}` interpolation against upstream stages (used by review/revise) |
+| `model` | string | yes | claude model id |
+| `cwd` | abs path | yes | working dir; typically `${yields.codex.workdir}` |
+| `executionWrap` | enum | no (default `production`) | `production` carries the implement-engine PROLOGUE/EPILOGUE wrapping; `bare` runs role + brief alone |
 
-`verifyCommand` is **required** by convention — the claude-direct
-shape gives up the seal engine's automatic build/test gating, so
-the verify command is the only Tier-1 mechanical signal we have.
-If a calibration trial truly needs no verify (apparatus smoke
-test), pass `verifyCommand: 'true'` to make the gating explicit.
+The engine writes a normal `animator/sessions` row stamped with `metadata.trialId` and `metadata.stage` (the engine id within the rig template — `implement`, `review`, `revise`).
+
+### `lab.shell-command` givens
+
+| field | type | required | meaning |
+|---|---|---|---|
+| `command` | string | yes | shell command to run |
+| `cwd` | abs path | yes | working directory |
+| `timeoutMs` | number | no (default 600 000) | per-command wallclock cap |
+
+Yields `{ exitCode, stdout, stderr, durationMs }` (stdout/stderr are tail-truncated to ~16 KB each).
+
+`verifyCommand` is **required** by convention — the claude-direct shape gives up the seal engine's automatic build/test gating, so the verify command is the only Tier-1 mechanical signal we have. If a calibration trial truly needs no verify, set `command: 'true'` to make the gating explicit.
 
 ---
 
 ## Review → revise loop
 
-By default a claude-direct trial is one implementer session and
-nothing else. To preserve production's review→revise dynamic —
-which matters especially when the implementer model is
-sonnet-class and benefits from a revision pass — opt in with a
-`review` block:
+By default a claude-direct trial is one implementer session and nothing else. To preserve production's review→revise dynamic — which matters especially when the implementer model is sonnet-class and benefits from a revision pass — pick the `lab.claude-direct-with-review` template instead:
 
 ```yaml
+config:
+  spider:
+    rigTemplates:
+      lab.claude-direct-with-review:
+        engines:
+          - id: implement
+            designId: lab.claude-session
+            upstream: []
+            givens:
+              rolePath: '${vars.rolePath}'
+              briefPath: '${vars.briefPath}'
+              model: '${vars.model}'
+              cwd: '${yields.codex.workdir}'
+              executionWrap: '${vars.executionWrap}'
+          - id: review
+            designId: lab.claude-session
+            upstream: [implement]
+            givens:
+              rolePath: '${vars.reviewerRolePath}'
+              promptTemplate: |
+                A previous implementer just made these changes against the brief below.
+                Inspect HEAD (the implementer's commit) in the working dir.
+
+                If the work satisfies the brief, output exactly:
+                  REVIEW: PASS
+                If concerns remain, output:
+                  REVIEW: CONCERNS
+                  <concerns body>
+              model: '${vars.reviewerModel}'
+              cwd: '${yields.codex.workdir}'
+              outputContract: review-pass-concerns   # parses the leading marker; engine yields { passed: bool, concerns: string }
+          - id: revise
+            designId: lab.claude-session
+            upstream: [review]
+            when: '!${yields.review.passed}'         # spider skips this engine when review yields passed=true
+            givens:
+              rolePath: '${vars.rolePath}'
+              promptTemplate: |
+                Original brief:
+                ${vars.briefBody}
+
+                A reviewer raised these concerns. Address them and recommit.
+
+                ${yields.review.concerns}
+              model: '${vars.model}'
+              cwd: '${yields.codex.workdir}'
+              executionWrap: '${vars.executionWrap}'
+          - id: verify
+            designId: lab.shell-command
+            upstream: [revise]
+            givens:
+              command: '${vars.verifyCommand}'
+              cwd: '${yields.codex.workdir}'
+        resolutionEngine: verify
+
 scenario:
-  engineId: lab.claude-direct
+  engineId: spider.graft-rig-template
   givens:
-    rolePath: roles/artificer.md
-    briefPath: briefs/variant-a.md
-    model: sonnet
-    review:
-      reviewerRolePath: roles/reviewer.md
+    template: lab.claude-direct-with-review
+    givens:
+      rolePath: /abs/path/to/roles/artificer.md
+      briefPath: /abs/path/to/briefs/variant-a.md
+      briefBody: |          # for the revise prompt — the brief body inlined
+        ...
+      model: sonnet
+      executionWrap: production
+      reviewerRolePath: /abs/path/to/roles/reviewer.md
       reviewerModel: opus
-      maxIterations: 1
-      revisePromptTemplate: |
-        ${brief}
-        ---
-        A reviewer raised these concerns. Address them and recommit.
-        ---
-        ${reviewOutput}
-    verifyCommand: 'pnpm typecheck && pnpm test'
+      verifyCommand: 'pnpm typecheck && pnpm test'
 ```
 
-The engine runs a sequential chain in the same working dir, each
-step a fresh claude session with its own cost stamp:
+### How review approval is detected — the `when` field does the work
 
-```
-implement(role, brief)
-  → commit_1, transcript_1, session_1
-loop while iter < maxIterations:
-  review(reviewerRole, prompt-citing-the-implementer's-commit)
-    → review.text, session_(2k)
-  if review.text begins with `REVIEW PASSED` (case-sensitive):
-    break
-  revise(role, revisePromptTemplate)
-    → commit_(n+1), transcript_(n+1), session_(2k+1)
-verify()
-  → exit code + tail
-```
+The reviewer engine yields a structured `{ passed: bool, concerns: string }` based on a leading `REVIEW: PASS` / `REVIEW: CONCERNS` marker (parsed by `lab.claude-session` when `outputContract: review-pass-concerns` is set on the engine). The revise engine's `when: '!${yields.review.passed}'` clause causes Spider to **skip** the revise engine entirely — no attempt, no spend — when review passed is truthy. From `nsg rig list <trialId>` you see the revise engine in `skipped` status when review passed and `completed` (or whatever it actually finishes as) when it ran.
 
-### Review-block givens
+The downstream `verify` engine still runs regardless of whether revise was skipped — its upstream is `[revise]`, and Spider's `when`-skip semantics propagate completion downstream so the DAG flows through the skipped engine.
 
-| field | type | required | meaning |
-|---|---|---|---|
-| `reviewerRolePath` | abs path | yes | role file for review + revise |
-| `reviewerModel` | string | yes | model id for review sessions |
-| `maxIterations` | number | no (default 1) | upper bound on review/revise cycles |
-| `revisePromptTemplate` | string | yes | template for the revise session's prompt; `${brief}` and `${reviewOutput}` are substituted |
-| `passToken` | string | no (default `REVIEW PASSED`) | exact line that signals no concerns |
+### Multiple iterations
 
-### How review approval is detected
-
-The reviewer is instructed via prompt template to emit
-`REVIEW PASSED` on its own line if no concerns, otherwise to
-output a concerns list. The engine matches the pass token
-literally on its own line; anything else is treated as the
-concerns body to forward to revise.
-
-This is intentionally crude — no JSON parsing, no structured
-output schema — because every observed parse-failure mode in the
-xguild reviewer has been about the model not honoring the schema.
-A literal-token convention is the smallest reliable signal.
-
-If the reviewer model still doesn't honor it, surface a session
-note in the trial archive (`reviewParseAmbiguous: true`) and
-default to "concerns present" — the engine prefers a wasted revise
-pass over a false-PASS that hides a quality regression.
+For a 2-iteration loop (review → revise → review → revise → verify), declare additional `review_2` / `revise_2` engines in the template, each with `when` clauses gating on the prior review's `passed` field. Templating gets verbose; we'll lift this to a parameterized iteration count if multi-iter trials become common. The wedge for now is to author per-shape templates as needed.
 
 ### Cost stamping
 
-Each session gets its own row in `lab-trial-claude-sessions` with
-its `stage` field set to one of `implement`, `review_1`,
-`revise_1`, `review_2`, `revise_2`, ... The archive index row
-includes a top-level `total` cost summed across all stages.
+Each stage writes a normal `animator/sessions` row stamped with `metadata.trialId` (so probes can filter) and `metadata.stage = '<engine-id-in-template>'`. Existing extraction tools that read `stacks-export/animator-sessions.json` work unchanged — the `metadata.stage` field disambiguates which row was implement vs review vs revise. The archive index row's probe summaries surface a top-level total cost summed across the trial's sessions.
 
-In runlogs, report both the total and the per-stage breakdown so
-sonnet-with-revise comparisons against opus-monolithic stay
-honest (you can see whether the savings hold after factoring the
-revise-pass spend in).
+In runlogs, report both the total and the per-stage breakdown so sonnet-with-revise comparisons against opus-monolithic stay honest (you can see whether the savings hold after factoring the revise-pass spend in).
 
 ---
 
@@ -280,14 +354,17 @@ share the same draft branch.
 
 ## Probes
 
-The claude-direct shape ships a per-session probe:
+The claude-direct shape ships a trial-scoped sessions probe:
 
-- **`lab.probe-claude-session`** — captures one row per stage
-  session (`implement`, `review_n`, `revise_n`) into
-  `lab-trial-claude-sessions` with `costUsd`, `tokenUsage`,
-  `transcriptPath`, `stage`, `iteration`, `durationMs`, `turns`.
-  Materializes to `<extract-dir>/sessions/{stage}.transcript.jsonl`
-  plus a `sessions-summary.json` index.
+- **`lab.probe-trial-sessions`** — filters the lab guild's
+  `animator/sessions` book by `metadata.trialId` and writes the
+  matching rows into `lab-trial-stacks-dumps` with
+  `sourceBook = 'animator/sessions'`. Summary surfaces per-stage
+  costs and a trial total. Materializes to
+  `<extract-dir>/stacks-export/animator-sessions.json` —
+  byte-identical shape to what the xguild trial's
+  `lab.probe-stacks-dump` produces, so existing extraction
+  scripts work unchanged.
 
 The general-purpose probes still apply:
 
@@ -298,7 +375,9 @@ The general-purpose probes still apply:
   commits made by implement and any revise passes.
 
 Skip `lab.probe-stacks-dump` — there's no test guild whose books
-to dump.
+to dump. The lab guild's books carry every session that ever ran
+(other trials, lab-host plumbing); `lab.probe-trial-sessions`
+filters them down to just this trial's rows.
 
 ---
 
