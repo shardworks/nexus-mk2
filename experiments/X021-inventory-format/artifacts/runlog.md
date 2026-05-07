@@ -7,6 +7,21 @@ under the section below the table.
 
 **Click:** `c-mophvf0d`. **Spec:** [`spec.md`](../spec.md).
 
+> **Migration note (2026-05-07):** All seven trial manifests have
+> been migrated from the **xguild** trial doctype to **claude-direct**
+> (a lighter-weight single-session shape that landed 2026-05-07,
+> framework v0.1.304). The xguild runs of trial 1 ($77.30, timeout)
+> and trial 5 ($57.09, H1 SUSTAINED at −26%) below are preserved as
+> cross-shape reference data; the trial sequence below should be
+> RE-RUN under the new doctype before per-idea decomposition is
+> reportable. See [HANDOFF-claude-direct-migration.md](../HANDOFF-claude-direct-migration.md)
+> for the runbook.
+>
+> Per-trial cost expectation under claude-direct is $0.40-$0.80
+> (substantive) / $0.20-$0.50 (control) — ~50-80× lower than xguild
+> on this workload. Total expected spend for the 7-trial sequence:
+> $3-$6.
+
 ## Trial sequence
 
 Run order is sequential. Spider concurrency on the lab host

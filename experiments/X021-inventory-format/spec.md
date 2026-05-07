@@ -8,6 +8,17 @@ status: draft
 format) of the Apr 29 cost-optimization landscape under
 `c-mok4nke6`. **This experiment's click:** `c-mophvf0d`.
 
+> **Migration note (2026-05-07):** All seven trial manifests have
+> been migrated from the **xguild** trial doctype to **claude-direct**.
+> The experimental design (intervention variants, hypotheses, brief
+> content, codex pins) is doctype-agnostic and unchanged; only the
+> operational shape differs. Operator runbook:
+> [HANDOFF-claude-direct-migration.md](./HANDOFF-claude-direct-migration.md).
+> Sections of this spec that reference the xguild trial shape and
+> "implement-only rig" remain accurate as historical context for the
+> 2026-05-03 trials but do not describe the current operational
+> manifests.
+
 ## Research question
 
 Does augmenting the implementer's **spec** with inline type

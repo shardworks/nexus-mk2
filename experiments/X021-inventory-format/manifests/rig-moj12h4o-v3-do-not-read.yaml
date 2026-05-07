@@ -1,110 +1,62 @@
 slug: x021-rig-moj12h4o-v3-do-not-read
-title: X021 v3 — Reckoner periodic-tick replay (do-not-Read markers, idea #5)
+title: X021 v3 — Reckoner periodic-tick replay (do-not-Read list, idea #5)
 codex: nexus
 
 description: |
-  Substantive variant v3 — applies idea #5 (explicit do-not-Read
-  markers) to the rig-moj12h4o brief. Brief appends "**Do not
-  Read.**" to four no-change-expected files in the inventory:
-  index.ts, reckoner.test.ts, schedulers/always-approve.ts,
-  package.json. types.ts is excluded because it has a concurrent
-  doc-update on the tickEventId comment (it IS being touched).
-  Predicted reduction: pure-reads on those four files (~38K chars
-  combined in rig 2 baseline).
+  Substantive variant v3 — applies idea #5 (explicit "do not Read"
+  markers on no-change files) to the rig-moj12h4o brief. Brief adds a
+  "## Files you do not need to Read" section listing files the spec
+  references for orientation but the implementer should not pure-read
+  (clockworks.ts, reckoner test files). Predicted reduction: pure-reads
+  on the listed files (rig-moj12h4o baseline pure-read share 71%).
 
-  Compared against rig-moj12h4o-baseline.yaml. All apparatus
-  identical to baseline; only the brief content differs.
+  Compared against rig-moj12h4o-baseline.yaml under the same doctype
+  (claude-direct). Migrated from xguild shape 2026-05-07 — see
+  HANDOFF-claude-direct-migration.md.
 
-  The artificer role file is shipped from the X021 fixtures dir
-  (snapshot of /workspace/vibers/roles/artificer.md). Codex pinned
-  to b92dc905. Frameworked at 0.1.300-x019.0.
-
-  waitForRigTerminal=true with a 60-min cap.
-
-frameworkVersion: '0.1.300-x019.0'
+frameworkVersion: '0.1.304'
 
 fixtures:
   - id: codex
     engineId: lab.codex-setup
     givens:
       upstreamRepo: /workspace/nexus
-      # Base SHA of draft-moj12hm9 — the codex state the original
-      # implementer saw when starting work on the periodic-tick
-      # commission (2026-04-28).
       baseSha: b92dc90502dc0e38a92012cbd238c9eae0e65b0d
 
-  - id: test-guild
-    engineId: lab.guild-setup
+  - id: codex-checkout
+    engineId: lab.codex-checkout
     dependsOn: [codex]
     givens:
-      # Implement-only plugin set per
-      # docs/lab-operations/running-xguild-trials.md#standard-plugin-sets.
-      # Mirrors X020's set (which Sean validated).
-      plugins:
-        - { name: '@shardworks/stacks-apparatus', version: '0.1.300-x019.0' }
-        - { name: '@shardworks/tools-apparatus', version: '0.1.300-x019.0' }
-        - { name: '@shardworks/codexes-apparatus', version: '0.1.300-x019.0' }
-        - { name: '@shardworks/clerk-apparatus', version: '0.1.300-x019.0' }
-        - { name: '@shardworks/ratchet-apparatus', version: '0.1.300-x019.0' }
-        - { name: '@shardworks/fabricator-apparatus', version: '0.1.300-x019.0' }
-        - { name: '@shardworks/animator-apparatus', version: '0.1.300-x019.0' }
-        - { name: '@shardworks/loom-apparatus', version: '0.1.300-x019.0' }
-        - { name: '@shardworks/claude-code-apparatus', version: '0.1.300-x019.0' }
-        - { name: '@shardworks/spider-apparatus', version: '0.1.300-x019.0' }
-        - { name: '@shardworks/clockworks-apparatus', version: '0.1.300-x019.0' }
-      config:
-        settings:
-          model: opus
-        loom:
-          roles:
-            artificer:
-              permissions:
-                - 'clerk:*'
-                - 'tools:*'
-        animator:
-          sessionProvider: 'claude-code'
-        spider:
-          variables:
-            role: 'artificer'
-            # rig-moj12h4o touches the reckoner apparatus
-            # (core source + new tick.ts + replacement test surface)
-            # plus a kit-contribution edge to clockworks. Build/test
-            # the affected packages directly. The reckoner package's
-            # test surface is the load-bearing verification.
-            buildCommand: 'pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus build'
-            testCommand: 'pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus test'
-      # Production artificer role file — snapshotted under fixtures/
-      # at X021 activation. Sean's note (2026-05-03): the artificer
-      # role instructions live in vibers/roles/artificer.md, not in
-      # the framework or any plugin. The framework's loom auto-loads
-      # <home>/roles/<roleName>.md for every guild-configured role,
-      # so for production fidelity we must ship this file into the
-      # fresh test guild via files:.
-      files:
-        - sourcePath: ../fixtures/test-guild/roles/artificer.md
-          guildPath: roles/artificer.md
-
-  - id: daemon
-    engineId: lab.daemon-setup
-    dependsOn: [test-guild]
-    givens: {}
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: b92dc90502dc0e38a92012cbd238c9eae0e65b0d
+      codexName: '${yields.fixture-codex-setup.codexName}'
 
 scenario:
-  engineId: lab.commission-post-xguild
+  engineId: spider.graft-rig-template
   givens:
-    briefPath: ../briefs/rig-moj12h4o-v3-do-not-read.md
-    waitForRigTerminal: true
-    timeoutMs: 3600000   # 60 min cap
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X021-inventory-format/fixtures/test-guild/roles/artificer.md
+      briefPath: /workspace/nexus-mk2/experiments/X021-inventory-format/briefs/rig-moj12h4o-v3-do-not-read.md
+      model: opus
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set -e
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus build
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus test
+        git push origin HEAD:main
+      verifyTimeoutMs: 600000
 
 probes:
   - id: context
     engineId: lab.probe-trial-context
     givens: {}
-  - id: stacks
-    engineId: lab.probe-stacks-dump
-    givens: {}
   - id: commits
     engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
     givens: {}
 
 archive:
