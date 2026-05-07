@@ -115,17 +115,29 @@ describe('parseReviewOutput', () => {
     assert.deepEqual(r, { passed: true, concerns: '' });
   });
 
+  it('detects PASS at the end (after a checks summary)', () => {
+    const r = parseReviewOutput(
+      'All checks pass:\n- Heading present\n- Commit subject matches\n\nREVIEW: PASS',
+    );
+    assert.deepEqual(r, { passed: true, concerns: '' });
+  });
+
+  it('detects PASS in the middle of a longer body', () => {
+    const r = parseReviewOutput('Preamble.\n\nREVIEW: PASS\n\nMore prose.');
+    assert.equal(r.passed, true);
+  });
+
   it('detects PASS case-insensitively', () => {
     const r = parseReviewOutput('review: pass');
     assert.equal(r.passed, true);
   });
 
-  it('detects PASS with surrounding whitespace lines', () => {
-    const r = parseReviewOutput('\n\n   \nREVIEW: PASS\n');
+  it('detects PASS with leading whitespace on the marker line', () => {
+    const r = parseReviewOutput('Preamble.\n  REVIEW: PASS  ');
     assert.equal(r.passed, true);
   });
 
-  it('detects CONCERNS and extracts body', () => {
+  it('detects CONCERNS and extracts body to end of output', () => {
     const r = parseReviewOutput('REVIEW: CONCERNS\n\n1. Issue A\n2. Issue B');
     assert.equal(r.passed, false);
     assert.match(r.concerns, /Issue A/);
@@ -135,6 +147,18 @@ describe('parseReviewOutput', () => {
   it('CONCERNS body is trimmed', () => {
     const r = parseReviewOutput('REVIEW: CONCERNS\n\n   Body   \n\n');
     assert.equal(r.concerns, 'Body');
+  });
+
+  it('CONCERNS after a preamble: body starts after the marker line', () => {
+    const r = parseReviewOutput('My findings:\n\nREVIEW: CONCERNS\n- Issue 1\n- Issue 2');
+    assert.equal(r.passed, false);
+    assert.equal(r.concerns, '- Issue 1\n- Issue 2');
+  });
+
+  it('PASS wins when both markers appear (contradictory signal)', () => {
+    const r = parseReviewOutput('Considered concerns:\n\nREVIEW: CONCERNS\n- some issue\n\nOn reflection:\nREVIEW: PASS');
+    // Documented choice: PASS wins; we don't trip a revise on contradictory signals.
+    assert.equal(r.passed, true);
   });
 
   it('treats unparseable as concerns + full body', () => {
@@ -152,12 +176,5 @@ describe('parseReviewOutput', () => {
   it('treats whitespace-only as not-passed with empty concerns', () => {
     const r = parseReviewOutput('   \n\n   \n');
     assert.deepEqual(r, { passed: false, concerns: '' });
-  });
-
-  it('does not match PASS in the middle of the output', () => {
-    const r = parseReviewOutput('Some preamble.\nREVIEW: PASS');
-    // First non-empty line is "Some preamble.", which doesn't match PASS,
-    // so the output is treated as concerns.
-    assert.equal(r.passed, false);
   });
 });

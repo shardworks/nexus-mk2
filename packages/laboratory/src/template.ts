@@ -151,10 +151,103 @@ export const CLAUDE_DIRECT_MONOLITHIC: RigTemplate = {
   resolutionEngine: 'verify',
 };
 
+/**
+ * Claude-direct trial template — implement → review → revise → verify.
+ *
+ * Used by claude-direct trials where production's review-loop dynamic
+ * matters (especially with sonnet-class implementers that benefit from a
+ * revision pass). Qualified template name:
+ * `laboratory.claude-direct-with-review`.
+ *
+ * Stages:
+ *   - `implement` — `lab.claude-session` (role: artificer; brief: caller-supplied)
+ *   - `review`    — `lab.claude-session` with `outputContract: review-pass-concerns`.
+ *                   Reviewer reads HEAD + the brief and emits either
+ *                   `REVIEW: PASS` or `REVIEW: CONCERNS\n<body>`. Engine
+ *                   yields `{ passed: bool, concerns: string }`.
+ *   - `revise`    — `lab.claude-session` gated by
+ *                   `when: '!${yields.review.passed}'`. Skipped entirely
+ *                   when review passed (Spider's existing skip semantics);
+ *                   when run, receives a promptTemplate citing the
+ *                   reviewer's concerns.
+ *   - `verify`    — `lab.shell-command`. Runs whether revise ran or was
+ *                   skipped (the rig DAG flows through skipped engines).
+ *
+ * Caller givens beyond the monolithic shape:
+ *   - reviewerRolePath  : abs path → reviewer's --system-prompt-file
+ *   - reviewerModel     : claude model id for review session (often opus)
+ *
+ * Multi-iteration loops (review_2 / revise_2 / ...) aren't expressible
+ * in this template; if a future experiment needs them, author a
+ * `claude-direct-with-review-2-iter` template alongside.
+ */
+export const CLAUDE_DIRECT_WITH_REVIEW: RigTemplate = {
+  engines: [
+    {
+      id: 'implement',
+      designId: 'lab.claude-session',
+      upstream: [],
+      givens: {
+        writ: '${writ}',
+        rolePath: '${vars.rolePath}',
+        briefPath: '${vars.briefPath}',
+        model: '${vars.model}',
+        cwd: '${vars.cwd}',
+        executionWrap: '${vars.executionWrap}',
+      },
+    },
+    {
+      id: 'review',
+      designId: 'lab.claude-session',
+      upstream: ['implement'],
+      givens: {
+        writ: '${writ}',
+        rolePath: '${vars.reviewerRolePath}',
+        briefPath: '${vars.briefPath}',
+        model: '${vars.reviewerModel}',
+        cwd: '${vars.cwd}',
+        executionWrap: 'bare',
+        outputContract: 'review-pass-concerns',
+      },
+    },
+    {
+      id: 'revise',
+      designId: 'lab.claude-session',
+      upstream: ['review'],
+      when: '!${yields.review.passed}',
+      givens: {
+        writ: '${writ}',
+        rolePath: '${vars.rolePath}',
+        promptTemplate:
+          'A reviewer evaluated your prior commit (HEAD) against this brief and raised the following concerns. Address them and recommit.\n\n' +
+          '## Original brief\n\n' +
+          'Re-read the original brief at: ${vars.briefPath}\n\n' +
+          '## Reviewer concerns\n\n' +
+          '${yields.review.concerns}',
+        model: '${vars.model}',
+        cwd: '${vars.cwd}',
+        executionWrap: '${vars.executionWrap}',
+      },
+    },
+    {
+      id: 'verify',
+      designId: 'lab.shell-command',
+      upstream: ['revise'],
+      givens: {
+        command: '${vars.verifyCommand}',
+        cwd: '${vars.cwd}',
+        timeoutMs: '${vars.verifyTimeoutMs}',
+      },
+    },
+  ],
+  resolutionEngine: 'verify',
+};
+
 /** The Laboratory's rig templates, keyed by unqualified template name. */
 export const rigTemplates: Record<string, RigTemplate> = {
   'post-and-collect-default': POST_AND_COLLECT_DEFAULT,
   'claude-direct-monolithic': CLAUDE_DIRECT_MONOLITHIC,
+  'claude-direct-with-review': CLAUDE_DIRECT_WITH_REVIEW,
 };
 
 /** Writ-type → unqualified-template-name mappings. */

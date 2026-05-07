@@ -252,25 +252,37 @@ function validateGivens(givens: Record<string, unknown>): ClaudeSessionGivens {
  * REVIEW: PASS / REVIEW: CONCERNS contract.
  *
  * Convention (set by the rig template's reviewer prompt):
- *   - First non-empty line begins with `REVIEW: PASS` → passed=true.
- *   - First non-empty line begins with `REVIEW: CONCERNS` → passed=false;
- *     concerns body is everything after the marker line, trimmed.
- *   - Anything else → passed=false; full output is the concerns body.
- *     (Conservative default — a wasted revise pass beats a false PASS.)
+ *   - A line containing `REVIEW: PASS` (case-insensitive, at line start)
+ *     anywhere in the output → passed=true.
+ *   - Otherwise, a line containing `REVIEW: CONCERNS` anywhere in the
+ *     output → passed=false; concerns body is everything after the
+ *     marker line through end of output, trimmed.
+ *   - Neither marker found → passed=false; full output is the concerns
+ *     body. (Conservative default — a wasted revise pass beats a false
+ *     PASS that hides a quality regression.)
+ *
+ * Scanning the whole output (rather than only the first line) matches
+ * production's reviewer parser shape — `^###\s*Overall:\s*PASS` with `m`
+ * flag in @shardworks/spider-apparatus's review.ts. Reviewers naturally
+ * put the verdict marker at the end of their message after explaining
+ * their checks; insisting on a leading-line marker rejects that shape
+ * and produces false-CONCERNS.
+ *
+ * If the same output contains both markers (shouldn't happen by the
+ * contract, but a confused reviewer might emit both), PASS wins —
+ * pulling the trigger on revise based on contradictory signals is
+ * worse than letting a confused PASS through verify.
  */
 export function parseReviewOutput(output: string): { passed: boolean; concerns: string } {
-  const lines = output.split('\n');
-  const firstNonEmpty = lines.findIndex((l) => l.trim() !== '');
-  if (firstNonEmpty < 0) {
-    return { passed: false, concerns: '' };
-  }
-  const head = lines[firstNonEmpty]!.trim();
-  if (/^REVIEW:\s*PASS\b/i.test(head)) {
+  const passRe = /^[ \t]*REVIEW:\s*PASS\b/im;
+  const concernsRe = /^[ \t]*REVIEW:\s*CONCERNS\b.*$/im;
+  if (passRe.test(output)) {
     return { passed: true, concerns: '' };
   }
-  if (/^REVIEW:\s*CONCERNS\b/i.test(head)) {
-    const body = lines.slice(firstNonEmpty + 1).join('\n').trim();
-    return { passed: false, concerns: body };
+  const concernsMatch = output.match(concernsRe);
+  if (concernsMatch && concernsMatch.index !== undefined) {
+    const after = output.slice(concernsMatch.index + concernsMatch[0].length);
+    return { passed: false, concerns: after.trim() };
   }
   // Unparseable — treat as concerns and forward the full output.
   return { passed: false, concerns: output.trim() };
