@@ -26,7 +26,7 @@
  *   //registry.npmjs.org/:_authToken=<token>
  *
  * Companion doc:
- *   experiments/lab-operations/running-trials.md
+ *   docs/lab-operations/running-xguild-trials.md
  *   §"Framework changes for experiments"
  */
 

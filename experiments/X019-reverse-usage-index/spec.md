@@ -28,7 +28,7 @@ preference; the bulk of the artifact lives in the tool's backing
 data.
 
 The trial shape is **spec-only** (planning-only) — same as X018.
-See [Lab Operations / Trial Shapes](../lab-operations/running-trials.md#trial-shapes).
+See [Lab Operations / Trial Shapes](../../docs/lab-operations/running-xguild-trials.md#trial-shapes).
 
 ## Background
 
@@ -166,7 +166,7 @@ H1 is sustained when cost reduction is observed AND at least one of:
 X019 requires real framework code (a new tool with a handler
 implementation), so the canonical experiment-branch publish flow
 applies — see
-[Lab Operations / Framework changes for experiments](../lab-operations/running-trials.md#framework-changes-for-experiments).
+[Lab Operations / Framework changes for experiments](../../docs/lab-operations/running-xguild-trials.md#framework-changes-for-experiments).
 
 ### Phase 1 — index generator (sanctum-side)
 
@@ -279,7 +279,7 @@ already analyzed:
   role prompt is left at the production default.
 
 **Rig configuration.** Use the `lab.plan-only` rig template per
-[Lab Operations / Planning-only rig](../lab-operations/running-trials.md#planning-only-rig).
+[Lab Operations / Planning-only rig](../../docs/lab-operations/running-xguild-trials.md#planning-only-rig).
 Same recipe as X018.
 
 **N=1/variant calibration first.** Expand based on signal strength
@@ -338,7 +338,7 @@ sequentially keeps the mechanism distinguishable.
 - Parent click: `c-moogy8wa`
 - This experiment's click: `c-moogyjgw`
 - Companion: X018 — Package Surface Map Injection
-- Lab Operations: `experiments/lab-operations/running-trials.md`
+- Lab Operations: `docs/lab-operations/running-xguild-trials.md`
 - Source analysis transcripts: same as X018
 - Astrolabe pipeline: `docs/architecture/apparatus/astrolabe.md`
 - Role prompt: `packages/plugins/astrolabe/sage-primer-attended.md`

@@ -38,7 +38,7 @@ active role is `sage-primer-attended`. The role prompt lives at
 This is where the surface map is injected.
 
 The trial shape is **spec-only** (planning-only) — see
-[Lab Operations / Trial Shapes](../lab-operations/running-trials.md#trial-shapes)
+[Lab Operations / Trial Shapes](../../docs/lab-operations/running-xguild-trials.md#trial-shapes)
 for the rig configuration. No implement/review/seal stages run.
 
 ## Background
@@ -273,7 +273,7 @@ calibration + variant pair: ~$16. Stacks adds another ~$13 if we
 extend.
 
 **Rig configuration.** Use the `lab.plan-only` rig template per
-[Lab Operations / Planning-only rig](../lab-operations/running-trials.md#planning-only-rig).
+[Lab Operations / Planning-only rig](../../docs/lab-operations/running-xguild-trials.md#planning-only-rig).
 The recipe is copy-pasted into the manifest's `config.spider`
 block; no framework changes required.
 
@@ -326,7 +326,7 @@ shrinks and its expected effect size shifts.
 - Parent click: `c-moogy8wa`
 - This experiment's click: `c-moogydti`
 - Companion: X019 — Reverse Usage Index
-- Lab Operations: `experiments/lab-operations/running-trials.md`
+- Lab Operations: `docs/lab-operations/running-xguild-trials.md`
 - Source analysis transcripts:
   `/home/vscode/.claude/projects/.../212acee8-*.jsonl` and
   `.../c5510609-*.jsonl`

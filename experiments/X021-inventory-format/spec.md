@@ -27,7 +27,7 @@ we hand-edit variant specs and feed them as the brief into the
 `lab.implement-only` rig shape.
 
 The trial shape is **implement-only** — see
-[Lab Operations / Trial Shapes](../lab-operations/running-trials.md#trial-shapes).
+[Lab Operations / Trial Shapes](../../docs/lab-operations/running-xguild-trials.md#trial-shapes).
 No astrolabe engines run. The brief IS the plandoc's `spec`
 section; the implementer reads it directly.
 
@@ -343,7 +343,7 @@ sustain, document and close.
 
 Production cost was $47 (substantive full-rig) and $20
 (control full-rig). Implement-only is a subset (no plan stages),
-typical $5–$15/trial per [running-trials.md](../lab-operations/running-trials.md#implement-only).
+typical $5–$15/trial per [running-xguild-trials.md](../../docs/lab-operations/running-xguild-trials.md#implement-only).
 Estimate: **$50–$120 total** for the 7-trial sequence.
 
 ### Manifest plumbing
@@ -361,7 +361,7 @@ implementer-eye-view of the codebase). Brief path differs per
 manifest.
 
 Lab plugin set: implement-only set per
-[Standard plugin sets](../lab-operations/running-trials.md#standard-plugin-sets).
+[Standard plugin sets](../../docs/lab-operations/running-xguild-trials.md#standard-plugin-sets).
 Settings: `model: opus` to match production.
 
 ## Risks
@@ -423,5 +423,5 @@ should be insensitive to upstream interventions.
   `rig-moji64hs` (control, $20) in `vibers` guild
 - Source plans: `w-moiy8hkv` (substantive plan) and
   `w-moji63xm` (control plan)
-- Lab Operations: `experiments/lab-operations/running-trials.md`
+- Lab Operations: `docs/lab-operations/running-xguild-trials.md`
 - Companion experiments: X018, X019, X020

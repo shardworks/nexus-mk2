@@ -1,11 +1,15 @@
-# Laboratory Operations
+# Running xguild Trials
 
-Operational guidance for running trials through the Laboratory
-apparatus (`packages/laboratory/`). This directory captures the
-reusable how-to and gotchas — things that recur across experiments
-and shouldn't be restated in every spec.
+Operational guidance for the **xguild trial doctype** — trials that
+spin up a disposable test guild on the lab host and post a
+commission into it via the cross-guild scenario engines
+(`lab.commission-post-xguild` etc.). The test guild runs the full
+production pipeline (plan → implement → review → revise → seal).
 
-Experiment specs reference this directory; they don't repeat it.
+For the lighter-weight single-session shape (claude-direct), see
+[`running-claude-direct-trials.md`](./running-claude-direct-trials.md).
+The high-level chooser between doctypes lives in
+[`README.md`](./README.md).
 
 > **Reading cost numbers in trial outputs?** See
 > [`calculating-costs.md`](./calculating-costs.md) for what the

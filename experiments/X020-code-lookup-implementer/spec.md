@@ -68,7 +68,7 @@ the role's prompt is augmented with a tool-preference snippet
 (parallel to X019's reader-analyst injection).
 
 The trial shape is **implement-only** — same as X016. See [Lab
-Operations / Trial Shapes](../lab-operations/running-trials.md#implement-only).
+Operations / Trial Shapes](../../docs/lab-operations/running-xguild-trials.md#implement-only).
 
 ## Brief shape
 

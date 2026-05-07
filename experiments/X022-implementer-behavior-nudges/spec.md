@@ -31,7 +31,7 @@ We hand-craft a single variant role file and copy it over the
 test guild's `roles/artificer.md`.
 
 The trial shape is **implement-only** — see
-[Lab Operations / Trial Shapes](../lab-operations/running-trials.md#trial-shapes).
+[Lab Operations / Trial Shapes](../../docs/lab-operations/running-xguild-trials.md#trial-shapes).
 No astrolabe engines run. The brief markdown IS the spec; the
 implementer reads it directly. We use the **PlanDoc `spec` field
 verbatim** — the same content the production implementer received
@@ -237,7 +237,7 @@ Identical apparatus across the four manifests:
 
 - `frameworkVersion: '0.1.301'` (current latest)
 - Implement-only plugin set per
-  [Standard plugin sets](../lab-operations/running-trials.md#standard-plugin-sets)
+  [Standard plugin sets](../../docs/lab-operations/running-xguild-trials.md#standard-plugin-sets)
 - `loom.roles.artificer.model: opus` to match production model
   choice on these rigs
 - `files:` block copies the variant role into
@@ -311,6 +311,6 @@ confound risk.
   (control) in `vibers` guild
 - Source plans: `w-moiy8hkv` (substantive) and `w-moji63xm`
   (control)
-- Lab Operations: `experiments/lab-operations/running-trials.md`
+- Lab Operations: `docs/lab-operations/running-xguild-trials.md`
 - Companion experiment: X021 (same parent Category 2, inventory
   format)
