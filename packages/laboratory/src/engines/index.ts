@@ -15,6 +15,10 @@
 import type { EngineDesign } from '@shardworks/fabricator-apparatus';
 import { phaseEngines } from './phases.ts';
 import { codexSetupEngine, codexTeardownEngine } from './codex-fixture.ts';
+import {
+  codexCheckoutSetupEngine,
+  codexCheckoutTeardownEngine,
+} from './codex-checkout.ts';
 import { guildSetupEngine, guildTeardownEngine } from './guild-fixture.ts';
 import { daemonSetupEngine, daemonTeardownEngine } from './daemon-fixture.ts';
 import {
@@ -37,6 +41,8 @@ export const engines: Record<string, EngineDesign> = {
   // Fixture work engines
   'lab.codex-setup': codexSetupEngine,
   'lab.codex-teardown': codexTeardownEngine,
+  'lab.codex-checkout': codexCheckoutSetupEngine,
+  'lab.codex-checkout-teardown': codexCheckoutTeardownEngine,
   'lab.guild-setup': guildSetupEngine,
   'lab.guild-teardown': guildTeardownEngine,
   'lab.daemon-setup': daemonSetupEngine,
