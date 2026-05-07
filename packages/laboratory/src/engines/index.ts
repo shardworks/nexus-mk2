@@ -22,6 +22,8 @@ import {
   waitForRigTerminalXguildEngine,
   waitForWritTerminalXguildEngine,
 } from './scenario-xguild.ts';
+import { claudeSessionEngine } from './claude-session.ts';
+import { shellCommandEngine } from './shell-command.ts';
 import { archiveEngine } from '../archive/engine.ts';
 import { trialContextEngine } from '../probes/trial-context.ts';
 import { stacksDumpEngine } from '../probes/stacks-dump.ts';
@@ -43,6 +45,10 @@ export const engines: Record<string, EngineDesign> = {
   'lab.commission-post-xguild': commissionPostXguildEngine,
   'lab.wait-for-writ-terminal-xguild': waitForWritTerminalXguildEngine,
   'lab.wait-for-rig-terminal-xguild': waitForRigTerminalXguildEngine,
+
+  // Claude-direct trial primitives
+  'lab.claude-session': claudeSessionEngine,
+  'lab.shell-command': shellCommandEngine,
 
   // Probe work engines
   'lab.probe-stacks-dump': stacksDumpEngine,
