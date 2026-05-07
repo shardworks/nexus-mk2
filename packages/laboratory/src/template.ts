@@ -93,9 +93,68 @@ export const POST_AND_COLLECT_DEFAULT: RigTemplate = {
   //   teardown-phase orchestrator's graftTail.
 };
 
+/**
+ * Claude-direct trial template — single-stage shape.
+ *
+ * Used by claude-direct trials whose scenario engine is
+ * `spider.graft-rig-template`. The graft engine looks this template up
+ * by qualified name (`laboratory.claude-direct-monolithic`) and grafts
+ * it into the rig as the scenario's tail.
+ *
+ * Stages:
+ *   - `implement` — `lab.claude-session` against the codex working dir
+ *   - `verify`    — `lab.shell-command` running the trial's verifyCommand
+ *
+ * Caller givens (passed through `spider.graft-rig-template` and
+ * substituted into `${vars.<key>}` references below):
+ *   - rolePath        : abs path → claude session's --system-prompt-file
+ *   - briefPath       : abs path → work prompt content
+ *   - model           : claude model id
+ *   - cwd             : codex working dir (typically
+ *                       `${yields.fixture-codex-checkout-setup.workdir}`)
+ *   - executionWrap   : 'production' | 'bare'
+ *   - verifyCommand   : shell command run by lab.shell-command
+ *   - verifyTimeoutMs : optional, default 600_000 in lab.shell-command
+ *
+ * Manifest-local rigTemplates (config.spider.rigTemplates) don't apply
+ * on the lab host's own spider — the lab guild's spider config doesn't
+ * change per-trial. Until that's wired through (separate piece of work),
+ * canonical claude-direct trial templates ship from the laboratory plugin
+ * as kit contributions.
+ */
+export const CLAUDE_DIRECT_MONOLITHIC: RigTemplate = {
+  engines: [
+    {
+      id: 'implement',
+      designId: 'lab.claude-session',
+      upstream: [],
+      givens: {
+        writ: '${writ}',
+        rolePath: '${vars.rolePath}',
+        briefPath: '${vars.briefPath}',
+        model: '${vars.model}',
+        cwd: '${vars.cwd}',
+        executionWrap: '${vars.executionWrap}',
+      },
+    },
+    {
+      id: 'verify',
+      designId: 'lab.shell-command',
+      upstream: ['implement'],
+      givens: {
+        command: '${vars.verifyCommand}',
+        cwd: '${vars.cwd}',
+        timeoutMs: '${vars.verifyTimeoutMs}',
+      },
+    },
+  ],
+  resolutionEngine: 'verify',
+};
+
 /** The Laboratory's rig templates, keyed by unqualified template name. */
 export const rigTemplates: Record<string, RigTemplate> = {
   'post-and-collect-default': POST_AND_COLLECT_DEFAULT,
+  'claude-direct-monolithic': CLAUDE_DIRECT_MONOLITHIC,
 };
 
 /** Writ-type → unqualified-template-name mappings. */
