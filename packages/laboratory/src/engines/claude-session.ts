@@ -351,6 +351,38 @@ export const claudeSessionEngine: EngineDesign = {
       );
     }
 
+    // Stamp trial metadata via raw write-through put if missing.
+    //
+    // Animator's dispatchAnimate races recordRunning (which carries
+    // request.metadata) against the babysitter's terminal session-record
+    // write — when a session terminates faster than processInfoPromise
+    // resolves (observed in reviewer sessions at ~3.5s), the terminal
+    // write lands first and the reducer's terminal-immutability rule
+    // no-ops the metadata merge. Result: short sessions in
+    // animator/sessions have no metadata field, and the trial-sessions
+    // probe's metadata.trialId filter misses them.
+    //
+    // Workaround until the framework race is fixed
+    // (sanctum click c-movszemq): on collect — which runs only after
+    // the session has terminated — re-stamp metadata via raw `put`
+    // (bypassing reduceSessionTransition's terminal-immutability).
+    // The probe filter then catches the row.
+    const writ = givens.writ as WritDoc | undefined;
+    const expectedMetadata = {
+      engineId: context.engineId,
+      trialId: writ?.id,
+      stage: context.engineId,
+      provider: 'lab.claude-session',
+    } as const;
+    if (writ && (!session.metadata || (session.metadata as Record<string, unknown>).trialId !== writ.id)) {
+      const writableSessions = stacks.book<SessionDoc>('animator', 'sessions');
+      const existingMetadata = (session.metadata ?? {}) as Record<string, unknown>;
+      await writableSessions.put({
+        ...session,
+        metadata: { ...existingMetadata, ...expectedMetadata },
+      });
+    }
+
     const base = {
       sessionId,
       status: session.status,
