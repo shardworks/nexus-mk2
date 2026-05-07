@@ -28,6 +28,7 @@ import { archiveEngine } from '../archive/engine.ts';
 import { trialContextEngine } from '../probes/trial-context.ts';
 import { stacksDumpEngine } from '../probes/stacks-dump.ts';
 import { gitRangeEngine } from '../probes/git-range.ts';
+import { trialSessionsEngine } from '../probes/trial-sessions.ts';
 
 export const engines: Record<string, EngineDesign> = {
   // Phase orchestrators (template backbone)
@@ -54,6 +55,7 @@ export const engines: Record<string, EngineDesign> = {
   'lab.probe-stacks-dump': stacksDumpEngine,
   'lab.probe-git-range': gitRangeEngine,
   'lab.probe-trial-context': trialContextEngine,
+  'lab.probe-trial-sessions': trialSessionsEngine,
 
   // Archive engine
   'lab.archive': archiveEngine,
