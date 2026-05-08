@@ -219,12 +219,81 @@ After rows 2–7 showed a ~12% combined-cell delta vs trial 1's
 n=1 baseline, two more substantive baseline trials were posted
 to firm H1 against X021's measured 3–12% noise floor.
 
-- Row 8: `w-mowr4jq1` (head)
-- Row 9: `w-mowr4mri` (depends-on row 8)
+- Row 8: `w-mowr4jq1` (head) — **completed $43.60 / 161.9 min** (47 min real work + ~115 min post-finish wedge)
+- Row 9: `w-mowr4mri` (depends-on row 8) — picked up 12:50 UTC after row 8 unwedged
 
-Both manifests: `rig-moj12h4o-baseline.yaml` (claude-direct,
-identical to row 8). Estimated chain cost: $36–$80 ($18–$28 ×2,
-+/- variance).
+#### Row 8 wedge incident (2026-05-08 10:54–12:43 UTC)
+
+The implementer completed its work cleanly, made commit `f9dcdf4`,
+and emitted its "Commit landed cleanly" final summary at
+10:54:45 UTC. Then it ran a final verification Bash:
+
+```
+pnpm -w typecheck 2>&1 | tail -10 && echo "---" && pnpm -w test 2>&1 | grep -E "ELIFECYCLE|fail [1-9]|^Failed|✖ failing tests" | head -10
+```
+
+…which wedged at **0% CPU for 1h55m**. Process tree:
+`bash → pnpm -w → pnpm -r test → sh`. Same nested-`pnpm -r test`
+pattern as click `c-moizriyk` (Reviewer wedged on nested
+`pnpm -r test`). Heartbeat-timeout reconciler did NOT kick in
+because claude-code was still alive (waiting on the Bash tool
+result), so its session-heartbeat kept firing.
+
+Coco killed the wedged bash + pnpm tree (PIDs 2403603, 2404274,
+2404296, 2404317) at ~12:43 UTC. Claude-code received an empty
+tool result, processed a few recovery turns confirming the test
+output was actually captured at /tmp/full-test-output.log
+(25 packages passing, 0 failures), said "false alarm" and
+finished. Trial then proceeded to verifyCommand → seal →
+terminal at exit 0.
+
+Cost note: $43.60 reflects mostly real implementer work; the
+~115 min wedge had 0% CPU (no API calls). Post-kill recovery
+added ~5 turns / ~$2 of cost. Tool-use counts are dominated
+by the pre-wedge work and reflect baseline behavior fairly.
+
+This is the **same wedge that affects baseline implementers
+generally** on this rig — when the role file lacks the
+"narrow test filters" nudge, the baseline implementer
+reflexively reaches for `pnpm -w test`. Variant trials
+avoided the wedge because the nudges discouraged
+workspace-wide test runs.
+
+#### Row 8 cost calibration
+
+Implementer cost $43.60 vs trial 1 ($37.35 implementer-alone).
+Baseline n=2 mean: **$40.48**. Combined n=3 mean: $32.81.
+**Δ -19%** (firmer than the -12% n=1 read).
+
+#### Tool-use metrics with n=2 baseline
+
+Re-run of `extract-tool-use-metrics.py` with trial 8 included
+clarified the per-mechanism picture:
+
+| metric | baseline (n=2) | combined (n=3) | Δ |
+|---|---:|---:|---:|
+| Bash count | 83.5 | 69.0 | -17% |
+| Edit + MultiEdit | 73.5 | 56.7 | -23% |
+| Read count | 68.0 | 64.3 | -5% |
+| Total searches (Grep+bash-grep) | 41.5 | 34.0 | -18% |
+| Workspace tests | 8.0 | 8.0 | flat |
+| Filter-test share | 0.36 | 0.32 | -11% |
+| `sed -i` | 1.5 | 1.7 | +11% |
+
+Mechanism readings (preliminary, n=3 baseline still pending):
+- **#10 (avoid repeat greps): strong, sustained** — total search
+  activity -18% with n=2 baseline (vs -23% at n=1).
+- **#11/#12 (narrow tests): wash** — workspace tests flat at 8
+  in both cells (was wrong-direction at n=1; trial 8 corrected).
+- **#8 (Bash bulk): weak positive** — sed +11% in variants
+  (flipped from -44% at n=1; trial 1 was a sed-heavy outlier).
+- **#9 (targeted Reads): flat at ceiling** — both cells at 79%.
+
+Cost-reduction provenance: **"variants do less work"** holds.
+Edit -23% is the largest mover; Bash -17%, searches -18% follow.
+The reductions aren't traceable to specific nudges firing on
+specific operations; they appear to be uniform efficiency gain
+from the role-file's "Tooling Discipline" framing.
 
 ## Cumulative spend
 

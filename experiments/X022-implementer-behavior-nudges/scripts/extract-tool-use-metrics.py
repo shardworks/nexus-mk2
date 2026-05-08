@@ -51,6 +51,14 @@ WRIT_EXTRACT_OVERRIDES: dict[str, Path] = {
         "/workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/"
         "artifacts/2026-05-03-trial-1-results/extracted"
     ),
+    "w-mowr4jq1": Path(
+        "/workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/"
+        "artifacts/2026-05-08-trials-8-9-extracts/w-mowr4jq1"
+    ),
+    "w-mowr4mri": Path(
+        "/workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/"
+        "artifacts/2026-05-08-trials-8-9-extracts/w-mowr4mri"
+    ),
 }
 
 # Default writ → cell mapping for X022 (extend as new trials land).
