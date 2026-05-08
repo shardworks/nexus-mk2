@@ -54,15 +54,19 @@ inventory/brief content the planner produces), X022 targets the
 role-instruction substrate Loom binds into every implement /
 revise session.
 
-The intervention is shipped via `lab.guild-setup`'s `files:`
-mechanism (the same mechanism X015 used to inject the role file).
-We hand-craft a single variant role file and copy it over the
-test guild's `roles/artificer.md`.
+The intervention is shipped by passing the variant role file's
+absolute path as the `rolePath` parameter on
+`spider.graft-rig-template`'s `laboratory.claude-direct-monolithic`
+template (post 2026-05-08 migration). The original design used
+`lab.guild-setup`'s `files:` mechanism to copy the role file into
+a full test guild; the migrated form is direct and lighter-weight.
 
-The trial shape is **implement-only** — see
-[Lab Operations / Trial Shapes](../../docs/lab-operations/running-xguild-trials.md#trial-shapes).
-No astrolabe engines run. The brief markdown IS the spec; the
-implementer reads it directly. We use the **PlanDoc `spec` field
+The trial shape is **claude-direct** — a single claude session
+against a fresh codex checkout, no astrolabe / review / revise /
+seal stages. See
+[`docs/lab-operations/running-claude-direct-trials.md`](../../docs/lab-operations/running-claude-direct-trials.md)
+and X023's spec § Operational breadcrumb for the runbook. The
+brief markdown IS the spec; the implementer reads it directly. We use the **PlanDoc `spec` field
 verbatim** — the same content the production implementer received
 when its session was launched (Astrolabe writes only `plandoc.spec`
 into the implementer brief, not the inventory / scope / decisions
@@ -223,17 +227,28 @@ role-file only.
 
 ### Phase 3 — Trial sequence
 
-Four trials, run sequentially:
+**Twelve trials, n=3 per cell, run sequentially:**
 
-| # | rig | variant | manifest |
-|---|---|---|---|
-| 1 | rig-moj12h4o (substantive) | baseline | `manifests/rig-moj12h4o-baseline.yaml` |
-| 2 | rig-moj12h4o (substantive) | combined | `manifests/rig-moj12h4o-combined.yaml` |
-| 3 | rig-moji64hs (control) | baseline | `manifests/rig-moji64hs-baseline.yaml` |
-| 4 | rig-moji64hs (control) | combined | `manifests/rig-moji64hs-combined.yaml` |
+| group | rig | variant | manifest | n |
+|---|---|---|---|---|
+| 1 | rig-moj12h4o (substantive) | baseline | `manifests/rig-moj12h4o-baseline.yaml` | 3 |
+| 2 | rig-moj12h4o (substantive) | combined | `manifests/rig-moj12h4o-combined.yaml` | 3 |
+| 3 | rig-moji64hs (control) | baseline | `manifests/rig-moji64hs-baseline.yaml` | 3 |
+| 4 | rig-moji64hs (control) | combined | `manifests/rig-moji64hs-combined.yaml` | 3 |
 
-Sequenced one at a time. Review interim results after each pair
-(rig completes baseline + variant) before deciding to expand N.
+Sequenced one at a time. Run all three trials of group 1, then
+group 2, then group 3, then group 4 — same workflow as X021's
+n=3 sequencing.
+
+**MVP fallback:** if budget-tight, run groups 1 + 2 only (substantive
+baseline + combined, n=3 each = 6 trials). Answers H1 cleanly;
+H2 requires control trials.
+
+**Original n=1 design (4 trials):** **superseded 2026-05-08**. The
+n=1-per-cell design was authored before X021's noise-floor
+measurement (10% CV). At n=1 the design is underpowered for
+hypothesized effect sizes of 5–15%. The 4-manifest set still works
+at n=3 — just post each manifest three times.
 
 ### Codex pins
 
@@ -249,39 +264,49 @@ each rig started.
 
 ### Cost estimate
 
-Production cost was $47 (substantive full-rig with planning) and
-$20 (control full-rig with planning). Implement-only is the
-back-half of that; X016 phase 2c on the same substantive rig
-ran $6.50 with a partial handoff. Full implement on the
-substantive rig should run $15–$30; control should run $10–$20
-against a production-faithful (spec-only) brief.
+Based on X021's measured per-trial cost on the same workloads
+under claude-direct:
 
-Estimate: **$30–$60 total** for the 4-trial sequence with
-trimmed briefs. (Initial draft estimate of $50–$100 assumed
-the bloated 2.4×-production briefs.)
+- Substantive (rig-moj12h4o): $18–$28/trial
+- Control (rig-moji64hs): $11–$15/trial
+
+| plan | trials | total |
+|---|---|---|
+| **MVP** | 6 substantive (n=3 baseline + n=3 combined) | $108–$170 |
+| **Full** | 12 (above + 6 control) | $174–$260 |
+
+Original n=1 4-trial estimate ($30–$60) is superseded — it was
+based on the smoke-trial-derived cost claim that turned out 30×
+low in X021. See [X021 results](../X021-inventory-format/artifacts/results.md).
 
 ### Manifest plumbing
 
-Identical apparatus across the four manifests:
+Identical apparatus across the four manifests (post-migration to
+claude-direct, 2026-05-08):
 
-- `frameworkVersion: '0.1.301'` (current latest)
-- Implement-only plugin set per
-  [Standard plugin sets](../../docs/lab-operations/running-xguild-trials.md#standard-plugin-sets)
-- `loom.roles.artificer.model: opus` to match production model
-  choice on these rigs
-- `files:` block copies the variant role into
-  `roles/artificer.md` (per X015 precedent)
+- `frameworkVersion: '0.1.304'`
+- Scenario engine `spider.graft-rig-template` with template
+  `laboratory.claude-direct-monolithic`
+- `model: opus`, `executionWrap: production` (matches the
+  EXECUTION_EPILOGUE production's spider implement engine uses)
+- `rolePath` points directly at the variant artificer file
+  (no `lab.guild-setup` files mechanism — claude-direct loads
+  the role file directly)
 
-Per-manifest variations: codex baseSha, briefPath, and
-`files[0].sourcePath` (which artificer file gets copied).
+Per-manifest variations: codex baseSha, briefPath, rolePath
+(which artificer file feeds in), and verifyCommand (filtered
+build+test on substantive; workspace typecheck on control).
 
 ## Risks
 
-- **N=1 variance.** Implementer cost has variance from rate-limit
-  retries, test flakes, model-output non-determinism. Modest
-  effect sizes (5–15%) may be obscured at N=1. If signal is
-  ambiguous after the 4-trial baseline+variant on each rig,
-  expand to N=2 on whichever cell is load-bearing.
+- **Run-to-run variance.** X021 measured run-to-run cost CV at
+  3–12% (median 9%) on these workloads. The 5–15% per-idea claims
+  for X022's nudges are at the edge of detectability against this
+  noise floor. **n=3 per cell is the minimum** to distinguish
+  modest real effects from noise; even at n=3 the 95% CI is wide
+  enough that effects under 15% may be inconclusive. If the
+  combined-variant signal at n=3 is borderline (within ±5% of
+  baseline), expand to n=5–8 on the load-bearing cell.
 
 - **Role-file injection vs brief injection.** This experiment
   modifies the role file (which is loom-bound at session start),

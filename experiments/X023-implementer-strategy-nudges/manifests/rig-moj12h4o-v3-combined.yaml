@@ -1,0 +1,69 @@
+slug: x023-rig-moj12h4o-v3-combined
+title: X023 — rig-moj12h4o (substantive) v3 combined (single-commit + conciseness)
+codex: nexus
+
+description: |
+  X023 v3 combined-strategy variant on the substantive rig
+  (rig-moj12h4o). Identical to rig-moj12h4o-baseline.yaml in every
+  way EXCEPT the artificer role file: this variant uses
+  fixtures/roles/artificer-v3-combined.md, which prepends BOTH
+  Work Discipline sections (Single Commit + Direct Trajectory).
+
+  Tests H1 — does the combined two-nudge variant reduce implementer
+  session cost ≥20% vs baseline at n=3?
+
+  Pair with rig-moj12h4o-baseline.yaml. The minimum-viable run plan
+  is baseline n=3 + this manifest n=3 (6 trials total). Per-idea
+  separation (v1, v2) is optional and runs only after H1 lands.
+
+  Per-trial cost expectation: $18-$28; minimum-viable plan total
+  $108-$170.
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: b92dc90502dc0e38a92012cbd238c9eae0e65b0d
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: b92dc90502dc0e38a92012cbd238c9eae0e65b0d
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X023-implementer-strategy-nudges/fixtures/roles/artificer-v3-combined.md
+      briefPath: /workspace/nexus-mk2/experiments/X021-inventory-format/briefs/rig-moj12h4o-baseline.md
+      model: opus
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set -e
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus build
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus test
+        git push origin HEAD:main
+      verifyTimeoutMs: 600000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

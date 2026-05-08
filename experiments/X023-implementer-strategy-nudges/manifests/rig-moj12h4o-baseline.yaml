@@ -1,0 +1,73 @@
+slug: x023-rig-moj12h4o-baseline
+title: X023 — rig-moj12h4o (substantive, Reckoner periodic tick) baseline (stock artificer.md)
+codex: nexus
+
+description: |
+  X023 baseline trial on the substantive rig (rig-moj12h4o, Reckoner
+  periodic tick / w-moiy8hkv). Ships the baseline artificer.md
+  (snapshot of /workspace/vibers/roles/artificer.md as of 2026-05-08;
+  see fixtures/roles/artificer-baseline.md) as the implementer's
+  system prompt. Brief is the verbatim planner spec extracted from
+  the production astrolabe.plans book — REUSED FROM X021 to keep
+  the comparison clean.
+
+  Codex pinned to b92dc90502dc0e38a92012cbd238c9eae0e65b0d (matching
+  X021 substantive trials). This is the implementer-eye-view of the
+  codebase the original Reckoner refactor implementer saw at start.
+
+  Run n=3 to control for the ~10% CV noise floor measured in X021.
+  Pair with rig-moj12h4o-v3-combined.yaml (combined-strategy variant)
+  and the per-idea variants (v1 single-commit, v2 conciseness) for
+  H2 separation.
+
+  Per-trial cost expectation: $18-$28 (per X021 measurements on the
+  same rig).
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: b92dc90502dc0e38a92012cbd238c9eae0e65b0d
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: b92dc90502dc0e38a92012cbd238c9eae0e65b0d
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X023-implementer-strategy-nudges/fixtures/roles/artificer-baseline.md
+      briefPath: /workspace/nexus-mk2/experiments/X021-inventory-format/briefs/rig-moj12h4o-baseline.md
+      model: opus
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set -e
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus build
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus test
+        git push origin HEAD:main
+      verifyTimeoutMs: 600000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

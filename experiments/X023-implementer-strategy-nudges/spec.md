@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 ---
 
 # X023 — Implementer Strategy Nudges
@@ -118,6 +118,19 @@ if the prompt explicitly directs it, because the default implementer
 behavior is to commit progress incrementally and re-verify often.
 
 ## Hypothesis
+
+> **Important context for H1/H2.** The production artificer.md
+> already contains a single-commit instruction in *Finishing Your
+> Work* ("commit all changes in a single commit with a clear,
+> descriptive message"). X021 control runs (n=3) showed this
+> instruction was followed only **1/3** of the time on multi-piece
+> work. X023's v1 / v3 variants therefore test whether **stronger
+> upfront framing** of an existing-but-weak directive improves
+> adherence — they are not introducing a new directive. A small or
+> null effect could mean "the existing weak instruction is already
+> doing most of the available work"; a substantial effect would
+> mean "framing/placement of the directive matters more than its
+> presence."
 
 **H1 (combined strategy effect).** The combined two-nudge variant
 reduces implementer session cost (USD) ≥20% on the substantive rig
@@ -242,46 +255,63 @@ No new instrument work. X023 reuses:
   X021's read-utilization output isn't sufficient. Phase 1 work,
   ~30 min.
 
-### Phase 1 — Author the role file variants
+### Phase 1 — Role file variants (DONE 2026-05-08)
 
-1. Snapshot `/workspace/vibers/roles/artificer.md` (the production
-   role) into `fixtures/roles/artificer-baseline.md`. Freeze the
-   snapshot — it doesn't track upstream production drift during
-   the experiment.
-2. Author the four variant files (or three, if we skip v1/v2 and
-   only run baseline + combined):
-   - `artificer-v1-single-commit.md`
-   - `artificer-v2-conciseness.md`
-   - `artificer-v3-combined.md`
-3. Decide whether the empirical-justification lines stay in the
-   role file (helps the model anchor on "why") or get stripped
-   (cleaner deployment-style file).
+Four role files authored:
 
-### Phase 2 — Briefs
+- `fixtures/roles/artificer-baseline.md` — verbatim snapshot of
+  `/workspace/vibers/roles/artificer.md` (2026-05-08). Frozen for
+  the duration of the experiment.
+- `fixtures/roles/artificer-v1-single-commit.md` — baseline with
+  a "Single Commit" Work Discipline section prepended after Role.
+- `fixtures/roles/artificer-v2-conciseness.md` — baseline with a
+  "Direct Trajectory" Work Discipline section prepended after Role.
+- `fixtures/roles/artificer-v3-combined.md` — baseline with both
+  Work Discipline sections.
 
-Reuse X021's briefs verbatim (they ARE the production PlanDoc spec
-sections):
+**Empirical-justification lines stripped.** Role files carry only
+imperative directives, no "X021 measured 14% saving" footnotes.
+Justification lives in this spec and the click record. Rationale:
+production deployment of any winning variant should not include
+research-internal references; cleaner to keep them out from the
+start.
 
-- `briefs/rig-moj12h4o-baseline.md` — copy from X021
-  (Reckoner periodic-tick refactor)
-- `briefs/rig-moji64hs-baseline.md` — copy from X021
-  (vision-keeper deletion)
+**Existing-instruction note.** The production artificer.md (and the
+X021 baseline used in this experiment) already contains a single-
+commit instruction in *Finishing Your Work*: "When you are finished,
+commit all changes in a single commit". X021 control runs (n=3)
+showed this instruction was followed only 1/3 of the time on
+multi-piece work. v1's nudge therefore tests whether **stronger
+upfront framing** of an existing directive improves adherence — not
+whether a *new* directive lands. Treat v1's expected effect with
+this in mind: a small effect could mean "the existing weak instruction
+is already doing most of the available work"; a large effect could
+mean "framing matters more than content."
 
-No variant briefs in X023 — the intervention is role-file-only.
+### Phase 2 — Briefs (DONE 2026-05-08)
 
-### Phase 3 — Trial sequence
+X023's manifests reference X021's briefs by absolute path:
 
-Six trials at minimum (n=3 baseline + n=3 combined on substantive
-to test H1; control trials and v1/v2 separation are stretch).
+- `/workspace/nexus-mk2/experiments/X021-inventory-format/briefs/rig-moj12h4o-baseline.md`
+- `/workspace/nexus-mk2/experiments/X021-inventory-format/briefs/rig-moji64hs-baseline.md`
+
+No copy is made; no variant briefs in X023. The intervention is
+role-file-only. Reusing X021's briefs keeps the X023 substantive
+baseline directly comparable to X021's substantive baseline trial
+(same brief, same role file, same codex pin).
+
+### Phase 3 — Trial sequence (manifests authored 2026-05-08)
+
+Six manifests authored in `manifests/`:
 
 | group | manifest | n | purpose |
 |---|---|---|---|
 | substantive baseline | `manifests/rig-moj12h4o-baseline.yaml` | 3 | H1 anchor; replicates the X021 substantive baseline at n=3 |
-| substantive combined | `manifests/rig-moj12h4o-combined.yaml` | 3 | H1 (≥20% reduction) |
-| control baseline | `manifests/rig-moji64hs-baseline.yaml` | 3 | H3 anchor (optional; partially captured in X021 at n=3) |
-| control combined | `manifests/rig-moji64hs-combined.yaml` | 3 | H3 (smaller effect than substantive) |
-| substantive v1 (single-commit alone) | `manifests/rig-moj12h4o-v1-single-commit.yaml` | 3 | H2 informational (optional) |
-| substantive v2 (conciseness alone) | `manifests/rig-moj12h4o-v2-conciseness.yaml` | 3 | H2 informational (optional) |
+| substantive v3 combined | `manifests/rig-moj12h4o-v3-combined.yaml` | 3 | H1 (≥20% reduction) |
+| control baseline | `manifests/rig-moji64hs-baseline.yaml` | 3 | H3 anchor; replicates X021 control baseline at n=3 |
+| control v3 combined | `manifests/rig-moji64hs-v3-combined.yaml` | 3 | H3 (smaller effect than substantive); also tests "did the nudge actually move commit decomposition" since this is the rig with observed multi-commit variance |
+| substantive v1 (single-commit alone) | `manifests/rig-moj12h4o-v1-single-commit.yaml` | 3 | H2 informational; run only if H1 sustains and per-idea attribution is wanted |
+| substantive v2 (conciseness alone) | `manifests/rig-moj12h4o-v2-conciseness.yaml` | 3 | H2 informational; run only if H1 sustains and per-idea attribution is wanted |
 
 **Minimum-viable run plan:** 6 trials (substantive baseline n=3 +
 substantive combined n=3) → answers H1.
@@ -308,17 +338,19 @@ each rig started.
 
 ### Cost estimate
 
-Based on X021's actual per-trial cost on the same workloads:
+Based on X021's measured per-trial cost on the same workloads:
 
-- Substantive: $18–$28/trial (claude-direct)
-- Control: $11–$15/trial (claude-direct)
+- Substantive (rig-moj12h4o): $18–$28/trial (claude-direct)
+- Control (rig-moji64hs): $11–$15/trial (claude-direct)
 
-Minimum-viable (6 trials, all substantive): **$120–$170**
-Mid-plan (12 trials, +6 control): **$180–$260**
-Full plan (18 trials, +6 substantive single-idea): **$300–$430**
+| plan | trials | breakdown | total |
+|---|---|---|---|
+| **MVP** | 6 substantive | baseline n=3 + v3 combined n=3 | $108–$170 |
+| **Mid** | 12 (MVP + 6 control) | + control baseline n=3 + control v3 combined n=3 | $174–$260 |
+| **Full** | 18 (Mid + 6 substantive single-idea) | + v1 single-commit n=3 + v2 conciseness n=3 | $282–$428 |
 
-The minimum-viable plan is the right starting point. Decide on
-expansion after the first 6 land.
+MVP is the right starting point. Decide on expansion after the
+first 6 land.
 
 ## Risks
 
@@ -384,45 +416,26 @@ ls /workspace/nexus-mk2/experiments/X021-inventory-format/briefs/
 # expect: rig-moj12h4o-baseline.md, rig-moji64hs-baseline.md (at minimum)
 ```
 
-### 2. Author Phase 1 artifacts (role file variants)
+### 2. Verify Phase 1 + 3 artifacts present
+
+Already authored 2026-05-08 — these should exist:
 
 ```bash
-# Snapshot production role
-cp /workspace/vibers/roles/artificer.md \
-   /workspace/nexus-mk2/experiments/X023-implementer-strategy-nudges/fixtures/roles/artificer-baseline.md
+# Role file variants
+ls /workspace/nexus-mk2/experiments/X023-implementer-strategy-nudges/fixtures/roles/
+# expect: artificer-baseline.md, artificer-v1-single-commit.md,
+#         artificer-v2-conciseness.md, artificer-v3-combined.md
 
-# Author variant role files by hand (see "Variants" section above)
-# At minimum: artificer-v3-combined.md
-# Optionally: artificer-v1-single-commit.md, artificer-v2-conciseness.md
+# Manifests
+ls /workspace/nexus-mk2/experiments/X023-implementer-strategy-nudges/manifests/
+# expect: rig-moj12h4o-baseline.yaml, rig-moj12h4o-v1-single-commit.yaml,
+#         rig-moj12h4o-v2-conciseness.yaml, rig-moj12h4o-v3-combined.yaml,
+#         rig-moji64hs-baseline.yaml, rig-moji64hs-v3-combined.yaml
 ```
 
-### 3. Author Phase 3 manifests
+If any are missing, see `## Status` section above.
 
-Copy an X021 manifest as a starting template and patch:
-
-```bash
-cp /workspace/nexus-mk2/experiments/X021-inventory-format/manifests/rig-moj12h4o-v4-combined.yaml \
-   /workspace/nexus-mk2/experiments/X023-implementer-strategy-nudges/manifests/rig-moj12h4o-combined.yaml
-```
-
-Then edit the new manifest to:
-
-- Update `slug` and `title` to X023 values
-- Update `description` to reference X023
-- Update `rolePath` to point at the X023 variant role file:
-  `/workspace/nexus-mk2/experiments/X023-implementer-strategy-nudges/fixtures/roles/artificer-v3-combined.md`
-- Update `briefPath` to point at the X021 brief (reused):
-  `/workspace/nexus-mk2/experiments/X021-inventory-format/briefs/rig-moj12h4o-baseline.md`
-  (note: it's the X021 BASELINE brief — X023 doesn't vary the brief)
-- Keep `verifyCommand` identical to X021's substantive command
-  (filtered build + test of reckoner + clockworks + push)
-- Keep `frameworkVersion`, fixtures, scenario, probes, archive
-  blocks unchanged
-
-Repeat for each manifest in the run plan (baseline, v1, v2, v3
-combined; for each rig).
-
-### 4. Run trials sequentially
+### 3. Run trials sequentially
 
 ```bash
 # Post a trial
@@ -444,7 +457,7 @@ but spider concurrency on the lab host serializes implement
 sessions anyway, and sequential posting prevents one trial's
 failure from contaminating the next.
 
-### 5. Per-trial analysis
+### 4. Per-trial analysis
 
 ```bash
 # Cost / tokens / duration
@@ -468,7 +481,7 @@ python3 /workspace/nexus-mk2/experiments/instruments/read-utilization.py \
 cat artifacts/<run>/trial-<n>/codex-history/commits-manifest.yaml
 ```
 
-### 6. Per-group summary
+### 5. Per-group summary
 
 After n=3 of a variant lands, compute:
 
@@ -481,13 +494,13 @@ After n=3 of a variant lands, compute:
 Append to `artifacts/<date>-<run>/runlog.md` (mirror X021's
 runlog format).
 
-### 7. Hypothesis verdict
+### 6. Hypothesis verdict
 
 Compare against H1 / H2 / H3 thresholds (see Hypothesis section).
 If H1 sustained, proceed to Tier 2 manual diff review. If H1 fails
 clearly, document and conclude. If H1 is borderline, expand n.
 
-### 8. Wrap-up
+### 7. Wrap-up
 
 - Write `artifacts/results.md` mirroring
   `experiments/X021-inventory-format/artifacts/results.md`.
@@ -519,13 +532,35 @@ independent effects.
 - **Pure-read instrument:** `experiments/instruments/read-utilization.py`.
 - **Run-to-run noise floor:** X021 results.md, "Run-to-run variance" section.
 
-## Open questions to resolve before Phase 1
+## Open questions
 
-- **Empirical justification lines in role file?** (See Phase 1.)
-  Keep for the experiment, strip for production? Decide before
-  authoring.
-- **Six-trial minimum vs full 18-trial plan?** Sean's call. Default
-  is six (substantive baseline + combined, n=3 each); expand
-  after the first batch lands.
+- **How many trials to actually run?** MVP is 6 (substantive
+  baseline + v3 combined, n=3 each). Mid-plan adds 6 more (control
+  baseline + v3 combined). Full plan adds another 6 (substantive
+  v1 alone + v2 alone). Sean's call when starting the run; default
+  is MVP and expand if H1 sustains.
 - **Stack with X022 in a follow-on?** Defer until both X022 and
-  X023 have results.
+  X023 have results. The interaction test is a clean follow-on
+  experiment.
+- **What if v1 and v3 both fail to clear noise but Tier 2 review
+  shows the nudge IS being followed?** That would suggest the
+  observed cheap-trajectory in X021 was driven by *something
+  else* (e.g., random model state) rather than the choice of
+  decomposition. In that case, X023 should be concluded with
+  "nudge induces the behavior but the behavior wasn't the cost
+  driver" and the cheap-outlier mechanism remains an open
+  question.
+
+## Status
+
+**Ready to run.** All artifacts in place as of 2026-05-08:
+
+- ✓ Spec finalized
+- ✓ Click `c-mowd893x` open
+- ✓ Role file variants authored (`fixtures/roles/`)
+- ✓ Manifests authored (`manifests/`, six files)
+- ✓ Briefs reused from X021 (no separate authoring)
+
+To kick off, run trials per the **Operational breadcrumb** below.
+Recommended starting point: substantive baseline n=3, then
+substantive v3 combined n=3. Decide expansion based on results.

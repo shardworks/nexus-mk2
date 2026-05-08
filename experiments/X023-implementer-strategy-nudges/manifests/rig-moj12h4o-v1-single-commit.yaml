@@ -1,0 +1,74 @@
+slug: x023-rig-moj12h4o-v1-single-commit
+title: X023 — rig-moj12h4o (substantive) v1 single-commit nudge alone
+codex: nexus
+
+description: |
+  X023 v1 variant on the substantive rig (rig-moj12h4o). Identical
+  to rig-moj12h4o-baseline.yaml in every way EXCEPT the artificer
+  role file: this variant uses fixtures/roles/artificer-v1-single-commit.md,
+  which prepends a "Single Commit" Work Discipline section that
+  strengthens the existing baseline's incidental "single commit"
+  instruction in Finishing Your Work.
+
+  Tests H2 (per-idea separation) for the commit-decomposition nudge
+  in isolation. Run after the baseline + v3 combined cells land at
+  n=3 and only if those show signal worth attributing.
+
+  Pair with rig-moj12h4o-baseline.yaml and the v2/v3 manifests for
+  per-idea separation.
+
+  Note on existing instruction: production artificer.md (and X021's
+  baseline) already says "commit all changes in a single commit"
+  in the Finishing Your Work section. X021 control runs (n=3) showed
+  this instruction was followed 1/3 of the time on multi-piece work.
+  v1 strengthens the framing (upfront discipline, not closing
+  reminder) and tests whether stronger placement improves adherence.
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: b92dc90502dc0e38a92012cbd238c9eae0e65b0d
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: b92dc90502dc0e38a92012cbd238c9eae0e65b0d
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X023-implementer-strategy-nudges/fixtures/roles/artificer-v1-single-commit.md
+      briefPath: /workspace/nexus-mk2/experiments/X021-inventory-format/briefs/rig-moj12h4o-baseline.md
+      model: opus
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set -e
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus build
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus test
+        git push origin HEAD:main
+      verifyTimeoutMs: 600000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

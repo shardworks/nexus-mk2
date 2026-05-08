@@ -1,0 +1,72 @@
+slug: x023-rig-moj12h4o-v2-conciseness
+title: X023 — rig-moj12h4o (substantive) v2 conciseness nudge alone
+codex: nexus
+
+description: |
+  X023 v2 variant on the substantive rig (rig-moj12h4o). Identical
+  to rig-moj12h4o-baseline.yaml in every way EXCEPT the artificer
+  role file: this variant uses fixtures/roles/artificer-v2-conciseness.md,
+  which prepends a "Direct Trajectory" Work Discipline section
+  directing fewer iterations / less speculative refactoring / one
+  test run at the end.
+
+  Tests H2 (per-idea separation) for the conciseness/iteration-discipline
+  nudge in isolation. Run after baseline + v3 combined cells land
+  at n=3 and only if those show signal worth attributing.
+
+  Mechanism evidence: X021 substantive runs (n=6 across all variants)
+  showed output token spread of 92K-118K (28%) on the same brief.
+  Cheap-trajectory runs were lower-iteration, lower-rewrite. v2
+  tests whether prompt nudges can induce that trajectory reliably.
+
+  Pair with rig-moj12h4o-baseline.yaml and the v1/v3 manifests for
+  per-idea separation.
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: b92dc90502dc0e38a92012cbd238c9eae0e65b0d
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: b92dc90502dc0e38a92012cbd238c9eae0e65b0d
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X023-implementer-strategy-nudges/fixtures/roles/artificer-v2-conciseness.md
+      briefPath: /workspace/nexus-mk2/experiments/X021-inventory-format/briefs/rig-moj12h4o-baseline.md
+      model: opus
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set -e
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus build
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus test
+        git push origin HEAD:main
+      verifyTimeoutMs: 600000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

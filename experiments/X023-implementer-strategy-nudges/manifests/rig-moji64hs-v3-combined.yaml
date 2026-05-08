@@ -1,0 +1,65 @@
+slug: x023-rig-moji64hs-v3-combined
+title: X023 — rig-moji64hs (control) v3 combined (single-commit + conciseness)
+codex: nexus
+
+description: |
+  X023 v3 combined-strategy variant on the control rig (rig-moji64hs).
+  Identical to rig-moji64hs-baseline.yaml in every way EXCEPT the
+  artificer role file: this variant uses
+  fixtures/roles/artificer-v3-combined.md.
+
+  Tests H3 — control insensitivity. The control rig is where
+  commit-decomposition variance was observed in X021; the v3 nudge
+  should significantly reduce the 6-commit-sweep tendency. Cost
+  effect on this rig is the cleanest test of "did the nudge actually
+  work on the work-shape it was designed for."
+
+  Per-trial cost expectation: $11-$15.
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: d6e34097f698df66d595f81f928320eafde8276f
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: d6e34097f698df66d595f81f928320eafde8276f
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X023-implementer-strategy-nudges/fixtures/roles/artificer-v3-combined.md
+      briefPath: /workspace/nexus-mk2/experiments/X021-inventory-format/briefs/rig-moji64hs-baseline.md
+      model: opus
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set -e
+        pnpm -w typecheck
+        git push origin HEAD:main
+      verifyTimeoutMs: 600000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

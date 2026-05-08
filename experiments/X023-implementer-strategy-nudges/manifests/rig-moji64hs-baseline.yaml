@@ -1,0 +1,69 @@
+slug: x023-rig-moji64hs-baseline
+title: X023 — rig-moji64hs (control, vision-keeper deletion) baseline
+codex: nexus
+
+description: |
+  X023 baseline trial on the control rig (rig-moji64hs, vision-keeper
+  deletion + Surveyor redefinition / w-moji63xm). Mechanical /
+  deletion-heavy commission. Ships the baseline artificer.md
+  (snapshot of /workspace/vibers/roles/artificer.md as of 2026-05-08).
+  Brief reused from X021.
+
+  Codex pinned to d6e34097f698df66d595f81f928320eafde8276f (matching
+  X021 control trials) — parent of the first sealed commit (721c9ec)
+  for this rig.
+
+  H3 anchor — the control rig is where commit-decomposition variance
+  was actually observed in X021 (1/3 runs chose monolithic, 2/3 chose
+  6-commit sweep, with a 14% cost gap). Re-anchoring at n=3 gives a
+  clean baseline to compare X023 v3 against.
+
+  Per-trial cost expectation: $11-$15.
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: d6e34097f698df66d595f81f928320eafde8276f
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: d6e34097f698df66d595f81f928320eafde8276f
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X023-implementer-strategy-nudges/fixtures/roles/artificer-baseline.md
+      briefPath: /workspace/nexus-mk2/experiments/X021-inventory-format/briefs/rig-moji64hs-baseline.md
+      model: opus
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set -e
+        pnpm -w typecheck
+        git push origin HEAD:main
+      verifyTimeoutMs: 600000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
