@@ -5,9 +5,9 @@ codex: nexus
 description: |
   X022 baseline trial on the substantive rig (rig-moj12h4o, Reckoner
   periodic tick / w-moiy8hkv). Ships the verbatim production
-  artificer.md (copied 2026-05-03 from /workspace/vibers/roles/) into
-  the test guild. Brief is the verbatim planner spec extracted from
-  the production astrolabe.plans book.
+  artificer.md (snapshot 2026-05-03 from /workspace/vibers/roles/) as
+  the implementer's system prompt. Brief is the verbatim planner spec
+  extracted from the production astrolabe.plans book.
 
   Codex pinned to 0e1e81f4a219179fd264625b869e12bd00778365 — the
   parent of the implementer's draft commit 7bed456 for w-moiy8hkv.
@@ -17,17 +17,22 @@ description: |
   Pair with manifests/rig-moj12h4o-combined.yaml (combined-nudges
   variant). Outcome metric: implementer session cost (USD), tokens,
   wallclock duration. Mechanism metrics extracted post-hoc from the
-  transcript jsonl via scripts/extract-tool-use-metrics.py.
+  transcript jsonl.
 
-  Production cost (full rig with planning) was $47. Implement-only
-  is the back-half; X016 phase 2c on the same codebase ran $6.50
-  for a partial handoff. Full implement on this rig estimated
-  $15-30. Wall-clock cap: 90 min.
+  Migrated from xguild trial doctype to claude-direct on 2026-05-08
+  (matches X021's migration). The xguild original used a full
+  test-guild rig with review/revise/seal stages; claude-direct runs
+  a single implementer session against a fresh codex checkout, with
+  no astrolabe / review / revise / seal. Faithful to the production
+  implementer's session shape (executionWrap: production carries the
+  same EXECUTION_EPILOGUE as spider's implement engine), with
+  ~3x lower per-trial cost than xguild on the same workload.
 
-  ANTHROPIC_API_KEY flows through to the test guild's daemon via
-  process.env inheritance.
+  Per-trial cost expectation under claude-direct: $18-$28 on this
+  substantive rig. See ../../X021-inventory-format/artifacts/results.md
+  for measured run-to-run variance on the equivalent X021 baseline.
 
-frameworkVersion: '0.1.301'
+frameworkVersion: '0.1.304'
 
 fixtures:
   - id: codex
@@ -36,65 +41,40 @@ fixtures:
       upstreamRepo: /workspace/nexus
       baseSha: 0e1e81f4a219179fd264625b869e12bd00778365
 
-  - id: test-guild
-    engineId: lab.guild-setup
+  - id: codex-checkout
+    engineId: lab.codex-checkout
     dependsOn: [codex]
     givens:
-      plugins:
-        - { name: '@shardworks/stacks-apparatus', version: '0.1.301' }
-        - { name: '@shardworks/tools-apparatus', version: '0.1.301' }
-        - { name: '@shardworks/codexes-apparatus', version: '0.1.301' }
-        - { name: '@shardworks/clerk-apparatus', version: '0.1.301' }
-        - { name: '@shardworks/fabricator-apparatus', version: '0.1.301' }
-        - { name: '@shardworks/animator-apparatus', version: '0.1.301' }
-        - { name: '@shardworks/loom-apparatus', version: '0.1.301' }
-        - { name: '@shardworks/claude-code-apparatus', version: '0.1.301' }
-        - { name: '@shardworks/spider-apparatus', version: '0.1.301' }
-        - { name: '@shardworks/clockworks-apparatus', version: '0.1.301' }
-      config:
-        loom:
-          roles:
-            artificer:
-              model: opus
-              permissions:
-                - 'clerk:*'
-                - 'tools:*'
-            reviewer:
-              model: opus
-              permissions: []
-        animator:
-          sessionProvider: 'claude-code'
-        spider:
-          variables:
-            role: 'artificer'
-            buildCommand: 'pnpm --filter @shardworks/reckoner-apparatus build && pnpm --filter @shardworks/clockworks-apparatus build'
-            testCommand: 'pnpm --filter @shardworks/reckoner-apparatus test && pnpm --filter @shardworks/clockworks-apparatus test'
-
-      files:
-        - sourcePath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/fixtures/test-guild/roles/artificer-baseline.md
-          guildPath: roles/artificer.md
-
-  - id: daemon
-    engineId: lab.daemon-setup
-    dependsOn: [test-guild]
-    givens: {}
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: 0e1e81f4a219179fd264625b869e12bd00778365
+      codexName: '${yields.fixture-codex-setup.codexName}'
 
 scenario:
-  engineId: lab.commission-post-xguild
+  engineId: spider.graft-rig-template
   givens:
-    briefPath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/briefs/rig-moj12h4o-baseline.md
-    waitForTerminal: true
-    timeoutMs: 5400000   # 90 min cap
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/fixtures/test-guild/roles/artificer-baseline.md
+      briefPath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/briefs/rig-moj12h4o-baseline.md
+      model: opus
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set -e
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus build
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus test
+        git push origin HEAD:main
+      verifyTimeoutMs: 600000
 
 probes:
   - id: context
     engineId: lab.probe-trial-context
     givens: {}
-  - id: stacks
-    engineId: lab.probe-stacks-dump
-    givens: {}
   - id: commits
     engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
     givens: {}
 
 archive:

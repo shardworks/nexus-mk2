@@ -1,0 +1,153 @@
+
+
+diff --git a/docs/architecture/apparatus/lattice.md b/docs/architecture/apparatus/lattice.md
+index f72f93b..d223938 100644
+--- a/docs/architecture/apparatus/lattice.md
++++ b/docs/architecture/apparatus/lattice.md
+@@ -22,10 +22,10 @@ channel (Discord webhook, CLI inbox, future push surfaces) via a Phase 2 CDC
+ watcher on its own book.
+ 
+ The Lattice is designed to outlive this MVP's single consumer (the Reckoner).
+-Future emitters — coinmaster balance alerts, anima completion, vision-keeper —
+-slot into the same substrate by calling `LatticeApi.emit()`; future push
+-surfaces attach as new `latticeChannels` factories. The pulse record is the
+-durable event; delivery is best-effort.
++Future emitters — coinmaster balance alerts, anima completion, tech-debt
++sentinels — slot into the same substrate by calling `LatticeApi.emit()`;
++future push surfaces attach as new `latticeChannels` factories. The pulse
++record is the durable event; delivery is best-effort.
+ 
+ The Lattice does **not** decide *when* to notify. That is the emitter's
+ responsibility. The Lattice also does not decide what "notification" looks
+diff --git a/docs/architecture/apparatus/reckoner.md b/docs/architecture/apparatus/reckoner.md
+index c08b32b..cc1280f 100644
+--- a/docs/architecture/apparatus/reckoner.md
++++ b/docs/architecture/apparatus/reckoner.md
+@@ -100,10 +100,10 @@ export default {
+     requires: ['reckoner'],
+     petitioners: [
+       {
+-        source: 'vision-keeper.snapshot',
++        source: 'tech-debt.detected',
+         description:
+-          'Periodic vision-vs-reality snapshots emitted when ' +
+-          'the keeper observes drift worth surfacing.',
++          'Tech-debt sentinels emitted when accumulating debt ' +
++          'warrants triage.',
+       },
+     ],
+   },
+@@ -125,9 +125,8 @@ suffix (lowercase letters, digits, and hyphens; not starting or
+ ending with a hyphen). Mirrors Lattice trigger-types and Clerk
+ link-kinds (D2). Examples:
+ 
+-- `vision-keeper.snapshot`
+-- `patron-bridge.commission`
+ - `tech-debt.detected`
++- `patron-bridge.commission`
+ 
+ The kebab-case suffix grammar is the same regex Clerk uses for
+ link-kinds: `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+@@ -702,8 +701,8 @@ import { guild } from '@shardworks/nexus-core';
+ const reckoner = guild().apparatus<ReckonerApi>('reckoner');
+ 
+ const writ = await reckoner.petition({
+-  source: 'vision-keeper.snapshot',
+-  title:  'Address vision drift detected at 04:00 UTC',
++  source: 'tech-debt.detected',
++  title:  'Address tech debt detected at 04:00 UTC',
+   body:   '...',
+   codex:  'nexus',
+   parentId: 'w-...',
+@@ -716,7 +715,7 @@ const writ = await reckoner.petition({
+   },
+   complexity: 'bounded',
+   payload: { /* opaque petitioner-defined data */ },
+-  labels:  { 'vision-keeper.io/vision-id': 'nexus' },
++  labels:  { 'tech-debt.io/instance-id': 'sample' },
+ });
+ ```
+ 
+@@ -745,7 +744,7 @@ const reckoner = guild().apparatus<ReckonerApi>('reckoner');
+ // Post the draft writ. It is in its initial phase but not yet
+ // Reckoner-visible (no ext.reckoner).
+ const draft = await clerk.post({
+-  title: 'Address vision drift',
++  title: 'Address tech debt',
+   body:  '...',
+ });
+ 
+@@ -754,7 +753,7 @@ const draft = await clerk.post({
+ await stacks.transaction(async () => {
+   await clerk.link(draft.id, blockerId, 'depends-on');
+   await reckoner.petition(draft.id, {
+-    source:   'vision-keeper.snapshot',
++    source:   'tech-debt.detected',
+     priority: { visionRelation: 'vision-violator' },
+   });
+ });
+diff --git a/docs/architecture/reckonings-book.md b/docs/architecture/reckonings-book.md
+index 5f8f168..05b936a 100644
+--- a/docs/architecture/reckonings-book.md
++++ b/docs/architecture/reckonings-book.md
+@@ -141,7 +141,7 @@ this doc is self-contained:
+ 
+ ```typescript
+ interface ReckonerExt {
+-  source:       string;                  // e.g. 'vision-keeper.snapshot'
++  source:       string;                  // e.g. 'tech-debt.detected'
+   priority:     Priority;                // multi-dimensional; see below
+   complexity?:  ComplexityTier;          // 'mechanical' | 'bounded' | 'exploratory' | 'open-ended'
+   rationale?:   string;                  // free-form justification for the priority claim
+@@ -304,7 +304,7 @@ The three projected fields are the ones that drive hot filter
+ queries:
+ 
+ - "show me everything the Reckoner did with writs from
+-  `vision-keeper.snapshot`" — `source` filter.
++  `tech-debt.detected`" — `source` filter.
+ - "show me every consideration of a `vision-violator` writ since T" —
+   `visionRelation` and `consideredAt` filter.
+ - "show me every consideration of `critical` or `serious` writs in
+@@ -739,7 +739,7 @@ Tracing each entry back to the queries it supports:
+   superseded for ordered timelines by `['writId', 'consideredAt']`.
+ - **`consideredAt`** — the unconditional since-T sweep, used by
+   recent-history surfaces (Oculus pages, the future Sentinel
+-  apparatus's archival selector, vision-keeper's "what changed since
++  apparatus's archival selector, a petitioner's "what changed since
+   my last poll" check).
+ - **`outcome`** — outcome-only filters and counts; standalone for
+   uses that don't need a time bound.
+@@ -855,9 +855,9 @@ Subscribers that want to filter to a specific outcome do so in their
+ relay handler, against `event.entry.outcome`:
+ 
+ ```typescript
+-// Illustrative — vision-keeper's accepted-only relay sketch.
++// Illustrative — a petitioner's accepted-only relay sketch.
+ relay({
+-  name: 'vision-keeper-on-accept',
++  name: 'tech-debt-on-accept',
+   handler: async (event) => {
+     const change = event.payload as ChangeEvent<ReckoningDoc>;
+     if (change.type !== 'create') return;
+diff --git a/docs/future/guild-vocabulary.md b/docs/future/guild-vocabulary.md
+index 3901017..1164b58 100644
+--- a/docs/future/guild-vocabulary.md
++++ b/docs/future/guild-vocabulary.md
+@@ -26,7 +26,7 @@ A narrow observer that watches the guild's work and announces when things go wro
+ 
+ The Sentinel reads the Clerk's books and listens for three specific conditions: a commission that stalls (stuck), a commission that fails, and the moment the guild's work queue drains entirely. When any of these conditions is met, the Sentinel emits a pulse to the Lattice. It does not judge how the news should be delivered; that is the Lattice's work. It does not modify writs, does not reach into rig internals, and does not participate in dispatch — it only observes and announces.
+ 
+-The Sentinel is the first observer to sit atop the Lattice substrate. Others are anticipated — balance alerts, anima completion, vision-keepers — each with its own narrow remit, each speaking through the same substrate.
++The Sentinel is the first observer to sit atop the Lattice substrate. Others are anticipated — balance alerts, anima completion, tech-debt detectors — each with its own narrow remit, each speaking through the same substrate.
+ 
+ See `docs/architecture/apparatus/sentinel.md`.
+ 
+@@ -34,7 +34,7 @@ See `docs/architecture/apparatus/sentinel.md`.
+ 
+ The petitioner-scheduler — the authority that decides which held petitions become live work.
+ 
+-A petitioner is anything that wants the guild to consider doing something — a vision-keeper noticing drift, a patron-bridge surfacing a request, a tech-debt detector flagging accumulating debt. Each petition arrives as a writ in `new` phase carrying a structured priority claim, and lives there until the Reckoner approves it (transitions it to `open`), defers it (leaves it in `new` for re-evaluation), or declines it (transitions it to `cancelled`). Spider does not dispatch from `new`; the Reckoner is the gate.
++A petitioner is anything that wants the guild to consider doing something — a tech-debt detector flagging accumulating debt, a patron-bridge surfacing a request, a quality sentinel noticing drift. Each petition arrives as a writ in `new` phase carrying a structured priority claim, and lives there until the Reckoner approves it (transitions it to `open`), defers it (leaves it in `new` for re-evaluation), or declines it (transitions it to `cancelled`). Spider does not dispatch from `new`; the Reckoner is the gate.
+ 
+ The Reckoner maintains a kit-static registry of recognized petitioner sources, a typed contract for the priority dimensions every petition declares, and the canonical helpers (`petition()`, `withdraw()`) that petitioner authors use. Future commissions add the consideration loop and the Reckonings book.
+ 

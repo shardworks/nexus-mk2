@@ -1,0 +1,423 @@
+
+
+diff --git a/docs/architecture/apparatus/lattice.md b/docs/architecture/apparatus/lattice.md
+index f72f93b..2741fa7 100644
+--- a/docs/architecture/apparatus/lattice.md
++++ b/docs/architecture/apparatus/lattice.md
+@@ -22,10 +22,10 @@ channel (Discord webhook, CLI inbox, future push surfaces) via a Phase 2 CDC
+ watcher on its own book.
+ 
+ The Lattice is designed to outlive this MVP's single consumer (the Reckoner).
+-Future emitters — coinmaster balance alerts, anima completion, vision-keeper —
+-slot into the same substrate by calling `LatticeApi.emit()`; future push
+-surfaces attach as new `latticeChannels` factories. The pulse record is the
+-durable event; delivery is best-effort.
++Future emitters — coinmaster balance alerts, anima completion, tech-debt
++detectors — slot into the same substrate by calling `LatticeApi.emit()`;
++future push surfaces attach as new `latticeChannels` factories. The pulse
++record is the durable event; delivery is best-effort.
+ 
+ The Lattice does **not** decide *when* to notify. That is the emitter's
+ responsibility. The Lattice also does not decide what "notification" looks
+diff --git a/docs/architecture/apparatus/reckoner.md b/docs/architecture/apparatus/reckoner.md
+index c08b32b..f58c6e8 100644
+--- a/docs/architecture/apparatus/reckoner.md
++++ b/docs/architecture/apparatus/reckoner.md
+@@ -100,10 +100,10 @@ export default {
+     requires: ['reckoner'],
+     petitioners: [
+       {
+-        source: 'vision-keeper.snapshot',
++        source: 'tech-debt.detected',
+         description:
+-          'Periodic vision-vs-reality snapshots emitted when ' +
+-          'the keeper observes drift worth surfacing.',
++          'Periodic scans flag accumulating technical debt ' +
++          'the guild should consider addressing.',
+       },
+     ],
+   },
+@@ -125,9 +125,8 @@ suffix (lowercase letters, digits, and hyphens; not starting or
+ ending with a hyphen). Mirrors Lattice trigger-types and Clerk
+ link-kinds (D2). Examples:
+ 
+-- `vision-keeper.snapshot`
+-- `patron-bridge.commission`
+ - `tech-debt.detected`
++- `patron-bridge.commission`
+ 
+ The kebab-case suffix grammar is the same regex Clerk uses for
+ link-kinds: `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+@@ -702,8 +701,8 @@ import { guild } from '@shardworks/nexus-core';
+ const reckoner = guild().apparatus<ReckonerApi>('reckoner');
+ 
+ const writ = await reckoner.petition({
+-  source: 'vision-keeper.snapshot',
+-  title:  'Address vision drift detected at 04:00 UTC',
++  source: 'tech-debt.detected',
++  title:  'Address tech debt detected at 04:00 UTC',
+   body:   '...',
+   codex:  'nexus',
+   parentId: 'w-...',
+@@ -716,7 +715,7 @@ const writ = await reckoner.petition({
+   },
+   complexity: 'bounded',
+   payload: { /* opaque petitioner-defined data */ },
+-  labels:  { 'vision-keeper.io/vision-id': 'nexus' },
++  labels:  { 'tech-debt.io/scan-id': 'nexus' },
+ });
+ ```
+ 
+@@ -745,7 +744,7 @@ const reckoner = guild().apparatus<ReckonerApi>('reckoner');
+ // Post the draft writ. It is in its initial phase but not yet
+ // Reckoner-visible (no ext.reckoner).
+ const draft = await clerk.post({
+-  title: 'Address vision drift',
++  title: 'Address tech debt',
+   body:  '...',
+ });
+ 
+@@ -754,7 +753,7 @@ const draft = await clerk.post({
+ await stacks.transaction(async () => {
+   await clerk.link(draft.id, blockerId, 'depends-on');
+   await reckoner.petition(draft.id, {
+-    source:   'vision-keeper.snapshot',
++    source:   'tech-debt.detected',
+     priority: { visionRelation: 'vision-violator' },
+   });
+ });
+diff --git a/docs/architecture/apparatus/review-loop.md b/docs/architecture/apparatus/review-loop.md
+index b47f5fd..e16b307 100644
+--- a/docs/architecture/apparatus/review-loop.md
++++ b/docs/architecture/apparatus/review-loop.md
+@@ -364,5 +364,4 @@ This commission is itself a spec-writing commission. There's no build command to
+ - Review engine declares `need: 'revision'` on failure
+ - Fabricator resolves revision chain dynamically
+ - Arbitrary retry depth (or patron-configured per-commission)
+-- Review loop data feeds Surveyor codex profiles (this codex has a 60% first-try rate → seed richer review graph by default)
+ 
+diff --git a/docs/architecture/apparatus/scriptorium.md b/docs/architecture/apparatus/scriptorium.md
+index cbd9188..fab134a 100644
+--- a/docs/architecture/apparatus/scriptorium.md
++++ b/docs/architecture/apparatus/scriptorium.md
+@@ -4,7 +4,7 @@ Status: **Draft**
+ 
+ Package: `@shardworks/codexes-apparatus` · Plugin id: `codexes`
+ 
+-> **⚠️ Future work.** Clockworks event emission (see [Future: Clockworks Events](#future-clockworks-events)) and the Surveyor's codex-awareness integration are not yet implemented.
++> **⚠️ Future work.** Clockworks event emission (see [Future: Clockworks Events](#future-clockworks-events)) is not yet implemented.
+ 
+ ---
+ 
+@@ -12,7 +12,7 @@ Package: `@shardworks/codexes-apparatus` · Plugin id: `codexes`
+ 
+ The Scriptorium manages the guild's codexes — the git repositories where the guild's inscriptions accumulate. It owns the registry of known codexes, maintains local bare clones for efficient access, opens and closes draft bindings (worktrees) for concurrent work, and handles the sealing lifecycle that incorporates drafts into the sealed binding.
+ 
+-The Scriptorium does **not** know what a codex contains or what work applies to it (that's the Surveyor's domain). It does **not** orchestrate which anima works in which draft (that's the caller's concern — rig engines or direct invocation). It is pure git infrastructure — repository lifecycle, draft isolation, and branch management.
++The Scriptorium does **not** know what a codex contains or what work applies to it. It does **not** orchestrate which anima works in which draft (that's the caller's concern — rig engines or direct invocation). It is pure git infrastructure — repository lifecycle, draft isolation, and branch management.
+ 
+ ### Vocabulary Mapping
+ 
+@@ -647,7 +647,7 @@ The Scriptorium does **not** automatically reap stale drafts. It provides the `a
+ 
+ ## Future: Clockworks Events
+ 
+-When the Clockworks apparatus exists, the Scriptorium should emit events for downstream consumers (particularly the Surveyor):
++When the Clockworks apparatus exists, the Scriptorium should emit events for downstream consumers:
+ 
+ | Event | Payload | When |
+ |-------|---------|------|
+@@ -668,7 +668,7 @@ Until then, downstream consumers query the Scriptorium API directly.
+ - **`guild().writeConfig()`** — the Scriptorium uses `guild().writeConfig('codexes', ...)` to persist codex registry changes to `guild.json`. This API was added to the `Guild` interface in `@shardworks/nexus-core` and implemented in Arbor. It updates both the in-memory config and the disk file atomically.
+ - **Git operations.** All git operations use `child_process.execFile` (not shell) via a lightweight `git.ts` helper that handles error parsing and provides typed results (`GitResult`, `GitError`).
+ - **Concurrency.** Multiple animas may open/seal drafts concurrently. The bare clone's git operations need appropriate locking — git's own ref locking handles most cases, but the fetch-rebase-seal cycle should be serialized per codex to avoid ref races.
+-- **No downstream coupling.** The Scriptorium has no dependency on the Surveyor, the Spider, or any other consumer of codex state. It is pure infrastructure. Downstream apparatus query or (future) subscribe to the Scriptorium's state independently.
++- **No downstream coupling.** The Scriptorium has no dependency on the Spider or any other consumer of codex state. It is pure infrastructure. Downstream apparatus query or (future) subscribe to the Scriptorium's state independently.
+ 
+ ---
+ 
+@@ -686,7 +686,7 @@ A future iteration should persist `DraftRecord` entries to a Stacks book (`codex
+ 
+ - Durable metadata that survives restarts
+ - Historical draft records (with terminal status: `sealed`, `abandoned`)
+-- CDC-driven downstream reactions (e.g. the Surveyor updating its codex-awareness when a draft is sealed)
++- CDC-driven downstream reactions (apparatus reacting to draft / codex lifecycle events instead of polling the API)
+ 
+ ### Per-Codex Sealing Lock
+ 
+diff --git a/docs/architecture/index.md b/docs/architecture/index.md
+index 840b5ee..3cd4840 100644
+--- a/docs/architecture/index.md
++++ b/docs/architecture/index.md
+@@ -66,7 +66,7 @@ Two additional commands bypass the tool registry: `nsg consult` and `nsg convene
+ 
+ ### The Apparatus
+ 
+-The guild's operational fabric is provided by apparatus — plugins with a start/stop lifecycle that Arbor starts in dependency order. **The Stacks** is the persistence substrate everything else reads from and writes to. **The Scriptorium** manages codexes — bare clones, draft bindings (worktrees), and the seal-and-push lifecycle. **The Clockworks** is the event-driven nervous system: standing orders bind events to relays, and the summon relay dispatches anima sessions in response. **The Surveyor** tracks what work applies to each registered codex. **The Clerk** handles commission intake, converting patron requests into writs and signaling when work is ready to execute. The Fabricator, Spider, Executor, Loom, and Animator then take it from there — covered in the next section.
++The guild's operational fabric is provided by apparatus — plugins with a start/stop lifecycle that Arbor starts in dependency order. **The Stacks** is the persistence substrate everything else reads from and writes to. **The Scriptorium** manages codexes — bare clones, draft bindings (worktrees), and the seal-and-push lifecycle. **The Clockworks** is the event-driven nervous system: standing orders bind events to relays, and the summon relay dispatches anima sessions in response. **The Surveyor** is the cartograph-decomposition apparatus: it surveys cartograph nodes (visions, charges, pieces) and produces the structural decompositions that flesh out the cartograph hierarchy — see [surveying-cascade.md](surveying-cascade.md). **The Clerk** handles commission intake, converting patron requests into writs and signaling when work is ready to execute. The Fabricator, Spider, Executor, Loom, and Animator then take it from there — covered in the next section.
+ 
+ Each of these is a plugin from the default set, not a built-in. The [Standard Guild](#the-standard-guild) section lists them; the sections that follow document each in detail.
+ 
+@@ -283,7 +283,7 @@ Each section introduces one or more apparatus or kits from the default set. Unde
+ | **[Claude Code](apparatus/claude-code.md)** | `claude-code` | Session provider — launches Claude Code CLI processes and parses their structured telemetry |
+ | **[The Parlour](apparatus/parlour.md)** | `parlour` | Conversation orchestration — drives `nsg consult` and `nsg convene` across multiple turns |
+ 
+-The Surveyor and The Executor are described elsewhere in this document as part of the guild's operational fabric, but they are not yet extracted as standalone packages.
++The Surveyor — the cartograph-decomposition apparatus, see [surveying-cascade.md](surveying-cascade.md) — is anticipated as a planned package landing in a separate commission. The Executor is described elsewhere in this document as part of the guild's operational fabric, but it is not yet extracted as a standalone package.
+ 
+ ### Opt-in Apparatus
+ 
+diff --git a/docs/architecture/petitioner-registration.md b/docs/architecture/petitioner-registration.md
+index beb6f67..8711487 100644
+--- a/docs/architecture/petitioner-registration.md
++++ b/docs/architecture/petitioner-registration.md
+@@ -12,9 +12,8 @@ Status: **Draft**
+ > the `enforceRegistration` and `disabledSources` config keys, the
+ > Reckonings evaluation log, and the trust model. The Reckoner's
+ > combination function (how dimensions become scheduling weight),
+-> the Reckonings book schema beyond the evaluation-log shape, the
+-> patron-emit surface (CLI / MCP), and any non-`vision-keeper`
+-> petitioner are explicitly out of scope.
++> the Reckonings book schema beyond the evaluation-log shape, and
++> the patron-emit surface (CLI / MCP) are explicitly out of scope.
+ 
+ > **Design framing.** A petition is not a separate entity from a
+ > writ — it is a writ in `new` phase carrying `ext['reckoner']`.
+@@ -66,13 +65,13 @@ writ requires its consideration.
+ ```typescript
+ await clerk.post({
+   type:     'mandate',
+-  title:    'Address vision drift detected at 04:00 UTC',
++  title:    'Address tech debt detected at 04:00 UTC',
+   body:     '...',
+   codex:    'nexus',
+   parentId: 'w-...',
+   ext: {
+     reckoner: {
+-      source:    'vision-keeper.snapshot',
++      source:    'tech-debt.detected',
+       priority: {
+         visionRelation: 'vision-violator',
+         severity:       'serious',
+@@ -292,7 +291,7 @@ interface ReckonerExt {
+ 
+   /**
+    * Additive non-priority metadata. Multi-instance discrimination
+-   * (e.g. `'vision-keeper.io/vision-id': 'nexus'`),
++   * (e.g. `'tech-debt.io/scan-id': 'nexus'`),
+    * observability hints, diagnostic tags.
+    */
+   labels?: Record<string, string>;
+@@ -522,10 +521,10 @@ export default {
+     requires: ['reckoner'],
+     petitioners: [
+       {
+-        source:      'vision-keeper.snapshot',
+-        description: 'Periodic vision-vs-reality snapshots ' +
+-                     'emitted when the keeper observes drift ' +
+-                     'worth surfacing.',
++        source:      'tech-debt.detected',
++        description: 'Periodic scans flag accumulating ' +
++                     'technical debt the guild should consider ' +
++                     'addressing.',
+       },
+     ],
+   },
+@@ -578,9 +577,8 @@ case suffix (lowercase letters, digits, single-hyphen separators;
+ no leading or trailing hyphen). Matches Lattice trigger-types and
+ Clerk link-kinds. Examples:
+ 
+-- `vision-keeper.snapshot`
+-- `patron-bridge.commission`
+ - `tech-debt.detected`
++- `patron-bridge.commission`
+ 
+ Malformed source ids hard-fail at startup, never at first emit.
+ 
+@@ -755,9 +753,9 @@ intrinsic attributes).
+     "standingOrders": [
+       {
+         "on": "book.clerk.writs.updated",
+-        "run": "vision-keeper-on-decline",
++        "run": "tech-debt-on-decline",
+         "with": {
+-          "filterExtSource": "vision-keeper.snapshot",
++          "filterExtSource": "tech-debt.detected",
+           "filterPhase":     "cancelled"
+         }
+       }
+@@ -773,7 +771,7 @@ know.
+ 
+ (The exact filter shape — `filterExtSource`, etc. — depends on
+ Clockworks's filter capabilities, which are out of scope here.
+-Flagged in §15.)
++Flagged in §13.g.)
+ 
+ ### Channel 2 — polling
+ 
+@@ -785,7 +783,7 @@ const writs  = stacks.book<WritDoc>('clerk', 'writs');
+ const mine   = await writs.list({
+   where: [
+     ['phase', '=', 'new'],
+-    ['ext.reckoner.source', '=', 'vision-keeper.snapshot'],
++    ['ext.reckoner.source', '=', 'tech-debt.detected'],
+   ],
+ });
+ ```
+@@ -822,56 +820,7 @@ without breaking v0 callers.
+ 
+ ---
+ 
+-## 11. Built-in example: vision-keeper
+-
+-The vision-keeper is the canonical worked example. It exercises
+-every contract surface in this doc:
+-
+-- **Declares its source** in its kit:
+-  ```typescript
+-  petitioners: [{
+-    source:      'vision-keeper.snapshot',
+-    description: 'Vision-vs-reality snapshots emitted when the ' +
+-                 'keeper observes drift worth surfacing.',
+-  }]
+-  ```
+-- **Posts held writs** via `reckoner.petition(...)` (Workflow 2)
+-  when it observes drift or proposes elaboration.
+-- **Stamps source** on each petition (`source:
+-  'vision-keeper.snapshot'`).
+-- **Declares dimensions** matching the situation:
+-  `{ visionRelation: 'vision-violator', severity: 'serious',
+-     scope: 'major-area', time: { decay: true, deadline: null },
+-     domain: ['quality'] }`
+-  for drift-detected snapshots.
+-- **Includes complexity claim** when it has a basis (often
+-  `'bounded'` for known-shape drift remediations; omitted for
+-  open-ended elaborations).
+-- **Attaches payload** in `writ.ext['reckoner'].payload` so the
+-  rig that processes the resulting writ has the full snapshot
+-  available without joining to overlay books.
+-- **Uses labels** to discriminate per-vision instances when
+-  multiple visions are tracked:
+-  `labels: { 'vision-keeper.io/vision-id': 'nexus' }`.
+-- **Withdraws superseded petitions** via `reckoner.withdraw(writId,
+-  reason?)` (or `clerk.transition(writId, 'cancelled', ...)`).
+-- **Observes outcomes** through a Channel-1 standing order on
+-  the writs book filtered to its own source.
+-
+-There is **no patron special-case** in this contract. The
+-patron's emit path (CLI surface, MCP tool, `commission-post`
+-interaction) is owned by a separate **patron-bridge** apparatus
+-that registers as a normal petitioner under
+-`patron-bridge.commission` (or whatever the bridge apparatus
+-chooses) and posts writs like any other petitioner. The patron's
+-authority emerges from the dimensions its petitions claim —
+-typically `severity: 'critical'` and concrete domain values that
+-combine into high scheduling weight — not from a privileged
+-source name.
+-
+----
+-
+-## 12. Existing precedents
++## 11. Existing precedents
+ 
+ This contract composes existing framework primitives rather than
+ inventing new ones:
+@@ -905,7 +854,7 @@ amalgam).
+ 
+ ---
+ 
+-## 13. Required Clerk-side schema addition
++## 12. Required Clerk-side schema addition
+ 
+ This contract requires one Clerk schema change:
+ 
+@@ -945,7 +894,7 @@ The `ext` slot:
+ 
+ ---
+ 
+-## 14. Open Questions
++## 13. Open Questions
+ 
+ ### a. Reckonings book schema
+ 
+diff --git a/docs/architecture/reckonings-book.md b/docs/architecture/reckonings-book.md
+index 5f8f168..05b936a 100644
+--- a/docs/architecture/reckonings-book.md
++++ b/docs/architecture/reckonings-book.md
+@@ -141,7 +141,7 @@ this doc is self-contained:
+ 
+ ```typescript
+ interface ReckonerExt {
+-  source:       string;                  // e.g. 'vision-keeper.snapshot'
++  source:       string;                  // e.g. 'tech-debt.detected'
+   priority:     Priority;                // multi-dimensional; see below
+   complexity?:  ComplexityTier;          // 'mechanical' | 'bounded' | 'exploratory' | 'open-ended'
+   rationale?:   string;                  // free-form justification for the priority claim
+@@ -304,7 +304,7 @@ The three projected fields are the ones that drive hot filter
+ queries:
+ 
+ - "show me everything the Reckoner did with writs from
+-  `vision-keeper.snapshot`" — `source` filter.
++  `tech-debt.detected`" — `source` filter.
+ - "show me every consideration of a `vision-violator` writ since T" —
+   `visionRelation` and `consideredAt` filter.
+ - "show me every consideration of `critical` or `serious` writs in
+@@ -739,7 +739,7 @@ Tracing each entry back to the queries it supports:
+   superseded for ordered timelines by `['writId', 'consideredAt']`.
+ - **`consideredAt`** — the unconditional since-T sweep, used by
+   recent-history surfaces (Oculus pages, the future Sentinel
+-  apparatus's archival selector, vision-keeper's "what changed since
++  apparatus's archival selector, a petitioner's "what changed since
+   my last poll" check).
+ - **`outcome`** — outcome-only filters and counts; standalone for
+   uses that don't need a time bound.
+@@ -855,9 +855,9 @@ Subscribers that want to filter to a specific outcome do so in their
+ relay handler, against `event.entry.outcome`:
+ 
+ ```typescript
+-// Illustrative — vision-keeper's accepted-only relay sketch.
++// Illustrative — a petitioner's accepted-only relay sketch.
+ relay({
+-  name: 'vision-keeper-on-accept',
++  name: 'tech-debt-on-accept',
+   handler: async (event) => {
+     const change = event.payload as ChangeEvent<ReckoningDoc>;
+     if (change.type !== 'create') return;
+diff --git a/docs/future/guild-vocabulary.md b/docs/future/guild-vocabulary.md
+index 3901017..1c27c1e 100644
+--- a/docs/future/guild-vocabulary.md
++++ b/docs/future/guild-vocabulary.md
+@@ -26,7 +26,7 @@ A narrow observer that watches the guild's work and announces when things go wro
+ 
+ The Sentinel reads the Clerk's books and listens for three specific conditions: a commission that stalls (stuck), a commission that fails, and the moment the guild's work queue drains entirely. When any of these conditions is met, the Sentinel emits a pulse to the Lattice. It does not judge how the news should be delivered; that is the Lattice's work. It does not modify writs, does not reach into rig internals, and does not participate in dispatch — it only observes and announces.
+ 
+-The Sentinel is the first observer to sit atop the Lattice substrate. Others are anticipated — balance alerts, anima completion, vision-keepers — each with its own narrow remit, each speaking through the same substrate.
++The Sentinel is the first observer to sit atop the Lattice substrate. Others are anticipated — balance alerts, anima completion, tech-debt detectors — each with its own narrow remit, each speaking through the same substrate.
+ 
+ See `docs/architecture/apparatus/sentinel.md`.
+ 
+@@ -34,7 +34,7 @@ See `docs/architecture/apparatus/sentinel.md`.
+ 
+ The petitioner-scheduler — the authority that decides which held petitions become live work.
+ 
+-A petitioner is anything that wants the guild to consider doing something — a vision-keeper noticing drift, a patron-bridge surfacing a request, a tech-debt detector flagging accumulating debt. Each petition arrives as a writ in `new` phase carrying a structured priority claim, and lives there until the Reckoner approves it (transitions it to `open`), defers it (leaves it in `new` for re-evaluation), or declines it (transitions it to `cancelled`). Spider does not dispatch from `new`; the Reckoner is the gate.
++A petitioner is anything that wants the guild to consider doing something — a tech-debt detector flagging accumulating debt, a patron-bridge surfacing a request, a drift sentinel noticing divergence. Each petition arrives as a writ in `new` phase carrying a structured priority claim, and lives there until the Reckoner approves it (transitions it to `open`), defers it (leaves it in `new` for re-evaluation), or declines it (transitions it to `cancelled`). Spider does not dispatch from `new`; the Reckoner is the gate.
+ 
+ The Reckoner maintains a kit-static registry of recognized petitioner sources, a typed contract for the priority dimensions every petition declares, and the canonical helpers (`petition()`, `withdraw()`) that petitioner authors use. Future commissions add the consideration loop and the Reckonings book.
+ 
+diff --git a/docs/guild-metaphor.md b/docs/guild-metaphor.md
+index f40786e..1d18fc4 100644
+--- a/docs/guild-metaphor.md
++++ b/docs/guild-metaphor.md
+@@ -180,9 +180,9 @@ The rig grows as it runs. The Spider is why.
+ 
+ ### The Surveyor
+ 
+-The apparatus that maintains the guild's knowledge of its codexes. When a codex is registered, the Surveyor inspects it — determining what kinds of work are applicable and how each is fulfilled for that specific codex. When a codex changes, the Surveyor updates its records. The guild's ability to seed rigs from commission text depends on the Surveyor's knowledge: without a current survey, the guild cannot reliably turn a patron's words into a working rig.
++The apparatus that surveys nodes on the guild's cartograph — visions, charges, and pieces — and produces structural decompositions: breaking a node down into the smaller nodes that compose it. The activity defines the role; surveyors operate on cartograph nodes, not on any particular input shape. A surveyor registered through a kit is invoked by the surveyor-apparatus substrate when a node needs decomposing, and its output is recorded back onto the cartograph as the next layer of structure.
+ 
+-The Surveyor's records live in the guildhall, not in the codexes themselves — a survey is the guild's understanding of a codex, not part of the codex's own inscriptions.
++See [architecture/surveying-cascade.md](architecture/surveying-cascade.md) for the surveying cascade — how decompositions chain across the cartograph hierarchy.
+ 
+ ### The Guildhall
+ 

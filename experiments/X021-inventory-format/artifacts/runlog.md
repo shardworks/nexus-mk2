@@ -312,8 +312,135 @@ counted as $0.
 
 ## Beyond the sequence (post-trial work)
 
-- [ ] Write `results.md` with H1/H2/H3 verdicts + recommendation.
-- [ ] Conclude or transition click `c-mophvf0d` based on outcome.
+- [x] Write `results.md` with H1/H2/H3 verdicts + recommendation. *(2026-05-08)*
+- [x] Conclude or transition click `c-mophvf0d` based on outcome. *(2026-05-08)*
 - [ ] Update parent landscape click `c-mok4nke6` with measured Category 2 savings.
-- [ ] If H1 sustained: spawn follow-up child click for sage-writer prompt change (Phase 2 / Lever B).
-- [ ] Sweep stale lab-guild dirs at `/workspace/vibers/.nexus/laboratory/guilds/x021-*`.
+- [ ] Sweep stale lab-guild dirs at `/workspace/vibers/.nexus/laboratory/guilds/x021-*` and `/workspace/vibers/.nexus/laboratory/checkouts/x021-*`.
+
+---
+
+## 2026-05-07/08 — claude-direct re-run sequence
+
+After the xguild trials of 2026-05-03 (rows 1 + 5 above), all seven
+manifests were migrated to the **claude-direct** doctype (commit
+`d7d66981`, framework v0.1.304). The xguild numbers are kept above
+as cross-shape reference data; **the data below is the canonical
+result** because claude-direct produces a more faithful baseline
+(no test-guild review-loop contamination).
+
+**Cost expectation revised (mid-sequence, 2026-05-07):** the
+HANDOFF's $0.40–$0.80/trial figure was an extrapolation from
+smoke-trial scale and proved wildly off. Real per-trial cost on
+this workload is **$11–$28** (substantive: ~$22; control: ~$14).
+Total spend across all 14 sequence trials below: **$257.78**.
+
+### Trial sequence — all runs
+
+| group | manifest | runs | trial writs | individual cost (USD) | mean | stdev | range | total Read (mean) |
+|---|---|---|---|---|---|---|---|---|
+| substantive baseline | `rig-moj12h4o-baseline.yaml` | 1 | `w-movtl5kr` | $22.16 | — | — | — | 411 KB |
+| substantive v1 inline-types | `rig-moj12h4o-v1-inline-types.yaml` | 1 | `w-movuxeil` | $27.90 | — | — | — | 445 KB |
+| substantive v3 do-not-read | `rig-moj12h4o-v3-do-not-read.yaml` | 3 | `w-mow7cssa`, `w-mow8oq5x`, `w-mowa4fzj` | $22.56, $23.84, $19.07 | $21.82 | $2.45 (11.2%) | $4.77 | 351 KB |
+| substantive v4 combined | `rig-moj12h4o-v4-combined.yaml` | 3 | `w-movxq3wm`, `w-movyxblt`, `w-mow0bdwn` | $20.79, $20.01, $18.10 | $19.63 | $1.40 (7.1%) | $2.69 | 320 KB |
+| control baseline | `rig-moji64hs-baseline.yaml` | 3 | `w-mow1xkje`, `w-mow2tft9`, `w-mow3n5ly` | $14.51, $14.35, $11.62 | $13.49 | $1.61 (12.0%) | $2.89 | 168 KB |
+| control v4 combined | `rig-moji64hs-v4-combined.yaml` | 3 | `w-mow4muh0`, `w-mow5n71i`, `w-mow6ffq2` | $13.88, $14.20, $14.80 | $14.29 | $0.46 (3.2%) | $0.92 | 190 KB |
+
+All trials reached `state=completed, classification=terminal,
+attrs=[success]`. Verify-command (filtered build+test for
+substantive, workspace-wide typecheck for control) returned
+exit 0 on every run. Per-trial extracts under
+`artifacts/2026-05-07-claude-direct-rerun/`.
+
+### Final hypothesis status
+
+- **H1** (combined v4 cuts substantive cost ≥15% vs baseline) —
+  **NOT SUSTAINED.** Mean reduction **−11.4%** (n=3, range −6.2%
+  to −18.3%). Below the H1 ≥15% gate. The xguild trial 5 number
+  (−26%) was inflated by its contaminated baseline (71% pure-read
+  vs production's 49%); under faithful methodology the real
+  effect is roughly half the xguild figure.
+- **H2** (per-idea additivity, #3 ≥ #4 ≥ #5) — **NOT SUSTAINED.**
+  v3 alone (n=3, mean −1.5%) is statistically indistinguishable
+  from baseline. v1 alone (n=1, +26%) appears to backfire. The
+  v4 effect cannot be additively decomposed from this data; v2
+  (inline templates) was not tested in isolation. Per-idea
+  decomposition is **underpowered at n=3** given a noise floor
+  of ~10% CV.
+- **H3** (control insensitive to v4, ±5%) — **MOSTLY SUSTAINED.**
+  Median delta −1.0%, mean delta +5.9% (just outside the gate,
+  driven by one cheap baseline outlier). Either way, the v4
+  effect on control is materially smaller than on substantive,
+  supporting the directional claim "spec content augmentation
+  works on substantive code, not on doc cleanup."
+
+### Mechanism observations
+
+The v4 intervention reliably reduces total Read content
+(~−22% on substantive, n=3). But the cost effect is roughly
+half what the read reduction would suggest — implementers
+appear to compensate with other work (more Edit calls, more
+output tokens, more iteration) when given less context to load.
+
+**Pure-read SHARE swung wildly across runs** (53.6 / 80.4 / 64.0
+on the three v4 substantive runs) — the metric is corrupted
+when implementers pick `Write` or `MultiEdit` over `Edit`. Use
+**total Read content** (KB) as the load-bearing measurement
+instead. Pure-read share is dropped from this experiment's
+canonical metrics.
+
+### Cheap-outlier mechanism (motivates X023)
+
+Three runs landed **8–14% below their group means** without
+being caused by X021's interventions:
+
+| run | $ | discount | distinguishing behavior |
+|---|---|---|---|
+| Control baseline run 3 | $11.62 | −14% | **1 commit** instead of 6; same end-state |
+| Substantive v4 run 3 | $18.10 | −8% | **lowest output tokens** (92K vs 99K/108K) |
+| Substantive v3 run 3 | $19.07 | −13% | **lowest output tokens** (100K vs 108K/118K) |
+
+Two distinct mechanisms surfaced:
+
+1. **Commit decomposition** — single monolithic commit vs distributed
+   incremental commits. Same code delta, ~14% cost saving.
+2. **Implementation conciseness / iteration discipline** — fewer
+   redundant edits, less verbose code, fewer test-fix cycles.
+   ~8–13% cost saving on the substantive workload.
+
+Neither is in X021's spec-content-augmentation scope. Both are
+worth their own experiment — see **[X023 — Implementer
+Strategy Nudges](../../X023-implementer-strategy-nudges/spec.md)**.
+
+### Methodology insights
+
+1. **xguild contaminates baselines.** Pure-read share inflated
+   from 49% (production) to 71% (xguild) on rig-moj12h4o; under
+   claude-direct it lands at 53.7% (close to production). Half
+   of xguild trial 5's apparent −26% headline was the test-guild's
+   review/revise loops opening files the implementer-by-itself
+   never would have. **Recommend: prefer claude-direct over
+   xguild for any cost-comparison experiment** unless you
+   specifically need the rig-level review/seal stages.
+2. **Noise floor on this workload is ~10% CV.** With n=3,
+   effect sizes <15% can't be confidently distinguished from
+   noise. Effects of ~25% are 2–3× the noise floor and detectable.
+   Plan future cost experiments accordingly: aim for hypothesized
+   effect sizes >20%, or budget n=5–8 minimum.
+3. **n=1 is dangerous on cost work.** Trial 2 (v1, n=1, +26%)
+   looked like a clear "intervention backfires" finding, but
+   v4 (which contains v1) shows −11% — the n=1 v1 result was
+   plausibly within the noise band. v3's mean swung from +1.8%
+   (n=1) to +4.7% (n=2) to −1.5% (n=3). **Don't make decisions
+   on n=1 cost data.**
+4. **Pure-read share is artifact-prone.** Use total Read content
+   for cost-mechanism analysis; pure-read share is sensitive to
+   tool choice (Edit vs Write vs MultiEdit) in ways the
+   read-utilization instrument doesn't fully capture.
+
+## Cumulative spend (final)
+
+| segment | trials | total |
+|---|---|---|
+| 2026-05-03 xguild runs (rows 1, 5) | 2 | ~$134 |
+| 2026-05-07/08 claude-direct re-run | 14 | $257.78 |
+| **Grand total** | **16** | **~$392** |

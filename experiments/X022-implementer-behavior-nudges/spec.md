@@ -8,6 +8,35 @@ status: active
 behavior, prompt-level nudges) of the Apr 29 cost-optimization
 landscape under `c-mok4nke6-06b21ff2a765`.
 
+> **Migration note (2026-05-08):** All four manifests have been
+> migrated from the **xguild** trial doctype to **claude-direct**
+> (matches X021's migration; framework v0.1.304). The xguild
+> references throughout this spec — particularly "Pipeline
+> placement", "Manifest plumbing", and references to
+> `running-xguild-trials.md` — are now historical context. The
+> intervention design (variants, hypotheses, brief content,
+> codex pins) is doctype-agnostic and unchanged.
+>
+> Per-trial cost expectation under claude-direct: **$18-$28**
+> (substantive rig-moj12h4o), **$11-$15** (control rig-moji64hs).
+> 4-trial total: **$60-$85**. The original "$30-$60" estimate
+> (based on the smoke-trial-derived xguild claim of $0.40-$0.80/trial
+> under claude-direct) was an order of magnitude low — see
+> [X021 results](../X021-inventory-format/artifacts/results.md)
+> for the cost-rate measurement.
+>
+> **For the operational runbook**, see X021's
+> [HANDOFF-claude-direct-migration.md](../X021-inventory-format/HANDOFF-claude-direct-migration.md)
+> and X023's [spec.md § Operational breadcrumb](../X023-implementer-strategy-nudges/spec.md#operational-breadcrumb-running-the-trials).
+> Both apply directly: post → wait for terminal → extract → analyze.
+>
+> **For run-to-run variance and hypothesis-power planning**, see
+> X021 results.md § Run-to-run variance — measured. With n=1
+> per cell as currently specced, X022's design is underpowered
+> against effect sizes <20%. **Strongly recommend expanding to
+> n=3 per cell** before running, mirroring X021's noise-control
+> approach.
+
 ## Research question
 
 Does prepending five behavior nudges (Bash bulk edits, targeted

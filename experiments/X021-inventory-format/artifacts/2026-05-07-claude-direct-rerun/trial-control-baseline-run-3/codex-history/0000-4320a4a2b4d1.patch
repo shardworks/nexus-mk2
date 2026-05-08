@@ -1,0 +1,3894 @@
+
+
+diff --git a/docs/architecture/apparatus/lattice.md b/docs/architecture/apparatus/lattice.md
+index f72f93b..2741fa7 100644
+--- a/docs/architecture/apparatus/lattice.md
++++ b/docs/architecture/apparatus/lattice.md
+@@ -22,10 +22,10 @@ channel (Discord webhook, CLI inbox, future push surfaces) via a Phase 2 CDC
+ watcher on its own book.
+ 
+ The Lattice is designed to outlive this MVP's single consumer (the Reckoner).
+-Future emitters — coinmaster balance alerts, anima completion, vision-keeper —
+-slot into the same substrate by calling `LatticeApi.emit()`; future push
+-surfaces attach as new `latticeChannels` factories. The pulse record is the
+-durable event; delivery is best-effort.
++Future emitters — coinmaster balance alerts, anima completion, tech-debt
++detectors — slot into the same substrate by calling `LatticeApi.emit()`;
++future push surfaces attach as new `latticeChannels` factories. The pulse
++record is the durable event; delivery is best-effort.
+ 
+ The Lattice does **not** decide *when* to notify. That is the emitter's
+ responsibility. The Lattice also does not decide what "notification" looks
+diff --git a/docs/architecture/apparatus/reckoner.md b/docs/architecture/apparatus/reckoner.md
+index c08b32b..c7bef3b 100644
+--- a/docs/architecture/apparatus/reckoner.md
++++ b/docs/architecture/apparatus/reckoner.md
+@@ -100,10 +100,10 @@ export default {
+     requires: ['reckoner'],
+     petitioners: [
+       {
+-        source: 'vision-keeper.snapshot',
++        source: 'tech-debt.detected',
+         description:
+-          'Periodic vision-vs-reality snapshots emitted when ' +
+-          'the keeper observes drift worth surfacing.',
++          'Tech-debt observations emitted when accumulated ' +
++          'debt is detected and worth surfacing.',
+       },
+     ],
+   },
+@@ -125,9 +125,9 @@ suffix (lowercase letters, digits, and hyphens; not starting or
+ ending with a hyphen). Mirrors Lattice trigger-types and Clerk
+ link-kinds (D2). Examples:
+ 
+-- `vision-keeper.snapshot`
+-- `patron-bridge.commission`
+ - `tech-debt.detected`
++- `patron-bridge.commission`
++- `oculus.feedback`
+ 
+ The kebab-case suffix grammar is the same regex Clerk uses for
+ link-kinds: `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+@@ -702,8 +702,8 @@ import { guild } from '@shardworks/nexus-core';
+ const reckoner = guild().apparatus<ReckonerApi>('reckoner');
+ 
+ const writ = await reckoner.petition({
+-  source: 'vision-keeper.snapshot',
+-  title:  'Address vision drift detected at 04:00 UTC',
++  source: 'tech-debt.detected',
++  title:  'Address tech-debt detected at 04:00 UTC',
+   body:   '...',
+   codex:  'nexus',
+   parentId: 'w-...',
+@@ -716,7 +716,7 @@ const writ = await reckoner.petition({
+   },
+   complexity: 'bounded',
+   payload: { /* opaque petitioner-defined data */ },
+-  labels:  { 'vision-keeper.io/vision-id': 'nexus' },
++  labels:  { 'tech-debt.io/scope-id': 'nexus' },
+ });
+ ```
+ 
+@@ -745,7 +745,7 @@ const reckoner = guild().apparatus<ReckonerApi>('reckoner');
+ // Post the draft writ. It is in its initial phase but not yet
+ // Reckoner-visible (no ext.reckoner).
+ const draft = await clerk.post({
+-  title: 'Address vision drift',
++  title: 'Address tech-debt detected',
+   body:  '...',
+ });
+ 
+@@ -754,7 +754,7 @@ const draft = await clerk.post({
+ await stacks.transaction(async () => {
+   await clerk.link(draft.id, blockerId, 'depends-on');
+   await reckoner.petition(draft.id, {
+-    source:   'vision-keeper.snapshot',
++    source:   'tech-debt.detected',
+     priority: { visionRelation: 'vision-violator' },
+   });
+ });
+diff --git a/docs/architecture/apparatus/review-loop.md b/docs/architecture/apparatus/review-loop.md
+index b47f5fd..9148473 100644
+--- a/docs/architecture/apparatus/review-loop.md
++++ b/docs/architecture/apparatus/review-loop.md
+@@ -364,5 +364,5 @@ This commission is itself a spec-writing commission. There's no build command to
+ - Review engine declares `need: 'revision'` on failure
+ - Fabricator resolves revision chain dynamically
+ - Arbitrary retry depth (or patron-configured per-commission)
+-- Review loop data feeds Surveyor codex profiles (this codex has a 60% first-try rate → seed richer review graph by default)
++- Review loop data informs default review-graph shape per codex (this codex has a 60% first-try rate → seed a richer review graph by default)
+ 
+diff --git a/docs/architecture/apparatus/scriptorium.md b/docs/architecture/apparatus/scriptorium.md
+index cbd9188..4b54b6c 100644
+--- a/docs/architecture/apparatus/scriptorium.md
++++ b/docs/architecture/apparatus/scriptorium.md
+@@ -4,7 +4,7 @@ Status: **Draft**
+ 
+ Package: `@shardworks/codexes-apparatus` · Plugin id: `codexes`
+ 
+-> **⚠️ Future work.** Clockworks event emission (see [Future: Clockworks Events](#future-clockworks-events)) and the Surveyor's codex-awareness integration are not yet implemented.
++> **⚠️ Future work.** Clockworks event emission (see [Future: Clockworks Events](#future-clockworks-events)) is not yet implemented.
+ 
+ ---
+ 
+@@ -12,7 +12,7 @@ Package: `@shardworks/codexes-apparatus` · Plugin id: `codexes`
+ 
+ The Scriptorium manages the guild's codexes — the git repositories where the guild's inscriptions accumulate. It owns the registry of known codexes, maintains local bare clones for efficient access, opens and closes draft bindings (worktrees) for concurrent work, and handles the sealing lifecycle that incorporates drafts into the sealed binding.
+ 
+-The Scriptorium does **not** know what a codex contains or what work applies to it (that's the Surveyor's domain). It does **not** orchestrate which anima works in which draft (that's the caller's concern — rig engines or direct invocation). It is pure git infrastructure — repository lifecycle, draft isolation, and branch management.
++The Scriptorium does **not** know what a codex contains or how the work it holds decomposes. It does **not** orchestrate which anima works in which draft (that's the caller's concern — rig engines or direct invocation). It is pure git infrastructure — repository lifecycle, draft isolation, and branch management.
+ 
+ ### Vocabulary Mapping
+ 
+@@ -647,7 +647,7 @@ The Scriptorium does **not** automatically reap stale drafts. It provides the `a
+ 
+ ## Future: Clockworks Events
+ 
+-When the Clockworks apparatus exists, the Scriptorium should emit events for downstream consumers (particularly the Surveyor):
++When the Clockworks apparatus exists, the Scriptorium should emit events for downstream consumers:
+ 
+ | Event | Payload | When |
+ |-------|---------|------|
+@@ -668,7 +668,7 @@ Until then, downstream consumers query the Scriptorium API directly.
+ - **`guild().writeConfig()`** — the Scriptorium uses `guild().writeConfig('codexes', ...)` to persist codex registry changes to `guild.json`. This API was added to the `Guild` interface in `@shardworks/nexus-core` and implemented in Arbor. It updates both the in-memory config and the disk file atomically.
+ - **Git operations.** All git operations use `child_process.execFile` (not shell) via a lightweight `git.ts` helper that handles error parsing and provides typed results (`GitResult`, `GitError`).
+ - **Concurrency.** Multiple animas may open/seal drafts concurrently. The bare clone's git operations need appropriate locking — git's own ref locking handles most cases, but the fetch-rebase-seal cycle should be serialized per codex to avoid ref races.
+-- **No downstream coupling.** The Scriptorium has no dependency on the Surveyor, the Spider, or any other consumer of codex state. It is pure infrastructure. Downstream apparatus query or (future) subscribe to the Scriptorium's state independently.
++- **No downstream coupling.** The Scriptorium has no dependency on the Spider or any other consumer of codex state. It is pure infrastructure. Downstream apparatus query or (future) subscribe to the Scriptorium's state independently.
+ 
+ ---
+ 
+@@ -686,7 +686,7 @@ A future iteration should persist `DraftRecord` entries to a Stacks book (`codex
+ 
+ - Durable metadata that survives restarts
+ - Historical draft records (with terminal status: `sealed`, `abandoned`)
+-- CDC-driven downstream reactions (e.g. the Surveyor updating its codex-awareness when a draft is sealed)
++- CDC-driven downstream reactions (downstream apparatus reacting to draft-lifecycle events without polling)
+ 
+ ### Per-Codex Sealing Lock
+ 
+diff --git a/docs/architecture/index.md b/docs/architecture/index.md
+index 840b5ee..fc4d14f 100644
+--- a/docs/architecture/index.md
++++ b/docs/architecture/index.md
+@@ -66,7 +66,7 @@ Two additional commands bypass the tool registry: `nsg consult` and `nsg convene
+ 
+ ### The Apparatus
+ 
+-The guild's operational fabric is provided by apparatus — plugins with a start/stop lifecycle that Arbor starts in dependency order. **The Stacks** is the persistence substrate everything else reads from and writes to. **The Scriptorium** manages codexes — bare clones, draft bindings (worktrees), and the seal-and-push lifecycle. **The Clockworks** is the event-driven nervous system: standing orders bind events to relays, and the summon relay dispatches anima sessions in response. **The Surveyor** tracks what work applies to each registered codex. **The Clerk** handles commission intake, converting patron requests into writs and signaling when work is ready to execute. The Fabricator, Spider, Executor, Loom, and Animator then take it from there — covered in the next section.
++The guild's operational fabric is provided by apparatus — plugins with a start/stop lifecycle that Arbor starts in dependency order. **The Stacks** is the persistence substrate everything else reads from and writes to. **The Scriptorium** manages codexes — bare clones, draft bindings (worktrees), and the seal-and-push lifecycle. **The Clockworks** is the event-driven nervous system: standing orders bind events to relays, and the summon relay dispatches anima sessions in response. **The Surveyor** is the cartograph-decomposition substrate: kits contribute concrete surveyors that decompose visions, charges, and pieces into the finer-grained work they imply, and the apparatus dispatches each survey to the right contributor (see [surveying-cascade.md](surveying-cascade.md)). **The Clerk** handles commission intake, converting patron requests into writs and signaling when work is ready to execute. The Fabricator, Spider, Executor, Loom, and Animator then take it from there — covered in the next section.
+ 
+ Each of these is a plugin from the default set, not a built-in. The [Standard Guild](#the-standard-guild) section lists them; the sections that follow document each in detail.
+ 
+@@ -283,7 +283,7 @@ Each section introduces one or more apparatus or kits from the default set. Unde
+ | **[Claude Code](apparatus/claude-code.md)** | `claude-code` | Session provider — launches Claude Code CLI processes and parses their structured telemetry |
+ | **[The Parlour](apparatus/parlour.md)** | `parlour` | Conversation orchestration — drives `nsg consult` and `nsg convene` across multiple turns |
+ 
+-The Surveyor and The Executor are described elsewhere in this document as part of the guild's operational fabric, but they are not yet extracted as standalone packages.
++The Surveyor is anticipated as a forthcoming `surveyor-apparatus` package (the cartograph-decomposition substrate; see [surveying-cascade.md](surveying-cascade.md)), landing in a separate commission. The Executor is described elsewhere in this document as part of the guild's operational fabric, but it is not yet extracted as a standalone package.
+ 
+ ### Opt-in Apparatus
+ 
+diff --git a/docs/architecture/petitioner-registration.md b/docs/architecture/petitioner-registration.md
+index beb6f67..0bad6fa 100644
+--- a/docs/architecture/petitioner-registration.md
++++ b/docs/architecture/petitioner-registration.md
+@@ -12,9 +12,8 @@ Status: **Draft**
+ > the `enforceRegistration` and `disabledSources` config keys, the
+ > Reckonings evaluation log, and the trust model. The Reckoner's
+ > combination function (how dimensions become scheduling weight),
+-> the Reckonings book schema beyond the evaluation-log shape, the
+-> patron-emit surface (CLI / MCP), and any non-`vision-keeper`
+-> petitioner are explicitly out of scope.
++> the Reckonings book schema beyond the evaluation-log shape, and
++> the patron-emit surface (CLI / MCP) are explicitly out of scope.
+ 
+ > **Design framing.** A petition is not a separate entity from a
+ > writ — it is a writ in `new` phase carrying `ext['reckoner']`.
+@@ -66,13 +65,13 @@ writ requires its consideration.
+ ```typescript
+ await clerk.post({
+   type:     'mandate',
+-  title:    'Address vision drift detected at 04:00 UTC',
++  title:    'Address tech-debt detected at 04:00 UTC',
+   body:     '...',
+   codex:    'nexus',
+   parentId: 'w-...',
+   ext: {
+     reckoner: {
+-      source:    'vision-keeper.snapshot',
++      source:    'tech-debt.detected',
+       priority: {
+         visionRelation: 'vision-violator',
+         severity:       'serious',
+@@ -292,7 +291,7 @@ interface ReckonerExt {
+ 
+   /**
+    * Additive non-priority metadata. Multi-instance discrimination
+-   * (e.g. `'vision-keeper.io/vision-id': 'nexus'`),
++   * (e.g. `'tech-debt.io/scope-id': 'nexus'`),
+    * observability hints, diagnostic tags.
+    */
+   labels?: Record<string, string>;
+@@ -522,10 +521,10 @@ export default {
+     requires: ['reckoner'],
+     petitioners: [
+       {
+-        source:      'vision-keeper.snapshot',
+-        description: 'Periodic vision-vs-reality snapshots ' +
+-                     'emitted when the keeper observes drift ' +
+-                     'worth surfacing.',
++        source:      'tech-debt.detected',
++        description: 'Tech-debt observations emitted when ' +
++                     'accumulated debt is detected and worth ' +
++                     'surfacing.',
+       },
+     ],
+   },
+@@ -578,9 +577,9 @@ case suffix (lowercase letters, digits, single-hyphen separators;
+ no leading or trailing hyphen). Matches Lattice trigger-types and
+ Clerk link-kinds. Examples:
+ 
+-- `vision-keeper.snapshot`
+-- `patron-bridge.commission`
+ - `tech-debt.detected`
++- `patron-bridge.commission`
++- `oculus.feedback`
+ 
+ Malformed source ids hard-fail at startup, never at first emit.
+ 
+@@ -755,9 +754,9 @@ intrinsic attributes).
+     "standingOrders": [
+       {
+         "on": "book.clerk.writs.updated",
+-        "run": "vision-keeper-on-decline",
++        "run": "tech-debt-on-decline",
+         "with": {
+-          "filterExtSource": "vision-keeper.snapshot",
++          "filterExtSource": "tech-debt.detected",
+           "filterPhase":     "cancelled"
+         }
+       }
+@@ -773,7 +772,7 @@ know.
+ 
+ (The exact filter shape — `filterExtSource`, etc. — depends on
+ Clockworks's filter capabilities, which are out of scope here.
+-Flagged in §15.)
++Flagged in §13.)
+ 
+ ### Channel 2 — polling
+ 
+@@ -785,7 +784,7 @@ const writs  = stacks.book<WritDoc>('clerk', 'writs');
+ const mine   = await writs.list({
+   where: [
+     ['phase', '=', 'new'],
+-    ['ext.reckoner.source', '=', 'vision-keeper.snapshot'],
++    ['ext.reckoner.source', '=', 'tech-debt.detected'],
+   ],
+ });
+ ```
+@@ -822,56 +821,7 @@ without breaking v0 callers.
+ 
+ ---
+ 
+-## 11. Built-in example: vision-keeper
+-
+-The vision-keeper is the canonical worked example. It exercises
+-every contract surface in this doc:
+-
+-- **Declares its source** in its kit:
+-  ```typescript
+-  petitioners: [{
+-    source:      'vision-keeper.snapshot',
+-    description: 'Vision-vs-reality snapshots emitted when the ' +
+-                 'keeper observes drift worth surfacing.',
+-  }]
+-  ```
+-- **Posts held writs** via `reckoner.petition(...)` (Workflow 2)
+-  when it observes drift or proposes elaboration.
+-- **Stamps source** on each petition (`source:
+-  'vision-keeper.snapshot'`).
+-- **Declares dimensions** matching the situation:
+-  `{ visionRelation: 'vision-violator', severity: 'serious',
+-     scope: 'major-area', time: { decay: true, deadline: null },
+-     domain: ['quality'] }`
+-  for drift-detected snapshots.
+-- **Includes complexity claim** when it has a basis (often
+-  `'bounded'` for known-shape drift remediations; omitted for
+-  open-ended elaborations).
+-- **Attaches payload** in `writ.ext['reckoner'].payload` so the
+-  rig that processes the resulting writ has the full snapshot
+-  available without joining to overlay books.
+-- **Uses labels** to discriminate per-vision instances when
+-  multiple visions are tracked:
+-  `labels: { 'vision-keeper.io/vision-id': 'nexus' }`.
+-- **Withdraws superseded petitions** via `reckoner.withdraw(writId,
+-  reason?)` (or `clerk.transition(writId, 'cancelled', ...)`).
+-- **Observes outcomes** through a Channel-1 standing order on
+-  the writs book filtered to its own source.
+-
+-There is **no patron special-case** in this contract. The
+-patron's emit path (CLI surface, MCP tool, `commission-post`
+-interaction) is owned by a separate **patron-bridge** apparatus
+-that registers as a normal petitioner under
+-`patron-bridge.commission` (or whatever the bridge apparatus
+-chooses) and posts writs like any other petitioner. The patron's
+-authority emerges from the dimensions its petitions claim —
+-typically `severity: 'critical'` and concrete domain values that
+-combine into high scheduling weight — not from a privileged
+-source name.
+-
+----
+-
+-## 12. Existing precedents
++## 11. Existing precedents
+ 
+ This contract composes existing framework primitives rather than
+ inventing new ones:
+@@ -905,7 +855,7 @@ amalgam).
+ 
+ ---
+ 
+-## 13. Required Clerk-side schema addition
++## 12. Required Clerk-side schema addition
+ 
+ This contract requires one Clerk schema change:
+ 
+@@ -945,7 +895,7 @@ The `ext` slot:
+ 
+ ---
+ 
+-## 14. Open Questions
++## 13. Open Questions
+ 
+ ### a. Reckonings book schema
+ 
+diff --git a/docs/architecture/reckonings-book.md b/docs/architecture/reckonings-book.md
+index 5f8f168..05b936a 100644
+--- a/docs/architecture/reckonings-book.md
++++ b/docs/architecture/reckonings-book.md
+@@ -141,7 +141,7 @@ this doc is self-contained:
+ 
+ ```typescript
+ interface ReckonerExt {
+-  source:       string;                  // e.g. 'vision-keeper.snapshot'
++  source:       string;                  // e.g. 'tech-debt.detected'
+   priority:     Priority;                // multi-dimensional; see below
+   complexity?:  ComplexityTier;          // 'mechanical' | 'bounded' | 'exploratory' | 'open-ended'
+   rationale?:   string;                  // free-form justification for the priority claim
+@@ -304,7 +304,7 @@ The three projected fields are the ones that drive hot filter
+ queries:
+ 
+ - "show me everything the Reckoner did with writs from
+-  `vision-keeper.snapshot`" — `source` filter.
++  `tech-debt.detected`" — `source` filter.
+ - "show me every consideration of a `vision-violator` writ since T" —
+   `visionRelation` and `consideredAt` filter.
+ - "show me every consideration of `critical` or `serious` writs in
+@@ -739,7 +739,7 @@ Tracing each entry back to the queries it supports:
+   superseded for ordered timelines by `['writId', 'consideredAt']`.
+ - **`consideredAt`** — the unconditional since-T sweep, used by
+   recent-history surfaces (Oculus pages, the future Sentinel
+-  apparatus's archival selector, vision-keeper's "what changed since
++  apparatus's archival selector, a petitioner's "what changed since
+   my last poll" check).
+ - **`outcome`** — outcome-only filters and counts; standalone for
+   uses that don't need a time bound.
+@@ -855,9 +855,9 @@ Subscribers that want to filter to a specific outcome do so in their
+ relay handler, against `event.entry.outcome`:
+ 
+ ```typescript
+-// Illustrative — vision-keeper's accepted-only relay sketch.
++// Illustrative — a petitioner's accepted-only relay sketch.
+ relay({
+-  name: 'vision-keeper-on-accept',
++  name: 'tech-debt-on-accept',
+   handler: async (event) => {
+     const change = event.payload as ChangeEvent<ReckoningDoc>;
+     if (change.type !== 'create') return;
+diff --git a/docs/future/guild-vocabulary.md b/docs/future/guild-vocabulary.md
+index 3901017..ef6b765 100644
+--- a/docs/future/guild-vocabulary.md
++++ b/docs/future/guild-vocabulary.md
+@@ -26,7 +26,7 @@ A narrow observer that watches the guild's work and announces when things go wro
+ 
+ The Sentinel reads the Clerk's books and listens for three specific conditions: a commission that stalls (stuck), a commission that fails, and the moment the guild's work queue drains entirely. When any of these conditions is met, the Sentinel emits a pulse to the Lattice. It does not judge how the news should be delivered; that is the Lattice's work. It does not modify writs, does not reach into rig internals, and does not participate in dispatch — it only observes and announces.
+ 
+-The Sentinel is the first observer to sit atop the Lattice substrate. Others are anticipated — balance alerts, anima completion, vision-keepers — each with its own narrow remit, each speaking through the same substrate.
++The Sentinel is the first observer to sit atop the Lattice substrate. Others are anticipated — balance alerts, anima completion, tech-debt detectors — each with its own narrow remit, each speaking through the same substrate.
+ 
+ See `docs/architecture/apparatus/sentinel.md`.
+ 
+@@ -34,7 +34,7 @@ See `docs/architecture/apparatus/sentinel.md`.
+ 
+ The petitioner-scheduler — the authority that decides which held petitions become live work.
+ 
+-A petitioner is anything that wants the guild to consider doing something — a vision-keeper noticing drift, a patron-bridge surfacing a request, a tech-debt detector flagging accumulating debt. Each petition arrives as a writ in `new` phase carrying a structured priority claim, and lives there until the Reckoner approves it (transitions it to `open`), defers it (leaves it in `new` for re-evaluation), or declines it (transitions it to `cancelled`). Spider does not dispatch from `new`; the Reckoner is the gate.
++A petitioner is anything that wants the guild to consider doing something — a tech-debt detector flagging accumulating debt, a patron-bridge surfacing a request, an oculus surface relaying operator feedback. Each petition arrives as a writ in `new` phase carrying a structured priority claim, and lives there until the Reckoner approves it (transitions it to `open`), defers it (leaves it in `new` for re-evaluation), or declines it (transitions it to `cancelled`). Spider does not dispatch from `new`; the Reckoner is the gate.
+ 
+ The Reckoner maintains a kit-static registry of recognized petitioner sources, a typed contract for the priority dimensions every petition declares, and the canonical helpers (`petition()`, `withdraw()`) that petitioner authors use. Future commissions add the consideration loop and the Reckonings book.
+ 
+diff --git a/docs/guild-metaphor.md b/docs/guild-metaphor.md
+index f40786e..64b0983 100644
+--- a/docs/guild-metaphor.md
++++ b/docs/guild-metaphor.md
+@@ -180,9 +180,11 @@ The rig grows as it runs. The Spider is why.
+ 
+ ### The Surveyor
+ 
+-The apparatus that maintains the guild's knowledge of its codexes. When a codex is registered, the Surveyor inspects it — determining what kinds of work are applicable and how each is fulfilled for that specific codex. When a codex changes, the Surveyor updates its records. The guild's ability to seed rigs from commission text depends on the Surveyor's knowledge: without a current survey, the guild cannot reliably turn a patron's words into a working rig.
++The apparatus that surveys cartograph nodes — the visions, charges, and pieces a guild holds open — and produces structural decompositions of them. When a node is presented for survey, the Surveyor reads its current shape, walks the cartograph it lives in, and emits the breakdown of finer-grained work the node implies. The same node may admit different decompositions over its life as the cartograph around it changes; surveying is a craft, not a one-time inscription.
+ 
+-The Surveyor's records live in the guildhall, not in the codexes themselves — a survey is the guild's understanding of a codex, not part of the codex's own inscriptions.
++The Surveyor is not a single fixed policy. It is a substrate: kits contribute concrete surveyors keyed to the node kinds they can decompose, and the apparatus dispatches each survey to the right contributor. The guild grows new decomposition strategies by installing kits, not by patching the apparatus.
++
++See [architecture/surveying-cascade.md](architecture/surveying-cascade.md) for the surveying cascade — how a survey on one node propagates through the cartograph to drive subsequent surveys on the nodes it produces.
+ 
+ ### The Guildhall
+ 
+diff --git a/packages/plugins/reckoner/README.md b/packages/plugins/reckoner/README.md
+index 720662f..798ab78 100644
+--- a/packages/plugins/reckoner/README.md
++++ b/packages/plugins/reckoner/README.md
+@@ -149,8 +149,8 @@ import { guild } from '@shardworks/nexus-core';
+ const reckoner = guild().apparatus<ReckonerApi>('reckoner');
+ 
+ const writ = await reckoner.petition({
+-  source: 'vision-keeper.snapshot',
+-  title: 'Address vision drift detected at 04:00 UTC',
++  source: 'tech-debt.detected',
++  title: 'Address tech-debt detected at 04:00 UTC',
+   body: '...',
+   codex: 'nexus',
+   priority: {
+@@ -189,7 +189,7 @@ const reckoner = guild().apparatus<ReckonerApi>('reckoner');
+ // Post the draft writ first — it is in its initial phase but not yet
+ // Reckoner-visible (no ext.reckoner).
+ const draft = await clerk.post({
+-  title: 'Address vision drift',
++  title: 'Address tech-debt detected',
+   body:  '...',
+ });
+ 
+@@ -200,7 +200,7 @@ const draft = await clerk.post({
+ await stacks.transaction(async () => {
+   await clerk.link(draft.id, blockerId, 'depends-on');
+   await reckoner.petition(draft.id, {
+-    source: 'vision-keeper.snapshot',
++    source: 'tech-debt.detected',
+     priority: { visionRelation: 'vision-violator' },
+   });
+ });
+@@ -223,9 +223,9 @@ export default {
+     requires: ['reckoner'],
+     petitioners: [
+       {
+-        source: 'vision-keeper.snapshot',
++        source: 'tech-debt.detected',
+         description:
+-          'Periodic vision-vs-reality snapshots emitted when the keeper observes drift worth surfacing.',
++          'Tech-debt observations emitted when accumulated debt is detected and worth surfacing.',
+       },
+     ],
+   },
+@@ -309,7 +309,7 @@ than constructor injection.
+ ## Withdrawing a petition
+ 
+ ```typescript
+-await reckoner.withdraw(writId, 'Snapshot superseded by drift detected before this ran.');
++await reckoner.withdraw(writId, 'Petition superseded by remediation already underway.');
+ ```
+ 
+ Equivalent to `clerk.transition(writId, 'cancelled', { resolution: reason })`.
+diff --git a/packages/plugins/reckoner/src/integration.test.ts b/packages/plugins/reckoner/src/integration.test.ts
+index a0af680..4a0a3fd 100644
+--- a/packages/plugins/reckoner/src/integration.test.ts
++++ b/packages/plugins/reckoner/src/integration.test.ts
+@@ -1,8 +1,6 @@
+ /**
+  * Reckoner end-to-end integration test.
+  *
+- * Apparatus-isolated counterpart to the vision-keeper integration
+- * test (`packages/plugins/vision-keeper/src/integration.test.ts`).
+  * Spins up Stacks + Clerk + Reckoner against the in-memory backend
+  * and exercises the public `petition()` helper through the full
+  * lifecycle:
+diff --git a/packages/plugins/reckoner/src/reckoner-tick.test.ts b/packages/plugins/reckoner/src/reckoner-tick.test.ts
+index 10ec257..b22fc46 100644
+--- a/packages/plugins/reckoner/src/reckoner-tick.test.ts
++++ b/packages/plugins/reckoner/src/reckoner-tick.test.ts
+@@ -287,9 +287,9 @@ const REGISTERED_PETITIONER = {
+   value: [{ source: 'tester.kind', description: 'tester' }],
+ };
+ 
+-const VK_PETITIONER = {
+-  pluginId: 'vision-keeper',
+-  value: [{ source: 'vision-keeper.snapshot', description: 'snapshots' }],
++const ALT_PETITIONER = {
++  pluginId: 'tester-alt',
++  value: [{ source: 'tester-alt.kind', description: 'alt-tester' }],
+ };
+ 
+ // ── Tests ────────────────────────────────────────────────────────────
+@@ -301,7 +301,7 @@ describe('Reckoner periodic tick', () => {
+ 
+   describe('empty candidate set', () => {
+     it('writes nothing and throws nothing when no held writs are present', async () => {
+-      const fix = await buildFixture({ petitionerKits: [VK_PETITIONER] });
++      const fix = await buildFixture({ petitionerKits: [ALT_PETITIONER] });
+       // No writs posted yet.
+       await fix.hooks.runTick();
+       const allRows = await fix.reckoningsBook.find({});
+@@ -314,14 +314,14 @@ describe('Reckoner periodic tick', () => {
+   describe('first tick after start', () => {
+     it('processes held writs that pre-date the apparatus start', async () => {
+       const fix = await buildFixture({
+-        petitionerKits: [VK_PETITIONER],
++        petitionerKits: [ALT_PETITIONER],
+         async preStart({ clerk }) {
+           // Seed a held writ before the Reckoner starts. Without a
+           // catch-up scan, the writ remains in `new` until the
+           // first tick fires.
+           const w = await clerk.post({ title: 'pre-start', body: 'b' });
+           await clerk.setWritExt(w.id, 'reckoner', {
+-            source: 'vision-keeper.snapshot',
++            source: 'tester-alt.kind',
+             priority: {
+               visionRelation: 'vision-neutral',
+               severity: 'minor',
+@@ -414,12 +414,12 @@ describe('Reckoner periodic tick', () => {
+   describe('disabled-source mid-flight', () => {
+     it('produces a declined row with declineReason: source_banned and transitions to cancelled', async () => {
+       const fix = await buildFixture({
+-        petitionerKits: [VK_PETITIONER],
++        petitionerKits: [ALT_PETITIONER],
+       });
+ 
+       // Step 1: petition with the source NOT yet in disabledSources.
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester-alt.kind',
+         title: 'mid-flight ban',
+         body: 'b',
+       });
+@@ -430,7 +430,7 @@ describe('Reckoner periodic tick', () => {
+       // decline the writ.
+       fix.fakeGuildConfig.reckoner = {
+         ...fix.fakeGuildConfig.reckoner,
+-        disabledSources: ['vision-keeper.snapshot'],
++        disabledSources: ['tester-alt.kind'],
+       };
+ 
+       await fix.hooks.runTick();
+@@ -439,7 +439,7 @@ describe('Reckoner periodic tick', () => {
+       assert.equal(reread.phase, 'cancelled');
+       assert.match(
+         String(reread.resolution),
+-        /vision-keeper\.snapshot.*disabledSources/,
++        /tester-alt\.kind.*disabledSources/,
+       );
+ 
+       const rows = await fix.reckoningsBook.find({
+@@ -448,7 +448,7 @@ describe('Reckoner periodic tick', () => {
+       assert.equal(rows.length, 1);
+       assert.equal(rows[0]!.outcome, 'declined');
+       assert.equal(rows[0]!.declineReason, 'source_banned');
+-      assert.equal(rows[0]!.remediationHint, 'vision-keeper.snapshot');
++      assert.equal(rows[0]!.remediationHint, 'tester-alt.kind');
+     });
+   });
+ 
+@@ -457,11 +457,11 @@ describe('Reckoner periodic tick', () => {
+   describe('repeated-tick idempotency', () => {
+     it('produces exactly one row across multiple ticks at unchanged updatedAt', async () => {
+       const fix = await buildFixture({
+-        petitionerKits: [VK_PETITIONER],
++        petitionerKits: [ALT_PETITIONER],
+       });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester-alt.kind',
+         title: 'idempotent',
+         body: 'b',
+       });
+@@ -489,10 +489,10 @@ describe('Reckoner periodic tick', () => {
+   describe('target-phase resolution', () => {
+     it('picks `open` for mandate writs', async () => {
+       const fix = await buildFixture({
+-        petitionerKits: [VK_PETITIONER],
++        petitionerKits: [ALT_PETITIONER],
+       });
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester-alt.kind',
+         title: 't',
+         body: 'b',
+       });
+@@ -563,8 +563,8 @@ describe('Reckoner periodic tick', () => {
+   describe('withdrawal mid-flight', () => {
+     it('produces no Reckonings row when the petitioner withdraws before the next tick', async () => {
+       const fix = await buildFixture({
+-        petitionerKits: [VK_PETITIONER],
+-        config: { disabledSources: ['vision-keeper.snapshot'] },
++        petitionerKits: [ALT_PETITIONER],
++        config: { disabledSources: ['tester-alt.kind'] },
+       });
+ 
+       // Disabled source: petition lands in `new`, no row, no
+@@ -572,7 +572,7 @@ describe('Reckoner periodic tick', () => {
+       // out of `new` before the next tick fires. The tick must
+       // observe no candidate (`phase !== 'new'`).
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester-alt.kind',
+         title: 't',
+         body: 'b',
+       });
+@@ -699,10 +699,10 @@ describe('Reckoner periodic tick', () => {
+ 
+   describe('tickEventId stamping', () => {
+     it('stamps tickEventId from the triggering event id when present', async () => {
+-      const fix = await buildFixture({ petitionerKits: [VK_PETITIONER] });
++      const fix = await buildFixture({ petitionerKits: [ALT_PETITIONER] });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester-alt.kind',
+         title: 't',
+         body: 'b',
+       });
+@@ -724,10 +724,10 @@ describe('Reckoner periodic tick', () => {
+     });
+ 
+     it('omits tickEventId when no event is supplied', async () => {
+-      const fix = await buildFixture({ petitionerKits: [VK_PETITIONER] });
++      const fix = await buildFixture({ petitionerKits: [ALT_PETITIONER] });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester-alt.kind',
+         title: 't',
+         body: 'b',
+       });
+diff --git a/packages/plugins/reckoner/src/reckoner.test.ts b/packages/plugins/reckoner/src/reckoner.test.ts
+index 78eb76e..bf919e9 100644
+--- a/packages/plugins/reckoner/src/reckoner.test.ts
++++ b/packages/plugins/reckoner/src/reckoner.test.ts
+@@ -15,7 +15,7 @@
+  *      false` (default): succeeds; warning logged.
+  *   4. `petition({ source: 'unknown' })` with `enforceRegistration:
+  *      true`: throws fail-loud; no writ posted.
+- *   5. `petition({ source: 'vision-keeper.snapshot', priority: {
++ *   5. `petition({ source: 'tester.kind', priority: {
+  *      visionRelation: 'vision-violator' } })`: succeeds; omitted
+  *      priority dimensions fall back to defaults.
+  *   6. Resulting writ: `phase: 'new'` and `writ.ext.reckoner =
+@@ -243,19 +243,19 @@ describe('Reckoner apparatus', () => {
+           buildFixture({
+             petitionerKits: [
+               {
+-                pluginId: 'vision-keeper',
++                pluginId: 'tester',
+                 value: [
+                   {
+-                    source: 'vision-keeper.snapshot',
++                    source: 'tester.kind',
+                     description: 'first kit',
+                   },
+                 ],
+               },
+               {
+-                pluginId: 'vision-keeper',
++                pluginId: 'tester',
+                 value: [
+                   {
+-                    source: 'vision-keeper.snapshot',
++                    source: 'tester.kind',
+                     description: 'second kit',
+                   },
+                 ],
+@@ -264,10 +264,10 @@ describe('Reckoner apparatus', () => {
+           }),
+         (err: Error) => {
+           assert.match(err.message, /duplicate source/i);
+-          assert.match(err.message, /vision-keeper\.snapshot/);
++          assert.match(err.message, /tester\.kind/);
+           // The diagnostic must name the first kit (already-
+           // registered owner) and the second kit (the offender).
+-          assert.match(err.message, /vision-keeper/);
++          assert.match(err.message, /tester/);
+           return true;
+         },
+       );
+@@ -277,7 +277,7 @@ describe('Reckoner apparatus', () => {
+       // Two distinct contributing plugin ids cannot share a source —
+       // the prefix-vs-pluginId check would reject the second one
+       // independently, so we test the same-prefix-different-plugin
+-      // case via two kits both contributing under "vision-keeper"
++      // case via two kits both contributing under "tester"
+       // but verify the diagnostic names both. (This case is covered
+       // by the prior test; this one specifically exercises the
+       // duplicate path with explicit naming of both kits.)
+@@ -286,19 +286,19 @@ describe('Reckoner apparatus', () => {
+         await buildFixture({
+           petitionerKits: [
+             {
+-              pluginId: 'vision-keeper',
++              pluginId: 'tester',
+               value: [
+                 {
+-                  source: 'vision-keeper.snapshot',
++                  source: 'tester.kind',
+                   description: 'A',
+                 },
+               ],
+             },
+             {
+-              pluginId: 'vision-keeper',
++              pluginId: 'tester',
+               value: [
+                 {
+-                  source: 'vision-keeper.snapshot',
++                  source: 'tester.kind',
+                   description: 'B',
+                 },
+               ],
+@@ -323,10 +323,10 @@ describe('Reckoner apparatus', () => {
+           buildFixture({
+             petitionerKits: [
+               {
+-                pluginId: 'vision-keeper',
++                pluginId: 'tester',
+                 value: [
+                   {
+-                    source: 'visionkeepersnapshot',
++                    source: 'testerkind',
+                     description: 'no dot',
+                   },
+                 ],
+@@ -335,7 +335,7 @@ describe('Reckoner apparatus', () => {
+           }),
+         (err: Error) => {
+           assert.match(err.message, /must be of the form/i);
+-          assert.match(err.message, /visionkeepersnapshot/);
++          assert.match(err.message, /testerkind/);
+           return true;
+         },
+       );
+@@ -347,7 +347,7 @@ describe('Reckoner apparatus', () => {
+           buildFixture({
+             petitionerKits: [
+               {
+-                pluginId: 'vision-keeper',
++                pluginId: 'tester',
+                 value: [
+                   {
+                     source: 'other-plugin.snapshot',
+@@ -359,7 +359,7 @@ describe('Reckoner apparatus', () => {
+           }),
+         (err: Error) => {
+           assert.match(err.message, /must match the contributing plugin id/i);
+-          assert.match(err.message, /vision-keeper/);
++          assert.match(err.message, /tester/);
+           assert.match(err.message, /other-plugin/);
+           return true;
+         },
+@@ -372,10 +372,10 @@ describe('Reckoner apparatus', () => {
+           buildFixture({
+             petitionerKits: [
+               {
+-                pluginId: 'vision-keeper',
++                pluginId: 'tester',
+                 value: [
+                   {
+-                    source: 'vision-keeper.Snapshot', // uppercase
++                    source: 'tester.Kind', // uppercase
+                     description: 'bad suffix',
+                   },
+                 ],
+@@ -467,10 +467,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots emitted on drift',
+               },
+             ],
+@@ -479,7 +479,7 @@ describe('Reckoner apparatus', () => {
+       });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 'Address vision drift',
+         body: 'long-form body',
+         codex: 'nexus',
+@@ -488,7 +488,7 @@ describe('Reckoner apparatus', () => {
+         },
+         complexity: 'bounded',
+         payload: { snapshotId: 'snap-1' },
+-        labels: { 'vision-keeper.io/vision-id': 'nexus' },
++        labels: { 'tester.io/test-id': 'nexus' },
+       });
+ 
+       // Behavioral case 6: phase + ext shape.
+@@ -498,10 +498,10 @@ describe('Reckoner apparatus', () => {
+ 
+       const ext = writ.ext?.reckoner as ReckonerExt | undefined;
+       assert.ok(ext, 'writ.ext.reckoner must be populated');
+-      assert.equal(ext!.source, 'vision-keeper.snapshot');
++      assert.equal(ext!.source, 'tester.kind');
+       assert.equal(ext!.complexity, 'bounded');
+       assert.deepEqual(ext!.payload, { snapshotId: 'snap-1' });
+-      assert.deepEqual(ext!.labels, { 'vision-keeper.io/vision-id': 'nexus' });
++      assert.deepEqual(ext!.labels, { 'tester.io/test-id': 'nexus' });
+ 
+       // Behavioral case 5: omitted priority dimensions fall back to
+       // contract defaults from §3 of the contract document.
+@@ -517,10 +517,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -529,7 +529,7 @@ describe('Reckoner apparatus', () => {
+       });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 'mvp',
+         body: 'B',
+       });
+@@ -547,10 +547,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -561,7 +561,7 @@ describe('Reckoner apparatus', () => {
+       await assert.rejects(
+         () =>
+           fix.reckoner.petition({
+-            source: 'vision-keeper.snapshot',
++            source: 'tester.kind',
+             title: 'bad',
+             body: 'B',
+             priority: {
+@@ -595,10 +595,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -615,21 +615,21 @@ describe('Reckoner apparatus', () => {
+       assert.equal(writ.ext, undefined, 'no ext.reckoner before stamp');
+ 
+       const stamped = await fix.reckoner.petition(writ.id, {
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         priority: { visionRelation: 'vision-violator' },
+         complexity: 'bounded',
+         payload: { snapshotId: 'snap-1' },
+-        labels: { 'vision-keeper.io/vision-id': 'nexus' },
++        labels: { 'tester.io/test-id': 'nexus' },
+       });
+ 
+       assert.equal(stamped.id, writ.id, 'returns the same writ');
+       assert.equal(stamped.phase, 'new', 'stamping does not transition');
+       const ext = stamped.ext?.reckoner as ReckonerExt | undefined;
+       assert.ok(ext, 'ext.reckoner populated after stamp');
+-      assert.equal(ext!.source, 'vision-keeper.snapshot');
++      assert.equal(ext!.source, 'tester.kind');
+       assert.equal(ext!.complexity, 'bounded');
+       assert.deepEqual(ext!.payload, { snapshotId: 'snap-1' });
+-      assert.deepEqual(ext!.labels, { 'vision-keeper.io/vision-id': 'nexus' });
++      assert.deepEqual(ext!.labels, { 'tester.io/test-id': 'nexus' });
+       // Default-fill on omitted dimensions, identical to create+stamp form.
+       assert.equal(ext!.priority.visionRelation, 'vision-violator');
+       assert.equal(ext!.priority.severity, 'minor');
+@@ -643,10 +643,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -656,7 +656,7 @@ describe('Reckoner apparatus', () => {
+ 
+       const writ = await fix.clerk.post({ title: 'mvp', body: 'B' });
+       const stamped = await fix.reckoner.petition(writ.id, {
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+       });
+ 
+       const ext = stamped.ext?.reckoner as ReckonerExt | undefined;
+@@ -677,23 +677,23 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+           },
+         ],
+         config: {
+-          disabledSources: ['vision-keeper.snapshot'],
++          disabledSources: ['tester.kind'],
+         },
+       });
+ 
+       try {
+         const existing = await fix.reckoner.petition({
+-          source: 'vision-keeper.snapshot',
++          source: 'tester.kind',
+           title: 'already petitioned',
+           body: 'B',
+         });
+@@ -706,7 +706,7 @@ describe('Reckoner apparatus', () => {
+         await assert.rejects(
+           () =>
+             fix.reckoner.petition(existing.id, {
+-              source: 'vision-keeper.snapshot',
++              source: 'tester.kind',
+               priority: { severity: 'critical' },
+             }),
+           (err: Error) => {
+@@ -731,10 +731,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -753,7 +753,7 @@ describe('Reckoner apparatus', () => {
+       await assert.rejects(
+         () =>
+           fix.reckoner.petition(writ.id, {
+-            source: 'vision-keeper.snapshot',
++            source: 'tester.kind',
+           }),
+         (err: Error) => {
+           assert.match(err.message, /\[reckoner\] petition:/);
+@@ -772,10 +772,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -786,7 +786,7 @@ describe('Reckoner apparatus', () => {
+       await assert.rejects(
+         () =>
+           fix.reckoner.petition('w-does-not-exist', {
+-            source: 'vision-keeper.snapshot',
++            source: 'tester.kind',
+           }),
+         (err: Error) => {
+           assert.match(err.message, /\[reckoner\] petition:/);
+@@ -857,10 +857,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -874,7 +874,7 @@ describe('Reckoner apparatus', () => {
+       await assert.rejects(
+         () =>
+           fix.reckoner.petition(writ.id, {
+-            source: 'vision-keeper.snapshot',
++            source: 'tester.kind',
+             priority: {
+               visionRelation: 'vision-incinerator' as unknown as PetitionExtRequest['priority'] extends
+                 | infer P
+@@ -901,10 +901,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -914,7 +914,7 @@ describe('Reckoner apparatus', () => {
+ 
+       const writ = await fix.clerk.post({ title: 'partial priority', body: 'b' });
+       const stamped = await fix.reckoner.petition(writ.id, {
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         priority: {
+           severity: 'critical',
+           domain: ['security'],
+@@ -945,10 +945,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -1033,7 +1033,7 @@ describe('Reckoner apparatus', () => {
+         // perspective; the framework defers Phase-2 dispatch to
+         // commit.
+         await fix.reckoner.petition(draftId, {
+-          source: 'vision-keeper.snapshot',
++          source: 'tester.kind',
+           priority: { visionRelation: 'vision-violator' },
+         });
+ 
+@@ -1073,7 +1073,7 @@ describe('Reckoner apparatus', () => {
+       const reread = await fix.clerk.show(draftId);
+       const ext = reread.ext?.reckoner as ReckonerExt | undefined;
+       assert.ok(ext, 'ext.reckoner is set after commit');
+-      assert.equal(ext!.source, 'vision-keeper.snapshot');
++      assert.equal(ext!.source, 'tester.kind');
+ 
+       const reckoningsBook = fix.stacks.readBook<{ writId: string; outcome: string; [k: string]: unknown }>(
+         'reckoner',
+@@ -1094,10 +1094,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -1106,7 +1106,7 @@ describe('Reckoner apparatus', () => {
+       });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 'to be withdrawn',
+         body: 'B',
+       });
+@@ -1127,10 +1127,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -1139,7 +1139,7 @@ describe('Reckoner apparatus', () => {
+       });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 'silent withdraw',
+         body: 'B',
+       });
+@@ -1197,10 +1197,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -1211,7 +1211,7 @@ describe('Reckoner apparatus', () => {
+       const list = fix.reckoner.listPetitioners();
+       assert.equal(list.length, 1);
+       assert.deepEqual(list[0], {
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         description: 'snapshots',
+       });
+     });
+@@ -1220,17 +1220,17 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+           },
+         ],
+       });
+-      assert.equal(fix.reckoner.isSourceRegistered('vision-keeper.snapshot'), true);
++      assert.equal(fix.reckoner.isSourceRegistered('tester.kind'), true);
+       assert.equal(fix.reckoner.isSourceRegistered('unknown.source'), false);
+     });
+ 
+@@ -1241,12 +1241,12 @@ describe('Reckoner apparatus', () => {
+       });
+ 
+       assert.equal(fix.reckoner.isSourceDisabled('noisy.source'), true);
+-      assert.equal(fix.reckoner.isSourceDisabled('vision-keeper.snapshot'), false);
++      assert.equal(fix.reckoner.isSourceDisabled('tester.kind'), false);
+ 
+       // Hot-edit guild.json — the change is observed without restart.
+-      fix.fakeGuildConfig.reckoner = { disabledSources: ['vision-keeper.snapshot'] };
++      fix.fakeGuildConfig.reckoner = { disabledSources: ['tester.kind'] };
+       assert.equal(fix.reckoner.isSourceDisabled('noisy.source'), false);
+-      assert.equal(fix.reckoner.isSourceDisabled('vision-keeper.snapshot'), true);
++      assert.equal(fix.reckoner.isSourceDisabled('tester.kind'), true);
+     });
+   });
+ 
+diff --git a/packages/plugins/reckoner/src/tick.ts b/packages/plugins/reckoner/src/tick.ts
+index ba95ef5..ec16b74 100644
+--- a/packages/plugins/reckoner/src/tick.ts
++++ b/packages/plugins/reckoner/src/tick.ts
+@@ -71,8 +71,7 @@
+  *      absent (e.g. test paths driving the handler with `null`).
+  *
+  * Source-file layout follows the established stdlib-relay pattern
+- * (`packages/plugins/clockworks/src/summon-relay.ts`,
+- * `packages/plugins/vision-keeper/src/decline-relay.ts`). The relay
++ * (`packages/plugins/clockworks/src/summon-relay.ts`). The relay
+  * factory and the pure handler-body helper are co-located here so
+  * unit tests can drive the helper without booting Clockworks.
+  *
+diff --git a/packages/plugins/reckoner/src/types.ts b/packages/plugins/reckoner/src/types.ts
+index 870d09e..9c7170c 100644
+--- a/packages/plugins/reckoner/src/types.ts
++++ b/packages/plugins/reckoner/src/types.ts
+@@ -5,8 +5,8 @@
+  * kit-static petitioner registry, exposes the canonical
+  * `petition()` / `withdraw()` helpers (Workflow 2 in the contract
+  * document), and surfaces inspection helpers for downstream
+- * consumers (the periodic tick handler, the vision-keeper kit, the
+- * patron-bridge apparatus).
++ * consumers (the periodic tick handler, the patron-bridge
++ * apparatus, and any kit that emits petitions).
+  *
+  * This file is the single source of public-symbol truth — every
+  * type a downstream import touches lives here, including
+diff --git a/packages/plugins/vision-keeper/README.md b/packages/plugins/vision-keeper/README.md
+deleted file mode 100644
+index 436b20a..0000000
+--- a/packages/plugins/vision-keeper/README.md
++++ /dev/null
+@@ -1,220 +0,0 @@
+-# `@shardworks/vision-keeper-apparatus`
+-
+-The Vision-keeper is the **canonical worked-example petitioner** from
+-the Reckoner contract document
+-(`docs/architecture/petitioner-registration.md` §11). It exists to
+-exercise every contract surface — kit declaration, source stamping,
+-dimension claims, complexity, payload, labels, withdraw, and standing-
+-order feedback — against a real consumer, and to give every future
+-petitioner an in-tree reference implementation to model from.
+-
+-This v0 commission ships the **petitioner side only**:
+-
+-- An apparatus exposing three caller-facing methods —
+-  `submitDriftSnapshot()`, `submitElaborationNudge()`, and
+-  `superseded()` — surfaced under `VisionKeeperApi`.
+-- A typed `VisionSnapshotPayload` shape (the `visionId`,
+-  `snapshotTimestamp`, `visionVsRealityDelta`, `metricValues` fields
+-  the brief enumerates) that the keeper auto-fills before stamping it
+-  onto `ext.reckoner.payload`.
+-- A `petitioners` kit contribution (declaring the
+-  `vision-keeper.snapshot` source) consumed by the Reckoner at
+-  apparatus startup and sealed at `phase:started`.
+-- The auto-supersede invariant: at most one outstanding petition per
+-  `visionId`. Emitting a second snapshot for the same vision while one
+-  is still outstanding withdraws the prior writ before posting the
+-  new one.
+-- A decline-feedback relay (`vision-keeper-on-decline`) operators wire
+-  via a Clockworks standing order — see "Wiring the decline-feedback
+-  relay" below.
+-
+-Out of scope for this commission (separate follow-up work):
+-
+-- The vision-artifact storage, the drift-detection runtime, and the
+-  rig that processes vision-keeper writs.
+-- Multi-vision orchestration (multiple keeper apparatuses, per-vision
+-  factories, vision registries). v0 supports the labels surface for
+-  multi-instance discrimination — see the per-call `visionId` argument.
+-
+-The Reckoner now ships a CDC approval handler (the always-approve
+-v0 stub): a vision-keeper petition lands in `new`, the handler picks
+-it up via the Phase 2 watcher on `clerk/writs`, and the writ
+-transitions to the type's active state (`open` for mandate). The
+-keeper does not need to drive that transition itself.
+-
+-The apparatus declares `requires: ['reckoner']` and
+-`recommends: ['clockworks']`. Without Clockworks the keeper still
+-emits and withdraws petitions cleanly; only the decline-feedback
+-channel needs the standing-order substrate.
+-
+-See: `docs/architecture/petitioner-registration.md` (the load-bearing
+-contract document) and the sibling Reckoner README for the underlying
+-helper API.
+-
+----
+-
+-## Installation
+-
+-```json
+-{
+-  "dependencies": {
+-    "@shardworks/vision-keeper-apparatus": "workspace:*"
+-  }
+-}
+-```
+-
+-Add `vision-keeper` to `guild.json`'s `plugins` array. The Reckoner
+-must already be declared as a plugin (the keeper hard-requires it).
+-
+-```json
+-{
+-  "plugins": ["clerk", "reckoner", "vision-keeper"]
+-}
+-```
+-
+-## Emitting a drift snapshot
+-
+-```typescript
+-import type { VisionKeeperApi } from '@shardworks/vision-keeper-apparatus';
+-import { guild } from '@shardworks/nexus-core';
+-
+-const keeper = guild().apparatus<VisionKeeperApi>('vision-keeper');
+-
+-const writ = await keeper.submitDriftSnapshot({
+-  visionId: 'product-vision-2026',
+-  title: 'API ergonomics drift detected at 04:00 UTC',
+-  body: 'The `/v2/orders` endpoint now requires three round-trips to '
+-      + 'complete what the vision document specifies as a single call.',
+-  visionVsRealityDelta: {
+-    promised: 'one-call order placement',
+-    observed: 'three sequential calls',
+-  },
+-  metricValues: { ordersPerSecond: 12.3, p95LatencyMs: 410 },
+-});
+-// writ is in `phase: 'new'` with:
+-//   ext.reckoner.source     = 'vision-keeper.snapshot'
+-//   ext.reckoner.priority   = drift-default dimensions (see below)
+-//   ext.reckoner.complexity = 'bounded'
+-//   ext.reckoner.payload    = the typed VisionSnapshotPayload
+-//   ext.reckoner.labels     = { 'vision-keeper.io/vision-id': 'product-vision-2026' }
+-```
+-
+-**Drift-default dimensions** (overridable per-call via the request):
+-
+-| Dimension        | Value                                  |
+-| ---------------- | -------------------------------------- |
+-| `visionRelation` | `'vision-violator'`                    |
+-| `severity`       | `'serious'`                            |
+-| `scope`          | `'major-area'`                         |
+-| `time`           | `{ decay: true, deadline: null }`      |
+-| `domain`         | `['quality']`                          |
+-| `complexity`     | `'bounded'`                            |
+-
+-Per-call overrides for `severity`, `scope`, and `complexity` are
+-exposed on the request object — useful for the contract document's
+-"or critical for severe drift" escalation case.
+-
+-## Emitting an elaboration nudge
+-
+-```typescript
+-const writ = await keeper.submitElaborationNudge({
+-  visionId: 'product-vision-2026',
+-  title: 'Enable saved order presets per the vision document',
+-  body: 'The vision document calls for one-click reorders; we have the '
+-      + 'data model but no UI affordance yet.',
+-  visionVsRealityDelta: {
+-    promised: 'one-click reorder from saved presets',
+-    observed: 'no UI affordance; data is available',
+-  },
+-  metricValues: { reorderRate: 0.04 },
+-});
+-```
+-
+-**Elaboration-default dimensions:**
+-
+-| Dimension        | Value                                  |
+-| ---------------- | -------------------------------------- |
+-| `visionRelation` | `'vision-advancer'`                    |
+-| `severity`       | `'moderate'`                           |
+-| `scope`          | `'minor-area'`                         |
+-| `time`           | `{ decay: false, deadline: null }`     |
+-| `domain`         | `['feature']`                          |
+-| `complexity`     | (omitted)                              |
+-
+-Complexity is omitted for elaborations by default. Pass `complexity`
+-on the request object to set one explicitly.
+-
+-## Auto-supersede
+-
+-The keeper holds an in-memory map `Map<visionId, writId>` recording at
+-most one outstanding petition per vision. Emitting a second petition
+-for a `visionId` that already has an outstanding writ withdraws the
+-prior writ first (with a "superseded by newer snapshot" reason) before
+-posting the new one. There is no caller-visible knob for this — it is
+-the keeper's identity (D10).
+-
+-State lives in process memory only; a daemon restart loses it. That is
+-an honest v0 limitation. Callers that need durable supersede semantics
+-across restart should treat each restart as a fresh slate.
+-
+-## Withdrawing the keeper's outstanding petition
+-
+-```typescript
+-const withdrawn = await keeper.superseded(
+-  'product-vision-2026',
+-  'Drift was resolved out-of-band before this petition was considered.',
+-);
+-// withdrawn === null when there was nothing to withdraw (idempotent).
+-```
+-
+-Idempotent — calling `superseded()` for a vision that has no
+-outstanding petition returns `null` rather than throwing.
+-
+-## Wiring the decline-feedback relay
+-
+-When the Reckoner CDC handler declines a vision-keeper petition (or
+-the petitioner-initiated `withdraw()` helper cancels one), the writ
+-transitions into `cancelled` and a `book.clerk.writs.updated` event
+-fires. The Vision-keeper contributes a relay named
+-`vision-keeper-on-decline` that logs a single line per decline;
+-operators wire it through the Clockworks standing-order surface.
+-
+-Add the following entry to `clockworks.standingOrders` in
+-`guild.json`:
+-
+-```json
+-{
+-  "clockworks": {
+-    "standingOrders": [
+-      {
+-        "on": "book.clerk.writs.updated",
+-        "run": "vision-keeper-on-decline"
+-      }
+-    ]
+-  }
+-}
+-```
+-
+-The relay handler narrows the CDC payload itself — only updates that
+-represent a transition into `cancelled` for a writ whose
+-`ext.reckoner.source` equals `vision-keeper.snapshot` produce a log
+-line. Other writ updates flowing past the relay are ignored. The
+-standing order accepts no `with:` parameters (the relay is zero-
+-config); operators only set `on:` and `run:`.
+-
+-## Configuration
+-
+-The Vision-keeper does not augment `guild.json`. There are no tunables
+-in v0 — dimension presets are hardcoded (with per-call overrides on
+-the API), the decline relay is zero-config, and the keeper holds no
+-configuration block.
+-
+-## Caveats
+-
+-- **No persistence of the outstanding-petition map.** The
+-  `Map<visionId, writId>` lives in process memory. A daemon restart
+-  loses the map; downstream Reckoner consideration of any orphaned
+-  outstanding writ continues unaffected, but the keeper itself
+-  treats the post-restart state as "no outstanding petitions known".
+-- **No payload size cap.** The keeper does not enforce a payload size
+-  limit; a separate cross-cutting commission owns that policy.
+diff --git a/packages/plugins/vision-keeper/package.json b/packages/plugins/vision-keeper/package.json
+deleted file mode 100644
+index b3a76d4..0000000
+--- a/packages/plugins/vision-keeper/package.json
++++ /dev/null
+@@ -1,45 +0,0 @@
+-{
+-  "name": "@shardworks/vision-keeper-apparatus",
+-  "version": "0.0.0",
+-  "license": "ISC",
+-  "repository": {
+-    "type": "git",
+-    "url": "https://github.com/shardworks/nexus",
+-    "directory": "packages/plugins/vision-keeper"
+-  },
+-  "description": "The Vision-keeper — canonical worked-example petitioner that emits vision-vs-reality drift snapshots and elaboration nudges through the Reckoner.",
+-  "type": "module",
+-  "exports": {
+-    ".": "./src/index.ts"
+-  },
+-  "scripts": {
+-    "build": "tsc",
+-    "test": "node --disable-warning=ExperimentalWarning --experimental-transform-types --test 'src/**/*.test.ts'",
+-    "typecheck": "tsc --noEmit"
+-  },
+-  "peerDependencies": {
+-    "@shardworks/nexus-core": "0.x"
+-  },
+-  "dependencies": {
+-    "@shardworks/clerk-apparatus": "workspace:*",
+-    "@shardworks/clockworks-apparatus": "workspace:*",
+-    "@shardworks/reckoner-apparatus": "workspace:*"
+-  },
+-  "devDependencies": {
+-    "@shardworks/clockworks-stacks-signals-apparatus": "workspace:*",
+-    "@shardworks/nexus-core": "workspace:*",
+-    "@shardworks/stacks-apparatus": "workspace:*",
+-    "@types/node": "25.5.0"
+-  },
+-  "files": [
+-    "dist"
+-  ],
+-  "publishConfig": {
+-    "exports": {
+-      ".": {
+-        "types": "./dist/index.d.ts",
+-        "import": "./dist/index.js"
+-      }
+-    }
+-  }
+-}
+diff --git a/packages/plugins/vision-keeper/src/constants.ts b/packages/plugins/vision-keeper/src/constants.ts
+deleted file mode 100644
+index 4f3a734..0000000
+--- a/packages/plugins/vision-keeper/src/constants.ts
++++ /dev/null
+@@ -1,38 +0,0 @@
+-/**
+- * Vision-keeper public constants.
+- *
+- * Cross-component contract anchors. Held in a leaf module so neither
+- * the apparatus implementation nor the decline-relay handler need to
+- * import them through the package's `index.ts` (which would create a
+- * circular reference: `index.ts` re-exports the apparatus from
+- * `vision-keeper.ts`, which would in turn import these constants
+- * back through `index.ts`).
+- *
+- * Each constant's value comes verbatim from the petitioner-
+- * registration contract document and the commission brief — see the
+- * decision references on each declaration.
+- */
+-
+-/**
+- * The petitioner source id stamped on `writ.ext.reckoner.source` for
+- * every vision-keeper petition. Cross-component contract anchor —
+- * downstream consumers (the Reckoner CDC handler, the keeper's own
+- * decline-feedback relay) key on this string.
+- */
+-export const VISION_KEEPER_SOURCE = 'vision-keeper.snapshot';
+-
+-/**
+- * The label key the keeper stamps onto every petition's
+- * `ext.reckoner.labels` map to discriminate which vision the snapshot
+- * pertains to. Multi-instance discrimination surface for downstream
+- * consumers that observe more than one vision in flight.
+- */
+-export const VISION_ID_LABEL_KEY = 'vision-keeper.io/vision-id';
+-
+-/**
+- * The registered name of the decline-feedback relay contributed via
+- * the apparatus's `supportKit.relays`. Operators reference this name
+- * in the `run:` field of the standing order they wire under
+- * `clockworks.standingOrders` in `guild.json` (see the README).
+- */
+-export const DECLINE_RELAY_NAME = 'vision-keeper-on-decline';
+diff --git a/packages/plugins/vision-keeper/src/decline-relay.ts b/packages/plugins/vision-keeper/src/decline-relay.ts
+deleted file mode 100644
+index 590d3ed..0000000
+--- a/packages/plugins/vision-keeper/src/decline-relay.ts
++++ /dev/null
+@@ -1,169 +0,0 @@
+-/**
+- * `vision-keeper-on-decline` — decline-feedback relay.
+- *
+- * Wired into the apparatus's `supportKit.relays` so any guild that
+- * installs the Vision-keeper alongside the Clockworks can author a
+- * standing order of the shape:
+- *
+- *   {
+- *     "on": "book.clerk.writs.updated",
+- *     "run": "vision-keeper-on-decline"
+- *   }
+- *
+- * The relay's job in v0 is narrow: log a single line whenever a writ
+- * sourced by `vision-keeper.snapshot` transitions into `cancelled`
+- * (the framework's signal for "petition declined"). It does not
+- * re-emit, it does not hand a callback back to the keeper, and it
+- * does not surface a configuration block — operators do not put a
+- * `with:` parameter block in the standing order (D25).
+- *
+- * The standing-order schema does not currently support a top-level
+- * filter; every event matching `on:` reaches every relay registered
+- * under that name. The handler therefore narrows the payload itself
+- * (D13):
+- *
+- *   1. The CDC change must be an `update` (no creates / deletes —
+- *      only updates can carry a phase transition).
+- *   2. The previous phase must NOT be `cancelled` (already-cancelled
+- *      writs that are merely patched do not represent a transition).
+- *   3. The current phase must be `cancelled`.
+- *   4. The entry's `ext.reckoner.source` must equal the keeper's
+- *      source id.
+- *
+- * When all four hold, the handler emits a single log line carrying the
+- * writId, source, and the entry's `resolution` (the decline reason).
+- * Otherwise the handler returns silently — both for the unrelated-event
+- * case and the re-invocation case (idempotency). The handler holds no
+- * mutable state beyond the call, so re-invoking with the same payload
+- * produces an identical observable side effect (one extra log line)
+- * with no other consequences. The Clockworks dispatch sweep is
+- * not atomic across processes; the relay-handler contract requires
+- * idempotency in the "no extra writes" sense, which this handler
+- * trivially satisfies.
+- *
+- * See: docs/architecture/petitioner-registration.md §9 (Channel-1
+- * standing-order feedback).
+- */
+-
+-import type { GuildEvent, RelayDefinition } from '@shardworks/clockworks-apparatus';
+-import { relay } from '@shardworks/clockworks-apparatus';
+-
+-import { DECLINE_RELAY_NAME, VISION_KEEPER_SOURCE } from './constants.ts';
+-
+-// ── CDC payload shape (read-only, narrowed in-handler) ──────────────
+-
+-/**
+- * Minimal shape of the writ entry the relay reads off the CDC payload.
+- *
+- * Importing `WritDoc` from `@shardworks/clerk-apparatus` would work,
+- * but the relay only consults four fields and depends on a tiny slice
+- * of the writ shape — keeping a local structural type keeps the
+- * handler's dependency surface narrow and immune to upstream additions
+- * to `WritDoc`.
+- */
+-interface WritsCdcEntry {
+-  id: string;
+-  phase: string;
+-  ext?: Record<string, unknown> | undefined;
+-  resolution?: string | undefined;
+-  [key: string]: unknown;
+-}
+-
+-/**
+- * The Stacks CDC `update` change shape, narrowed to the fields the
+- * relay reads. Defined locally for the same reason as `WritsCdcEntry`.
+- */
+-interface WritsCdcUpdateChange {
+-  type: 'create' | 'update' | 'delete';
+-  ownerId: string;
+-  book: string;
+-  entry: WritsCdcEntry;
+-  prev?: WritsCdcEntry | undefined;
+-  [key: string]: unknown;
+-}
+-
+-/** Reckoner-owned `ext.reckoner` slot shape — only `.source` is read. */
+-interface ReckonerExtSlice {
+-  source?: string;
+-}
+-
+-// ── Filter (D13) ────────────────────────────────────────────────────
+-
+-/**
+- * Narrow a CDC event to the precise "vision-keeper petition just
+- * declined" shape the relay reacts to. Returns the matching entry on
+- * success and `null` otherwise.
+- *
+- * Pulled out of the handler so unit tests can drive the predicate
+- * directly with synthetic payloads — the tests for the v0 commission
+- * cover three negative cases (unrelated update, other-source decline,
+- * idempotency re-invocation) plus the matching case.
+- */
+-export function matchVisionKeeperDecline(
+-  event: GuildEvent | null,
+-): WritsCdcEntry | null {
+-  if (!event) return null;
+-  const payload = event.payload;
+-  if (
+-    typeof payload !== 'object' ||
+-    payload === null ||
+-    Array.isArray(payload)
+-  ) {
+-    return null;
+-  }
+-  const change = payload as Partial<WritsCdcUpdateChange>;
+-  if (change.type !== 'update') return null;
+-  const entry = change.entry;
+-  if (!entry || typeof entry !== 'object') return null;
+-  const prev = change.prev;
+-  // Both phase fields must be strings to make the transition assertion
+-  // meaningful. A missing `prev` (legacy or malformed CDC payload) is
+-  // treated as "no transition recorded" and the relay returns silently.
+-  if (typeof entry.phase !== 'string' || entry.phase !== 'cancelled') {
+-    return null;
+-  }
+-  if (!prev || typeof prev !== 'object') return null;
+-  if (typeof prev.phase !== 'string' || prev.phase === 'cancelled') {
+-    return null;
+-  }
+-  // Source-prefix check (D13) — the keeper's source is the contract
+-  // anchor, not the owner-book pair. The standing order is wired on
+-  // `book.clerk.writs.updated`, so any CDC event reaching this handler
+-  // has already been narrowed to writs-book updates.
+-  const ext = entry.ext;
+-  if (!ext || typeof ext !== 'object') return null;
+-  const reckonerSlot = ext.reckoner as ReckonerExtSlice | undefined;
+-  if (!reckonerSlot || reckonerSlot.source !== VISION_KEEPER_SOURCE) {
+-    return null;
+-  }
+-  return entry;
+-}
+-
+-// ── Relay factory ───────────────────────────────────────────────────
+-
+-/**
+- * Build the `vision-keeper-on-decline` `RelayDefinition`. Exported so
+- * the apparatus boot path can wire it into `supportKit.relays`, and
+- * so unit tests can drive the handler directly.
+- */
+-export function createDeclineRelay(): RelayDefinition {
+-  return relay({
+-    name: DECLINE_RELAY_NAME,
+-    description:
+-      'Logs a line whenever a vision-keeper.snapshot writ transitions into cancelled.',
+-    handler: (event, _context) => {
+-      const entry = matchVisionKeeperDecline(event);
+-      if (entry === null) return;
+-      // Log-only: the brief hedges re-emit as "possibly", and the
+-      // post-decline "adjusted context" is undefined in v0 (D14). We
+-      // stick with a single line carrying the writId, source, and the
+-      // declining-side resolution string so an operator can find the
+-      // decline in their guild log without cross-referencing the
+-      // writs book.
+-      const reason = entry.resolution ?? '(no resolution recorded)';
+-      console.log(
+-        `[vision-keeper] decline-feedback: writ ${entry.id} (source=${VISION_KEEPER_SOURCE}) was declined — ${reason}`,
+-      );
+-    },
+-  });
+-}
+diff --git a/packages/plugins/vision-keeper/src/index.ts b/packages/plugins/vision-keeper/src/index.ts
+deleted file mode 100644
+index 48e0303..0000000
+--- a/packages/plugins/vision-keeper/src/index.ts
++++ /dev/null
+@@ -1,45 +0,0 @@
+-/**
+- * @shardworks/vision-keeper-apparatus — The Vision-keeper.
+- *
+- * Canonical worked-example petitioner from
+- * `docs/architecture/petitioner-registration.md` §11. Emits vision-vs-
+- * reality drift snapshots and proactive elaboration nudges through the
+- * Reckoner, holds the outstanding-petition lifecycle in process memory,
+- * and contributes a decline-feedback relay so a declined keeper writ
+- * can route back into operator-visible logging via the Clockworks
+- * standing-order surface.
+- *
+- * v0 ships the petitioner side only. The vision-artifact storage,
+- * the drift-detection rig, and the rig that processes vision-keeper
+- * writs remain owned by separate commissions; the Reckoner CDC
+- * approval handler now lands in the Reckoner package and drives
+- * keeper petitions out of `new` automatically.
+- *
+- * See: packages/plugins/vision-keeper/README.md and
+- * docs/architecture/petitioner-registration.md §§1, 3, 4, 9, 11.
+- */
+-
+-// ── Public types ─────────────────────────────────────────────────────
+-
+-export type {
+-  VisionKeeperApi,
+-  VisionSnapshotPayload,
+-  VisionSnapshotRequest,
+-} from './types.ts';
+-
+-// ── Public constants ─────────────────────────────────────────────────
+-
+-export {
+-  DECLINE_RELAY_NAME,
+-  VISION_ID_LABEL_KEY,
+-  VISION_KEEPER_SOURCE,
+-} from './constants.ts';
+-
+-// ── Factory ──────────────────────────────────────────────────────────
+-
+-export { createVisionKeeper, __internal } from './vision-keeper.ts';
+-
+-// ── Default export: the apparatus plugin ─────────────────────────────
+-
+-import { createVisionKeeper } from './vision-keeper.ts';
+-export default createVisionKeeper();
+diff --git a/packages/plugins/vision-keeper/src/integration.test.ts b/packages/plugins/vision-keeper/src/integration.test.ts
+deleted file mode 100644
+index 079e423..0000000
+--- a/packages/plugins/vision-keeper/src/integration.test.ts
++++ /dev/null
+@@ -1,657 +0,0 @@
+-/**
+- * Vision-keeper end-to-end integration test.
+- *
+- * Boots Stacks + Clerk + Reckoner + Clockworks + Vision-keeper in one
+- * harness — no apparatus is stubbed, no Reckoner is mocked, no relay
+- * is hand-rolled. Asserts every behavioral case from the brief against
+- * a live stack:
+- *
+- *   1. A drift snapshot lands a held writ in `new` carrying the
+- *      contract's `ext.reckoner` slot (registered source, drift
+- *      dimensions, typed payload, vision-id label). The Reckoner's
+- *      periodic tick (the production evaluation entry) is not
+- *      driven from this fixture — these tests assert vision-keeper
+- *      behavior, not tick outcomes; per-tick acceptance is covered
+- *      end-to-end in `packages/plugins/reckoner/src/integration.test.ts`.
+- *   2. A second snapshot for the same vision auto-supersedes the
+- *      first — the prior writ ends in `cancelled`.
+- *   3. `superseded(visionId)` cancels the outstanding writ for a
+- *      different vision, leaving the first vision's writ untouched.
+- *   4. Two visions in flight carry distinct `vision-keeper.io/vision-id`
+- *      label values at the writs-book level.
+- *   5. The decline-feedback relay is invoked end-to-end via the
+- *      Clockworks dispatch sweep when a `vision-keeper.snapshot` writ
+- *      transitions into `cancelled`. The cancellation is driven
+- *      naturally through `reckoner.withdraw()` — the petitioner-
+- *      initiated path that produces a real `clerk.transition` from
+- *      Reckoner code, not a hand-synthesised transition from the
+- *      test harness.
+- *   6. The petitioner kit declaration round-trips through the
+- *      Reckoner registry as in production.
+- *
+- * The fixture mirrors the structural pattern from the Sentinel
+- * integration test (`packages/plugins/sentinel/src/integration.test.ts`)
+- * — book pre-creation, kit-entry surfacing, capture-logger plumbing.
+- */
+-
+-import { describe, it, afterEach } from 'node:test';
+-import assert from 'node:assert/strict';
+-
+-import { setGuild, clearGuild } from '@shardworks/nexus-core';
+-import type {
+-  Guild,
+-  GuildConfig,
+-  KitEntry,
+-  LoadedApparatus,
+-  LoadedKit,
+-  StartupContext,
+-} from '@shardworks/nexus-core';
+-
+-import { createStacksApparatus } from '@shardworks/stacks-apparatus';
+-import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
+-import type { StacksApi } from '@shardworks/stacks-apparatus';
+-
+-import { createClerk } from '@shardworks/clerk-apparatus';
+-import type { ClerkApi, WritDoc } from '@shardworks/clerk-apparatus';
+-
+-import { createReckoner } from '@shardworks/reckoner-apparatus';
+-import type { ReckonerApi, ReckonerExt } from '@shardworks/reckoner-apparatus';
+-
+-import { createClockworks } from '@shardworks/clockworks-apparatus';
+-import type {
+-  ClockworksApi,
+-  RelayDefinition,
+-  StandingOrder,
+-} from '@shardworks/clockworks-apparatus';
+-
+-import { createClockworksStacksSignals } from '@shardworks/clockworks-stacks-signals-apparatus';
+-
+-import {
+-  DECLINE_RELAY_NAME,
+-  VISION_ID_LABEL_KEY,
+-  VISION_KEEPER_SOURCE,
+-  createVisionKeeper,
+-} from './index.ts';
+-import type { VisionKeeperApi, VisionSnapshotPayload } from './types.ts';
+-
+-// ── Fixture ──────────────────────────────────────────────────────────
+-
+-interface Fixture {
+-  stacks: StacksApi;
+-  clerk: ClerkApi;
+-  reckoner: ReckonerApi;
+-  clockworks: ClockworksApi;
+-  keeper: VisionKeeperApi;
+-  /** Captured `console.log` lines from this test scope. */
+-  capturedLogs: string[];
+-  /** Restore captured `console.log`. */
+-  restoreLog: () => void;
+-}
+-
+-function buildCtx(kitEntries: KitEntry[]): StartupContext {
+-  // Track phase:started handlers for a manual seal at the end of boot.
+-  return {
+-    on(event, handler) {
+-      if (event === 'phase:started') {
+-        // The fixture fires phase:started after every apparatus is
+-        // started — see buildGuild() below.
+-        phaseStartedHandlers.push(handler);
+-      }
+-    },
+-    kits(type: string): KitEntry[] {
+-      return kitEntries.filter((e) => e.type === type);
+-    },
+-  };
+-}
+-
+-// Module-scoped so the buildCtx closure can see the same array. Reset
+-// at the start of each `buildGuild()` call.
+-let phaseStartedHandlers: Array<(...args: unknown[]) => void | Promise<void>> = [];
+-
+-async function buildGuild(opts: {
+-  standingOrders?: StandingOrder[];
+-} = {}): Promise<Fixture> {
+-  phaseStartedHandlers = [];
+-
+-  const backend = new MemoryBackend();
+-  const stacksPlugin = createStacksApparatus(backend);
+-  if (!('apparatus' in stacksPlugin)) throw new Error('stacks');
+-
+-  const clerkPlugin = createClerk();
+-  if (!('apparatus' in clerkPlugin)) throw new Error('clerk');
+-
+-  const reckonerPlugin = createReckoner();
+-  if (!('apparatus' in reckonerPlugin)) throw new Error('reckoner');
+-
+-  const clockworksPlugin = createClockworks();
+-  if (!('apparatus' in clockworksPlugin)) throw new Error('clockworks');
+-
+-  const bridgePlugin = createClockworksStacksSignals();
+-  if (!('apparatus' in bridgePlugin)) throw new Error('clockworks-stacks-signals');
+-
+-  const keeperPlugin = createVisionKeeper();
+-  if (!('apparatus' in keeperPlugin)) throw new Error('vision-keeper');
+-
+-  const apparatusMap = new Map<string, unknown>();
+-  const guildConfig: GuildConfig = {
+-    name: 'vision-keeper-integration',
+-    nexus: '0.0.0',
+-    plugins: [],
+-    ...(opts.standingOrders !== undefined
+-      ? {
+-          clockworks: { standingOrders: opts.standingOrders },
+-        }
+-      : {}),
+-  };
+-
+-  const fakeGuild: Guild = {
+-    home: '/tmp/vision-keeper-integration',
+-    apparatus<T>(name: string): T {
+-      const a = apparatusMap.get(name);
+-      if (!a) throw new Error(`Apparatus "${name}" not installed`);
+-      return a as T;
+-    },
+-
+-    tryApparatus<T>(name: string): T | null {
+-      try { return this.apparatus<T>(name); } catch { return null; }
+-    },
+-    config<T>() {
+-      return {} as T;
+-    },
+-    writeConfig(): void {},
+-    guildConfig(): GuildConfig {
+-      return guildConfig;
+-    },
+-    kits(): LoadedKit[] {
+-      return [];
+-    },
+-    apparatuses(): LoadedApparatus[] {
+-      return [];
+-    },
+-    failedPlugins() {
+-      return [];
+-    },
+-    startupWarnings(): string[] {
+-      return [];
+-    },
+-  };
+-
+-  setGuild(fakeGuild);
+-
+-  // Pre-create the books the apparatuses expect (Arbor would do this
+-  // from supportKit declarations in production).
+-  backend.ensureBook(
+-    { ownerId: 'clerk', book: 'writs' },
+-    {
+-      indexes: [
+-        'phase',
+-        'type',
+-        'createdAt',
+-        'parentId',
+-        ['phase', 'type'],
+-        ['phase', 'createdAt'],
+-        ['parentId', 'phase'],
+-      ],
+-    },
+-  );
+-  backend.ensureBook(
+-    { ownerId: 'clerk', book: 'links' },
+-    {
+-      indexes: [
+-        'sourceId',
+-        'targetId',
+-        'label',
+-        ['sourceId', 'label'],
+-        ['targetId', 'label'],
+-      ],
+-    },
+-  );
+-  backend.ensureBook(
+-    { ownerId: 'clockworks', book: 'events' },
+-    { indexes: ['name', 'processed', 'firedAt', ['processed', 'firedAt']] },
+-  );
+-  backend.ensureBook(
+-    { ownerId: 'clockworks', book: 'event_dispatches' },
+-    { indexes: ['eventId', 'status', ['eventId', 'status']] },
+-  );
+-  // Reckoner's reckonings book — populated by the Reckoner's
+-  // periodic tick handler on every consideration. Pre-create here
+-  // so the handler's first write succeeds in fixtures that drive
+-  // the tick.
+-  backend.ensureBook(
+-    { ownerId: 'reckoner', book: 'reckonings' },
+-    {
+-      indexes: [
+-        'writId',
+-        'consideredAt',
+-        'outcome',
+-        'source',
+-        'visionRelation',
+-        'severity',
+-        'declineReason',
+-        ['outcome', 'consideredAt'],
+-        ['visionRelation', 'consideredAt'],
+-        ['severity', 'consideredAt'],
+-        ['writId', 'consideredAt'],
+-      ],
+-    },
+-  );
+-
+-  // ── Stacks ─────────────────────────────────────────────────────────
+-  await stacksPlugin.apparatus.start(buildCtx([]));
+-  const stacks = stacksPlugin.apparatus.provides as StacksApi;
+-  apparatusMap.set('stacks', stacks);
+-
+-  // ── Clerk ──────────────────────────────────────────────────────────
+-  await clerkPlugin.apparatus.start(buildCtx([]));
+-  const clerk = clerkPlugin.apparatus.provides as ClerkApi;
+-  apparatusMap.set('clerk', clerk);
+-
+-  // ── Reckoner ──────────────────────────────────────────────────────
+-  // Surface the keeper's `petitioners` supportKit through the kit-entry
+-  // wire path so the registration runs against the production code.
+-  const keeperSupport = keeperPlugin.apparatus.supportKit as
+-    | { petitioners: Array<{ source: string; description: string }>; relays: RelayDefinition[] }
+-    | undefined;
+-  if (!keeperSupport) throw new Error('vision-keeper supportKit missing');
+-
+-  // Surface the Reckoner's own supportKit.schedulers (the built-in
+-  // always-approve instance) as a kit entry so the registry picks it
+-  // up — Arbor does this in production from each apparatus's
+-  // supportKit.
+-  const reckonerSchedulers = (reckonerPlugin.apparatus.supportKit as
+-    | { schedulers?: unknown[] }
+-    | undefined
+-  )?.schedulers;
+-  const petitionerKitEntries: KitEntry[] = [
+-    {
+-      pluginId: 'vision-keeper',
+-      packageName: '@shardworks/vision-keeper-apparatus',
+-      type: 'petitioners',
+-      value: keeperSupport.petitioners,
+-    },
+-    ...(reckonerSchedulers
+-      ? [
+-          {
+-            pluginId: 'reckoner',
+-            packageName: '@shardworks/reckoner-apparatus',
+-            type: 'schedulers',
+-            value: reckonerSchedulers,
+-          } satisfies KitEntry,
+-        ]
+-      : []),
+-  ];
+-  await reckonerPlugin.apparatus.start(buildCtx(petitionerKitEntries));
+-  const reckoner = reckonerPlugin.apparatus.provides as ReckonerApi;
+-  apparatusMap.set('reckoner', reckoner);
+-
+-  // ── Clockworks ────────────────────────────────────────────────────
+-  // Surface kit contributions that the live Wire phase would surface:
+-  //   - `events` kit from Clockworks itself (own framework-event vocab),
+-  //   - `books` kit from Clerk so the CDC auto-wiring registers the
+-  //     writs book and `book.clerk.writs.updated` fires for transitions,
+-  //   - `books` kit from Clockworks itself so the CDC carve-out for
+-  //     the events book is in place,
+-  //   - `relays` kit from Vision-keeper so the decline relay is
+-  //     registered under the standing-order's `run:` name.
+-  const clockworksEvents = (clockworksPlugin.apparatus.supportKit as
+-    | { events?: unknown }
+-    | undefined)?.events;
+-  const clockworksBooks = (clockworksPlugin.apparatus.supportKit as
+-    | { books?: unknown }
+-    | undefined)?.books;
+-  const clerkBooks = (clerkPlugin.apparatus.supportKit as
+-    | { books?: unknown }
+-    | undefined)?.books;
+-
+-  const clockworksKitEntries: KitEntry[] = [];
+-  if (clockworksEvents !== undefined) {
+-    clockworksKitEntries.push({
+-      pluginId: 'clockworks',
+-      packageName: '@shardworks/clockworks-apparatus',
+-      type: 'events',
+-      value: clockworksEvents,
+-    });
+-  }
+-  if (clockworksBooks !== undefined) {
+-    clockworksKitEntries.push({
+-      pluginId: 'clockworks',
+-      packageName: '@shardworks/clockworks-apparatus',
+-      type: 'books',
+-      value: clockworksBooks,
+-    });
+-  }
+-  if (clerkBooks !== undefined) {
+-    clockworksKitEntries.push({
+-      pluginId: 'clerk',
+-      packageName: '@shardworks/clerk-apparatus',
+-      type: 'books',
+-      value: clerkBooks,
+-    });
+-  }
+-  // Vision-keeper's relay declared via its supportKit.relays.
+-  clockworksKitEntries.push({
+-    pluginId: 'vision-keeper',
+-    packageName: '@shardworks/vision-keeper-apparatus',
+-    type: 'relays',
+-    value: keeperSupport.relays,
+-  });
+-
+-  await clockworksPlugin.apparatus.start(buildCtx(clockworksKitEntries));
+-  const clockworks = clockworksPlugin.apparatus.provides as ClockworksApi;
+-  apparatusMap.set('clockworks', clockworks);
+-
+-  // ── Clockworks↔Stacks bridge ──────────────────────────────────────
+-  // The bridge reads `ctx.kits('books')` and registers a Phase 2 CDC
+-  // watcher on each declared book, re-emitting row mutations as
+-  // `book.<owner>.<book>.<verb>` Clockworks events. Without it, the
+-  // standing order on `book.clerk.writs.updated` never fires. The
+-  // bridge's `requires: ['stacks', 'clockworks']` is satisfied at this
+-  // point. We surface the same books kits Clockworks consumed (clerk,
+-  // clockworks) plus the Reckoner's `reckonings` book so the auto-wired
+-  // `book.reckoner.reckonings.created` channel is observable too.
+-  const reckonerBooks = (reckonerPlugin.apparatus.supportKit as
+-    | { books?: unknown }
+-    | undefined)?.books;
+-  const bridgeKitEntries: KitEntry[] = [];
+-  if (clockworksBooks !== undefined) {
+-    bridgeKitEntries.push({
+-      pluginId: 'clockworks',
+-      packageName: '@shardworks/clockworks-apparatus',
+-      type: 'books',
+-      value: clockworksBooks,
+-    });
+-  }
+-  if (clerkBooks !== undefined) {
+-    bridgeKitEntries.push({
+-      pluginId: 'clerk',
+-      packageName: '@shardworks/clerk-apparatus',
+-      type: 'books',
+-      value: clerkBooks,
+-    });
+-  }
+-  if (reckonerBooks !== undefined) {
+-    bridgeKitEntries.push({
+-      pluginId: 'reckoner',
+-      packageName: '@shardworks/reckoner-apparatus',
+-      type: 'books',
+-      value: reckonerBooks,
+-    });
+-  }
+-  await bridgePlugin.apparatus.start(buildCtx(bridgeKitEntries));
+-
+-  // ── Vision-keeper ─────────────────────────────────────────────────
+-  await keeperPlugin.apparatus.start(buildCtx([]));
+-  const keeper = keeperPlugin.apparatus.provides as VisionKeeperApi;
+-  apparatusMap.set('vision-keeper', keeper);
+-
+-  // Seal — run any registered phase:started handlers. The
+-  // Reckoner's seal handler resolves the active scheduler
+-  // synchronously now; awaiting each is forward-compatibility
+-  // with future async seal handlers.
+-  for (const handler of phaseStartedHandlers) {
+-    await handler();
+-  }
+-
+-  // Capture console.log so the integration test can assert on the
+-  // decline-relay's log line. Restored in the per-test teardown.
+-  const capturedLogs: string[] = [];
+-  const originalLog = console.log;
+-  console.log = (msg: unknown) => {
+-    capturedLogs.push(String(msg));
+-  };
+-
+-  return {
+-    stacks,
+-    clerk,
+-    reckoner,
+-    clockworks,
+-    keeper,
+-    capturedLogs,
+-    restoreLog: () => {
+-      console.log = originalLog;
+-    },
+-  };
+-}
+-
+-async function teardown(fix: Fixture): Promise<void> {
+-  fix.restoreLog();
+-  clearGuild();
+-}
+-
+-// ── Tests ────────────────────────────────────────────────────────────
+-
+-describe('Vision-keeper — end-to-end', () => {
+-  afterEach(() => clearGuild());
+-
+-  it('drift snapshot lands a writ visible in the writs book with the contract ext slot', async () => {
+-    const fix = await buildGuild();
+-    try {
+-      const writ = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'vision-1',
+-        title: 'drift detected',
+-        body: 'b',
+-        visionVsRealityDelta: { gap: 'observed' },
+-        metricValues: { metricA: 1 },
+-      });
+-
+-      // Re-read through Clerk to confirm the row is persisted.
+-      // The Reckoner now drives evaluation through a periodic tick
+-      // (`@every 60s`) rather than CDC, and this fixture does not
+-      // fire a tick — the writ remains in `new` carrying the
+-      // contract ext slot. The vision-keeper integration's load-
+-      // bearing assertions are about the writ shape, not the
+-      // tick outcome.
+-      const reread = await fix.clerk.show(writ.id);
+-      assert.equal(reread.phase, 'new');
+-      const ext = reread.ext?.reckoner as ReckonerExt | undefined;
+-      assert.ok(ext);
+-      assert.equal(ext!.source, VISION_KEEPER_SOURCE);
+-      assert.equal(ext!.priority.visionRelation, 'vision-violator');
+-      assert.equal(ext!.complexity, 'bounded');
+-      const payload = ext!.payload as VisionSnapshotPayload;
+-      assert.equal(payload.visionId, 'vision-1');
+-      assert.deepEqual(payload.metricValues, { metricA: 1 });
+-      assert.equal(ext!.labels?.[VISION_ID_LABEL_KEY], 'vision-1');
+-
+-      // The kit declaration round-trips through the Reckoner registry.
+-      const list = fix.reckoner.listPetitioners();
+-      assert.ok(list.some((p) => p.source === VISION_KEEPER_SOURCE));
+-    } finally {
+-      await teardown(fix);
+-    }
+-  });
+-
+-  it('emitting a competing snapshot for the same vision auto-supersedes the prior writ end-to-end', async () => {
+-    const fix = await buildGuild();
+-    try {
+-      const first = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'vision-1',
+-        title: 'first',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-      const second = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'vision-1',
+-        title: 'second',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-
+-      const firstReread = await fix.clerk.show(first.id);
+-      assert.equal(firstReread.phase, 'cancelled');
+-      assert.match(
+-        String(firstReread.resolution),
+-        /superseded by newer snapshot/i,
+-      );
+-
+-      // The new petition lands in `new` and waits for the next
+-      // periodic tick — no tick fires in this fixture, so the
+-      // writ stays in `new`. The auto-supersede behavior under
+-      // test is on the prior writ, not the new one.
+-      const secondReread = await fix.clerk.show(second.id);
+-      assert.equal(secondReread.phase, 'new');
+-    } finally {
+-      await teardown(fix);
+-    }
+-  });
+-
+-  it('explicit superseded() withdraws one vision\'s outstanding petition without touching the other', async () => {
+-    const fix = await buildGuild();
+-    try {
+-      const a = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'vision-a',
+-        title: 'a',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-      const b = await fix.keeper.submitElaborationNudge({
+-        visionId: 'vision-b',
+-        title: 'b',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-
+-      // Withdraw vision-b's outstanding petition explicitly.
+-      const withdrawn = await fix.keeper.superseded(
+-        'vision-b',
+-        'context shifted; nudge no longer relevant',
+-      );
+-      assert.ok(withdrawn);
+-      assert.equal(withdrawn!.id, b.id);
+-      const bReread = await fix.clerk.show(b.id);
+-      assert.equal(bReread.phase, 'cancelled');
+-      assert.equal(
+-        bReread.resolution,
+-        'context shifted; nudge no longer relevant',
+-      );
+-
+-      // Vision-a's petition is untouched by the explicit supersede
+-      // — no tick has fired in this fixture, so it remains in
+-      // `new`.
+-      const aReread = await fix.clerk.show(a.id);
+-      assert.equal(aReread.phase, 'new');
+-    } finally {
+-      await teardown(fix);
+-    }
+-  });
+-
+-  it('two visions in flight carry distinct vision-id label values at the writs-book level', async () => {
+-    const fix = await buildGuild();
+-    try {
+-      const a = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'vision-a',
+-        title: 'a',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-      const b = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'vision-b',
+-        title: 'b',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-
+-      // List the writs and confirm the labels are distinct.
+-      const all = await fix.clerk.list({ limit: 100 });
+-      const aWrit = all.find((w: WritDoc) => w.id === a.id);
+-      const bWrit = all.find((w: WritDoc) => w.id === b.id);
+-      assert.ok(aWrit && bWrit);
+-      const aExt = aWrit!.ext?.reckoner as ReckonerExt | undefined;
+-      const bExt = bWrit!.ext?.reckoner as ReckonerExt | undefined;
+-      assert.equal(aExt?.labels?.[VISION_ID_LABEL_KEY], 'vision-a');
+-      assert.equal(bExt?.labels?.[VISION_ID_LABEL_KEY], 'vision-b');
+-    } finally {
+-      await teardown(fix);
+-    }
+-  });
+-
+-  it('decline-feedback relay fires through Clockworks when a vision-keeper.snapshot writ transitions into cancelled', async () => {
+-    const fix = await buildGuild({
+-      standingOrders: [
+-        { on: 'book.clerk.writs.updated', run: DECLINE_RELAY_NAME },
+-      ],
+-    });
+-    try {
+-      // Emit a petition.
+-      const writ = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'vision-1',
+-        title: 'drift to be declined',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-
+-      // Drive the cancellation through the Reckoner's `withdraw`
+-      // helper so the CDC update event arrives via real Reckoner
+-      // code rather than a hand-synthesised `clerk.transition` from
+-      // the test harness. The relay's filter does not differentiate
+-      // who initiated the cancel — only that a vision-keeper.snapshot
+-      // writ transitions into `cancelled` with a captured resolution.
+-      await fix.reckoner.withdraw(
+-        writ.id,
+-        'declined by reckoner — vision misalignment',
+-      );
+-
+-      // Drain the Clockworks event sweep — the relay handler is invoked
+-      // synchronously here.
+-      const summary = await fix.clockworks.processEvents();
+-
+-      // At least one dispatch landed against the decline relay.
+-      assert.ok(
+-        summary.dispatches >= 1,
+-        `expected at least one dispatch; got ${summary.dispatches}`,
+-      );
+-
+-      // Captured log carries our decline line.
+-      const declineLines = fix.capturedLogs.filter((l) =>
+-        /\[vision-keeper\] decline-feedback/.test(l),
+-      );
+-      assert.equal(declineLines.length, 1, 'exactly one decline log line');
+-      assert.match(declineLines[0]!, /declined by reckoner — vision misalignment/);
+-      assert.match(declineLines[0]!, new RegExp(writ.id));
+-    } finally {
+-      await teardown(fix);
+-    }
+-  });
+-
+-  it('decline-feedback relay does NOT fire for an other-source writ transitioning into cancelled', async () => {
+-    const fix = await buildGuild({
+-      standingOrders: [
+-        { on: 'book.clerk.writs.updated', run: DECLINE_RELAY_NAME },
+-      ],
+-    });
+-    try {
+-      // Post a writ via Clerk directly (no Reckoner ext slot).
+-      const writ = await fix.clerk.post({
+-        title: 'unrelated writ',
+-        body: 'b',
+-      });
+-      await fix.clerk.transition(writ.id, 'cancelled', {
+-        resolution: 'unrelated cancellation',
+-      });
+-
+-      const summary = await fix.clockworks.processEvents();
+-      // Dispatches may still happen (the standing order matches the
+-      // event name regardless of payload) but the relay's filter must
+-      // reject this case — no log line.
+-      void summary;
+-      const declineLines = fix.capturedLogs.filter((l) =>
+-        /\[vision-keeper\] decline-feedback/.test(l),
+-      );
+-      assert.equal(
+-        declineLines.length,
+-        0,
+-        'no decline log line for non-vision-keeper writs',
+-      );
+-    } finally {
+-      await teardown(fix);
+-    }
+-  });
+-});
+diff --git a/packages/plugins/vision-keeper/src/types.ts b/packages/plugins/vision-keeper/src/types.ts
+deleted file mode 100644
+index 9e16e17..0000000
+--- a/packages/plugins/vision-keeper/src/types.ts
++++ /dev/null
+@@ -1,212 +0,0 @@
+-/**
+- * Vision-keeper public types.
+- *
+- * The Vision-keeper is the canonical worked-example petitioner from
+- * `docs/architecture/petitioner-registration.md` §11. It emits
+- * vision-vs-reality snapshots through the Reckoner whenever it observes
+- * drift worth surfacing, and proactive elaboration nudges when it sees
+- * an opportunity to push the product further along the vision.
+- *
+- * v0 ships the petitioner side only — vision-artifact storage, drift
+- * detection, and the rig that processes vision-keeper writs remain
+- * owned by separate commissions. The Reckoner CDC approval handler
+- * now lands in the Reckoner package itself.
+- *
+- * This file is the single source of public-symbol truth for downstream
+- * consumers: every type that crosses the package boundary lives here,
+- * including `VisionKeeperApi` (the apparatus's `provides` shape).
+- *
+- * See: docs/architecture/petitioner-registration.md (§11 worked example;
+- * §1 helper API; §3 priority dimensions; §4 complexity; §9 Channel-1
+- * standing-order feedback).
+- */
+-
+-import type { WritDoc } from '@shardworks/clerk-apparatus';
+-import type {
+-  ComplexityTier,
+-  Priority,
+-} from '@shardworks/reckoner-apparatus';
+-
+-// ── Snapshot payload ─────────────────────────────────────────────────
+-
+-/**
+- * The typed payload the keeper stamps into every petition's
+- * `ext.reckoner.payload` slot.
+- *
+- * The four fields are enumerated by the contract document's worked
+- * example (§11). Future rigs that consume vision-keeper writs import
+- * this type to bind their input shape; type-checking catches a missing
+- * field at compile time rather than at first run.
+- *
+- * `visionId` and `snapshotTimestamp` are auto-filled by the keeper from
+- * arguments the caller already supplies — the keeper never asks the
+- * caller for the timestamp, and `visionId` is required on every emit
+- * call (D8) so it is always present.
+- *
+- * `visionVsRealityDelta` and `metricValues` are the situation-specific
+- * payload data the caller supplies. The keeper does not introspect
+- * either field; the contract is between the caller and the rig.
+- */
+-export interface VisionSnapshotPayload {
+-  /** Identifier of the vision this snapshot pertains to. */
+-  visionId: string;
+-  /** ISO timestamp the keeper stamped at emit time. */
+-  snapshotTimestamp: string;
+-  /**
+-   * Free-shape description of the gap between the vision and the
+-   * observed reality. The rig that processes the writ interprets this
+-   * field; the keeper stores it verbatim.
+-   */
+-  visionVsRealityDelta: unknown;
+-  /**
+-   * Bag of metric readings supporting the snapshot. The rig and the
+-   * caller agree on the shape; the keeper stores it verbatim.
+-   */
+-  metricValues: unknown;
+-}
+-
+-// ── Caller-supplied request shapes ───────────────────────────────────
+-
+-/**
+- * Caller-supplied input for `submitDriftSnapshot()` /
+- * `submitElaborationNudge()`.
+- *
+- * The keeper auto-fills the `visionId` and `snapshotTimestamp` fields
+- * of the typed payload, so the caller hands in `visionId` once
+- * (alongside the rest of the request) and the payload-data fields
+- * separately. Title and body are caller-supplied required arguments —
+- * the keeper has no model for descriptive text (D11).
+- *
+- * `severity`, `scope`, and `complexity` are optional per-call overrides
+- * over the situation's hardcoded dimension preset (D5, D6). Callers
+- * can also supply `codex` and `parentId` which pass straight through to
+- * the underlying `reckoner.petition()` call (D12).
+- */
+-export interface VisionSnapshotRequest {
+-  /** Identifier of the vision this snapshot pertains to. Required (D8). */
+-  visionId: string;
+-  /** Short human-readable title describing the snapshot. */
+-  title: string;
+-  /** Detail text. */
+-  body: string;
+-  /**
+-   * Free-shape description of the gap between the vision and observed
+-   * reality. Auto-stamped onto the typed payload's
+-   * `visionVsRealityDelta` field.
+-   */
+-  visionVsRealityDelta: unknown;
+-  /**
+-   * Metric readings supporting this snapshot. Auto-stamped onto the
+-   * typed payload's `metricValues` field.
+-   */
+-  metricValues: unknown;
+-  /** Per-call override of the situation's default severity (D6). */
+-  severity?: Priority['severity'];
+-  /** Per-call override of the situation's default scope (D6). */
+-  scope?: Priority['scope'];
+-  /**
+-   * Per-call override of the situation's default complexity. Drift-
+-   * snapshot petitions default to `'bounded'`; elaboration nudges
+-   * omit complexity entirely (D6).
+-   */
+-  complexity?: ComplexityTier;
+-  /** Optional target codex name. Passes through to `reckoner.petition()`. */
+-  codex?: string;
+-  /**
+-   * Optional parent writ id. Passes through to `reckoner.petition()`.
+-   * Vision-keeper itself imposes no nesting requirement; preserving
+-   * the Reckoner contract closes no doors for future consumers (D12).
+-   */
+-  parentId?: string;
+-}
+-
+-// ── Apparatus API surface ────────────────────────────────────────────
+-
+-/**
+- * The Vision-keeper's runtime API — retrieved via
+- * `guild().apparatus<VisionKeeperApi>('vision-keeper')`.
+- *
+- * Three methods, one per situation kind plus the explicit-supersede
+- * lever (D5, D9):
+- *
+- *   - `submitDriftSnapshot()` — observed drift the keeper considers
+- *     worth surfacing. Carries the brief's drift-default dimensions
+- *     (vision-violator / serious / major-area, decay:true,
+- *     domain:['quality'], complexity:'bounded').
+- *
+- *   - `submitElaborationNudge()` — proactive suggestion that the
+- *     product can advance further along the vision. Carries the
+- *     brief's elaboration-default dimensions (vision-advancer /
+- *     moderate / minor-area, decay:false, domain:['feature']) and
+- *     omits complexity by default.
+- *
+- *   - `superseded()` — explicit lever to withdraw the keeper's current
+- *     outstanding petition for a given vision when the keeper's own
+- *     observation has become stale (e.g. the underlying drift was
+- *     resolved out-of-band). Unrelated to the auto-supersede that
+- *     fires when the keeper emits a second petition for the same
+- *     vision while one is still outstanding (D10).
+- *
+- * Both emit methods implement the auto-supersede invariant (D10): when
+- * the keeper has an outstanding petition for the same `visionId`, the
+- * prior writ is withdrawn (with a "superseded by newer snapshot"
+- * reason) before the new one is created. The keeper holds the
+- * outstanding-petition map in process memory only; persistence across
+- * restart is a separate follow-up (D9).
+- */
+-export interface VisionKeeperApi {
+-  /**
+-   * Emit a vision-vs-reality drift snapshot for `visionId`.
+-   *
+-   * Default dimensions (overridable per-call via the request):
+-   *   - visionRelation: 'vision-violator'
+-   *   - severity: 'serious'
+-   *   - scope: 'major-area'
+-   *   - time: { decay: true, deadline: null }
+-   *   - domain: ['quality']
+-   *   - complexity: 'bounded'
+-   *
+-   * Auto-supersede behavior (D10): if an outstanding petition already
+-   * exists for this `visionId`, the keeper withdraws it (with a
+-   * superseded-reason) before posting the new one.
+-   *
+-   * Returns the resulting writ — `phase: 'new'`, with
+-   * `ext.reckoner.source = 'vision-keeper.snapshot'`, the typed
+-   * `VisionSnapshotPayload` on `ext.reckoner.payload`, and the
+-   * `vision-keeper.io/vision-id` label on `ext.reckoner.labels`.
+-   */
+-  submitDriftSnapshot(request: VisionSnapshotRequest): Promise<WritDoc>;
+-
+-  /**
+-   * Emit a proactive elaboration nudge for `visionId`.
+-   *
+-   * Default dimensions (overridable per-call via the request):
+-   *   - visionRelation: 'vision-advancer'
+-   *   - severity: 'moderate'
+-   *   - scope: 'minor-area'
+-   *   - time: { decay: false, deadline: null }
+-   *   - domain: ['feature']
+-   *   - complexity: omitted by default
+-   *
+-   * Auto-supersede behavior is identical to `submitDriftSnapshot()` —
+-   * the keeper tracks outstanding petitions per `visionId` regardless
+-   * of the situation kind that produced them.
+-   */
+-  submitElaborationNudge(request: VisionSnapshotRequest): Promise<WritDoc>;
+-
+-  /**
+-   * Withdraw the keeper's outstanding petition for `visionId`, if any.
+-   *
+-   * No-op when no outstanding petition exists for the given vision —
+-   * the keeper does not throw on the empty case so callers can use it
+-   * as an idempotent "ensure no outstanding petition for this vision"
+-   * lever.
+-   *
+-   * Returns the withdrawn writ when one was actually withdrawn, or
+-   * `null` when there was nothing to withdraw.
+-   *
+-   * `reason` is passed through to `reckoner.withdraw()` verbatim;
+-   * undefined stays undefined.
+-   */
+-  superseded(visionId: string, reason?: string): Promise<WritDoc | null>;
+-}
+diff --git a/packages/plugins/vision-keeper/src/vision-keeper.test.ts b/packages/plugins/vision-keeper/src/vision-keeper.test.ts
+deleted file mode 100644
+index 1a078a0..0000000
+--- a/packages/plugins/vision-keeper/src/vision-keeper.test.ts
++++ /dev/null
+@@ -1,842 +0,0 @@
+-/**
+- * Vision-keeper apparatus — per-case unit tests.
+- *
+- * Fixture mirrors `packages/plugins/reckoner/src/reckoner.test.ts`:
+- * fake guild via `setGuild` / `clearGuild`, MemoryBackend stacks, real
+- * Clerk, real Reckoner, vision-keeper under test, drive `phase:started`
+- * at the end of the boot to seal the petitioner registry. No
+- * Reckoner-stubbing — every assertion runs through the production
+- * petition / withdraw paths (D18, D28).
+- *
+- * The assertions line up with the behavioral cases enumerated in the
+- * commission's Acceptance Signal:
+- *
+- *   1. Drift petition produces a writ in `phase: 'new'` with the
+- *      brief-default drift dimensions, the typed payload (with auto-
+- *      filled `snapshotTimestamp`/`visionId`), the
+- *      `vision-keeper.io/vision-id` label, and
+- *      `ext.reckoner.source === 'vision-keeper.snapshot'`.
+- *   2. Elaboration nudge does the same with the elaboration-default
+- *      dimensions and complexity omitted.
+- *   3. Explicit `superseded(visionId)` call withdraws the outstanding
+- *      writ.
+- *   4. Emitting on top of an outstanding petition auto-supersedes
+- *      (prior writ ends `cancelled`, new writ posted in `new`).
+- *   5. Per-call overrides for `severity` / `scope` / `complexity` /
+- *      `codex` / `parentId` reach the resulting writ.
+- *   6. Multi-vision label discrimination — two petitions with
+- *      different visionIds carry different label values and the
+- *      keeper's outstanding map tracks each independently.
+- *   7. Kit-declaration round-trip — after `phase:started` the
+- *      petitioner registry contains the vision-keeper.snapshot entry
+- *      with the verbatim description.
+- *   8. Decline-feedback relay handler reacts to a synthetic CDC
+- *      payload representing a transition into `cancelled` for a
+- *      vision-keeper.snapshot writ but not to the negative cases.
+- */
+-
+-import { describe, it, afterEach } from 'node:test';
+-import assert from 'node:assert/strict';
+-
+-import { setGuild, clearGuild } from '@shardworks/nexus-core';
+-import type {
+-  Guild,
+-  GuildConfig,
+-  KitEntry,
+-  LoadedApparatus,
+-  LoadedKit,
+-  StartupContext,
+-} from '@shardworks/nexus-core';
+-
+-import { createStacksApparatus } from '@shardworks/stacks-apparatus';
+-import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
+-import type { StacksApi } from '@shardworks/stacks-apparatus';
+-
+-import { createClerk } from '@shardworks/clerk-apparatus';
+-import type { ClerkApi, WritDoc } from '@shardworks/clerk-apparatus';
+-
+-import { createReckoner } from '@shardworks/reckoner-apparatus';
+-import type {
+-  PetitionerDescriptor,
+-  ReckonerApi,
+-  ReckonerExt,
+-} from '@shardworks/reckoner-apparatus';
+-
+-import {
+-  DECLINE_RELAY_NAME,
+-  VISION_ID_LABEL_KEY,
+-  VISION_KEEPER_SOURCE,
+-  createVisionKeeper,
+-} from './index.ts';
+-import { __internal } from './vision-keeper.ts';
+-import type { VisionKeeperApi, VisionSnapshotPayload } from './types.ts';
+-import { createDeclineRelay, matchVisionKeeperDecline } from './decline-relay.ts';
+-
+-// ── Fixture helpers ──────────────────────────────────────────────────
+-
+-/** Read the apparatus's supportKit. The keeper has both `petitioners` and `relays`. */
+-function readSupportKit(plugin: { apparatus: { supportKit?: unknown } }): {
+-  petitioners: PetitionerDescriptor[];
+-  relayName: string;
+-} {
+-  const kit = plugin.apparatus.supportKit as
+-    | { petitioners?: unknown; relays?: unknown }
+-    | undefined;
+-  if (!kit) throw new Error('vision-keeper: supportKit missing');
+-  if (!Array.isArray(kit.petitioners) || kit.petitioners.length === 0) {
+-    throw new Error('vision-keeper: supportKit.petitioners missing');
+-  }
+-  if (!Array.isArray(kit.relays) || kit.relays.length === 0) {
+-    throw new Error('vision-keeper: supportKit.relays missing');
+-  }
+-  return {
+-    petitioners: kit.petitioners as PetitionerDescriptor[],
+-    relayName: (kit.relays[0] as { name: string }).name,
+-  };
+-}
+-
+-interface Fixture {
+-  stacks: StacksApi;
+-  clerk: ClerkApi;
+-  reckoner: ReckonerApi;
+-  keeper: VisionKeeperApi;
+-  /**
+-   * Manually re-fire `phase:started` against every registered
+-   * handler. Awaits async handlers (kept awaitable for forward-
+-   * compatibility; the Reckoner's seal handler is synchronous now
+-   * that there is no catch-up scan).
+-   */
+-  firePhaseStarted: () => Promise<void>;
+-}
+-
+-function buildFakeGuild(
+-  apparatusMap: Map<string, unknown>,
+-  fakeGuildConfig: GuildConfig,
+-): Guild {
+-  return {
+-    home: '/tmp/vision-keeper-test-guild',
+-    apparatus<T>(name: string): T {
+-      const a = apparatusMap.get(name);
+-      if (!a) throw new Error(`Apparatus "${name}" not installed`);
+-      return a as T;
+-    },
+-
+-    tryApparatus<T>(name: string): T | null {
+-      try { return this.apparatus<T>(name); } catch { return null; }
+-    },
+-    config<T>(_pluginId: string): T {
+-      return {} as T;
+-    },
+-    writeConfig(): void {},
+-    guildConfig(): GuildConfig {
+-      return fakeGuildConfig;
+-    },
+-    kits(): LoadedKit[] {
+-      return [];
+-    },
+-    apparatuses(): LoadedApparatus[] {
+-      return [];
+-    },
+-    failedPlugins() {
+-      return [];
+-    },
+-    startupWarnings(): string[] {
+-      return [];
+-    },
+-  };
+-}
+-
+-async function buildFixture(): Promise<Fixture> {
+-  const memBackend = new MemoryBackend();
+-
+-  const stacksPlugin = createStacksApparatus(memBackend);
+-  if (!('apparatus' in stacksPlugin)) throw new Error('stacks plugin shape');
+-
+-  const clerkPlugin = createClerk();
+-  if (!('apparatus' in clerkPlugin)) throw new Error('clerk plugin shape');
+-
+-  const reckonerPlugin = createReckoner();
+-  if (!('apparatus' in reckonerPlugin)) throw new Error('reckoner plugin shape');
+-
+-  const keeperPlugin = createVisionKeeper();
+-  if (!('apparatus' in keeperPlugin)) throw new Error('vision-keeper plugin shape');
+-
+-  const apparatusMap = new Map<string, unknown>();
+-  const fakeGuildConfig: GuildConfig = {
+-    name: 'vision-keeper-test-guild',
+-    nexus: '0.0.0',
+-    plugins: [],
+-  };
+-  setGuild(buildFakeGuild(apparatusMap, fakeGuildConfig));
+-
+-  // Pre-create the books the Clerk needs.
+-  memBackend.ensureBook(
+-    { ownerId: 'clerk', book: 'writs' },
+-    {
+-      indexes: [
+-        'phase',
+-        'type',
+-        'createdAt',
+-        'parentId',
+-        ['phase', 'type'],
+-        ['phase', 'createdAt'],
+-        ['parentId', 'phase'],
+-      ],
+-    },
+-  );
+-  memBackend.ensureBook(
+-    { ownerId: 'clerk', book: 'links' },
+-    {
+-      indexes: [
+-        'sourceId',
+-        'targetId',
+-        'label',
+-        ['sourceId', 'label'],
+-        ['targetId', 'label'],
+-      ],
+-    },
+-  );
+-  // Reckoner's reckonings book — populated by the Reckoner CDC
+-  // handler on every consideration. Pre-create here so the handler's
+-  // first write succeeds.
+-  memBackend.ensureBook(
+-    { ownerId: 'reckoner', book: 'reckonings' },
+-    {
+-      indexes: [
+-        'writId',
+-        'consideredAt',
+-        'outcome',
+-        'source',
+-        'visionRelation',
+-        'severity',
+-        'declineReason',
+-        ['outcome', 'consideredAt'],
+-        ['visionRelation', 'consideredAt'],
+-        ['severity', 'consideredAt'],
+-        ['writId', 'consideredAt'],
+-      ],
+-    },
+-  );
+-
+-  // Track phase:started handlers so the test can drive seal manually.
+-  const phaseStartedHandlers: Array<(...args: unknown[]) => void | Promise<void>> = [];
+-  const firePhaseStarted = async (): Promise<void> => {
+-    for (const handler of phaseStartedHandlers) {
+-      await handler();
+-    }
+-  };
+-
+-  function buildCtx(kitEntries: KitEntry[]): StartupContext {
+-    return {
+-      on(event, handler) {
+-        if (event === 'phase:started') {
+-          phaseStartedHandlers.push(handler);
+-        }
+-      },
+-      kits(type: string): KitEntry[] {
+-        return kitEntries.filter((e) => e.type === type);
+-      },
+-    };
+-  }
+-
+-  // Stacks
+-  await stacksPlugin.apparatus.start(buildCtx([]));
+-  const stacks = stacksPlugin.apparatus.provides as StacksApi;
+-  apparatusMap.set('stacks', stacks);
+-
+-  // Clerk
+-  await clerkPlugin.apparatus.start(buildCtx([]));
+-  const clerk = clerkPlugin.apparatus.provides as ClerkApi;
+-  apparatusMap.set('clerk', clerk);
+-
+-  // Reckoner — wire vision-keeper's supportKit.petitioners through as
+-  // a KitEntry so the registration runs against the production code
+-  // path. We build the kit entries from the keeper plugin's
+-  // supportKit, mirroring what the real Wire phase does. The
+-  // Reckoner's own supportKit.schedulers (the built-in always-approve
+-  // instance) is surfaced the same way so the scheduler registry
+-  // picks it up.
+-  const keeperSupport = readSupportKit(keeperPlugin);
+-  const reckonerSchedulers = (reckonerPlugin.apparatus.supportKit as
+-    | { schedulers?: unknown[] }
+-    | undefined
+-  )?.schedulers;
+-  const petitionerKitEntries: KitEntry[] = [
+-    {
+-      pluginId: 'vision-keeper',
+-      packageName: '@shardworks/vision-keeper-apparatus',
+-      type: 'petitioners',
+-      value: keeperSupport.petitioners,
+-    },
+-    ...(reckonerSchedulers
+-      ? [
+-          {
+-            pluginId: 'reckoner',
+-            packageName: '@shardworks/reckoner-apparatus',
+-            type: 'schedulers',
+-            value: reckonerSchedulers,
+-          } satisfies KitEntry,
+-        ]
+-      : []),
+-  ];
+-  await reckonerPlugin.apparatus.start(buildCtx(petitionerKitEntries));
+-  const reckoner = reckonerPlugin.apparatus.provides as ReckonerApi;
+-  apparatusMap.set('reckoner', reckoner);
+-
+-  // Vision-keeper — start last; resolves the Reckoner handle.
+-  await keeperPlugin.apparatus.start(buildCtx([]));
+-  const keeper = keeperPlugin.apparatus.provides as VisionKeeperApi;
+-  apparatusMap.set('vision-keeper', keeper);
+-
+-  // Seal by firing phase:started so the petitioner registry locks
+-  // down and the Reckoner resolves its active scheduler.
+-  await firePhaseStarted();
+-
+-  return { stacks, clerk, reckoner, keeper, firePhaseStarted };
+-}
+-
+-afterEach(() => clearGuild());
+-
+-// ── Behavioral cases ─────────────────────────────────────────────────
+-
+-describe('Vision-keeper apparatus', () => {
+-  // Case 1 + 7: drift petition produces correct writ; kit declaration
+-  // round-trips through the Reckoner registry.
+-
+-  describe('submitDriftSnapshot()', () => {
+-    it('posts a writ in phase:new with the drift-default dimensions and the typed payload', async () => {
+-      const fix = await buildFixture();
+-
+-      const before = new Date().toISOString();
+-      const writ = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'product-vision',
+-        title: 'API drift',
+-        body: 'three calls instead of one',
+-        visionVsRealityDelta: { promised: 'one call', observed: 'three' },
+-        metricValues: { p95: 410 },
+-      });
+-      const after = new Date().toISOString();
+-
+-      assert.equal(writ.phase, 'new');
+-      assert.equal(writ.title, 'API drift');
+-      assert.equal(writ.body, 'three calls instead of one');
+-
+-      const ext = writ.ext?.reckoner as ReckonerExt | undefined;
+-      assert.ok(ext, 'writ.ext.reckoner must be populated');
+-      assert.equal(ext!.source, VISION_KEEPER_SOURCE);
+-      assert.equal(ext!.complexity, 'bounded');
+-
+-      // Drift-default dimensions (D6).
+-      assert.equal(ext!.priority.visionRelation, 'vision-violator');
+-      assert.equal(ext!.priority.severity, 'serious');
+-      assert.equal(ext!.priority.scope, 'major-area');
+-      assert.equal(ext!.priority.time.decay, true);
+-      assert.equal(ext!.priority.time.deadline, null);
+-      assert.deepEqual(ext!.priority.domain, ['quality']);
+-
+-      // Typed payload — keeper auto-fills `visionId` and timestamp.
+-      const payload = ext!.payload as VisionSnapshotPayload;
+-      assert.equal(payload.visionId, 'product-vision');
+-      assert.deepEqual(payload.visionVsRealityDelta, {
+-        promised: 'one call',
+-        observed: 'three',
+-      });
+-      assert.deepEqual(payload.metricValues, { p95: 410 });
+-      assert.ok(payload.snapshotTimestamp >= before);
+-      assert.ok(payload.snapshotTimestamp <= after);
+-
+-      // Vision-id label is stamped.
+-      assert.deepEqual(ext!.labels, {
+-        [VISION_ID_LABEL_KEY]: 'product-vision',
+-      });
+-    });
+-
+-    it('rejects an empty visionId fail-loud', async () => {
+-      const fix = await buildFixture();
+-
+-      await assert.rejects(
+-        () =>
+-          fix.keeper.submitDriftSnapshot({
+-            visionId: '',
+-            title: 't',
+-            body: 'b',
+-            visionVsRealityDelta: null,
+-            metricValues: null,
+-          }),
+-        (err: Error) => {
+-          assert.match(err.message, /visionId is required/i);
+-          return true;
+-        },
+-      );
+-    });
+-  });
+-
+-  // Case 2: elaboration nudge with elaboration-default dimensions and
+-  // complexity omitted.
+-
+-  describe('submitElaborationNudge()', () => {
+-    it('posts a writ with the elaboration-default dimensions and omits complexity', async () => {
+-      const fix = await buildFixture();
+-
+-      const writ = await fix.keeper.submitElaborationNudge({
+-        visionId: 'product-vision',
+-        title: 'Saved presets nudge',
+-        body: 'one-click reorder is unrealized',
+-        visionVsRealityDelta: { promised: 'one click', observed: 'no UI' },
+-        metricValues: { reorderRate: 0.04 },
+-      });
+-
+-      assert.equal(writ.phase, 'new');
+-      const ext = writ.ext?.reckoner as ReckonerExt | undefined;
+-      assert.ok(ext);
+-      assert.equal(ext!.source, VISION_KEEPER_SOURCE);
+-
+-      assert.equal(ext!.priority.visionRelation, 'vision-advancer');
+-      assert.equal(ext!.priority.severity, 'moderate');
+-      assert.equal(ext!.priority.scope, 'minor-area');
+-      assert.equal(ext!.priority.time.decay, false);
+-      assert.equal(ext!.priority.time.deadline, null);
+-      assert.deepEqual(ext!.priority.domain, ['feature']);
+-
+-      // Elaboration: no complexity field by default.
+-      assert.equal('complexity' in ext!, false, 'complexity must be omitted on elaboration nudges');
+-    });
+-  });
+-
+-  // Case 3: explicit superseded() call withdraws.
+-
+-  describe('superseded()', () => {
+-    it('withdraws the outstanding petition for a vision', async () => {
+-      const fix = await buildFixture();
+-
+-      const writ = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'v1',
+-        title: 't',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-
+-      const withdrawn = await fix.keeper.superseded(
+-        'v1',
+-        'drift was resolved out-of-band',
+-      );
+-
+-      assert.ok(withdrawn, 'a writ must have been withdrawn');
+-      assert.equal(withdrawn!.id, writ.id);
+-      assert.equal(withdrawn!.phase, 'cancelled');
+-      assert.equal(withdrawn!.resolution, 'drift was resolved out-of-band');
+-    });
+-
+-    it('returns null when there is no outstanding petition for the vision', async () => {
+-      const fix = await buildFixture();
+-
+-      const result = await fix.keeper.superseded('absent-vision');
+-      assert.equal(result, null);
+-    });
+-
+-    it('clears the outstanding-petition map so a re-emit does not auto-supersede', async () => {
+-      const fix = await buildFixture();
+-      // Emit, withdraw, re-emit. The re-emit must not look up a stale
+-      // entry and try to withdraw an already-cancelled writ.
+-      const first = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'v1',
+-        title: 't1',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-      await fix.keeper.superseded('v1');
+-      const second = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'v1',
+-        title: 't2',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-      assert.notEqual(first.id, second.id);
+-      // First writ stayed cancelled; second is new.
+-      const firstReread = await fix.clerk.show(first.id);
+-      assert.equal(firstReread.phase, 'cancelled');
+-      assert.equal(second.phase, 'new');
+-    });
+-  });
+-
+-  // Case 4: auto-supersede when emitting over an outstanding petition.
+-
+-  describe('auto-supersede on consecutive emits', () => {
+-    it('cancels the prior writ before posting the new one', async () => {
+-      const fix = await buildFixture();
+-
+-      const first = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'v1',
+-        title: 'first',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-      const second = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'v1',
+-        title: 'second',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-
+-      assert.notEqual(first.id, second.id);
+-      const firstReread = await fix.clerk.show(first.id);
+-      assert.equal(firstReread.phase, 'cancelled');
+-      assert.match(
+-        String(firstReread.resolution),
+-        /superseded by newer snapshot/i,
+-      );
+-      assert.equal(second.phase, 'new');
+-    });
+-  });
+-
+-  // Case 5: per-call overrides reach the resulting writ.
+-
+-  describe('per-call overrides', () => {
+-    it('caller-supplied severity / scope / complexity / codex / parentId reach the writ', async () => {
+-      const fix = await buildFixture();
+-
+-      // Need a parent writ to reference via parentId.
+-      const parent = await fix.clerk.post({ title: 'parent', body: 'b' });
+-
+-      const writ = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'v1',
+-        title: 'override drift',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-        severity: 'critical',
+-        scope: 'whole-product',
+-        complexity: 'open-ended',
+-        codex: 'nexus',
+-        parentId: parent.id,
+-      });
+-
+-      assert.equal(writ.codex, 'nexus');
+-      assert.equal(writ.parentId, parent.id);
+-
+-      const ext = writ.ext?.reckoner as ReckonerExt | undefined;
+-      assert.ok(ext);
+-      assert.equal(ext!.priority.severity, 'critical');
+-      assert.equal(ext!.priority.scope, 'whole-product');
+-      assert.equal(ext!.complexity, 'open-ended');
+-      // visionRelation / time / domain still come from the drift preset.
+-      assert.equal(ext!.priority.visionRelation, 'vision-violator');
+-      assert.deepEqual(ext!.priority.domain, ['quality']);
+-    });
+-
+-    it('elaboration nudge with explicit complexity stamps it', async () => {
+-      const fix = await buildFixture();
+-
+-      const writ = await fix.keeper.submitElaborationNudge({
+-        visionId: 'v1',
+-        title: 'elaborate',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-        complexity: 'mechanical',
+-      });
+-      const ext = writ.ext?.reckoner as ReckonerExt | undefined;
+-      assert.ok(ext);
+-      assert.equal(ext!.complexity, 'mechanical');
+-    });
+-  });
+-
+-  // Case 6: multi-vision discrimination.
+-
+-  describe('multi-vision label discrimination', () => {
+-    it('petitions for distinct visionIds carry distinct label values and the keeper tracks each independently', async () => {
+-      const fix = await buildFixture();
+-
+-      const a = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'vision-a',
+-        title: 'a',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-      const b = await fix.keeper.submitDriftSnapshot({
+-        visionId: 'vision-b',
+-        title: 'b',
+-        body: 'b',
+-        visionVsRealityDelta: null,
+-        metricValues: null,
+-      });
+-
+-      const aExt = a.ext?.reckoner as ReckonerExt | undefined;
+-      const bExt = b.ext?.reckoner as ReckonerExt | undefined;
+-      assert.equal(aExt?.labels?.[VISION_ID_LABEL_KEY], 'vision-a');
+-      assert.equal(bExt?.labels?.[VISION_ID_LABEL_KEY], 'vision-b');
+-
+-      // Withdrawing one vision's outstanding petition leaves the other
+-      // intact — confirms the keeper tracks them independently.
+-      const withdrawnA = await fix.keeper.superseded('vision-a');
+-      assert.ok(withdrawnA, 'vision-a outstanding petition must be withdrawn');
+-      assert.equal(withdrawnA!.id, a.id);
+-
+-      // No tick has fired in this fixture, so vision-b's writ
+-      // remains in `new`. The assertion's intent is "vision-b's
+-      // writ is not transitioned by superseded('vision-a')" — the
+-      // unchanged `new` phase satisfies that intent.
+-      const bReread = await fix.clerk.show(b.id);
+-      assert.equal(bReread.phase, 'new', 'vision-b petition must not be touched');
+-    });
+-  });
+-
+-  // Case 7: kit declaration round-trip.
+-
+-  describe('kit declaration round-trip', () => {
+-    it('after phase:started the petitioner registry contains the vision-keeper.snapshot entry with the verbatim brief description', async () => {
+-      const fix = await buildFixture();
+-
+-      const list = fix.reckoner.listPetitioners();
+-      const entry = list.find((p) => p.source === VISION_KEEPER_SOURCE);
+-      assert.ok(entry, 'vision-keeper.snapshot must be registered');
+-      assert.equal(
+-        entry!.description,
+-        'Vision-vs-reality snapshots emitted when the keeper observes drift worth surfacing.',
+-      );
+-
+-      // Source is reachable through isSourceRegistered too.
+-      assert.equal(fix.reckoner.isSourceRegistered(VISION_KEEPER_SOURCE), true);
+-    });
+-  });
+-
+-  // Case 8: decline-feedback relay handler reactions.
+-
+-  describe('decline-feedback relay', () => {
+-    it('logs a line for a vision-keeper.snapshot writ transitioning into cancelled', () => {
+-      const def = createDeclineRelay();
+-      assert.equal(def.name, DECLINE_RELAY_NAME);
+-
+-      const event = {
+-        id: 'e-1',
+-        name: 'book.clerk.writs.updated',
+-        payload: {
+-          type: 'update',
+-          ownerId: 'clerk',
+-          book: 'writs',
+-          entry: {
+-            id: 'w-1',
+-            type: 'mandate',
+-            phase: 'cancelled',
+-            title: 't',
+-            body: 'b',
+-            createdAt: 'now',
+-            updatedAt: 'now',
+-            resolution: 'declined by reckoner',
+-            ext: { reckoner: { source: VISION_KEEPER_SOURCE } },
+-          },
+-          prev: {
+-            id: 'w-1',
+-            type: 'mandate',
+-            phase: 'new',
+-            title: 't',
+-            body: 'b',
+-            createdAt: 'now',
+-            updatedAt: 'now',
+-            ext: { reckoner: { source: VISION_KEEPER_SOURCE } },
+-          },
+-        },
+-        emitter: 'framework',
+-        firedAt: new Date().toISOString(),
+-      };
+-
+-      const captured: string[] = [];
+-      const originalLog = console.log;
+-      console.log = (msg: unknown) => {
+-        captured.push(String(msg));
+-      };
+-      try {
+-        // Invoke twice — idempotency check (re-invocation is observable
+-        // only via additional log lines; no other side effects).
+-        def.handler(event, { home: '/tmp', params: {} });
+-        def.handler(event, { home: '/tmp', params: {} });
+-      } finally {
+-        console.log = originalLog;
+-      }
+-
+-      assert.equal(captured.length, 2, 'matching event produces one log line per invocation');
+-      for (const line of captured) {
+-        assert.match(line, /\[vision-keeper\] decline-feedback/);
+-        assert.match(line, /w-1/);
+-        assert.match(line, /declined by reckoner/);
+-      }
+-    });
+-
+-    it('does not log for an update without a phase change', () => {
+-      const event = {
+-        id: 'e-2',
+-        name: 'book.clerk.writs.updated',
+-        payload: {
+-          type: 'update',
+-          ownerId: 'clerk',
+-          book: 'writs',
+-          entry: {
+-            id: 'w-2',
+-            type: 'mandate',
+-            phase: 'new',
+-            title: 't',
+-            body: 'edited',
+-            createdAt: 'now',
+-            updatedAt: 'now',
+-            ext: { reckoner: { source: VISION_KEEPER_SOURCE } },
+-          },
+-          prev: {
+-            id: 'w-2',
+-            type: 'mandate',
+-            phase: 'new',
+-            title: 't',
+-            body: 'original',
+-            createdAt: 'now',
+-            updatedAt: 'now',
+-            ext: { reckoner: { source: VISION_KEEPER_SOURCE } },
+-          },
+-        },
+-        emitter: 'framework',
+-        firedAt: new Date().toISOString(),
+-      };
+-      assert.equal(matchVisionKeeperDecline(event), null);
+-    });
+-
+-    it('does not log for an other-source writ transitioning into cancelled', () => {
+-      const event = {
+-        id: 'e-3',
+-        name: 'book.clerk.writs.updated',
+-        payload: {
+-          type: 'update',
+-          ownerId: 'clerk',
+-          book: 'writs',
+-          entry: {
+-            id: 'w-3',
+-            type: 'mandate',
+-            phase: 'cancelled',
+-            title: 't',
+-            body: 'b',
+-            createdAt: 'now',
+-            updatedAt: 'now',
+-            ext: { reckoner: { source: 'other.source' } },
+-          },
+-          prev: {
+-            id: 'w-3',
+-            type: 'mandate',
+-            phase: 'open',
+-            title: 't',
+-            body: 'b',
+-            createdAt: 'now',
+-            updatedAt: 'now',
+-            ext: { reckoner: { source: 'other.source' } },
+-          },
+-        },
+-        emitter: 'framework',
+-        firedAt: new Date().toISOString(),
+-      };
+-      assert.equal(matchVisionKeeperDecline(event), null);
+-    });
+-
+-    it('does not log for a create CDC change (no transition)', () => {
+-      const event = {
+-        id: 'e-4',
+-        name: 'book.clerk.writs.created',
+-        payload: {
+-          type: 'create',
+-          ownerId: 'clerk',
+-          book: 'writs',
+-          entry: {
+-            id: 'w-4',
+-            type: 'mandate',
+-            phase: 'cancelled',
+-            title: 't',
+-            body: 'b',
+-            createdAt: 'now',
+-            updatedAt: 'now',
+-            ext: { reckoner: { source: VISION_KEEPER_SOURCE } },
+-          },
+-        },
+-        emitter: 'framework',
+-        firedAt: new Date().toISOString(),
+-      };
+-      assert.equal(matchVisionKeeperDecline(event), null);
+-    });
+-
+-    it('does not log for a writ already cancelled before the update (no transition into cancelled)', () => {
+-      const event = {
+-        id: 'e-5',
+-        name: 'book.clerk.writs.updated',
+-        payload: {
+-          type: 'update',
+-          ownerId: 'clerk',
+-          book: 'writs',
+-          entry: {
+-            id: 'w-5',
+-            type: 'mandate',
+-            phase: 'cancelled',
+-            title: 't',
+-            body: 'updated body',
+-            createdAt: 'now',
+-            updatedAt: 'now',
+-            ext: { reckoner: { source: VISION_KEEPER_SOURCE } },
+-          },
+-          prev: {
+-            id: 'w-5',
+-            type: 'mandate',
+-            phase: 'cancelled',
+-            title: 't',
+-            body: 'body',
+-            createdAt: 'now',
+-            updatedAt: 'now',
+-            ext: { reckoner: { source: VISION_KEEPER_SOURCE } },
+-          },
+-        },
+-        emitter: 'framework',
+-        firedAt: new Date().toISOString(),
+-      };
+-      assert.equal(matchVisionKeeperDecline(event), null);
+-    });
+-  });
+-
+-  // Plugin shape sanity (D29).
+-
+-  describe('plugin wiring', () => {
+-    it('default export is a constructed Plugin with correct apparatus declarations', async () => {
+-      const mod = await import('./index.ts');
+-      const plugin = mod.default;
+-      assert.ok('apparatus' in plugin, 'default export is an apparatus plugin');
+-      assert.deepEqual(plugin.apparatus.requires, ['reckoner']);
+-      assert.deepEqual(plugin.apparatus.recommends, ['clockworks']);
+-    });
+-
+-    it('supportKit declares the petitioner descriptor and the decline relay', () => {
+-      const plugin = createVisionKeeper();
+-      if (!('apparatus' in plugin)) throw new Error('expected apparatus shape');
+-      const support = readSupportKit(plugin);
+-      assert.equal(support.petitioners.length, 1);
+-      assert.equal(support.petitioners[0]?.source, VISION_KEEPER_SOURCE);
+-      assert.equal(support.relayName, DECLINE_RELAY_NAME);
+-    });
+-
+-    it('__internal exposes the dimension-preset builders', () => {
+-      // Sanity: tests can drive the builders without booting an apparatus.
+-      const drift = (
+-        __internal as unknown as {
+-          driftDimensionPreset: () => { visionRelation: string };
+-        }
+-      ).driftDimensionPreset();
+-      assert.equal(drift.visionRelation, 'vision-violator');
+-      const elab = (
+-        __internal as unknown as {
+-          elaborationDimensionPreset: () => { visionRelation: string };
+-        }
+-      ).elaborationDimensionPreset();
+-      assert.equal(elab.visionRelation, 'vision-advancer');
+-    });
+-  });
+-});
+-
+-// Silence unused-import noise — WritDoc is referenced via type annotations.
+-type _Unused = WritDoc;
+-void (null as unknown as _Unused);
+diff --git a/packages/plugins/vision-keeper/src/vision-keeper.ts b/packages/plugins/vision-keeper/src/vision-keeper.ts
+deleted file mode 100644
+index 22b3193..0000000
+--- a/packages/plugins/vision-keeper/src/vision-keeper.ts
++++ /dev/null
+@@ -1,331 +0,0 @@
+-/**
+- * The Vision-keeper apparatus — petitioner-side worked example.
+- *
+- * Implements the three caller-facing methods (drift snapshot,
+- * elaboration nudge, explicit supersede) declared on `VisionKeeperApi`,
+- * plus the auto-supersede invariant (D10) that holds the keeper's
+- * outstanding-petition map to at-most-one writ per `visionId`.
+- *
+- * The Reckoner handle is resolved once at `start()` and closed over by
+- * every subsequent call (D23). Reckoner is a hard `requires` (D21), so
+- * the framework guarantees readiness before this apparatus's `start()`
+- * runs.
+- *
+- * The runtime never calls Clerk directly — every petition / withdrawal
+- * routes through the cached `reckoner.petition` / `reckoner.withdraw`
+- * handles. That keeps the `ext.reckoner` slot single-sourced through
+- * the petition-helper boundary and avoids drift if the Reckoner later
+- * grows additional pre-write enrichment.
+- *
+- * See: docs/architecture/petitioner-registration.md §11 (worked
+- * example), §1 (helper API), §3 (priority dimensions), §4 (complexity).
+- */
+-
+-import type { Plugin, StartupContext } from '@shardworks/nexus-core';
+-import { guild } from '@shardworks/nexus-core';
+-import type { WritDoc } from '@shardworks/clerk-apparatus';
+-import type {
+-  ComplexityTier,
+-  PetitionRequest,
+-  Priority,
+-  ReckonerApi,
+-} from '@shardworks/reckoner-apparatus';
+-
+-import {
+-  DECLINE_RELAY_NAME,
+-  VISION_ID_LABEL_KEY,
+-  VISION_KEEPER_SOURCE,
+-} from './constants.ts';
+-import { createDeclineRelay } from './decline-relay.ts';
+-import type {
+-  VisionKeeperApi,
+-  VisionSnapshotPayload,
+-  VisionSnapshotRequest,
+-} from './types.ts';
+-
+-// ── Petitioner descriptor (verbatim from the brief, D4) ──────────────
+-
+-/**
+- * Description string declared in the petitioner kit contribution. The
+- * brief supplies the exact words; tests assert the verbatim match
+- * against the registered descriptor (Acceptance Signal "kit declaration
+- * round-trips").
+- */
+-const VISION_KEEPER_DESCRIPTION =
+-  'Vision-vs-reality snapshots emitted when the keeper observes drift worth surfacing.';
+-
+-// ── Auto-supersede reason (D10) ──────────────────────────────────────
+-
+-/** Reason recorded on the prior writ when the keeper auto-supersedes. */
+-const AUTO_SUPERSEDE_REASON =
+-  'superseded by newer snapshot from the vision-keeper.';
+-
+-// ── Dimension presets (D5, D6) ───────────────────────────────────────
+-
+-/**
+- * Drift-snapshot default priority dimensions. Quoted from the brief's
+- * worked example: a drift observation is by construction a vision
+- * violation, the contract default decay flag is `true` (drift sentinel
+- * exhibit A), and the domain tag is `quality`.
+- *
+- * `severity` and `scope` callers can override per-call (the contract
+- * document calls out the "or critical for severe drift" escalation).
+- * `time.deadline` stays `null` because drift detection is decay-driven,
+- * not deadline-driven; if a downstream consumer needs deadlines, the
+- * Reckoner's per-call partial-priority merge handles it.
+- */
+-function driftDimensionPreset(): Priority {
+-  return {
+-    visionRelation: 'vision-violator',
+-    severity: 'serious',
+-    scope: 'major-area',
+-    time: { decay: true, deadline: null },
+-    domain: ['quality'],
+-  };
+-}
+-
+-/** Default complexity for drift snapshots — `'bounded'` per the brief. */
+-const DRIFT_DEFAULT_COMPLEXITY: ComplexityTier = 'bounded';
+-
+-/**
+- * Elaboration-nudge default priority dimensions. A proactive
+- * elaboration is by construction vision-advancing, with no decay
+- * (the elaboration is not actively drifting), and a `feature` domain
+- * tag. The brief specifies omitting complexity by default — the keeper
+- * surfaces the per-call override only.
+- */
+-function elaborationDimensionPreset(): Priority {
+-  return {
+-    visionRelation: 'vision-advancer',
+-    severity: 'moderate',
+-    scope: 'minor-area',
+-    time: { decay: false, deadline: null },
+-    domain: ['feature'],
+-  };
+-}
+-
+-/**
+- * Apply per-call overrides to a dimension preset. Field-by-field merge
+- * to mirror the Reckoner's `mergePriorityWithDefaults` behavior — a
+- * caller specifying a single dimension lets the rest fall through to
+- * the situation's default.
+- */
+-function applyOverrides(
+-  base: Priority,
+-  overrides: { severity?: Priority['severity']; scope?: Priority['scope'] },
+-): Priority {
+-  return {
+-    visionRelation: base.visionRelation,
+-    severity: overrides.severity ?? base.severity,
+-    scope: overrides.scope ?? base.scope,
+-    time: { decay: base.time.decay, deadline: base.time.deadline },
+-    domain: [...base.domain],
+-  };
+-}
+-
+-// ── Apparatus factory ────────────────────────────────────────────────
+-
+-/**
+- * Build the Vision-keeper apparatus.
+- *
+- * Closure-scoped state:
+- *   - `reckoner` — Reckoner handle resolved at `start()` (D23).
+- *   - `outstandingByVision` — in-memory `Map<visionId, writId>`. The
+- *     auto-supersede invariant holds this to at most one entry per
+- *     `visionId` at any time. Persistence across restart is a
+- *     separate follow-up (D9 limitation).
+- */
+-export function createVisionKeeper(): Plugin {
+-  let reckoner: ReckonerApi | undefined;
+-  const outstandingByVision = new Map<string, string>();
+-
+-  /**
+-   * Resolve the Reckoner handle. `start()` populates it; calls before
+-   * `start()` (or against a malformed apparatus map) throw a clear
+-   * diagnostic naming the package — saves the caller a layer of
+-   * stack-trace digging.
+-   */
+-  function reckonerOrThrow(): ReckonerApi {
+-    if (!reckoner) {
+-      throw new Error(
+-        '[vision-keeper] Reckoner handle is not yet resolved. The apparatus must be started before any submitDriftSnapshot/submitElaborationNudge/superseded call.',
+-      );
+-    }
+-    return reckoner;
+-  }
+-
+-  /**
+-   * Common emit path shared between drift snapshots and elaboration
+-   * nudges. Builds the typed payload, applies the dimension preset
+-   * (with per-call overrides), runs the auto-supersede check, and
+-   * routes through `reckoner.petition()`.
+-   *
+-   * On success the keeper records the new writ id under
+-   * `outstandingByVision[visionId]` so the next emit on the same
+-   * vision auto-supersedes this one.
+-   */
+-  async function emit(
+-    request: VisionSnapshotRequest,
+-    preset: Priority,
+-    defaultComplexity: ComplexityTier | undefined,
+-  ): Promise<WritDoc> {
+-    if (typeof request.visionId !== 'string' || request.visionId.length === 0) {
+-      // Required on every call (D8). Fail-loud at the helper boundary;
+-      // a missing visionId would silently route the snapshot under a
+-      // wrong key in `outstandingByVision` (it would key as `''`).
+-      throw new Error(
+-        '[vision-keeper] visionId is required on every emit call and must be a non-empty string.',
+-      );
+-    }
+-
+-    const r = reckonerOrThrow();
+-
+-    // Auto-supersede (D10): if there is an outstanding petition for
+-    // this vision, withdraw it before posting the new one. We do this
+-    // first so a failure withdrawing the prior surfaces before any
+-    // new writ is created.
+-    const prior = outstandingByVision.get(request.visionId);
+-    if (prior !== undefined) {
+-      // Forget the entry first so a withdraw failure doesn't leave a
+-      // stale entry pointing to an in-limbo writ — the failure path's
+-      // diagnostic is the single source of truth.
+-      outstandingByVision.delete(request.visionId);
+-      await r.withdraw(prior, AUTO_SUPERSEDE_REASON);
+-    }
+-
+-    // Auto-fill the typed payload's keeper-controlled fields.
+-    const payload: VisionSnapshotPayload = {
+-      visionId: request.visionId,
+-      snapshotTimestamp: new Date().toISOString(),
+-      visionVsRealityDelta: request.visionVsRealityDelta,
+-      metricValues: request.metricValues,
+-    };
+-
+-    // Apply caller overrides over the situation's preset.
+-    const priority = applyOverrides(preset, {
+-      severity: request.severity,
+-      scope: request.scope,
+-    });
+-
+-    // Complexity: caller override > situation default. Elaboration
+-    // nudges have no situation default — `defaultComplexity` arrives
+-    // as `undefined` and the keeper omits the field unless the caller
+-    // supplied one.
+-    const complexity =
+-      request.complexity !== undefined ? request.complexity : defaultComplexity;
+-
+-    const petitionRequest: PetitionRequest = {
+-      source: VISION_KEEPER_SOURCE,
+-      title: request.title,
+-      body: request.body,
+-      priority,
+-      payload,
+-      labels: { [VISION_ID_LABEL_KEY]: request.visionId },
+-      ...(complexity !== undefined ? { complexity } : {}),
+-      ...(request.codex !== undefined ? { codex: request.codex } : {}),
+-      ...(request.parentId !== undefined ? { parentId: request.parentId } : {}),
+-    };
+-
+-    const writ = await r.petition(petitionRequest);
+-    outstandingByVision.set(request.visionId, writ.id);
+-    return writ;
+-  }
+-
+-  const api: VisionKeeperApi = {
+-    submitDriftSnapshot(request: VisionSnapshotRequest): Promise<WritDoc> {
+-      return emit(request, driftDimensionPreset(), DRIFT_DEFAULT_COMPLEXITY);
+-    },
+-
+-    submitElaborationNudge(request: VisionSnapshotRequest): Promise<WritDoc> {
+-      // Elaboration nudges omit complexity by default (D6). Callers
+-      // can still provide it via `request.complexity`; the third
+-      // argument here is `undefined` so the situation default does
+-      // not stamp one.
+-      return emit(request, elaborationDimensionPreset(), undefined);
+-    },
+-
+-    async superseded(
+-      visionId: string,
+-      reason?: string,
+-    ): Promise<WritDoc | null> {
+-      if (typeof visionId !== 'string' || visionId.length === 0) {
+-        throw new Error(
+-          '[vision-keeper] superseded(): visionId must be a non-empty string.',
+-        );
+-      }
+-      const r = reckonerOrThrow();
+-      const writId = outstandingByVision.get(visionId);
+-      if (writId === undefined) {
+-        // Idempotent no-op (D9): callers can use this as an "ensure no
+-        // outstanding petition" lever without checking first.
+-        return null;
+-      }
+-      outstandingByVision.delete(visionId);
+-      return r.withdraw(writId, reason);
+-    },
+-  };
+-
+-  // ── Plugin ─────────────────────────────────────────────────────────
+-
+-  const plugin: Plugin = {
+-    apparatus: {
+-      // Reckoner is a hard `requires` (D21): without it the keeper
+-      // cannot petition at all. Clockworks is a soft `recommends`
+-      // because the keeper still works for emit/withdraw without
+-      // standing orders — only the decline-feedback channel needs it.
+-      requires: ['reckoner'],
+-      recommends: ['clockworks'],
+-
+-      // The keeper is a producer of kit-contributed petitioner and
+-      // relay descriptors via supportKit; it is not a consumer of any
+-      // kit type.
+-      provides: api,
+-
+-      supportKit: {
+-        // Petitioner kit declaration — the Reckoner consumes this
+-        // contribution under the `petitioners` kit type and registers
+-        // the descriptor in its kit-static registry. The description
+-        // is the verbatim brief text (D4).
+-        petitioners: [
+-          {
+-            source: VISION_KEEPER_SOURCE,
+-            description: VISION_KEEPER_DESCRIPTION,
+-          },
+-        ],
+-        // Decline-feedback relay — the Clockworks consumes this
+-        // contribution under the `relays` kit type. Operators wire a
+-        // standing order against `book.clerk.writs.updated` with
+-        // `run: 'vision-keeper-on-decline'` (see README); the relay
+-        // module owns the filter.
+-        relays: [createDeclineRelay()],
+-      },
+-
+-      start(_ctx: StartupContext): void {
+-        // Resolve the Reckoner handle once and close over it. The
+-        // `requires: ['reckoner']` declaration guarantees the
+-        // Reckoner has already started by the time we run.
+-        reckoner = guild().apparatus<ReckonerApi>('reckoner');
+-      },
+-    },
+-  };
+-
+-  return plugin;
+-}
+-
+-// ── Test-only internals (D20) ────────────────────────────────────────
+-
+-/**
+- * Internal helpers exported for tests. Not part of the public package
+- * surface — the package's `index.ts` re-exports these via the same
+- * `__internal` named export so unit tests can drive the dimension-
+- * preset builders without booting an apparatus.
+- */
+-export const __internal = {
+-  driftDimensionPreset,
+-  elaborationDimensionPreset,
+-  applyOverrides,
+-  AUTO_SUPERSEDE_REASON,
+-  VISION_KEEPER_DESCRIPTION,
+-  DRIFT_DEFAULT_COMPLEXITY,
+-  DECLINE_RELAY_NAME,
+-};
+diff --git a/packages/plugins/vision-keeper/tsconfig.json b/packages/plugins/vision-keeper/tsconfig.json
+deleted file mode 100644
+index 4229950..0000000
+--- a/packages/plugins/vision-keeper/tsconfig.json
++++ /dev/null
+@@ -1,13 +0,0 @@
+-{
+-  "extends": "../../../tsconfig.json",
+-  "compilerOptions": {
+-    "outDir": "dist",
+-    "rootDir": "src"
+-  },
+-  "include": [
+-    "src"
+-  ],
+-  "exclude": [
+-    "src/**/*.test.ts"
+-  ]
+-}
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 7b389cd..375c169 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -526,31 +526,6 @@ importers:
+         specifier: 25.5.0
+         version: 25.5.0
+ 
+-  packages/plugins/vision-keeper:
+-    dependencies:
+-      '@shardworks/clerk-apparatus':
+-        specifier: workspace:*
+-        version: link:../clerk
+-      '@shardworks/clockworks-apparatus':
+-        specifier: workspace:*
+-        version: link:../clockworks
+-      '@shardworks/reckoner-apparatus':
+-        specifier: workspace:*
+-        version: link:../reckoner
+-    devDependencies:
+-      '@shardworks/clockworks-stacks-signals-apparatus':
+-        specifier: workspace:*
+-        version: link:../clockworks-stacks-signals
+-      '@shardworks/nexus-core':
+-        specifier: workspace:*
+-        version: link:../../framework/core
+-      '@shardworks/stacks-apparatus':
+-        specifier: workspace:*
+-        version: link:../stacks
+-      '@types/node':
+-        specifier: 25.5.0
+-        version: 25.5.0
+-
+ packages:
+ 
+   '@hono/node-server@1.19.11':

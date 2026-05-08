@@ -1,0 +1,36 @@
+[
+  {
+    "id": "ses-movtl762-c75fb47c",
+    "status": "completed",
+    "startedAt": "2026-05-07T18:28:55.562Z",
+    "provider": "claude-code",
+    "authorizedTools": [
+      "session-running",
+      "session-record",
+      "session-heartbeat"
+    ],
+    "lastActivityAt": "2026-05-07T19:05:30.561Z",
+    "cancelHandle": {
+      "kind": "local-pgid",
+      "pgid": 1485173
+    },
+    "metadata": {
+      "engineId": "implement",
+      "trialId": "w-movtl5kr-b996878b2d3a",
+      "stage": "implement",
+      "provider": "lab.claude-session"
+    },
+    "endedAt": "2026-05-07T19:05:30.561Z",
+    "durationMs": 2194999,
+    "exitCode": 0,
+    "costUsd": 22.158499749999994,
+    "tokenUsage": {
+      "inputTokens": 150,
+      "outputTokens": 108993,
+      "cacheReadTokens": 33591334,
+      "cacheWriteTokens": 420835
+    },
+    "output": "The commission is complete. All seven tasks done and committed in one commit (`0248675`).\n\n**Summary**\n\nSwitched the Reckoner from CDC-driven per-writ-update evaluation to a periodic tick:\n\n- **New `reckoner.tick` relay** (`packages/plugins/reckoner/src/tick.ts`) with a pure handler-body helper for unit tests. Wired through `apparatus.supportKit.relays` plus a kit-contributed standing order at `@every 60s` via `supportKit.standingOrders` (no `id` field — operators cannot disable/override).\n- **CDC removal is total**: the `stacks.watch('clerk', 'writs')` subscription, `handleWritsChange`, `runCatchUpScan`, and `considerWrit` are all gone. Audit grep returns no matches.\n- **Per-fire sequence**: pre-seal throw (D8) → schedulerConfig re-read+validate → held-writ query → source/disabled gates inline → dedupe → batch SchedulerInput → evaluate → apply decisions per-writ. Empty candidate set early-returns without calling evaluate.\n- **Patron-prescribed semantics**: `source_banned` decline rows for disabled-source mid-flight (D2); `deferReason: 'other'` + `deferNote` for defer outcomes (D3); fail-loud-skip the entire tick on multi-decision-per-writ (D9); `tickEventId` stamped from `event.id` when present (D6).\n- **`recommends: ['clockworks']`** declared so the soft dep surfaces to Arbor's topo sort and operator readers; the Reckoner still boots cleanly without Clockworks (the relay is registered but never fires).\n- **Test surface rewritten** against the tick path — the new `reckoner-tick.test.ts` covers all 10 brief-enumerated cases via the new `hooks.runTick` entry point. `reckoner-scheduler.test.ts` shifts from \"petition then observe\" to \"petition then runTick then observe\"; the defer-outcome assertion flipped to expect a deferred row. `integration.test.ts` fires a tick after petition and asserts a populated `tickEventId`. The vision-keeper integration test surfaces the Reckoner's relay through Clockworks's kit-entry wire and drives the relay directly via `clockworks.resolveRelay('reckoner.tick')`.\n- **Docs updated**: Reckoner architecture (top callout, Dependencies, \"What it does NOT do\", Schedulers section); Reckonings book (tickEventId is now populated, no more \"always absent on v0\"); petitioner-registration (Reckoner observes the held writ on the next tick instead of via CDC); README.md (Phase 2 CDC subsection rewritten); types.ts comments on tickEventId / outcome / reason enums.\n- **Verification**: 25 packages typecheck clean; 3742 tests pass across the workspace.",
+    "providerSessionId": "a1dabe93-51bb-4df1-bbc2-334ae1f8f3ac"
+  }
+]

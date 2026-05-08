@@ -1,0 +1,36 @@
+[
+  {
+    "id": "ses-mowa4h3x-7adfa9ff",
+    "status": "completed",
+    "startedAt": "2026-05-08T02:11:48.765Z",
+    "provider": "claude-code",
+    "authorizedTools": [
+      "session-running",
+      "session-record",
+      "session-heartbeat"
+    ],
+    "lastActivityAt": "2026-05-08T02:45:10.826Z",
+    "cancelHandle": {
+      "kind": "local-pgid",
+      "pgid": 2073703
+    },
+    "metadata": {
+      "engineId": "implement",
+      "trialId": "w-mowa4fzj-2b756ca1e9d0",
+      "stage": "implement",
+      "provider": "lab.claude-session"
+    },
+    "endedAt": "2026-05-08T02:45:10.826Z",
+    "durationMs": 2002061,
+    "exitCode": 0,
+    "costUsd": 19.073624750000004,
+    "tokenUsage": {
+      "inputTokens": 151,
+      "outputTokens": 99910,
+      "cacheReadTokens": 28890021,
+      "cacheWriteTokens": 339633
+    },
+    "output": "Commission complete. Summary of work delivered:\n\n**Reckoner: CDC → periodic-tick switchover**\n\n- **New `tick.ts`** sibling-file relay following the `summon-relay.ts` / `decline-relay.ts` pattern. Exports `createTickRelay(context)` and `runTick(context, event?)` — the pure helper unit tests drive directly. Implements the full per-fire sequence: pre-seal fail-loud guard, `validateConfig` re-read, held-writ query, inline source/disabled gates, dedupe-before-scheduler, batch `evaluate`, decision validation (filter-and-warn on stranger writIds; fail-loud-skip on multi-decision-per-writ), decision application, and one Reckonings row per writ.\n- **`reckoner.ts`** rewritten: CDC subscription, `handleWritsChange`, `runCatchUpScan`, and `considerWrit` removed in their entirety. Wires `relays: [tickRelay]` and `standingOrders: [{ schedule: '@every 60s', run: 'reckoner.tick' }]` into `supportKit`. Adds `recommends: ['clockworks']`. Test hooks now expose `runTick(event?)` instead of the removed CDC entries.\n- **Disabled-source gate** now writes a `declined` row with `declineReason: 'source_banned'` plus a transition to the cancelled target (was a debug-log skip). **Defer outcome** now writes a `deferred` row with `deferReason: 'other'` and the decision's reason in `deferNote` (was no-row).\n- **Tests**: `reckoner-cdc.test.ts` replaced by `reckoner-tick.test.ts` exercising every brief-named behavioral case through `hooks.runTick`. Scheduler and integration tests shifted to driving the tick. Vision-keeper integration test re-uses production relay-resolution to fire ticks; vision-keeper unit-level test updated to assert held-in-`new` rather than implicit-approval.\n- **Docs**: Reckoner architecture doc (top callout, Dependencies, \"What … does NOT do\", Schedulers Failure modes), Reckonings book doc (`tickEventId` rule, Tick identity), petitioner-registration doc (CDC handler refs), Reckoner README, and the `tickEventId` field comment in `types.ts` all updated for the tick model. Out-of-radius `reckoner-tick`-vs-`reckoner.tick` drift in `clockworks.md` left to ride per the brief.\n- All `pnpm -w typecheck` / `pnpm -w test` runs are green; acceptance-signal greps for `handleWritsChange|runCatchUpScan|stacks.watch.*clerk.*writs|considerWrit` return zero matches in `packages/plugins/reckoner/src/`.",
+    "providerSessionId": "3190fd67-d8c4-4693-80c1-19545c7e2bc7"
+  }
+]

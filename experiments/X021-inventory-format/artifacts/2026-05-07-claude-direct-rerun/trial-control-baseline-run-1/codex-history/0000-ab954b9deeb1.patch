@@ -1,0 +1,794 @@
+
+
+diff --git a/packages/plugins/reckoner/README.md b/packages/plugins/reckoner/README.md
+index 720662f..af1d00d 100644
+--- a/packages/plugins/reckoner/README.md
++++ b/packages/plugins/reckoner/README.md
+@@ -149,8 +149,8 @@ import { guild } from '@shardworks/nexus-core';
+ const reckoner = guild().apparatus<ReckonerApi>('reckoner');
+ 
+ const writ = await reckoner.petition({
+-  source: 'vision-keeper.snapshot',
+-  title: 'Address vision drift detected at 04:00 UTC',
++  source: 'tech-debt.detected',
++  title: 'Address tech debt detected at 04:00 UTC',
+   body: '...',
+   codex: 'nexus',
+   priority: {
+@@ -189,7 +189,7 @@ const reckoner = guild().apparatus<ReckonerApi>('reckoner');
+ // Post the draft writ first — it is in its initial phase but not yet
+ // Reckoner-visible (no ext.reckoner).
+ const draft = await clerk.post({
+-  title: 'Address vision drift',
++  title: 'Address tech debt',
+   body:  '...',
+ });
+ 
+@@ -200,7 +200,7 @@ const draft = await clerk.post({
+ await stacks.transaction(async () => {
+   await clerk.link(draft.id, blockerId, 'depends-on');
+   await reckoner.petition(draft.id, {
+-    source: 'vision-keeper.snapshot',
++    source: 'tech-debt.detected',
+     priority: { visionRelation: 'vision-violator' },
+   });
+ });
+@@ -223,9 +223,9 @@ export default {
+     requires: ['reckoner'],
+     petitioners: [
+       {
+-        source: 'vision-keeper.snapshot',
++        source: 'tech-debt.detected',
+         description:
+-          'Periodic vision-vs-reality snapshots emitted when the keeper observes drift worth surfacing.',
++          'Tech-debt findings emitted when the detector observes accumulating debt worth surfacing.',
+       },
+     ],
+   },
+diff --git a/packages/plugins/reckoner/src/integration.test.ts b/packages/plugins/reckoner/src/integration.test.ts
+index a0af680..4a0a3fd 100644
+--- a/packages/plugins/reckoner/src/integration.test.ts
++++ b/packages/plugins/reckoner/src/integration.test.ts
+@@ -1,8 +1,6 @@
+ /**
+  * Reckoner end-to-end integration test.
+  *
+- * Apparatus-isolated counterpart to the vision-keeper integration
+- * test (`packages/plugins/vision-keeper/src/integration.test.ts`).
+  * Spins up Stacks + Clerk + Reckoner against the in-memory backend
+  * and exercises the public `petition()` helper through the full
+  * lifecycle:
+diff --git a/packages/plugins/reckoner/src/reckoner-tick.test.ts b/packages/plugins/reckoner/src/reckoner-tick.test.ts
+index 10ec257..7c48a69 100644
+--- a/packages/plugins/reckoner/src/reckoner-tick.test.ts
++++ b/packages/plugins/reckoner/src/reckoner-tick.test.ts
+@@ -287,11 +287,6 @@ const REGISTERED_PETITIONER = {
+   value: [{ source: 'tester.kind', description: 'tester' }],
+ };
+ 
+-const VK_PETITIONER = {
+-  pluginId: 'vision-keeper',
+-  value: [{ source: 'vision-keeper.snapshot', description: 'snapshots' }],
+-};
+-
+ // ── Tests ────────────────────────────────────────────────────────────
+ 
+ describe('Reckoner periodic tick', () => {
+@@ -301,7 +296,7 @@ describe('Reckoner periodic tick', () => {
+ 
+   describe('empty candidate set', () => {
+     it('writes nothing and throws nothing when no held writs are present', async () => {
+-      const fix = await buildFixture({ petitionerKits: [VK_PETITIONER] });
++      const fix = await buildFixture({ petitionerKits: [REGISTERED_PETITIONER] });
+       // No writs posted yet.
+       await fix.hooks.runTick();
+       const allRows = await fix.reckoningsBook.find({});
+@@ -314,14 +309,14 @@ describe('Reckoner periodic tick', () => {
+   describe('first tick after start', () => {
+     it('processes held writs that pre-date the apparatus start', async () => {
+       const fix = await buildFixture({
+-        petitionerKits: [VK_PETITIONER],
++        petitionerKits: [REGISTERED_PETITIONER],
+         async preStart({ clerk }) {
+           // Seed a held writ before the Reckoner starts. Without a
+           // catch-up scan, the writ remains in `new` until the
+           // first tick fires.
+           const w = await clerk.post({ title: 'pre-start', body: 'b' });
+           await clerk.setWritExt(w.id, 'reckoner', {
+-            source: 'vision-keeper.snapshot',
++            source: 'tester.kind',
+             priority: {
+               visionRelation: 'vision-neutral',
+               severity: 'minor',
+@@ -414,12 +409,12 @@ describe('Reckoner periodic tick', () => {
+   describe('disabled-source mid-flight', () => {
+     it('produces a declined row with declineReason: source_banned and transitions to cancelled', async () => {
+       const fix = await buildFixture({
+-        petitionerKits: [VK_PETITIONER],
++        petitionerKits: [REGISTERED_PETITIONER],
+       });
+ 
+       // Step 1: petition with the source NOT yet in disabledSources.
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 'mid-flight ban',
+         body: 'b',
+       });
+@@ -430,7 +425,7 @@ describe('Reckoner periodic tick', () => {
+       // decline the writ.
+       fix.fakeGuildConfig.reckoner = {
+         ...fix.fakeGuildConfig.reckoner,
+-        disabledSources: ['vision-keeper.snapshot'],
++        disabledSources: ['tester.kind'],
+       };
+ 
+       await fix.hooks.runTick();
+@@ -439,7 +434,7 @@ describe('Reckoner periodic tick', () => {
+       assert.equal(reread.phase, 'cancelled');
+       assert.match(
+         String(reread.resolution),
+-        /vision-keeper\.snapshot.*disabledSources/,
++        /tester\.kind.*disabledSources/,
+       );
+ 
+       const rows = await fix.reckoningsBook.find({
+@@ -448,7 +443,7 @@ describe('Reckoner periodic tick', () => {
+       assert.equal(rows.length, 1);
+       assert.equal(rows[0]!.outcome, 'declined');
+       assert.equal(rows[0]!.declineReason, 'source_banned');
+-      assert.equal(rows[0]!.remediationHint, 'vision-keeper.snapshot');
++      assert.equal(rows[0]!.remediationHint, 'tester.kind');
+     });
+   });
+ 
+@@ -457,11 +452,11 @@ describe('Reckoner periodic tick', () => {
+   describe('repeated-tick idempotency', () => {
+     it('produces exactly one row across multiple ticks at unchanged updatedAt', async () => {
+       const fix = await buildFixture({
+-        petitionerKits: [VK_PETITIONER],
++        petitionerKits: [REGISTERED_PETITIONER],
+       });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 'idempotent',
+         body: 'b',
+       });
+@@ -489,10 +484,10 @@ describe('Reckoner periodic tick', () => {
+   describe('target-phase resolution', () => {
+     it('picks `open` for mandate writs', async () => {
+       const fix = await buildFixture({
+-        petitionerKits: [VK_PETITIONER],
++        petitionerKits: [REGISTERED_PETITIONER],
+       });
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 't',
+         body: 'b',
+       });
+@@ -563,8 +558,8 @@ describe('Reckoner periodic tick', () => {
+   describe('withdrawal mid-flight', () => {
+     it('produces no Reckonings row when the petitioner withdraws before the next tick', async () => {
+       const fix = await buildFixture({
+-        petitionerKits: [VK_PETITIONER],
+-        config: { disabledSources: ['vision-keeper.snapshot'] },
++        petitionerKits: [REGISTERED_PETITIONER],
++        config: { disabledSources: ['tester.kind'] },
+       });
+ 
+       // Disabled source: petition lands in `new`, no row, no
+@@ -572,7 +567,7 @@ describe('Reckoner periodic tick', () => {
+       // out of `new` before the next tick fires. The tick must
+       // observe no candidate (`phase !== 'new'`).
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 't',
+         body: 'b',
+       });
+@@ -699,10 +694,10 @@ describe('Reckoner periodic tick', () => {
+ 
+   describe('tickEventId stamping', () => {
+     it('stamps tickEventId from the triggering event id when present', async () => {
+-      const fix = await buildFixture({ petitionerKits: [VK_PETITIONER] });
++      const fix = await buildFixture({ petitionerKits: [REGISTERED_PETITIONER] });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 't',
+         body: 'b',
+       });
+@@ -724,10 +719,10 @@ describe('Reckoner periodic tick', () => {
+     });
+ 
+     it('omits tickEventId when no event is supplied', async () => {
+-      const fix = await buildFixture({ petitionerKits: [VK_PETITIONER] });
++      const fix = await buildFixture({ petitionerKits: [REGISTERED_PETITIONER] });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 't',
+         body: 'b',
+       });
+diff --git a/packages/plugins/reckoner/src/reckoner.test.ts b/packages/plugins/reckoner/src/reckoner.test.ts
+index 78eb76e..13a1b3f 100644
+--- a/packages/plugins/reckoner/src/reckoner.test.ts
++++ b/packages/plugins/reckoner/src/reckoner.test.ts
+@@ -15,7 +15,7 @@
+  *      false` (default): succeeds; warning logged.
+  *   4. `petition({ source: 'unknown' })` with `enforceRegistration:
+  *      true`: throws fail-loud; no writ posted.
+- *   5. `petition({ source: 'vision-keeper.snapshot', priority: {
++ *   5. `petition({ source: 'tester.kind', priority: {
+  *      visionRelation: 'vision-violator' } })`: succeeds; omitted
+  *      priority dimensions fall back to defaults.
+  *   6. Resulting writ: `phase: 'new'` and `writ.ext.reckoner =
+@@ -243,19 +243,19 @@ describe('Reckoner apparatus', () => {
+           buildFixture({
+             petitionerKits: [
+               {
+-                pluginId: 'vision-keeper',
++                pluginId: 'tester',
+                 value: [
+                   {
+-                    source: 'vision-keeper.snapshot',
++                    source: 'tester.kind',
+                     description: 'first kit',
+                   },
+                 ],
+               },
+               {
+-                pluginId: 'vision-keeper',
++                pluginId: 'tester',
+                 value: [
+                   {
+-                    source: 'vision-keeper.snapshot',
++                    source: 'tester.kind',
+                     description: 'second kit',
+                   },
+                 ],
+@@ -264,10 +264,10 @@ describe('Reckoner apparatus', () => {
+           }),
+         (err: Error) => {
+           assert.match(err.message, /duplicate source/i);
+-          assert.match(err.message, /vision-keeper\.snapshot/);
++          assert.match(err.message, /tester\.kind/);
+           // The diagnostic must name the first kit (already-
+           // registered owner) and the second kit (the offender).
+-          assert.match(err.message, /vision-keeper/);
++          assert.match(err.message, /tester/);
+           return true;
+         },
+       );
+@@ -277,7 +277,7 @@ describe('Reckoner apparatus', () => {
+       // Two distinct contributing plugin ids cannot share a source —
+       // the prefix-vs-pluginId check would reject the second one
+       // independently, so we test the same-prefix-different-plugin
+-      // case via two kits both contributing under "vision-keeper"
++      // case via two kits both contributing under "tester"
+       // but verify the diagnostic names both. (This case is covered
+       // by the prior test; this one specifically exercises the
+       // duplicate path with explicit naming of both kits.)
+@@ -286,19 +286,19 @@ describe('Reckoner apparatus', () => {
+         await buildFixture({
+           petitionerKits: [
+             {
+-              pluginId: 'vision-keeper',
++              pluginId: 'tester',
+               value: [
+                 {
+-                  source: 'vision-keeper.snapshot',
++                  source: 'tester.kind',
+                   description: 'A',
+                 },
+               ],
+             },
+             {
+-              pluginId: 'vision-keeper',
++              pluginId: 'tester',
+               value: [
+                 {
+-                  source: 'vision-keeper.snapshot',
++                  source: 'tester.kind',
+                   description: 'B',
+                 },
+               ],
+@@ -323,10 +323,10 @@ describe('Reckoner apparatus', () => {
+           buildFixture({
+             petitionerKits: [
+               {
+-                pluginId: 'vision-keeper',
++                pluginId: 'tester',
+                 value: [
+                   {
+-                    source: 'visionkeepersnapshot',
++                    source: 'testerkind',
+                     description: 'no dot',
+                   },
+                 ],
+@@ -335,7 +335,7 @@ describe('Reckoner apparatus', () => {
+           }),
+         (err: Error) => {
+           assert.match(err.message, /must be of the form/i);
+-          assert.match(err.message, /visionkeepersnapshot/);
++          assert.match(err.message, /testerkind/);
+           return true;
+         },
+       );
+@@ -347,10 +347,10 @@ describe('Reckoner apparatus', () => {
+           buildFixture({
+             petitionerKits: [
+               {
+-                pluginId: 'vision-keeper',
++                pluginId: 'tester',
+                 value: [
+                   {
+-                    source: 'other-plugin.snapshot',
++                    source: 'other-plugin.kind',
+                     description: 'wrong prefix',
+                   },
+                 ],
+@@ -359,7 +359,7 @@ describe('Reckoner apparatus', () => {
+           }),
+         (err: Error) => {
+           assert.match(err.message, /must match the contributing plugin id/i);
+-          assert.match(err.message, /vision-keeper/);
++          assert.match(err.message, /tester/);
+           assert.match(err.message, /other-plugin/);
+           return true;
+         },
+@@ -372,10 +372,10 @@ describe('Reckoner apparatus', () => {
+           buildFixture({
+             petitionerKits: [
+               {
+-                pluginId: 'vision-keeper',
++                pluginId: 'tester',
+                 value: [
+                   {
+-                    source: 'vision-keeper.Snapshot', // uppercase
++                    source: 'tester.Kind', // uppercase
+                     description: 'bad suffix',
+                   },
+                 ],
+@@ -467,10 +467,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots emitted on drift',
+               },
+             ],
+@@ -479,7 +479,7 @@ describe('Reckoner apparatus', () => {
+       });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 'Address vision drift',
+         body: 'long-form body',
+         codex: 'nexus',
+@@ -488,7 +488,7 @@ describe('Reckoner apparatus', () => {
+         },
+         complexity: 'bounded',
+         payload: { snapshotId: 'snap-1' },
+-        labels: { 'vision-keeper.io/vision-id': 'nexus' },
++        labels: { 'tester.io/instance-id': 'nexus' },
+       });
+ 
+       // Behavioral case 6: phase + ext shape.
+@@ -498,10 +498,10 @@ describe('Reckoner apparatus', () => {
+ 
+       const ext = writ.ext?.reckoner as ReckonerExt | undefined;
+       assert.ok(ext, 'writ.ext.reckoner must be populated');
+-      assert.equal(ext!.source, 'vision-keeper.snapshot');
++      assert.equal(ext!.source, 'tester.kind');
+       assert.equal(ext!.complexity, 'bounded');
+       assert.deepEqual(ext!.payload, { snapshotId: 'snap-1' });
+-      assert.deepEqual(ext!.labels, { 'vision-keeper.io/vision-id': 'nexus' });
++      assert.deepEqual(ext!.labels, { 'tester.io/instance-id': 'nexus' });
+ 
+       // Behavioral case 5: omitted priority dimensions fall back to
+       // contract defaults from §3 of the contract document.
+@@ -517,10 +517,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -529,7 +529,7 @@ describe('Reckoner apparatus', () => {
+       });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 'mvp',
+         body: 'B',
+       });
+@@ -547,10 +547,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -561,7 +561,7 @@ describe('Reckoner apparatus', () => {
+       await assert.rejects(
+         () =>
+           fix.reckoner.petition({
+-            source: 'vision-keeper.snapshot',
++            source: 'tester.kind',
+             title: 'bad',
+             body: 'B',
+             priority: {
+@@ -595,10 +595,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -615,21 +615,21 @@ describe('Reckoner apparatus', () => {
+       assert.equal(writ.ext, undefined, 'no ext.reckoner before stamp');
+ 
+       const stamped = await fix.reckoner.petition(writ.id, {
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         priority: { visionRelation: 'vision-violator' },
+         complexity: 'bounded',
+         payload: { snapshotId: 'snap-1' },
+-        labels: { 'vision-keeper.io/vision-id': 'nexus' },
++        labels: { 'tester.io/instance-id': 'nexus' },
+       });
+ 
+       assert.equal(stamped.id, writ.id, 'returns the same writ');
+       assert.equal(stamped.phase, 'new', 'stamping does not transition');
+       const ext = stamped.ext?.reckoner as ReckonerExt | undefined;
+       assert.ok(ext, 'ext.reckoner populated after stamp');
+-      assert.equal(ext!.source, 'vision-keeper.snapshot');
++      assert.equal(ext!.source, 'tester.kind');
+       assert.equal(ext!.complexity, 'bounded');
+       assert.deepEqual(ext!.payload, { snapshotId: 'snap-1' });
+-      assert.deepEqual(ext!.labels, { 'vision-keeper.io/vision-id': 'nexus' });
++      assert.deepEqual(ext!.labels, { 'tester.io/instance-id': 'nexus' });
+       // Default-fill on omitted dimensions, identical to create+stamp form.
+       assert.equal(ext!.priority.visionRelation, 'vision-violator');
+       assert.equal(ext!.priority.severity, 'minor');
+@@ -643,10 +643,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -656,7 +656,7 @@ describe('Reckoner apparatus', () => {
+ 
+       const writ = await fix.clerk.post({ title: 'mvp', body: 'B' });
+       const stamped = await fix.reckoner.petition(writ.id, {
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+       });
+ 
+       const ext = stamped.ext?.reckoner as ReckonerExt | undefined;
+@@ -677,23 +677,23 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+           },
+         ],
+         config: {
+-          disabledSources: ['vision-keeper.snapshot'],
++          disabledSources: ['tester.kind'],
+         },
+       });
+ 
+       try {
+         const existing = await fix.reckoner.petition({
+-          source: 'vision-keeper.snapshot',
++          source: 'tester.kind',
+           title: 'already petitioned',
+           body: 'B',
+         });
+@@ -706,7 +706,7 @@ describe('Reckoner apparatus', () => {
+         await assert.rejects(
+           () =>
+             fix.reckoner.petition(existing.id, {
+-              source: 'vision-keeper.snapshot',
++              source: 'tester.kind',
+               priority: { severity: 'critical' },
+             }),
+           (err: Error) => {
+@@ -731,10 +731,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -753,7 +753,7 @@ describe('Reckoner apparatus', () => {
+       await assert.rejects(
+         () =>
+           fix.reckoner.petition(writ.id, {
+-            source: 'vision-keeper.snapshot',
++            source: 'tester.kind',
+           }),
+         (err: Error) => {
+           assert.match(err.message, /\[reckoner\] petition:/);
+@@ -772,10 +772,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -786,7 +786,7 @@ describe('Reckoner apparatus', () => {
+       await assert.rejects(
+         () =>
+           fix.reckoner.petition('w-does-not-exist', {
+-            source: 'vision-keeper.snapshot',
++            source: 'tester.kind',
+           }),
+         (err: Error) => {
+           assert.match(err.message, /\[reckoner\] petition:/);
+@@ -857,10 +857,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -874,7 +874,7 @@ describe('Reckoner apparatus', () => {
+       await assert.rejects(
+         () =>
+           fix.reckoner.petition(writ.id, {
+-            source: 'vision-keeper.snapshot',
++            source: 'tester.kind',
+             priority: {
+               visionRelation: 'vision-incinerator' as unknown as PetitionExtRequest['priority'] extends
+                 | infer P
+@@ -901,10 +901,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -914,7 +914,7 @@ describe('Reckoner apparatus', () => {
+ 
+       const writ = await fix.clerk.post({ title: 'partial priority', body: 'b' });
+       const stamped = await fix.reckoner.petition(writ.id, {
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         priority: {
+           severity: 'critical',
+           domain: ['security'],
+@@ -945,10 +945,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -1033,7 +1033,7 @@ describe('Reckoner apparatus', () => {
+         // perspective; the framework defers Phase-2 dispatch to
+         // commit.
+         await fix.reckoner.petition(draftId, {
+-          source: 'vision-keeper.snapshot',
++          source: 'tester.kind',
+           priority: { visionRelation: 'vision-violator' },
+         });
+ 
+@@ -1073,7 +1073,7 @@ describe('Reckoner apparatus', () => {
+       const reread = await fix.clerk.show(draftId);
+       const ext = reread.ext?.reckoner as ReckonerExt | undefined;
+       assert.ok(ext, 'ext.reckoner is set after commit');
+-      assert.equal(ext!.source, 'vision-keeper.snapshot');
++      assert.equal(ext!.source, 'tester.kind');
+ 
+       const reckoningsBook = fix.stacks.readBook<{ writId: string; outcome: string; [k: string]: unknown }>(
+         'reckoner',
+@@ -1094,10 +1094,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -1106,7 +1106,7 @@ describe('Reckoner apparatus', () => {
+       });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 'to be withdrawn',
+         body: 'B',
+       });
+@@ -1127,10 +1127,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -1139,7 +1139,7 @@ describe('Reckoner apparatus', () => {
+       });
+ 
+       const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         title: 'silent withdraw',
+         body: 'B',
+       });
+@@ -1197,10 +1197,10 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+@@ -1211,7 +1211,7 @@ describe('Reckoner apparatus', () => {
+       const list = fix.reckoner.listPetitioners();
+       assert.equal(list.length, 1);
+       assert.deepEqual(list[0], {
+-        source: 'vision-keeper.snapshot',
++        source: 'tester.kind',
+         description: 'snapshots',
+       });
+     });
+@@ -1220,17 +1220,17 @@ describe('Reckoner apparatus', () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+-            pluginId: 'vision-keeper',
++            pluginId: 'tester',
+             value: [
+               {
+-                source: 'vision-keeper.snapshot',
++                source: 'tester.kind',
+                 description: 'snapshots',
+               },
+             ],
+           },
+         ],
+       });
+-      assert.equal(fix.reckoner.isSourceRegistered('vision-keeper.snapshot'), true);
++      assert.equal(fix.reckoner.isSourceRegistered('tester.kind'), true);
+       assert.equal(fix.reckoner.isSourceRegistered('unknown.source'), false);
+     });
+ 
+@@ -1241,12 +1241,12 @@ describe('Reckoner apparatus', () => {
+       });
+ 
+       assert.equal(fix.reckoner.isSourceDisabled('noisy.source'), true);
+-      assert.equal(fix.reckoner.isSourceDisabled('vision-keeper.snapshot'), false);
++      assert.equal(fix.reckoner.isSourceDisabled('tester.kind'), false);
+ 
+       // Hot-edit guild.json — the change is observed without restart.
+-      fix.fakeGuildConfig.reckoner = { disabledSources: ['vision-keeper.snapshot'] };
++      fix.fakeGuildConfig.reckoner = { disabledSources: ['tester.kind'] };
+       assert.equal(fix.reckoner.isSourceDisabled('noisy.source'), false);
+-      assert.equal(fix.reckoner.isSourceDisabled('vision-keeper.snapshot'), true);
++      assert.equal(fix.reckoner.isSourceDisabled('tester.kind'), true);
+     });
+   });
+ 
+diff --git a/packages/plugins/reckoner/src/tick.ts b/packages/plugins/reckoner/src/tick.ts
+index ba95ef5..ec16b74 100644
+--- a/packages/plugins/reckoner/src/tick.ts
++++ b/packages/plugins/reckoner/src/tick.ts
+@@ -71,8 +71,7 @@
+  *      absent (e.g. test paths driving the handler with `null`).
+  *
+  * Source-file layout follows the established stdlib-relay pattern
+- * (`packages/plugins/clockworks/src/summon-relay.ts`,
+- * `packages/plugins/vision-keeper/src/decline-relay.ts`). The relay
++ * (`packages/plugins/clockworks/src/summon-relay.ts`). The relay
+  * factory and the pure handler-body helper are co-located here so
+  * unit tests can drive the helper without booting Clockworks.
+  *
+diff --git a/packages/plugins/reckoner/src/types.ts b/packages/plugins/reckoner/src/types.ts
+index 870d09e..5f9812a 100644
+--- a/packages/plugins/reckoner/src/types.ts
++++ b/packages/plugins/reckoner/src/types.ts
+@@ -5,8 +5,8 @@
+  * kit-static petitioner registry, exposes the canonical
+  * `petition()` / `withdraw()` helpers (Workflow 2 in the contract
+  * document), and surfaces inspection helpers for downstream
+- * consumers (the periodic tick handler, the vision-keeper kit, the
+- * patron-bridge apparatus).
++ * consumers (the periodic tick handler, registered petitioner kits,
++ * the patron-bridge apparatus).
+  *
+  * This file is the single source of public-symbol truth — every
+  * type a downstream import touches lives here, including

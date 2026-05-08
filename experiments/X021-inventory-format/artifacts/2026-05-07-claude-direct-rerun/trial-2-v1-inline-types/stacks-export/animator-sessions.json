@@ -1,0 +1,36 @@
+[
+  {
+    "id": "ses-movuxirs-0671b677",
+    "status": "completed",
+    "startedAt": "2026-05-07T19:06:30.089Z",
+    "provider": "claude-code",
+    "authorizedTools": [
+      "session-running",
+      "session-record",
+      "session-heartbeat"
+    ],
+    "lastActivityAt": "2026-05-07T19:45:56.487Z",
+    "cancelHandle": {
+      "kind": "local-pgid",
+      "pgid": 1528940
+    },
+    "metadata": {
+      "engineId": "implement",
+      "trialId": "w-movuxeil-e23a4f3d25fc",
+      "stage": "implement",
+      "provider": "lab.claude-session"
+    },
+    "endedAt": "2026-05-07T19:45:56.487Z",
+    "durationMs": 2366398,
+    "exitCode": 0,
+    "costUsd": 27.903136000000018,
+    "tokenUsage": {
+      "inputTokens": 175,
+      "outputTokens": 110940,
+      "cacheReadTokens": 44451514,
+      "cacheWriteTokens": 462600
+    },
+    "output": "The work is complete and committed. Here's a summary of what was done:\n\n## Summary\n\n**Commission:** Switch the Reckoner from CDC-driven per-writ-update evaluation to a periodic tick.\n\n**What landed:**\n\n1. **New `reckoner.tick` relay** (`packages/plugins/reckoner/src/tick.ts`) — sibling-file relay following the `summon-relay` / `decline-relay` pattern. Pure handler-body helper (`runTick`) takes a dependency context for unit testability.\n\n2. **Kit contributions in `reckoner.ts`:**\n   - `supportKit.relays`: `[createTickRelay(deps)]`\n   - `supportKit.standingOrders`: `[{ schedule: '@every 60s', run: 'reckoner.tick' }]` — first apparatus shipping a default standing order\n   - Added `recommends: ['clockworks']`\n\n3. **CDC removal is total** — `handleWritsChange`, `runCatchUpScan`, the `clerk/writs` watch subscription, and `considerWrit` are all gone. The tick is the sole evaluation entry.\n\n4. **Per-tick sequence** matches the brief's prescription: resolve scheduler → re-read+validate config → query held petitions → apply source/disabled gates inline → dedupe → call evaluate → apply decisions → write rows. Disabled-source decline (D2: `source_banned`), defer row (D3: `deferReason: 'other'` + `deferNote`), tickEventId stamping (D6), pre-write dedupe (D7), pre-seal fail-loud throw (D8), filter-and-warn on stranger writIds + fail-loud-skip on multi-decision (D9), early-return on empty candidates (D10), `runTick` hook (D11).\n\n5. **Test surface refresh**: `reckoner-cdc.test.ts` → `reckoner-tick.test.ts` covering 14 behavioral cases. Scheduler tests shift to \"petition → runTick → observe\". Integration test fires a tick and asserts `tickEventId`. Vision-keeper tests patched to drive the tick via `runTick` (now exported from the public surface).\n\n6. **Documentation drift closed** in the Reckoner architecture doc, Reckonings book doc, petitioner-registration doc, package README, and the `tickEventId`/`ReckoningOutcome`/`ReckoningDeferReason` field comments.\n\n**Verification:**\n- `pnpm -w typecheck` passes\n- `pnpm -w test` passes (61 reckoner tests, 25 vision-keeper tests, plus everything else)\n- Audit greps clean: no `handleWritsChange|runCatchUpScan|stacks.watch.*clerk.*writs|considerWrit` in reckoner src\n- Apparatus boots both with and without Clockworks (existing fixtures cover both)",
+    "providerSessionId": "c580cc59-15e2-4deb-ba34-01172c3d04c8"
+  }
+]
