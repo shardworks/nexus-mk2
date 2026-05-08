@@ -18,9 +18,32 @@ cell clears H1 (-10% vs $37.85).
 
 | run | manifest | rig | role file | trial writ | depends-on | status | cost | duration | notes |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | `rig-moj12h4o-turn-discipline.yaml` | substantive | turn-discipline | `w-mox34hwi` | — (head) | open | — | — | turn-discipline replicate 1/3 |
-| 2 | `rig-moj12h4o-turn-discipline.yaml` | substantive | turn-discipline | `w-mox34l3r` | `w-mox34hwi` | open (held) | — | — | turn-discipline replicate 2/3 |
-| 3 | `rig-moj12h4o-turn-discipline.yaml` | substantive | turn-discipline | `w-mox34okl` | `w-mox34l3r` | open (held) | — | — | turn-discipline replicate 3/3 |
+| 1 | `rig-moj12h4o-turn-discipline.yaml` | substantive | turn-discipline | `w-mox34hwi` | — (head) | **completed** | $33.28 | 42.5 min | clean run, exit 0, sealed |
+| 2 | `rig-moj12h4o-turn-discipline.yaml` | substantive | turn-discipline | `w-mox34l3r` | `w-mox34hwi` | **completed** | $35.93 | 43.0 min | clean run, exit 0, sealed |
+| 3 | `rig-moj12h4o-turn-discipline.yaml` | substantive | turn-discipline | `w-mox34okl` | `w-mox34l3r` | **completed** | $40.37 | 189.4 min | wedged on `pnpm -w test` mid-session; Coco killed bash tree, claude recovered, sealed exit 0. ~$2-4 of recovery cost included. Same wedge pattern as X022 trial 8 / click `c-moizriyk`. |
+| F1-F3 | `rig-moji64hs-turn-discipline.yaml` | foil | turn-discipline | — | — | **cancelled** | — | — | Foil cell cancelled 2026-05-08 — substantive cell did not clear H1, no basis to spend on foil replication. |
+
+## Final cell summary
+
+| cell | n | mean | range | CV |
+|---|---:|---:|---|---:|
+| substantive baseline (X022 reuse) | 3 | $37.85 | $32.59-$43.60 | 14.6% |
+| substantive X022 combined-nudges | 3 | $32.81 | $30.14-$34.40 | 7.1% |
+| **substantive X024 turn-discipline** | **3** | **$36.53** | $33.28-$40.37 | 9.8% |
+
+**X024 vs baseline:** -3.5% (does not clear H1's 10% threshold)
+**X024 vs X022 combined:** +11.3% (X022's imperative framing did meaningfully better)
+
+## Hypothesis verdicts
+
+| | hypothesis | verdict |
+|---|---|---|
+| H1 | variant cuts substantive cost ≥10% vs baseline | **NOT sustained** (-3.5%) |
+| H2 | ≥2 of 3 named examples move in predicted direction | **NOT sustained** (only 1 of 3) |
+| H3 | no quality regression | sustained at Tier 1 |
+| H4 | foil cell variant cost ≤ $20.39 | **N/A** — foil cell cancelled |
+
+See [`results.md`](results.md) for full writeup.
 
 ## Comparator (X022 substantive baseline, n=3)
 

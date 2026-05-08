@@ -59,6 +59,18 @@ WRIT_EXTRACT_OVERRIDES: dict[str, Path] = {
         "/workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/"
         "artifacts/2026-05-08-trials-8-9-extracts/w-mowr4mri"
     ),
+    "w-mox34hwi": Path(
+        "/workspace/nexus-mk2/experiments/X024-implementer-turn-discipline/"
+        "artifacts/2026-05-08-trials-extracts/w-mox34hwi"
+    ),
+    "w-mox34l3r": Path(
+        "/workspace/nexus-mk2/experiments/X024-implementer-turn-discipline/"
+        "artifacts/2026-05-08-trials-extracts/w-mox34l3r"
+    ),
+    "w-mox34okl": Path(
+        "/workspace/nexus-mk2/experiments/X024-implementer-turn-discipline/"
+        "artifacts/2026-05-08-trials-extracts/w-mox34okl"
+    ),
 }
 
 # Default writ → cell mapping for X022 (extend as new trials land).
@@ -75,6 +87,10 @@ WRIT_CELLS: dict[str, str] = {
     # Baseline-firming chain (claude-direct, posted 2026-05-08)
     "w-mowr4jq1": "substantive-baseline",
     "w-mowr4mri": "substantive-baseline",
+    # X024 — goal-stated turn-discipline variant (claude-direct, posted 2026-05-08)
+    "w-mox34hwi": "substantive-turn-discipline",
+    "w-mox34l3r": "substantive-turn-discipline",
+    "w-mox34okl": "substantive-turn-discipline",
 }
 
 
@@ -387,8 +403,9 @@ def print_summary_table(summary: dict[str, dict], file=sys.stderr) -> None:
     order_key = {
         "substantive-baseline": 0,
         "substantive-combined": 1,
-        "control-baseline": 2,
-        "control-combined": 3,
+        "substantive-turn-discipline": 2,
+        "control-baseline": 3,
+        "control-combined": 4,
     }
     rows.sort(key=lambda kv: order_key.get(kv[0], 99))
 

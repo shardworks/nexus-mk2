@@ -1,8 +1,13 @@
 ---
-status: active
+status: complete
 ---
 
 # X024 — Implementer Turn Discipline
+
+**Status (2026-05-08):** **Complete. H1, H2 not sustained.** Substantive
+cell at n=3 produced -3.5% cost reduction (well below 10% threshold and
+inside baseline noise). Only 1 of 3 named examples moved in predicted
+direction. Foil cell cancelled. See [`artifacts/results.md`](artifacts/results.md).
 
 **Parent click:** TBD (will be opened on activation; child of
 `c-mok4nke6` Apr 29 cost-optimization landscape).
