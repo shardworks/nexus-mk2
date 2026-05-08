@@ -1,0 +1,79 @@
+slug: x024-rig-moj12h4o-turn-discipline
+title: X024 — rig-moj12h4o (substantive, Reckoner periodic tick) turn-discipline variant
+codex: nexus
+
+description: |
+  X024 turn-discipline variant on the substantive rig (rig-moj12h4o,
+  Reckoner periodic tick / w-moiy8hkv).
+
+  The variant role file prepends a "Tooling discipline" section between
+  "Role" and "Testing", framed around minimizing turn count rather than
+  enumerating five specific imperatives. Three illustrative examples
+  show what turn-waste looks like (Bash bulk edits, repeat greps,
+  re-testing unchanged packages); the framing is goal-stated, not
+  rule-following.
+
+  Motivation: X022's combined-nudges variant produced a marginal -13%
+  cost reduction at n=3, but the per-mechanism story did not hold —
+  three of five imperatives were going wrong direction or flat. The
+  most likely explanation is that the "Tooling Discipline" framing
+  itself produced a general "be deliberate" effect, not the specific
+  rules. X024 tests whether stating the goal directly (minimize turns)
+  with examples in support produces the same or better effect with a
+  cleaner mechanism signature.
+
+  Same codex pin, same fixtures, same brief, same framework version
+  as X022's substantive baseline. The only deliberate variable is the
+  artificer role file content passed through `rolePath`.
+
+  Compare against X022's substantive baseline cell (n=3, mean $37.85)
+  rather than running a fresh baseline.
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: 0e1e81f4a219179fd264625b869e12bd00778365
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: 0e1e81f4a219179fd264625b869e12bd00778365
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X024-implementer-turn-discipline/fixtures/test-guild/roles/artificer-turn-discipline.md
+      briefPath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/briefs/rig-moj12h4o-baseline.md
+      model: opus
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set -e
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus build
+        pnpm --filter @shardworks/reckoner-apparatus --filter @shardworks/clockworks-apparatus test
+        git push origin HEAD:main
+      verifyTimeoutMs: 600000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

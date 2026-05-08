@@ -1,0 +1,71 @@
+slug: x024-rig-moji64hs-turn-discipline
+title: X024 — rig-moji64hs (foil, vision-keeper deletion) turn-discipline variant
+codex: nexus
+
+description: |
+  X024 turn-discipline variant on the foil rig (rig-moji64hs,
+  vision-keeper deletion + Surveyor redefinition / w-moji63xm).
+
+  The variant role file prepends a "Tooling discipline" section between
+  "Role" and "Testing", framed around minimizing turn count rather than
+  enumerating five specific imperatives.
+
+  Same codex pin, same fixtures, same brief, same framework version
+  as X022's foil baseline (rig-moji64hs-baseline.yaml is the natural
+  comparator, but X022 did not run a foil baseline — it compared
+  variant vs production full-rig cost $20.39 instead). For X024 we
+  follow the same approach: compare variant cost against production
+  full-rig $20.39 as a first-pass H2 signal.
+
+  Posted only after the substantive cell (rig-moj12h4o-turn-discipline)
+  lands and the findings warrant the additional spend. If the
+  substantive variant fails to improve on X022's combined-nudges
+  result (-13% vs baseline), we likely cancel the foil cell.
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: d6e34097f698df66d595f81f928320eafde8276f
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: d6e34097f698df66d595f81f928320eafde8276f
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X024-implementer-turn-discipline/fixtures/test-guild/roles/artificer-turn-discipline.md
+      briefPath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/briefs/rig-moji64hs-baseline.md
+      model: opus
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set -e
+        pnpm -w typecheck
+        git push origin HEAD:main
+      verifyTimeoutMs: 600000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

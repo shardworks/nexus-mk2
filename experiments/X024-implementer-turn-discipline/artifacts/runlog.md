@@ -1,0 +1,55 @@
+# X024 Runlog
+
+Live tracking for the X024 implementer-turn-discipline trial sequence.
+Coco appends to this as trials land.
+
+**Click:** TBD (will be opened on first follow-up).
+**Spec:** [`spec.md`](../spec.md).
+
+## Trial sequence
+
+n=3 substantive cell on rig-moj12h4o. Posted as a depends-on chain
+2026-05-08 15:43 UTC, then published. Spider serializes via the
+depends-on link kind. Compares against X022's n=3 substantive
+baseline ($37.85 mean, range $32.59–$43.60).
+
+Foil cell (rig-moji64hs) is conditional — posted only if substantive
+cell clears H1 (-10% vs $37.85).
+
+| run | manifest | rig | role file | trial writ | depends-on | status | cost | duration | notes |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | `rig-moj12h4o-turn-discipline.yaml` | substantive | turn-discipline | `w-mox34hwi` | — (head) | open | — | — | turn-discipline replicate 1/3 |
+| 2 | `rig-moj12h4o-turn-discipline.yaml` | substantive | turn-discipline | `w-mox34l3r` | `w-mox34hwi` | open (held) | — | — | turn-discipline replicate 2/3 |
+| 3 | `rig-moj12h4o-turn-discipline.yaml` | substantive | turn-discipline | `w-mox34okl` | `w-mox34l3r` | open (held) | — | — | turn-discipline replicate 3/3 |
+
+## Comparator (X022 substantive baseline, n=3)
+
+| trial | writ | cost | duration |
+|---|---|---:|---:|
+| X022 trial 1 (xguild) | `w-mopuwdsp` | $37.35 (impl-only) | 42.3 min |
+| X022 trial 8 (claude-direct) | `w-mowr4jq1` | $43.60 | 47 min real (+ 115 min wedge) |
+| X022 trial 9 (claude-direct) | `w-mowr4mri` | $32.59 | 40.5 min |
+| **mean** | | **$37.85** | |
+| **CV** | | 14.6% | |
+
+## Hypothesis status
+
+- **H1** — Goal-stated turn-discipline cuts substantive cost ≥10% vs X022 baseline.
+  - **Status:** unresolved. Needs all 3 trials.
+- **H2** — Cleaner per-mechanism signature than X022's variant: ≥2 of 3 examples
+  (Bash bulk +sed-i, repeat-grep avoidance, no re-test of unchanged) move in
+  predicted direction.
+  - **Status:** unresolved. Tool-use metrics extracted post-trial.
+- **H3** — No quality regression vs X022 baseline (Tier 1 verifyCommand exit 0
+  + Tier 2 manual diff vs `7c810bb`).
+  - **Status:** unresolved.
+- **H4** — Foil cell variant cost ≤ $20.39 production full-rig.
+  - **Status:** conditional — only run if H1 clears.
+
+## Cost ceiling
+
+| | trials | spend |
+|---|---|---|
+| Estimated (n=3 substantive) | 3 | $54–$84 |
+| Estimated (n=3 foil, conditional) | 3 | $33–$45 |
+| **Total estimated (both cells if foil runs)** | **6** | **$87–$129** |
