@@ -18,19 +18,36 @@ The 2x2 design varies role-file × rig-brief; brief content is
 identical baseline-vs-variant (the intervention lives in
 `roles/artificer.md`, not the brief).
 
-**Running order (revised 2026-05-03 ~16:10 UTC):** Sean asked to run
-the substantive variant immediately after the substantive baseline,
-then move to the control variant, and only post a control baseline if
-the control-variant cost lands outside the production envelope.
-The 2x2 design is preserved on the substantive side; the control side
-becomes single-arm against production cost as the comparator.
+**Running order (revised 2026-05-07, Sean):** Upgrade design to
+n=3 per variant cell. Six trials posted as a single
+depends-on chain, interleaved (sub, ctrl, sub, ctrl, sub, ctrl)
+so any environmental drift across the run window distributes
+evenly. All six posted as drafts, linked, then published —
+Spider holds successors in `open` until each predecessor reaches
+a terminal state. Substantive baseline initially stayed at n=1
+(trial 1's $39.76); after rows 2–7 landed and showed a ~12%
+combined-cell delta, **rows 8–9** (2026-05-08) were posted to
+firm the baseline against X021's measured 3–12% noise floor.
+Control baseline still conditional.
 
-| run order | manifest | rig | role file | trial writ | status | cost | duration | sealed commit | notes |
+**Trial-shape note:** rows 1 used the older xguild trial doctype
+(separate review + revise + seal sessions); rows 2–9 use the
+post-2026-05-08 claude-direct doctype (single implement session,
+verifyCommand-as-seal). Compare implementer-alone numbers
+($37.35 from row 1's implementer session) against rows 2/4/6/8/9
+total cost for apples-to-apples cell comparison.
+
+| run order | manifest | rig | role file | trial writ | depends-on | status | cost | duration | notes |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | `rig-moj12h4o-baseline.yaml` | substantive | baseline | `w-mopuwdsp` | **completed** | $39.76 | 74.9 min (sessions) / 16:29 UTC scenario terminal | `7c810bb` | Tier 1 PASS. Reviewer-1 killed by 90s heartbeat-timeout reconciler at 28.9 min, framework auto-retried review (3.5 min, $2.28), revise was no-op ($0.13). Calibration: $37.35 implementer alone vs $25–35 spec estimate (~7% over upper bound, within ±30% gate). |
-| 2 | `rig-moj12h4o-combined.yaml` | substantive | combined-nudges | — | — | — | — | — | gate: ≥10% cost reduction vs row 1 (H1) |
-| 3 | `rig-moji64hs-combined.yaml` | control | combined-nudges | — | — | — | — | — | gate: lab cost ≤ $20 (production full-rig). H2 signal indirect — see decision gate below. |
-| 4 (conditional) | `rig-moji64hs-baseline.yaml` | control | baseline | — | — | — | — | — | post **only if** row 3 cost ≥ ~$20 lab — to disambiguate brief-bloat vs nudge-failure |
+| 1 | `rig-moj12h4o-baseline.yaml` | substantive | baseline | `w-mopuwdsp` | — | **completed** | $39.76 (impl-only $37.35) | 74.9 min | xguild doctype. Tier 1 PASS. Sealed `7c810bb`. Reviewer-1 killed by 90s heartbeat-timeout reconciler at 28.9 min, framework auto-retried review (3.5 min, $2.28), revise was no-op ($0.13). |
+| 2 | `rig-moj12h4o-combined.yaml` | substantive | combined-nudges | `w-mowe5lsl` | — (head) | **completed** | $34.40 | 55.2 min | claude-direct. Sealed `ffcf038`. Tier 1 PASS (verifyCommand exit 0). H1 replicate 1/3. |
+| 3 | `rig-moji64hs-combined.yaml` | control | combined-nudges | `w-mowe90mm` | `w-mowe5lsl` | **completed** | $9.46 | 18.6 min | claude-direct. Tier 1 PASS. H2 replicate 1/3. |
+| 4 | `rig-moj12h4o-combined.yaml` | substantive | combined-nudges | `w-mowe93t2` | `w-mowe90mm` | **completed** | $33.90 | 45.6 min | claude-direct. Tier 1 PASS. H1 replicate 2/3. |
+| 5 | `rig-moji64hs-combined.yaml` | control | combined-nudges | `w-mowe97r2` | `w-mowe93t2` | **completed** | $11.32 | 22.5 min | claude-direct. Tier 1 PASS. H2 replicate 2/3. |
+| 6 | `rig-moj12h4o-combined.yaml` | substantive | combined-nudges | `w-mowe9ane` | `w-mowe97r2` | **completed** | $30.14 | 42.8 min | claude-direct. Tier 1 PASS. H1 replicate 3/3. |
+| 7 | `rig-moji64hs-combined.yaml` | control | combined-nudges | `w-mowe9dm5` | `w-mowe9ane` | **completed** | $6.84 | 15.1 min | claude-direct. Tier 1 PASS. H2 replicate 3/3. |
+| 8 | `rig-moj12h4o-baseline.yaml` | substantive | baseline | `w-mowr4jq1` | — (head 2) | open | — | — | claude-direct. Sub-baseline replicate 2/3. Posted 2026-05-08 to firm H1 against noise floor. |
+| 9 | `rig-moj12h4o-baseline.yaml` | substantive | baseline | `w-mowr4mri` | `w-mowr4jq1` | open (held) | — | — | claude-direct. Sub-baseline replicate 3/3. |
 
 **Reference data (from production, for orientation):**
 
@@ -66,11 +83,16 @@ or by querying the test guild's `nexus.db` directly with sqlite3
 ## Hypothesis status
 
 - **H1** — Combined-nudges variant cuts substantive cost ≥10% on rig-moj12h4o vs baseline.
-  - **Status:** unresolved. Needs row 2 vs row 1.
+  - **Preliminary signal (2026-05-08):** combined mean (n=3) = $32.81; baseline (n=1) = $37.35 → **~12.2% reduction**, clears threshold. Caveat: baseline n=1 inside X021's measured 3–12% noise floor. Rows 8–9 posted to firm.
+  - **Status:** preliminary positive; awaiting n=3 baseline.
 - **H2** — Combined-nudges variant cuts control cost ≥5% on rig-moji64hs vs baseline.
-  - **Status:** unresolved. **Comparator changed (2026-05-03 ~16:10 UTC):** row 3 (control variant) compared against production full-rig cost ($20) as a first pass; only post a paired lab control baseline (row 4) if row 3 lands outside the production envelope and disambiguation is needed.
+  - **Comparator (2026-05-03):** lab combined cost vs production full-rig cost ($20.39) as first-pass.
+  - **Result (2026-05-08):** combined mean (n=3) = $9.21, range $6.84–$11.32 — all three runs **well under $20**. **H2 supported** without a lab-baseline run.
+  - **Status:** supported.
 - **H3** — Neither variant produces an outcome-quality regression vs its baseline (Tier 1 mechanical + Tier 2 manual diff).
-  - **Status:** unresolved. Tier 1 reads from probe artifacts; Tier 2 manual after each variant.
+  - **Tier 1 (2026-05-08):** all 6 variant trials exited 0 with their verifyCommand passing (build+test on substantive; typecheck on control). **PASS.**
+  - **Tier 2:** pending (manual diff of trials 2/4/6 sealed commits vs trial 1's `7c810bb`).
+  - **Status:** Tier 1 supported; Tier 2 pending.
 
 ## Trial run history
 
@@ -153,14 +175,66 @@ or by querying the test guild's `nexus.db` directly with sqlite3
 
 Inherited X021's bloated baseline briefs (61 KB / 55 KB) when production saw spec-only (~26 KB / ~22 KB). Trimmed both briefs to spec-only at commit `5a7ff5ae` while trial was still queued. Scenario engine reads brief content at execution time (`scenario-xguild.ts:475`), so the queued trial picks up the trimmed brief automatically when spider unblocks. No re-post needed.
 
+### Trials 2–7 — variant chain (claude-direct, 2026-05-08)
+
+Six-trial interleaved chain (sub, ctrl, sub, ctrl, sub, ctrl)
+ran 04:08–07:29 UTC, all six exited cleanly.
+
+| run | writ | cell | cost | duration | output tokens | cache-read | exit |
+|---|---|---|---:|---:|---:|---:|---:|
+| 2 | `w-mowe5lsl` | sub-combined #1 | $34.40 | 55.2 min | 143,081 | 55.6M | 0 |
+| 3 | `w-mowe90mm` | ctrl-combined #1 | $9.46 | 18.6 min | 44,070 | 14.2M | 0 |
+| 4 | `w-mowe93t2` | sub-combined #2 | $33.90 | 45.6 min | 134,639 | 55.3M | 0 |
+| 5 | `w-mowe97r2` | ctrl-combined #2 | $11.32 | 22.5 min | 45,189 | 17.5M | 0 |
+| 6 | `w-mowe9ane` | sub-combined #3 | $30.14 | 42.8 min | 115,317 | 49.3M | 0 |
+| 7 | `w-mowe9dm5` | ctrl-combined #3 | $6.84 | 15.1 min | 39,509 | 10.1M | 0 |
+
+**Cell summaries:**
+- Substantive combined (n=3): mean **$32.81**, range $30.14–$34.40, CV 7.1%
+- Control combined (n=3): mean **$9.21**, range $6.84–$11.32, CV 24.4%
+
+**Mechanism signal — cache-read tokens.** Trial 1 baseline implementer
+cache-read: 62.7M. Combined cell cache-reads: 49.3M / 55.3M / 55.6M
+(consistently lower). Output tokens flat-to-slightly-higher in
+combined runs, so savings come from less context replay (fewer
+repeat-greps + narrower test runs) — exactly the nudge mechanism.
+
+**Tier 1 (PASS for all 6).** Each trial's `verifyCommand` ran as
+the seal step: filtered build+test on substantive (rig-moj12h4o)
+manifests, workspace typecheck on control (rig-moji64hs)
+manifests. All exited 0; sealed commits pushed via `git push
+origin HEAD:main` inside the disposable lab guild's bare codex.
+
+**Tier 2 (pending).** Manual diff of trials 2/4/6 sealed commits
+vs trial 1's `7c810bb`.
+
+**Captured extracts:** `/tmp/x022-extract/{w-mowe5lsl,...}/`
+(stacks-export, codex-history, README, manifest). Persistent
+copies under `artifacts/2026-05-08-trial-2-7-extracts/` if/when
+this commits.
+
+### Trials 8–9 — substantive baseline firming (posted 2026-05-08 10:07 UTC)
+
+After rows 2–7 showed a ~12% combined-cell delta vs trial 1's
+n=1 baseline, two more substantive baseline trials were posted
+to firm H1 against X021's measured 3–12% noise floor.
+
+- Row 8: `w-mowr4jq1` (head)
+- Row 9: `w-mowr4mri` (depends-on row 8)
+
+Both manifests: `rig-moj12h4o-baseline.yaml` (claude-direct,
+identical to row 8). Estimated chain cost: $36–$80 ($18–$28 ×2,
++/- variance).
+
 ## Cumulative spend
 
-| | trials | trial cost (sum-of-sessions) | total |
-|---|---|---|---|
-| Estimated (spec, post-trim) | 4 | $5–$15/trial | $30–$60 |
-| Actual to date | 1 completed | $39.76 (trial 1) | **$39.76** |
+| | trials | spend |
+|---|---|---|
+| Estimated (n=3 active plan) | 6 variant + 2 baseline-firming | $147–$209 |
+| Actual to date | 7 completed (1 + 6) | **$165.82** |
+| In flight (8, 9) | 2 baseline | est $36–$80 |
 
-(Trial 1's first post `w-mopib8yh` was cancelled before billable implement work; counted as $0. Trial 1 second post `w-mopuwdsp` ran end-to-end at $39.76 — slightly above the per-trial spec estimate because the substantive Reckoner refactor is the most expensive of the four trials; control-rig trials should run lighter.)
+Trial 1: $39.76. Trials 2–7: $126.06. Total: $165.82.
 
 ## Open questions / decisions to revisit
 

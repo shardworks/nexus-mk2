@@ -1,0 +1,4508 @@
+
+
+diff --git a/docs/architecture/apparatus/reckoner.md b/docs/architecture/apparatus/reckoner.md
+index db3513f..c72c4bb 100644
+--- a/docs/architecture/apparatus/reckoner.md
++++ b/docs/architecture/apparatus/reckoner.md
+@@ -4,20 +4,20 @@ Status: **Draft**
+ 
+ Package: `@shardworks/reckoner-apparatus` · Plugin id: `reckoner`
+ 
+-> **⚠️ v0 scope.** v0 ships the contract surface plus the Phase-2
+-> CDC handler and the Reckonings evaluation journal. Specifically:
++> **⚠️ v0 scope.** v0 ships the contract surface plus the periodic-
++> tick relay and the Reckonings evaluation journal. Specifically:
+ > the kit-static petitioner registry, the `petition()` /
+ > `withdraw()` helpers (Workflow 2 in the contract document, in
+ > both create+stamp and stamp-only forms), the
+ > `enforceRegistration` and `disabledSources` config keys, the
+-> inspection helpers on `provides`, the CDC handler on
+-> `clerk/writs` that drives held petitions out of their initial
+-> phase, and the `reckoner/reckonings` book. Lattice pulse emission
+-> remains out of scope (the auto-wired Clockworks events on the
+-> reckonings book are sufficient for v0 consumers). The legacy
+-> stall/fail/drain pulse emitter (formerly named "the Reckoner")
+-> now lives at [sentinel.md](sentinel.md) under the `sentinel`
+-> plugin id.
++> inspection helpers on `provides`, the kit-contributed
++> `reckoner.tick` relay plus a single kit-contributed standing
++> order at `@every 60s` that fires it, and the
++> `reckoner/reckonings` book. Lattice pulse emission remains out of
++> scope (the auto-wired Clockworks events on the reckonings book
++> are sufficient for v0 consumers). The legacy stall/fail/drain
++> pulse emitter (formerly named "the Reckoner") now lives at
++> [sentinel.md](sentinel.md) under the `sentinel` plugin id.
+ 
+ ---
+ 
+@@ -28,17 +28,21 @@ The Reckoner is the petitioner-scheduler apparatus. It owns the
+ writ — a writ in `new` phase carrying `writ.ext['reckoner']` — and
+ maintains the registry of recognized petitioner sources.
+ 
+-In v0 the Reckoner evaluates held petitions through a Phase-2 CDC
+-handler on `clerk/writs` (see "What the Reckoner does NOT do" for
+-the policy carve-outs that remain out of scope). The handler runs
+-the rule sequence (skip / disabled-source / source-check /
+-dependency-gate / scheduler-evaluate), drives `clerk.transition()`
+-on accept or decline, defers (no transition, deferred row) when the
+-dependency gate fires, and idempotently appends one row per
+-state-change to the `reckoner/reckonings` book. The default
+-scheduler is always-approve; petitioners may withdraw a held writ
+-via `withdraw()` (a thin wrapper over `clerk.transition(writId,
+-'cancelled', …)`).
++In v0 the Reckoner evaluates held petitions through a **periodic
++tick** — the `reckoner.tick` relay (kit-contributed via
++`supportKit.relays`) bound to a single kit-contributed standing
++order at `@every 60s` (see "What the Reckoner does NOT do" for the
++policy carve-outs that remain out of scope). On every fire the
++relay queries every held petition, applies the source/disabled
++gates inline, runs the dependency-aware gate, dedupes against the
++`(writId, writUpdatedAt)` index, and hands the surviving candidate
++set to the configured scheduler in **one batch**. Each decision
++drives `clerk.transition()` on accept or decline, leaves the writ
++in `new` on defer (with a deferred row stamped), and idempotently
++appends one row per writ considered to the `reckoner/reckonings`
++book. The default scheduler is always-approve; petitioners may
++withdraw a held writ via `withdraw()` (a thin wrapper over
++`clerk.transition(writId, 'cancelled', …)`).
+ 
+ The Reckoner is the canonical Workflow-2 path. Workflow-1 callers
+ (direct `clerk.post()` + `clerk.setWritExt()`) get the same on-disk
+@@ -53,8 +57,9 @@ See: the load-bearing contract document at
+ ## Dependencies
+ 
+ ```
+-requires: ['clerk']
+-consumes: ['petitioners', 'schedulers']
++requires:    ['clerk']
++recommends:  ['clockworks']
++consumes:    ['petitioners', 'schedulers']
+ ```
+ 
+ - **The Clerk** (required) — `clerk.post()` is the writ-creation
+@@ -62,6 +67,12 @@ consumes: ['petitioners', 'schedulers']
+   `writ.ext['reckoner']` slot; `clerk.transition()` drives
+   `withdraw()`. Stacks is a transitive `requires` via Clerk and is
+   not declared explicitly (D16).
++- **The Clockworks** (recommended) — its dispatcher fires the
++  kit-contributed standing order targeting `reckoner.tick`. The
++  Reckoner boots without it, but with no Clockworks installed the
++  tick never fires and held petitions never advance. Surfacing the
++  soft dependency through `recommends` documents the relation to
++  readers and Arbor's topo sort.
+ 
+ ---
+ 
+@@ -324,10 +335,9 @@ joins the surrounding transaction via Stacks AsyncLocalStorage, so
+ a petitioner that wraps `clerk.link()` (or any other writ-graph
+ prep) plus `reckoner.petition(writId, ext)` in a single transaction
+ gets atomicity for free — the writ becomes Reckoner-visible only
+-after the outer transaction commits. The Reckoner CDC handler
+-observes the post-commit `setWritExt` UPDATE event and runs the
+-rule sequence as for any other Reckoner-stamped writ (no special
+-case in the handler).
++after the outer transaction commits. The next periodic tick that
++fires after the commit picks the writ up with no special case in
++the handler.
+ 
+ Out of scope (parked at the parent click): re-prioritization on
+ already-`open` writs, cross-apparatus authoring (apparatus X
+@@ -484,7 +494,7 @@ The three `SchedulerDecision` outcomes map to apparatus actions:
+ | Outcome   | Phase transition       | Reckonings row | Notes |
+ |-----------|------------------------|----------------|-------|
+ | `approve` | `new` → active target  | `accepted`     | The target is the writ-type config's active state; weight (if present) is threaded onto the row. |
+-| `defer`   | none                   | none           | The writ stays in `new`. The scheduler-emitted defer path is row-less because `SchedulerDecision` does not carry the `deferReason` / `deferNote` metadata required to populate a faithful deferred row. (The dependency-aware defer path — see "Dependency-aware defer" below — does emit deferred rows; that path runs in the apparatus's rule sequence before the scheduler is invoked.) |
++| `defer`   | none                   | `deferred`     | The writ stays in `new`. The row carries `deferReason: 'other'` and the decision's `reason` in `deferNote`; the running counters (`deferCount`, `firstDeferredAt`, `lastDeferredAt`) and the wake-up companions (`deferUntil`, `deferSignal`) stay absent in v0, awaiting a real consumer. The dependency-aware defer path (see below) emits its own deferred rows with `dependency_pending` / `dependency_failed` reasons; those rows are written before the scheduler is invoked. |
+ | `decline` | `new` → `cancelled`    | `declined`     | The decision's `reason` is recorded as the writ's resolution string; the row carries `declineReason: 'other'` and the reason in `remediationHint`. |
+ 
+ ### Dependency-aware defer
+@@ -535,26 +545,26 @@ under `enforceRegistration: true` declines + transitions and never
+ reaches the dep check.
+ 
+ **Cadence and idempotency.** The dependency check runs on every
+-consideration tick — it is not gated by the existing `(writId,
+-writUpdatedAt)` dedupe (which lives inside the scheduler call and
+-gates only acceptance/decline writes). Re-evaluating a deferred writ
+-at the same outcome shape suppresses the row write rather than
+-emitting a heartbeat duplicate; a fresh row appears only when the
+-outcome shape changes (a dep cleared, a new dep failed, the dep set's
+-classification mix changed). The wake-up mechanism in v0 is the
+-polling tick — deferred dependents do not subscribe to wake-up
+-events on dependency-target updates.
++periodic tick — it is not gated by the existing `(writId,
++writUpdatedAt)` dedupe (which gates only acceptance/decline writes).
++Re-evaluating a deferred writ at the same outcome shape suppresses
++the row write rather than emitting a heartbeat duplicate; a fresh
++row appears only when the outcome shape changes (a dep cleared, a
++new dep failed, the dep set's classification mix changed). The
++wake-up mechanism in v0 is the polling tick — deferred dependents
++do not subscribe to wake-up events on dependency-target updates.
+ 
+ ### Failure modes
+ 
+ | Condition                                                          | Behavior |
+ |---|---|
+-| CDC event arrives before `phase:started`                           | Silently skipped; the catch-up scan reprocesses the writ post-seal. |
+-| Dedupe lookup short-circuits on the same `(writId, writUpdatedAt)` | No `evaluate` call, no acceptance/decline row, no transition. The dedupe runs inside the scheduler call and counts only non-deferred prior rows — the dependency gate (which runs *before* the scheduler) re-evaluates every tick regardless. |
+-| `validateConfig` throws                                            | Fail-loud log via the `[reckoner] scheduler:` prefix; evaluation is skipped (no row, no transition). |
+-| `evaluate` throws or does not return an array                      | Fail-loud log; evaluation skipped. |
+-| Decision carries a `writId` not in the candidate set               | Per-decision `console.warn` naming the offending id; ignore-and-continue. |
+-| Two decisions target the same `writId`                             | Fail-loud log; the entire evaluation is skipped (no decision is applied). |
++| Tick fires before `phase:started`                                  | Fail-loud throw at handler entry (`[reckoner] tick: activeScheduler not resolved …`). Production never trips this; test fixtures get a deterministic loud signal (D8). |
++| Empty candidate set                                                | The handler early-returns after the held-petitions query — no scheduler call, no rows, no errors (D10). |
++| Dedupe lookup short-circuits on the same `(writId, writUpdatedAt)` | The candidate is filtered out before `SchedulerInput` is built (D7). Already-considered writs never reach the scheduler. The dedupe counts only non-deferred prior rows — the dependency gate (which runs *before* the dedupe filter) re-evaluates every tick regardless. |
++| `validateConfig` throws                                            | Fail-loud log via the `[reckoner] tick:` prefix; the **entire tick** is skipped — no rows for any candidate, no transitions. |
++| `evaluate` throws or does not return an array                      | Fail-loud log; the entire tick is skipped (no rows for any candidate). |
++| Decision carries a `writId` not in the candidate set               | Per-decision `console.warn` naming the offending id; the stranger decision is ignored, in-scope decisions still apply. |
++| Two decisions target the same `writId`                             | Fail-loud log; the entire tick is skipped — no decision is applied for any candidate. |
+ | Decision carries an unknown outcome                                | Fail-loud log; the decision is ignored. |
+ 
+ ---
+@@ -590,8 +600,7 @@ const writ = await reckoner.petition({
+ 
+ After this call, the writ exists in its registered initial phase
+ with `writ.ext.reckoner = { source, priority, complexity, payload,
+-labels }`. The CDC handler picks it up on the post-commit update
+-event.
++labels }`. The next periodic tick picks it up.
+ 
+ ### Draft-then-publish (stamp-only)
+ 
+@@ -655,9 +664,10 @@ present, or when the writ id does not exist. See the
+   scheduler is always-approve for held petitions that pass the
+   source / disabled / registration gates and clear the dependency
+   gate; richer scheduling policy is reserved for the Reckoner-core
+-  scheduling commission. (Deferral *is* implemented for the
+-  dependency-aware path — see "Dependency-aware defer" above —
+-  but the scheduler-emitted `defer` outcome remains row-less.)
++  scheduling commission. (Deferral *is* implemented for both the
++  dependency-aware path and the scheduler-emitted `defer` outcome —
++  the latter writes a deferred row carrying `deferReason: 'other'`
++  and the decision's reason in `deferNote`.)
+ - **No deferred-petition staleness diagnostic.** Cycle visibility,
+   dangling-target escalation, `dependency_failed` petitioner
+   notification, and the running-counter fields (`deferCount`,
+@@ -670,6 +680,14 @@ present, or when the writ id does not exist. See the
+   petitions wake up on the next polling tick only — the Reckoner
+   does not subscribe to writ-completion events on the dep target's
+   side to drive an immediate re-evaluation.
++- **No operator-configurable tick cadence.** The schedule is
++  hard-coded `@every 60s` in the apparatus's standing-order kit
++  contribution. A `reckoner.tickSchedule` config knob is parked as
++  a future improvement; v0 operators have no config-side way to
++  adjust or suspend the tick.
++- **No multi-scheduler dispatch.** Exactly one scheduler is active
++  per Reckoner instance, resolved at startup from
++  `guild.json reckoner.scheduler`.
+ - **No `ext` field on `clerk.post()`.** Clerk's
+   `PostCommissionRequest` is unchanged; the ext slot is written
+   via the `setWritExt` call.
+@@ -681,8 +699,6 @@ present, or when the writ id does not exist. See the
+   `PetitionerDescriptor`.** Contract floor only (D19).
+ - **No source/owner check inside `withdraw()`.** Thin pass-through
+   (D10).
+-- **No `recommends: ['oculus']` or explicit Stacks dependency.**
+-  `requires: ['clerk']` only (D16).
+ - **No `nsg reckoner list-petitioners` CLI tool.** Recorded as
+   observation `obs-8`.
+ 
+diff --git a/docs/architecture/petitioner-registration.md b/docs/architecture/petitioner-registration.md
+index cc3362e..ae3ee35 100644
+--- a/docs/architecture/petitioner-registration.md
++++ b/docs/architecture/petitioner-registration.md
+@@ -42,11 +42,12 @@ contract spans: ['clerk', 'spider', 'stacks', 'clockworks']
+   state), Spider picks it up and dispatches via the writ type's
+   rig template.
+ - **[Stacks](apparatus/stacks.md)** — the storage substrate. The
+-  Reckoner watches CDC events on the writs book to find writs
+-  needing consideration.
+-- **[Clockworks](clockworks.md)** — the event substrate. The auto-
+-  wired `book.clerk.writs.{created,updated}` events feed the
+-  Reckoner's CDC handler.
++  Reckoner queries the writs book on every periodic tick to find
++  held petitions needing consideration.
++- **[Clockworks](clockworks.md)** — the event substrate. The
++  Reckoner kit-contributes a standing order at `@every 60s`
++  targeting the `reckoner.tick` relay; the Clockworks dispatcher
++  fires it on cadence.
+ 
+ ---
+ 
+@@ -84,9 +85,9 @@ await clerk.post({
+ ```
+ 
+ The writ exists in `new` phase (Clerk's default for new writs).
+-Spider doesn't dispatch from `new`. The Reckoner observes CDC,
+-sees `writ.ext['reckoner']`, validates the source against its
+-registry (see §5), and adopts responsibility for transitioning
++Spider doesn't dispatch from `new`. The next periodic tick that
++fires sees `writ.ext['reckoner']`, validates the source against
++the registry (see §5), and adopts responsibility for transitioning
+ the writ.
+ 
+ This workflow is always available — any apparatus that can call
+@@ -225,7 +226,8 @@ The Reckoner's `withdraw(writId, reason?)` helper is a thin
+ wrapper around the same call.
+ 
+ If withdrawal lands while the writ is still in `new` (the common
+-case), the Reckoner's CDC handler stops considering it. If
++case), the next tick simply fails to find it in the held-writs
++query (its phase is no longer `new`) and writes nothing. If
+ withdrawal lands after approval (writ already in `open` or
+ further), it follows the normal lifecycle for cancelling
+ in-flight work — same as any other writ being cancelled mid-
+diff --git a/docs/architecture/reckonings-book.md b/docs/architecture/reckonings-book.md
+index e2be680..5a8bee8 100644
+--- a/docs/architecture/reckonings-book.md
++++ b/docs/architecture/reckonings-book.md
+@@ -222,11 +222,12 @@ interface ReckoningDoc {
+   outcome: 'accepted' | 'deferred' | 'declined' | 'no-op';
+ 
+   /**
+-   * Triggering Clockworks event id, when the consideration was
+-   * triggered by a scheduling tick. Absent for considerations
+-   * triggered by a CDC event on `clerk/writs` (e.g. initial post-time
+-   * consideration of a newly-arrived held writ, before any scheduling
+-   * tick reaches it). See "Tick identity".
++   * Triggering Clockworks event id — stamped from the
++   * `clockworks.timer` event that fired the periodic tick. Present
++   * on every production-path row (D6 of the periodic-tick
++   * commission); absent only on rows produced by a test driving
++   * the handler directly with `null` for the triggering event.
++   * See "Tick identity".
+    */
+   tickEventId?: string;
+ 
+@@ -353,38 +354,36 @@ heavy-blob sibling would be empty.
+ 
+ ### Tick identity
+ 
+-The Reckoner has two trigger paths into a consideration:
+-
+-1. **Scheduled tick** — a Clockworks `schedule:` standing order
+-   firing on a fixed interval. Every fire writes a synthesized
+-   `clockworks.timer` event row into `clockworks/events` (see
+-   [clockworks.md → Scheduled Standing Orders](clockworks.md#scheduled-standing-orders))
+-   with a unique event id of the form `e-<base36_ts>-<hex>`. The
+-   Reckoner sweeps held writs and may write Reckonings rows.
+-2. **CDC-driven** — a Clockworks standing order on
+-   `book.clerk.writs.{created,updated}`. When a held writ arrives or
+-   changes, the Reckoner considers it directly. There is no
+-   scheduling-tick id for these considerations because no scheduled
+-   timer fired.
++In v0 the Reckoner has exactly one trigger path into a consideration:
++the **periodic tick** — a kit-contributed standing order at
++`@every 60s` targeting the `reckoner.tick` relay. Every fire writes
++a synthesized `clockworks.timer` event row into `clockworks/events`
++(see [clockworks.md → Scheduled Standing Orders](clockworks.md#scheduled-standing-orders))
++with a unique event id of the form `e-<base36_ts>-<hex>`. The
++Reckoner sweeps held writs and may write Reckonings rows for any
++that produce decisions.
+ 
+ Reckonings records stamp the triggering `clockworks.timer` event id
+-into `tickEventId` on path (1). On path (2), the field is **absent**.
+-Together with `consideredAt`, this gives the consumer two
+-complementary handles:
++into `tickEventId` whenever the tick was driven by a real event
++(D6 of the periodic-tick commission). The field is **absent** only
++on test-driven paths that hand the handler `null` for the
++triggering event, and on rows that pre-date the tick model
++(rows written by the prior CDC handler in older guilds; the
++Reckoner stops writing such rows post-migration). Together with
++`consideredAt`, the field gives consumers two complementary
++handles:
+ 
+ - **`tickEventId`** (when present) — exact-match join to the
+   dispatch row, the schedule entry, and every sibling Reckonings row
+   produced by the same scheduled tick.
+ - **`consideredAt`** — time-range filter for since-T sweeps and
+-  per-writ timeline ordering, available on every row regardless of
+-  trigger path.
++  per-writ timeline ordering, available on every row.
+ 
+ The doc deliberately reuses the framework-emitted `clockworks.timer`
+ id rather than synthesizing a new "Reckoner tick id" — it earns no
+-second piece of identity. CDC-triggered considerations have no tick
+-id because there is no tick to identify; the Stacks `ChangeEvent`
+-that triggered them is observable through `clockworks/events` for
+-auditors who need that join.
++second piece of identity. Synthesizing a fallback id when the
++triggering event is absent would pollute rows with non-joinable ids;
++absence is meaningful.
+ 
+ ### Outcome-keyed reason metadata layout
+ 
+diff --git a/packages/plugins/reckoner/README.md b/packages/plugins/reckoner/README.md
+index 2e9da2a..ce05c61 100644
+--- a/packages/plugins/reckoner/README.md
++++ b/packages/plugins/reckoner/README.md
+@@ -4,9 +4,11 @@ The Reckoner stands up the **petition-scheduler apparatus**: the
+ kit-static registry of petitioner sources, the canonical
+ `petition()` / `withdraw()` helpers (Workflow 2 in the contract document),
+ the inspection helpers downstream consumers use to read the registry
+-and live config, and a Phase 2 CDC handler on `clerk/writs` that drives
+-held petitions out of `new` and writes one row per substantive
+-consideration to its `reckoner/reckonings` evaluation journal.
++and live config, and a kit-contributed periodic-tick relay
++(`reckoner.tick`, fired every 60 seconds via a kit-contributed
++standing order) that drives held petitions out of `new` and writes
++one row per writ considered to its `reckoner/reckonings` evaluation
++journal.
+ 
+ What ships here:
+ 
+@@ -46,23 +48,27 @@ What ships here:
+ - A `reckoner` block in `guild.json` with `enforceRegistration` and
+   `disabledSources`; both fields are optional and re-read on every
+   consumer call so operators can hot-edit without restarting the guild.
+-- A **Phase 2 CDC handler** that watches `clerk/writs` for held
+-  petitions (writs in `new` phase carrying `ext.reckoner`), runs the
+-  rule sequence (skip / disabled-source / source-check /
+-  dependency-gate / scheduler-evaluate), drives `clerk.transition(...)`
+-  to the type's active state on accept (or to `cancelled` with a
+-  structured resolution on decline), and idempotently appends one row
+-  to the `reckoner/reckonings` book per state-change. The scheduler
+-  call site routes through the registry-resolved active scheduler —
+-  the default `reckoner.always-approve` instance approves every held
+-  petition that clears the source / disabled / registration gates and
+-  whose dependency gate proceeds. The configured scheduler can also
+-  emit `defer` (no transition, no row) or `decline` (transition to
+-  `cancelled` with the decision's reason recorded as the resolution
+-  string + a Reckonings row carrying `declineReason: 'other'`). The
+-  other decline path remains `enforceRegistration: true` against an
+-  unregistered source, which produces an `outcome: 'declined'` row
+-  with `declineReason: 'source_unregistered'`.
++- A **kit-contributed periodic-tick relay** (`reckoner.tick`) plus a
++  matching **kit-contributed standing order** at `@every 60s`. On
++  every fire the relay queries every held petition (writs in `new`
++  phase carrying `ext.reckoner`) in one batch, applies the source-
++  disabled and unregistered-strict gates inline (decline rows
++  carrying `declineReason: 'source_banned'` or `'source_unregistered'`
++  respectively + transitions to the type's cancelled target), runs
++  the dependency-aware defer gate, dedupes the survivors against the
++  `(writId, writUpdatedAt)` index, and hands the resulting candidate
++  set to the configured scheduler. The default
++  `reckoner.always-approve` instance approves every held petition
++  that reaches it. The configured scheduler can also emit `defer`
++  (writes a deferred row carrying `deferReason: 'other'` and the
++  decision's reason in `deferNote`; no transition) or `decline`
++  (transitions to `cancelled` with the decision's reason as the
++  resolution string + a Reckonings row carrying `declineReason:
++  'other'`). The schedule is hard-coded — operators cannot reduce
++  the cadence in this commission (a `reckoner.tickSchedule` knob is
++  parked as a future improvement). With no Clockworks installed the
++  tick simply never fires and held petitions never advance; the
++  Reckoner still boots cleanly.
+ - A **dependency-aware defer rule**, slotted into the rule sequence
+   between source-registration enforcement and the scheduler call. The
+   rule walks each held petition's outbound `depends-on` links
+@@ -78,17 +84,14 @@ What ships here:
+   writ in `new` phase and emit a `deferred` Reckonings row carrying
+   `deferReason: 'dependency_pending'` or `'dependency_failed'` and
+   `deferNote` listing the gating / failed dep writ ids. The dep gate
+-  re-evaluates on every Reckoner tick (the polling cadence is the v0
+-  wake-up mechanism); the row write is suppressed when the outcome
+-  shape is identical to the writ's most recent deferred row, so a
+-  long-deferred dependent does not produce a heartbeat duplicate per
+-  tick. The deferred-petition staleness diagnostic (cycle visibility,
+-  dangling-target escalation, running counters, `dependency_failed`
+-  petitioner notification) belongs to a sibling commission; the
+-  Reckoner stops at "petition stays deferred."
+-- A **startup catch-up scan** that re-routes pre-existing held
+-  petitions through the same handler at apparatus start so a process
+-  restart does not strand work.
++  re-evaluates on every Reckoner tick; the row write is suppressed
++  when the outcome shape is identical to the writ's most recent
++  deferred row, so a long-deferred dependent does not produce a
++  heartbeat duplicate per tick. The deferred-petition staleness
++  diagnostic (cycle visibility, dangling-target escalation, running
++  counters, `dependency_failed` petitioner notification) belongs to
++  a sibling commission; the Reckoner stops at "petition stays
++  deferred."
+ - The **`reckoner/reckonings` book** — the Reckoner's evaluation
+   journal. One row per substantive consideration, immutable after
+   write. The auto-wired
+@@ -98,9 +101,11 @@ What ships here:
+   `docs/architecture/reckonings-book.md` for the schema, index set,
+   and CDC contract.
+ 
+-The Reckoner requires `clerk` and consumes `petitioners`. Stacks is
+-reached transitively through Clerk; no Clockworks dependency is
+-declared.
++The Reckoner requires `clerk`, recommends `clockworks`, and consumes
++`petitioners` and `schedulers`. Stacks is reached transitively
++through Clerk. Clockworks is the soft dependency that fires the
++kit-contributed standing order targeting `reckoner.tick`; the
++apparatus boots without it (the tick simply never fires).
+ 
+ See the contract document at
+ `docs/architecture/petitioner-registration.md` for the full data shape
+diff --git a/packages/plugins/reckoner/package.json b/packages/plugins/reckoner/package.json
+index d03f852..938788a 100644
+--- a/packages/plugins/reckoner/package.json
++++ b/packages/plugins/reckoner/package.json
+@@ -22,6 +22,7 @@
+   },
+   "dependencies": {
+     "@shardworks/clerk-apparatus": "workspace:*",
++    "@shardworks/clockworks-apparatus": "workspace:*",
+     "@shardworks/stacks-apparatus": "workspace:*"
+   },
+   "devDependencies": {
+diff --git a/packages/plugins/reckoner/src/integration.test.ts b/packages/plugins/reckoner/src/integration.test.ts
+index 5e2656e..026b6b8 100644
+--- a/packages/plugins/reckoner/src/integration.test.ts
++++ b/packages/plugins/reckoner/src/integration.test.ts
+@@ -9,14 +9,15 @@
+  *
+  *   1. A petition lands as a held writ in `new` carrying
+  *      `ext['reckoner']`.
+- *   2. The Phase 2 CDC handler observes the setWritExt update
+- *      event and runs the rule sequence.
++ *   2. A periodic tick (driven via `hooks.runTick(event)` with a
++ *      synthetic `clockworks.timer` event) evaluates the held writ
++ *      through the configured scheduler.
+  *   3. The accept-path transitions the writ from `new` to the
+  *      type's active state (`open` for mandate).
+  *   4. A Reckonings row is appended carrying `outcome: 'accepted'`,
+  *      the lean projection (`source`, `visionRelation`, `severity`),
+- *      and the dedupe-discriminating `(writId, writUpdatedAt)`
+- *      pair.
++ *      the dedupe-discriminating `(writId, writUpdatedAt)` pair, and
++ *      a `tickEventId` matching the synthetic event's id.
+  *
+  * Mirrors the structural pattern from
+  * `packages/plugins/sentinel/src/integration.test.ts` for fixture
+@@ -43,7 +44,7 @@ import type { ReadOnlyBook, StacksApi } from '@shardworks/stacks-apparatus';
+ import { createClerk } from '@shardworks/clerk-apparatus';
+ import type { ClerkApi } from '@shardworks/clerk-apparatus';
+ 
+-import { createReckoner } from './reckoner.ts';
++import { createReckonerWithHooks } from './reckoner.ts';
+ import { alwaysApproveScheduler } from './schedulers/always-approve.ts';
+ import type { ReckoningDoc, ReckonerApi } from './types.ts';
+ 
+@@ -52,13 +53,15 @@ interface Fixture {
+   clerk: ClerkApi;
+   reckoner: ReckonerApi;
+   reckoningsBook: ReadOnlyBook<ReckoningDoc>;
++  hooks: ReturnType<typeof createReckonerWithHooks>['hooks'];
+ }
+ 
+ async function buildGuild(): Promise<Fixture> {
+   const backend = new MemoryBackend();
+   const stacksPlugin = createStacksApparatus(backend);
+   const clerkPlugin = createClerk();
+-  const reckonerPlugin = createReckoner();
++  const built = createReckonerWithHooks();
++  const reckonerPlugin = built.plugin;
+ 
+   const apparatusMap = new Map<string, unknown>();
+   const guildConfig: GuildConfig = {
+@@ -211,6 +214,7 @@ async function buildGuild(): Promise<Fixture> {
+     stacks,
+     clerk,
+     reckoner,
++    hooks: built.hooks,
+     reckoningsBook: stacks.readBook<ReckoningDoc>('reckoner', 'reckonings'),
+   };
+ }
+@@ -218,7 +222,7 @@ async function buildGuild(): Promise<Fixture> {
+ describe('Reckoner — end-to-end', () => {
+   afterEach(() => clearGuild());
+ 
+-  it('petition → consideration → transition → reckonings row flows end-to-end', async () => {
++  it('petition → tick → transition → reckonings row flows end-to-end', async () => {
+     const fix = await buildGuild();
+ 
+     const writ = await fix.reckoner.petition({
+@@ -231,9 +235,19 @@ describe('Reckoner — end-to-end', () => {
+       },
+     });
+ 
+-    // The CDC handler ran during setWritExt's Phase 2 dispatch and
+-    // approved the petition. Re-read to confirm the writ is in the
+-    // type's active state (`open` for mandate).
++    // Drive one tick with a synthetic clockworks.timer event so the
++    // resulting Reckonings row carries a populated `tickEventId`.
++    const tickEventId = 'e-test-integration';
++    await fix.hooks.runTick({
++      id: tickEventId,
++      name: 'clockworks.timer',
++      payload: null,
++      emitter: 'clockworks',
++      firedAt: new Date().toISOString(),
++    });
++
++    // The tick approved the petition. Re-read to confirm the writ
++    // is in the type's active state (`open` for mandate).
+     const reread = await fix.clerk.show(writ.id);
+     assert.equal(reread.phase, 'open', 'held petition becomes active');
+     assert.equal(reread.type, 'mandate');
+@@ -259,11 +273,11 @@ describe('Reckoner — end-to-end', () => {
+     // Accepted rows carry no decline / defer metadata.
+     assert.equal(row.declineReason, undefined);
+     assert.equal(row.deferReason, undefined);
+-    // No scheduled-tick id for v0 (CDC-driven only).
+-    assert.equal(row.tickEventId, undefined);
++    // tickEventId is stamped from the synthetic event id (D6).
++    assert.equal(row.tickEventId, tickEventId);
+   });
+ 
+-  it('emits one row per acceptance even when the handler is re-driven on the same writ-version', async () => {
++  it('emits one row per acceptance even when the tick is re-driven on the same writ-version', async () => {
+     const fix = await buildGuild();
+ 
+     const writ = await fix.reckoner.petition({
+@@ -272,12 +286,10 @@ describe('Reckoner — end-to-end', () => {
+       body: 'b',
+     });
+ 
+-    // Drive a benign edit through Clerk so a fresh CDC update event
+-    // fires for the writ. ext.reckoner did not change and phase did
+-    // not change since the accept transition, so the re-firing gate
+-    // (D14) rejects it before the dedupe lookup; either way the
+-    // assertion is the same: exactly one row per acceptance.
+-    await fix.clerk.edit({ id: writ.id, body: 'b' });
++    // First tick — accepts and writes the row.
++    await fix.hooks.runTick();
++    // Second tick at the same writ-version — dedupe short-circuits.
++    await fix.hooks.runTick();
+ 
+     const rows = await fix.reckoningsBook.find({
+       where: [['writId', '=', writ.id]],
+diff --git a/packages/plugins/reckoner/src/reckoner-cdc.test.ts b/packages/plugins/reckoner/src/reckoner-cdc.test.ts
+deleted file mode 100644
+index e24cba6..0000000
+--- a/packages/plugins/reckoner/src/reckoner-cdc.test.ts
++++ /dev/null
+@@ -1,945 +0,0 @@
+-/**
+- * Reckoner CDC handler tests.
+- *
+- * Covers the eleven behavioral cases enumerated in the commission's
+- * Acceptance Signal:
+- *
+- *   1. skip-not-in-new — the handler ignores writs whose phase is not
+- *      `new`.
+- *   2. skip-no-ext — the handler ignores writs lacking a reckoner ext.
+- *   3. disabled-source debug-skip — no Reckonings row, no transition.
+- *   4. unregistered-strict decline — emits a `'declined'` row with
+- *      `declineReason: 'source_unregistered'` and a structured
+- *      resolution string.
+- *   5. unregistered-non-strict approve — accepts the petition.
+- *   6. registered-source approve — accepts the petition; the row
+- *      carries the lean projection.
+- *   7. ext re-stamp re-evaluation gate — a meaningful ext change while
+- *      still in `new` triggers a second consideration.
+- *   8. CDC re-delivery idempotency — the same (writId, writUpdatedAt)
+- *      pair produces exactly one row and one transition.
+- *   9. startup catch-up scan — held writs pre-dating apparatus start
+- *      are processed at boot.
+- *  10. withdrawal-mid-flight — a petitioner-initiated cancellation
+- *      produces no Reckonings row.
+- *  11. type-aware target-phase resolution — the handler uses the
+- *      writ-type config to pick the active target. Tested with
+- *      `mandate` (target `'open'`) and a custom non-mandate type
+- *      whose active state is named differently.
+- *
+- * The fixture mirrors the scaffolding in `reckoner.test.ts` — real
+- * Stacks + Clerk + Reckoner against MemoryBackend, with explicit
+- * book pre-creation for the books the apparatuses expect. The CDC
+- * handler is invoked end-to-end through `clerk.setWritExt()`'s Phase 2
+- * dispatch in most cases; the dedupe and re-delivery cases drive the
+- * handler directly via `hooks.handleWritsChange()` to assert the
+- * idempotency contract without racing against Stacks' coalescer.
+- */
+-
+-import { describe, it, afterEach } from 'node:test';
+-import assert from 'node:assert/strict';
+-
+-import { setGuild, clearGuild } from '@shardworks/nexus-core';
+-import type {
+-  Guild,
+-  GuildConfig,
+-  KitEntry,
+-  LoadedApparatus,
+-  LoadedKit,
+-  StartupContext,
+-} from '@shardworks/nexus-core';
+-
+-import { createStacksApparatus } from '@shardworks/stacks-apparatus';
+-import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
+-import type {
+-  ChangeEvent,
+-  ReadOnlyBook,
+-  StacksApi,
+-} from '@shardworks/stacks-apparatus';
+-
+-import { createClerk } from '@shardworks/clerk-apparatus';
+-import type { ClerkApi, WritDoc, WritTypeConfig } from '@shardworks/clerk-apparatus';
+-
+-import { createReckonerWithHooks } from './reckoner.ts';
+-import { alwaysApproveScheduler } from './schedulers/always-approve.ts';
+-import type {
+-  ReckoningDoc,
+-  ReckonerApi,
+-  ReckonerConfig,
+-  Scheduler,
+-} from './types.ts';
+-
+-// ── Test harness ─────────────────────────────────────────────────────
+-
+-interface Fixture {
+-  stacks: StacksApi;
+-  clerk: ClerkApi;
+-  reckoner: ReckonerApi;
+-  hooks: ReturnType<typeof createReckonerWithHooks>['hooks'];
+-  memBackend: MemoryBackend;
+-  fakeGuildConfig: GuildConfig & { reckoner?: ReckonerConfig };
+-  reckoningsBook: ReadOnlyBook<ReckoningDoc>;
+-  /**
+-   * Re-fire `phase:started` against the registered handlers. Awaits
+-   * any async handlers (the Reckoner's seal handler runs the
+-   * catch-up scan async).
+-   */
+-  firePhaseStarted: () => Promise<void>;
+-}
+-
+-function buildFakeGuild(
+-  apparatusMap: Map<string, unknown>,
+-  fakeGuildConfig: GuildConfig,
+-): Guild {
+-  return {
+-    home: '/tmp/reckoner-cdc-test-guild',
+-    apparatus<T>(name: string): T {
+-      const a = apparatusMap.get(name);
+-      if (!a) throw new Error(`Apparatus "${name}" not installed`);
+-      return a as T;
+-    },
+-    config<T>(_pluginId: string): T {
+-      return {} as T;
+-    },
+-    writeConfig(): void {},
+-    guildConfig(): GuildConfig {
+-      return fakeGuildConfig;
+-    },
+-    kits(): LoadedKit[] {
+-      return [];
+-    },
+-    apparatuses(): LoadedApparatus[] {
+-      return [];
+-    },
+-    failedPlugins() {
+-      return [];
+-    },
+-    startupWarnings(): string[] {
+-      return [];
+-    },
+-  };
+-}
+-
+-interface FixtureOptions {
+-  petitionerKits?: Array<{ pluginId: string; value: unknown }>;
+-  /**
+-   * Additional `schedulers` kit contributions visible to the
+-   * Reckoner's `start()`, on top of the built-in
+-   * `reckoner.always-approve` instance the apparatus contributes
+-   * from its own supportKit. Tests that need to exercise a non-
+-   * default scheduler (decline / defer / weight / validateConfig)
+-   * supply their scheduler here.
+-   */
+-  schedulerKits?: Array<{ pluginId: string; value: Scheduler[] }>;
+-  config?: ReckonerConfig | undefined;
+-  /**
+-   * Optional writ types to register on the Clerk before the Reckoner
+-   * starts. Used to test type-aware target-phase resolution against a
+-   * non-mandate type.
+-   */
+-  writTypes?: WritTypeConfig[];
+-  /**
+-   * When set, callers can pre-seed writs into the writs book before
+-   * the Reckoner's `start()` runs — used to exercise the catch-up
+-   * scan path.
+-   */
+-  preStart?: (deps: { stacks: StacksApi; clerk: ClerkApi }) => Promise<void>;
+-}
+-
+-async function buildFixture(opts: FixtureOptions = {}): Promise<Fixture> {
+-  const memBackend = new MemoryBackend();
+-  const stacksPlugin = createStacksApparatus(memBackend);
+-  const clerkPlugin = createClerk();
+-  const built = createReckonerWithHooks();
+-  const reckonerPlugin = built.plugin;
+-
+-  const apparatusMap = new Map<string, unknown>();
+-
+-  const fakeGuildConfig: GuildConfig & { reckoner?: ReckonerConfig } = {
+-    name: 'reckoner-cdc-test-guild',
+-    nexus: '0.0.0',
+-    plugins: [],
+-    ...(opts.config !== undefined ? { reckoner: opts.config } : {}),
+-  };
+-
+-  setGuild(buildFakeGuild(apparatusMap, fakeGuildConfig));
+-
+-  // Pre-create the books the Clerk needs — Stacks' Wire phase would do
+-  // this in production from the supportKit declarations.
+-  memBackend.ensureBook(
+-    { ownerId: 'clerk', book: 'writs' },
+-    {
+-      indexes: [
+-        'phase',
+-        'type',
+-        'createdAt',
+-        'parentId',
+-        ['phase', 'type'],
+-        ['phase', 'createdAt'],
+-        ['parentId', 'phase'],
+-      ],
+-    },
+-  );
+-  memBackend.ensureBook(
+-    { ownerId: 'clerk', book: 'links' },
+-    {
+-      indexes: [
+-        'sourceId',
+-        'targetId',
+-        'label',
+-        ['sourceId', 'label'],
+-        ['targetId', 'label'],
+-      ],
+-    },
+-  );
+-  // Pre-create the Reckoner's reckonings book with the contract index
+-  // set so the handler's queries (and the dedupe lookup) hit indexed
+-  // columns the same way they would in production.
+-  memBackend.ensureBook(
+-    { ownerId: 'reckoner', book: 'reckonings' },
+-    {
+-      indexes: [
+-        'writId',
+-        'consideredAt',
+-        'outcome',
+-        'source',
+-        'visionRelation',
+-        'severity',
+-        'declineReason',
+-        ['outcome', 'consideredAt'],
+-        ['visionRelation', 'consideredAt'],
+-        ['severity', 'consideredAt'],
+-        ['writId', 'consideredAt'],
+-      ],
+-    },
+-  );
+-
+-  // Build a phase-started capable StartupContext per apparatus.
+-  const phaseStartedHandlers: Array<(...args: unknown[]) => void | Promise<void>> = [];
+-  const firePhaseStarted = async (): Promise<void> => {
+-    for (const handler of phaseStartedHandlers) {
+-      await handler();
+-    }
+-  };
+-
+-  function buildCtx(kitEntries: KitEntry[]): StartupContext {
+-    return {
+-      on(event, handler) {
+-        if (event === 'phase:started') {
+-          phaseStartedHandlers.push(handler);
+-        }
+-      },
+-      kits(type: string): KitEntry[] {
+-        return kitEntries.filter((e) => e.type === type);
+-      },
+-    };
+-  }
+-
+-  // ── Stacks ────────────────────────────────────────────────────────
+-  await stacksPlugin.apparatus.start(buildCtx([]));
+-  const stacks = stacksPlugin.apparatus.provides as StacksApi;
+-  apparatusMap.set('stacks', stacks);
+-
+-  // ── Clerk ─────────────────────────────────────────────────────────
+-  await clerkPlugin.apparatus.start(buildCtx([]));
+-  const clerk = clerkPlugin.apparatus.provides as ClerkApi;
+-  apparatusMap.set('clerk', clerk);
+-
+-  // Register optional writ types before the Reckoner starts so the
+-  // type config is visible during catch-up scan and CDC dispatch.
+-  if (opts.writTypes) {
+-    for (const config of opts.writTypes) {
+-      clerk.registerWritType(config);
+-    }
+-  }
+-
+-  // Optional pre-start seed (catch-up scan tests).
+-  if (opts.preStart) {
+-    await opts.preStart({ stacks, clerk });
+-  }
+-
+-  // ── Reckoner ──────────────────────────────────────────────────────
+-  const petitionerKitEntries: KitEntry[] = (opts.petitionerKits ?? []).map(
+-    (entry) => ({
+-      pluginId: entry.pluginId,
+-      packageName: `@test/${entry.pluginId}`,
+-      type: 'petitioners',
+-      value: entry.value,
+-    }),
+-  );
+-
+-  // Surface the Reckoner's own supportKit `schedulers` contribution
+-  // (the built-in always-approve instance) plus any test-supplied
+-  // schedulers. Arbor synthesises kit entries from each apparatus's
+-  // supportKit in production; the test fixture mirrors that
+-  // responsibility by hand.
+-  const schedulerKitEntries: KitEntry[] = [
+-    {
+-      pluginId: 'reckoner',
+-      packageName: '@shardworks/reckoner-apparatus',
+-      type: 'schedulers',
+-      value: [alwaysApproveScheduler],
+-    },
+-    ...(opts.schedulerKits ?? []).map((entry) => ({
+-      pluginId: entry.pluginId,
+-      packageName: `@test/${entry.pluginId}`,
+-      type: 'schedulers',
+-      value: entry.value,
+-    })),
+-  ];
+-
+-  await reckonerPlugin.apparatus.start(
+-    buildCtx([...petitionerKitEntries, ...schedulerKitEntries]),
+-  );
+-  const reckoner = reckonerPlugin.apparatus.provides as ReckonerApi;
+-  apparatusMap.set('reckoner', reckoner);
+-
+-  // Fire `phase:started` so the registry seals, the active
+-  // scheduler resolves, and the catch-up scan runs — the real Arbor
+-  // lifecycle does this for us in production. Tests that need to
+-  // exercise pre-seal behavior (CDC events arriving before
+-  // phase:started, etc.) call `hooks.handleWritsChange` against a
+-  // fresh fixture and rely on the activeScheduler-undefined guard.
+-  await firePhaseStarted();
+-
+-  return {
+-    stacks,
+-    clerk,
+-    reckoner,
+-    hooks: built.hooks,
+-    memBackend,
+-    fakeGuildConfig,
+-    reckoningsBook: stacks.readBook<ReckoningDoc>('reckoner', 'reckonings'),
+-    firePhaseStarted,
+-  };
+-}
+-
+-// ── Tests ────────────────────────────────────────────────────────────
+-
+-describe('Reckoner CDC handler', () => {
+-  afterEach(() => {
+-    clearGuild();
+-  });
+-
+-  // ── 1: skip-not-in-new ─────────────────────────────────────────────
+-
+-  describe('rule: phase gate', () => {
+-    it('ignores writs whose phase is not `new`', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [
+-          {
+-            pluginId: 'vision-keeper',
+-            value: [
+-              { source: 'vision-keeper.snapshot', description: 'snapshots' },
+-            ],
+-          },
+-        ],
+-      });
+-
+-      // Post a writ via the petition helper to trigger the CDC
+-      // handler, then immediately drive it to a terminal state. The
+-      // CDC handler will fire on the post (via setWritExt), accept
+-      // it, and write a row. After the terminal transition fires
+-      // again, the handler must skip — no second row.
+-      const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
+-        title: 't',
+-        body: 'b',
+-      });
+-
+-      // Row count after the auto-accept.
+-      const rowsAfterAccept = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(
+-        rowsAfterAccept.length,
+-        1,
+-        'auto-accept should produce exactly one row',
+-      );
+-
+-      // Now transition the writ to a terminal state (cancelled). The
+-      // CDC handler should observe the update event but skip because
+-      // `phase !== 'new'`.
+-      await fix.clerk.transition(writ.id, 'cancelled', { resolution: 'r' });
+-
+-      const rowsAfterCancel = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(
+-        rowsAfterCancel.length,
+-        1,
+-        'phase-gate skip must not write a second row',
+-      );
+-    });
+-  });
+-
+-  // ── 2: skip-no-ext ─────────────────────────────────────────────────
+-
+-  describe('rule: ext gate', () => {
+-    it('ignores writs that carry no reckoner ext slot', async () => {
+-      const fix = await buildFixture({ petitionerKits: [] });
+-
+-      // Post a bare writ via Clerk (no Reckoner ext at all). Then
+-      // edit the title to fire an update CDC event with no ext
+-      // change — gate must reject (no row, no transition).
+-      const writ = await fix.clerk.post({ title: 't', body: 'b' });
+-      await fix.clerk.edit({ id: writ.id, title: 't2' });
+-
+-      const rows = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(rows.length, 0, 'no-ext writs must not produce rows');
+-
+-      const reread = await fix.clerk.show(writ.id);
+-      assert.equal(reread.phase, 'new', 'no-ext writ stays in new');
+-    });
+-  });
+-
+-  // ── 3: disabled-source debug-skip ──────────────────────────────────
+-
+-  describe('rule: disabled-source skip', () => {
+-    it('does not write a row or transition when the source is disabled', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [
+-          {
+-            pluginId: 'vision-keeper',
+-            value: [
+-              { source: 'vision-keeper.snapshot', description: 'snapshots' },
+-            ],
+-          },
+-        ],
+-        config: {
+-          disabledSources: ['vision-keeper.snapshot'],
+-        },
+-      });
+-
+-      const originalDebug = console.debug;
+-      const debugLines: string[] = [];
+-      console.debug = (msg: unknown) => {
+-        debugLines.push(String(msg));
+-      };
+-
+-      try {
+-        const writ = await fix.reckoner.petition({
+-          source: 'vision-keeper.snapshot',
+-          title: 't',
+-          body: 'b',
+-        });
+-
+-        // No transition: writ stays in new.
+-        const reread = await fix.clerk.show(writ.id);
+-        assert.equal(reread.phase, 'new', 'disabled-source writ stays in new');
+-
+-        // No Reckonings row.
+-        const rows = await fix.reckoningsBook.find({
+-          where: [['writId', '=', writ.id]],
+-        });
+-        assert.equal(rows.length, 0, 'disabled-source skip writes no row');
+-
+-        // A debug log line must surface the skip.
+-        assert.ok(
+-          debugLines.some((l) =>
+-            /\[reckoner\] cdc:.*disabledSources/.test(l) &&
+-              l.includes('vision-keeper.snapshot'),
+-          ),
+-          `expected a debug-log line naming the disabled source; got: ${JSON.stringify(debugLines)}`,
+-        );
+-      } finally {
+-        console.debug = originalDebug;
+-      }
+-    });
+-  });
+-
+-  // ── 4: unregistered-strict decline ────────────────────────────────
+-
+-  describe('rule: enforceRegistration: true', () => {
+-    it('declines unregistered sources with source_unregistered and a structured resolution', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [],
+-        config: { enforceRegistration: true },
+-      });
+-
+-      // The petition helper itself fail-loud rejects unregistered
+-      // sources under strict registration; to drive the CDC path,
+-      // post the writ + ext via Clerk's post-extension fast path so
+-      // the handler sees the held petition without going through
+-      // the helper's gate.
+-      const writ = await fix.clerk.post({ title: 't', body: 'b' });
+-      await fix.clerk.setWritExt(writ.id, 'reckoner', {
+-        source: 'unknown.source',
+-        priority: {
+-          visionRelation: 'vision-neutral',
+-          severity: 'minor',
+-          scope: 'minor-area',
+-          time: { decay: false, deadline: null },
+-          domain: [],
+-        },
+-      });
+-
+-      // The CDC handler fired during setWritExt's Phase 2 dispatch.
+-      // The writ should now be cancelled with a structured
+-      // resolution.
+-      const reread = await fix.clerk.show(writ.id);
+-      assert.equal(reread.phase, 'cancelled');
+-      assert.match(
+-        String(reread.resolution),
+-        /\[reckoner\] declined: source 'unknown\.source' is not registered \(enforceRegistration: true\)\./,
+-      );
+-
+-      // Reckonings row carries outcome + decline reason.
+-      const rows = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(rows.length, 1);
+-      assert.equal(rows[0]!.outcome, 'declined');
+-      assert.equal(rows[0]!.declineReason, 'source_unregistered');
+-      assert.equal(rows[0]!.remediationHint, 'unknown.source');
+-      assert.equal(rows[0]!.source, 'unknown.source');
+-      assert.equal(rows[0]!.visionRelation, 'vision-neutral');
+-      assert.equal(rows[0]!.severity, 'minor');
+-      assert.equal(typeof rows[0]!.consideredAt, 'string');
+-      assert.equal(typeof rows[0]!.writUpdatedAt, 'string');
+-      assert.ok(rows[0]!.id.startsWith('rk-'));
+-    });
+-  });
+-
+-  // ── 5: unregistered-non-strict approve ────────────────────────────
+-
+-  describe('rule: enforceRegistration: false', () => {
+-    it('approves unregistered sources when registration is permissive', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [],
+-        config: { enforceRegistration: false },
+-      });
+-
+-      // Suppress the petition helper's expected warning about an
+-      // unregistered source — keeps the test output clean without
+-      // changing behaviour.
+-      const originalWarn = console.warn;
+-      console.warn = () => {};
+-
+-      try {
+-        const writ = await fix.reckoner.petition({
+-          source: 'unknown.source',
+-          title: 't',
+-          body: 'b',
+-        });
+-
+-        const reread = await fix.clerk.show(writ.id);
+-        assert.equal(reread.phase, 'open', 'permissive mode auto-approves');
+-
+-        const rows = await fix.reckoningsBook.find({
+-          where: [['writId', '=', writ.id]],
+-        });
+-        assert.equal(rows.length, 1);
+-        assert.equal(rows[0]!.outcome, 'accepted');
+-        assert.equal(rows[0]!.source, 'unknown.source');
+-      } finally {
+-        console.warn = originalWarn;
+-      }
+-    });
+-  });
+-
+-  // ── 6: registered-source approve ──────────────────────────────────
+-
+-  describe('rule: registered source', () => {
+-    it('approves registered sources and writes a lean Reckonings row', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [
+-          {
+-            pluginId: 'vision-keeper',
+-            value: [
+-              { source: 'vision-keeper.snapshot', description: 'snapshots' },
+-            ],
+-          },
+-        ],
+-      });
+-
+-      const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
+-        title: 't',
+-        body: 'b',
+-        priority: {
+-          visionRelation: 'vision-violator',
+-          severity: 'serious',
+-        },
+-      });
+-
+-      const reread = await fix.clerk.show(writ.id);
+-      assert.equal(reread.phase, 'open');
+-
+-      const rows = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(rows.length, 1);
+-      const row = rows[0]!;
+-      assert.equal(row.outcome, 'accepted');
+-      assert.equal(row.source, 'vision-keeper.snapshot');
+-      assert.equal(row.visionRelation, 'vision-violator');
+-      assert.equal(row.severity, 'serious');
+-      assert.equal(typeof row.consideredAt, 'string');
+-      assert.equal(typeof row.writUpdatedAt, 'string');
+-      assert.ok(row.id.startsWith('rk-'));
+-      // No reason metadata on accepted rows.
+-      assert.equal(row.declineReason, undefined);
+-      assert.equal(row.deferReason, undefined);
+-    });
+-  });
+-
+-  // ── 7: ext re-stamp re-evaluation gate ─────────────────────────────
+-
+-  describe('rule: re-firing gate (D14)', () => {
+-    it('re-evaluates a held writ when its ext.reckoner changes meaningfully', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [
+-          {
+-            pluginId: 'tester',
+-            value: [{ source: 'tester.kind', description: 'tester' }],
+-          },
+-        ],
+-        // First ext stamp will use a disabled source — the handler
+-        // skips at the disabled gate (no row, no transition). Second
+-        // ext stamp swaps the source to a registered one, which the
+-        // re-firing gate must observe as a meaningful change so the
+-        // accept path runs.
+-        config: { disabledSources: ['blocked.kind'] },
+-      });
+-
+-      // Suppress the petition helper's expected unregistered warning
+-      // for the first stamp.
+-      const originalWarn = console.warn;
+-      console.warn = () => {};
+-      const originalDebug = console.debug;
+-      console.debug = () => {};
+-
+-      try {
+-        // Post a writ and stamp an ext with a disabled source. The
+-        // CDC handler runs but skips at the disabled-source gate.
+-        const writ = await fix.clerk.post({ title: 't', body: 'b' });
+-        await fix.clerk.setWritExt(writ.id, 'reckoner', {
+-          source: 'blocked.kind',
+-          priority: {
+-            visionRelation: 'vision-neutral',
+-            severity: 'minor',
+-            scope: 'minor-area',
+-            time: { decay: false, deadline: null },
+-            domain: [],
+-          },
+-        });
+-
+-        // No row, no transition — writ stays in `new`.
+-        const afterFirstStamp = await fix.clerk.show(writ.id);
+-        assert.equal(afterFirstStamp.phase, 'new');
+-        const rowsAfterFirstStamp = await fix.reckoningsBook.find({
+-          where: [['writId', '=', writ.id]],
+-        });
+-        assert.equal(rowsAfterFirstStamp.length, 0);
+-
+-        // Re-stamp ext with a registered source. The CDC handler
+-        // observes a meaningful ext change while phase is still
+-        // `new`, runs the rule sequence again, and approves.
+-        await fix.clerk.setWritExt(writ.id, 'reckoner', {
+-          source: 'tester.kind',
+-          priority: {
+-            visionRelation: 'vision-neutral',
+-            severity: 'minor',
+-            scope: 'minor-area',
+-            time: { decay: false, deadline: null },
+-            domain: [],
+-          },
+-        });
+-
+-        const afterSecondStamp = await fix.clerk.show(writ.id);
+-        assert.equal(
+-          afterSecondStamp.phase,
+-          'open',
+-          'meaningful ext change re-fires the rule sequence',
+-        );
+-        const rowsAfterSecond = await fix.reckoningsBook.find({
+-          where: [['writId', '=', writ.id]],
+-        });
+-        assert.equal(rowsAfterSecond.length, 1);
+-        assert.equal(rowsAfterSecond[0]!.outcome, 'accepted');
+-        assert.equal(rowsAfterSecond[0]!.source, 'tester.kind');
+-      } finally {
+-        console.warn = originalWarn;
+-        console.debug = originalDebug;
+-      }
+-    });
+-
+-    it('does not re-fire when neither phase nor ext.reckoner changes', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [
+-          {
+-            pluginId: 'vision-keeper',
+-            value: [
+-              { source: 'vision-keeper.snapshot', description: 'snapshots' },
+-            ],
+-          },
+-        ],
+-      });
+-
+-      // Post + auto-accept.
+-      const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
+-        title: 't',
+-        body: 'b',
+-      });
+-      const accepted = await fix.clerk.show(writ.id);
+-      assert.equal(accepted.phase, 'open');
+-
+-      const rowsAfterAccept = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(rowsAfterAccept.length, 1);
+-
+-      // Synthesise an unrelated update event — phase unchanged,
+-      // ext.reckoner unchanged. Handler must short-circuit at the
+-      // gate.
+-      const evt: ChangeEvent<WritDoc> = {
+-        type: 'update',
+-        ownerId: 'clerk',
+-        book: 'writs',
+-        prev: accepted,
+-        entry: { ...accepted, title: 'edited' },
+-      };
+-      await fix.hooks.handleWritsChange(evt);
+-
+-      const rowsAfter = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(rowsAfter.length, 1, 'unrelated update must not produce a row');
+-    });
+-  });
+-
+-  // ── 8: CDC re-delivery idempotency ─────────────────────────────────
+-
+-  describe('idempotency: same (writId, writUpdatedAt) twice', () => {
+-    it('produces exactly one row and one transition under same-event replay', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [
+-          {
+-            pluginId: 'vision-keeper',
+-            value: [
+-              { source: 'vision-keeper.snapshot', description: 'snapshots' },
+-            ],
+-          },
+-        ],
+-      });
+-
+-      const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
+-        title: 't',
+-        body: 'b',
+-      });
+-
+-      // The CDC handler fired during setWritExt's Phase 2 dispatch
+-      // and accepted the writ. Re-deliver the same update event by
+-      // hand — synthesised against the writ's pre-handler snapshot
+-      // so the gate observes a meaningful ext change but the dedupe
+-      // identity (writId, writUpdatedAt) matches the row we already
+-      // wrote.
+-      const evt: ChangeEvent<WritDoc> = {
+-        type: 'update',
+-        ownerId: 'clerk',
+-        book: 'writs',
+-        prev: { ...writ, ext: undefined },
+-        entry: writ,
+-      };
+-      await fix.hooks.handleWritsChange(evt);
+-
+-      const rows = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(rows.length, 1, 'replay must dedupe on (writId, writUpdatedAt)');
+-
+-      const reread = await fix.clerk.show(writ.id);
+-      assert.equal(
+-        reread.phase,
+-        'open',
+-        'replay must not produce a second transition (which would fail anyway)',
+-      );
+-    });
+-  });
+-
+-  // ── 9: startup catch-up scan ───────────────────────────────────────
+-
+-  describe('startup catch-up scan', () => {
+-    it('processes held writs that pre-date apparatus startup', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [
+-          {
+-            pluginId: 'vision-keeper',
+-            value: [
+-              { source: 'vision-keeper.snapshot', description: 'snapshots' },
+-            ],
+-          },
+-        ],
+-        // Seed a held writ before the Reckoner starts. The handler
+-        // is not yet registered, so the post + setWritExt's Phase 2
+-        // dispatch finds zero subscribers and the writ remains in
+-        // `new` until the catch-up scan runs during start().
+-        async preStart({ clerk }) {
+-          const w = await clerk.post({ title: 'pre-start', body: 'b' });
+-          await clerk.setWritExt(w.id, 'reckoner', {
+-            source: 'vision-keeper.snapshot',
+-            priority: {
+-              visionRelation: 'vision-neutral',
+-              severity: 'minor',
+-              scope: 'minor-area',
+-              time: { decay: false, deadline: null },
+-              domain: [],
+-            },
+-          });
+-        },
+-      });
+-
+-      // After start(), the catch-up scan has run; the held writ
+-      // should be transitioned and a row should exist.
+-      const all = await fix.clerk.list({ limit: 100 });
+-      assert.equal(all.length, 1);
+-      const writ = all[0]!;
+-      assert.equal(writ.phase, 'open', 'catch-up scan auto-approves the writ');
+-
+-      const rows = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(rows.length, 1);
+-      assert.equal(rows[0]!.outcome, 'accepted');
+-
+-      // Re-running the catch-up scan must not produce a second row —
+-      // the writ's phase is no longer `new`, so it short-circuits at
+-      // the phase gate.
+-      await fix.hooks.runCatchUpScan();
+-      const rowsAfter = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(rowsAfter.length, 1, 'idempotent across repeated scans');
+-    });
+-  });
+-
+-  // ── 10: withdrawal-mid-flight ──────────────────────────────────────
+-
+-  describe('withdrawal mid-flight', () => {
+-    it('produces no Reckonings row when the petitioner cancels a held writ before the handler runs', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [],
+-        config: { disabledSources: ['vision-keeper.snapshot'] },
+-      });
+-
+-      // Suppress the disabled-source debug log line.
+-      const originalDebug = console.debug;
+-      console.debug = () => {};
+-
+-      try {
+-        const writ = await fix.reckoner.petition({
+-          source: 'vision-keeper.snapshot',
+-          title: 't',
+-          body: 'b',
+-        });
+-
+-        // The handler skipped at the disabled-source gate, so the
+-        // writ remains in `new`. Now have the petitioner withdraw
+-        // it — the handler observes the update event but skips
+-        // because phase is no longer `new`, and writes no row.
+-        await fix.reckoner.withdraw(writ.id, 'no longer relevant');
+-
+-        const rows = await fix.reckoningsBook.find({
+-          where: [['writId', '=', writ.id]],
+-        });
+-        assert.equal(rows.length, 0, 'no row on withdrawal-mid-flight');
+-
+-        const reread = await fix.clerk.show(writ.id);
+-        assert.equal(reread.phase, 'cancelled');
+-      } finally {
+-        console.debug = originalDebug;
+-      }
+-    });
+-  });
+-
+-  // ── 11: type-aware target-phase resolution ─────────────────────────
+-
+-  describe('target-phase resolution', () => {
+-    it('picks `open` for mandate writs', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [
+-          {
+-            pluginId: 'vision-keeper',
+-            value: [
+-              { source: 'vision-keeper.snapshot', description: 'snapshots' },
+-            ],
+-          },
+-        ],
+-      });
+-
+-      const writ = await fix.reckoner.petition({
+-        source: 'vision-keeper.snapshot',
+-        title: 't',
+-        body: 'b',
+-      });
+-      const reread = await fix.clerk.show(writ.id);
+-      assert.equal(reread.phase, 'open');
+-      assert.equal(reread.type, 'mandate');
+-    });
+-
+-    it('picks the registered active state for a non-mandate type', async () => {
+-      const fix = await buildFixture({
+-        petitionerKits: [
+-          {
+-            pluginId: 'tester',
+-            value: [{ source: 'tester.kind', description: 'tester' }],
+-          },
+-        ],
+-        writTypes: [
+-          {
+-            name: 'task',
+-            states: [
+-              {
+-                name: 'new',
+-                classification: 'initial',
+-                allowedTransitions: ['running', 'cancelled'],
+-              },
+-              {
+-                name: 'running',
+-                classification: 'active',
+-                allowedTransitions: ['done', 'cancelled'],
+-              },
+-              {
+-                name: 'done',
+-                classification: 'terminal',
+-                attrs: ['success'],
+-                allowedTransitions: [],
+-              },
+-              {
+-                name: 'cancelled',
+-                classification: 'terminal',
+-                attrs: ['cancelled'],
+-                allowedTransitions: [],
+-              },
+-            ],
+-          },
+-        ],
+-      });
+-
+-      const writ = await fix.reckoner.petition({
+-        type: 'task',
+-        source: 'tester.kind',
+-        title: 't',
+-        body: 'b',
+-      });
+-      const reread = await fix.clerk.show(writ.id);
+-      assert.equal(reread.type, 'task');
+-      assert.equal(
+-        reread.phase,
+-        'running',
+-        'non-mandate type lands in its registered active state, not `open`',
+-      );
+-
+-      const rows = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(rows.length, 1);
+-      assert.equal(rows[0]!.outcome, 'accepted');
+-    });
+-  });
+-});
+diff --git a/packages/plugins/reckoner/src/reckoner-depends-on.test.ts b/packages/plugins/reckoner/src/reckoner-depends-on.test.ts
+index 1db2acc..b2093dc 100644
+--- a/packages/plugins/reckoner/src/reckoner-depends-on.test.ts
++++ b/packages/plugins/reckoner/src/reckoner-depends-on.test.ts
+@@ -23,13 +23,19 @@
+  *      source skip and registration enforcement run *before* the
+  *      dependency check).
+  *
+- * The fixture mirrors `reckoner-cdc.test.ts` — real Stacks + Clerk +
++ * The fixture mirrors `reckoner-tick.test.ts` — real Stacks + Clerk +
+  * Reckoner against MemoryBackend — and additionally surfaces the
+  * Clerk's own `supportKit.linkKinds` through `ctx.kits('linkKinds')`
+  * so tests can create real `kind: 'depends-on'` links via
+  * `clerk.link(source, target, label, 'depends-on')`. The dep gate
+  * filters outbound links by `link.kind === 'depends-on'`, so the
+  * kind plumbing is load-bearing.
++ *
++ * Each behavioral case drives one or more `runTick` calls — the
++ * periodic-tick path is now the only evaluation surface. The
++ * `postHeld` helper bakes one tick into the petition flow so most
++ * tests look like "post + observe row"; multi-tick tests fire
++ * additional `runTick` calls explicitly between dep-state mutations.
+  */
+ 
+ import { describe, it, afterEach } from 'node:test';
+@@ -75,8 +81,9 @@ interface Fixture {
+   reckoningsBook: ReadOnlyBook<ReckoningDoc>;
+   /**
+    * Re-fire `phase:started` against the registered handlers. The
+-   * Reckoner's seal handler runs the catch-up scan — calling this
+-   * again is the v0 way to simulate a tick (D7 of the commission).
++   * Reckoner's seal handler resolves the active scheduler and
++   * builds the tick context; tests that need to drive the tick
++   * after fixture build call `hooks.runTick()`.
+    */
+   firePhaseStarted: () => Promise<void>;
+ }
+@@ -286,13 +293,15 @@ const TESTER_KIT = {
+ };
+ 
+ /**
+- * Post a held petition without consideration firing. We post the
+- * underlying writ via `clerk.post()` (no ext), wire any depends-on
+- * links to existing targets, then stamp `ext.reckoner` last —
+- * stamping is the moment the CDC handler considers the writ. By
+- * routing all stamps through `reckoner.petition(writId, ext)` we
+- * exercise the same code path operators use for the draft-then-
+- * publish idiom.
++ * Post a held petition and drive one tick to give it a first
++ * consideration. We post the underlying writ via `clerk.post()` (no
++ * ext), wire any depends-on links to existing targets, stamp
++ * `ext.reckoner` via `reckoner.petition(writId, ext)`, and finally
++ * fire one tick — the periodic-tick path is now the only evaluation
++ * surface, so every dep-gate behavioral case must drive at least one
++ * tick before observing outcomes. Routing all stamps through the
++ * stamp-only form exercises the same code path operators use for the
++ * draft-then-publish idiom.
+  */
+ async function postHeld(
+   fix: Fixture,
+@@ -310,6 +319,7 @@ async function postHeld(
+   await fix.reckoner.petition(writ.id, {
+     source: 'tester.dep',
+   });
++  await fix.hooks.runTick();
+   return writ;
+ }
+ 
+@@ -459,9 +469,9 @@ describe('Reckoner dependency-aware consideration gate', () => {
+     const writsBook = fix.stacks.book<WritDoc>('clerk', 'writs');
+     await writsBook.delete(ghost.id);
+ 
+-    // Re-run the catch-up scan to re-evaluate the held writ at the
++    // Drive another tick to re-evaluate the held writ at the
+     // dangling-target shape.
+-    await fix.hooks.runCatchUpScan();
++    await fix.hooks.runTick();
+ 
+     const rows = await fix.reckoningsBook.find({
+       where: [['writId', '=', writ.id]],
+@@ -525,10 +535,11 @@ describe('Reckoner dependency-aware consideration gate', () => {
+     // Clear the dep between ticks.
+     await fix.clerk.transition(dep.id, 'completed', { resolution: 'ok' });
+ 
+-    // Tick again — re-run the catch-up scan, which re-considers every
+-    // held petition. With the dep cleared, the gate proceeds and the
++    // Tick again — re-run the periodic-tick handler, which
++    // re-considers every held petition. With the dep cleared, the
++    // gate proceeds and the
+     // scheduler accepts.
+-    await fix.hooks.runCatchUpScan();
++    await fix.hooks.runTick();
+ 
+     const rereadAfterTick = await fix.clerk.show(writ.id);
+     assert.equal(
+@@ -565,10 +576,10 @@ describe('Reckoner dependency-aware consideration gate', () => {
+     assert.equal(rows.length, 1);
+     assert.equal(rows[0]!.outcome, 'deferred');
+ 
+-    // Re-run the catch-up scan twice without changing dep state.
+-    // Each tick must run the dep gate but suppress the row write.
+-    await fix.hooks.runCatchUpScan();
+-    await fix.hooks.runCatchUpScan();
++    // Drive two more ticks without changing dep state. Each tick
++    // must run the dep gate but suppress the row write.
++    await fix.hooks.runTick();
++    await fix.hooks.runTick();
+ 
+     rows = await fix.reckoningsBook.find({
+       where: [['writId', '=', writ.id]],
+@@ -598,7 +609,7 @@ describe('Reckoner dependency-aware consideration gate', () => {
+     // Fail the dep — outcome shape changes (pending → failed).
+     await fix.clerk.transition(dep.id, 'failed', { resolution: 'oops' });
+ 
+-    await fix.hooks.runCatchUpScan();
++    await fix.hooks.runTick();
+ 
+     rows = await fix.reckoningsBook.find({
+       where: [['writId', '=', writ.id]],
+@@ -628,10 +639,10 @@ describe('Reckoner dependency-aware consideration gate', () => {
+     await fix.reckoner.petition(a.id, { source: 'tester.dep' });
+     await fix.reckoner.petition(b.id, { source: 'tester.dep' });
+ 
+-    // Re-run the catch-up scan a few times to confirm the cycle
+-    // doesn't drift toward an accept on either side.
+-    await fix.hooks.runCatchUpScan();
+-    await fix.hooks.runCatchUpScan();
++    // Drive the tick a few times to confirm the cycle doesn't
++    // drift toward an accept on either side.
++    await fix.hooks.runTick();
++    await fix.hooks.runTick();
+ 
+     const rereadA = await fix.clerk.show(a.id);
+     const rereadB = await fix.clerk.show(b.id);
+@@ -656,9 +667,9 @@ describe('Reckoner dependency-aware consideration gate', () => {
+     }
+   });
+ 
+-  // ── Case 12: rule ordering — disabled-source skip wins over dep gate ─
++  // ── Case 12: rule ordering — disabled-source decline wins over dep gate ─
+ 
+-  it('rule ordering: a disabled source produces no row even when its deps would defer', async () => {
++  it('rule ordering: a disabled source declines (source_banned) before the dep gate runs', async () => {
+     const fix = await buildFixture({
+       petitionerKits: [TESTER_KIT],
+       config: { disabledSources: ['tester.dep'] },
+@@ -667,23 +678,20 @@ describe('Reckoner dependency-aware consideration gate', () => {
+     const dep = await fix.clerk.post({ title: 'dep', body: 'b' });
+     await fix.clerk.transition(dep.id, 'open', {}); // gating
+ 
+-    const originalDebug = console.debug;
+-    console.debug = () => {};
+-    try {
+-      const writ = await postHeld(fix, { dependsOn: [dep.id] });
+-      const rows = await fix.reckoningsBook.find({
+-        where: [['writId', '=', writ.id]],
+-      });
+-      assert.equal(
+-        rows.length,
+-        0,
+-        'disabled-source skip runs before the dep gate; no row',
+-      );
+-      const reread = await fix.clerk.show(writ.id);
+-      assert.equal(reread.phase, 'new');
+-    } finally {
+-      console.debug = originalDebug;
+-    }
++    const writ = await postHeld(fix, { dependsOn: [dep.id] });
++    const rows = await fix.reckoningsBook.find({
++      where: [['writId', '=', writ.id]],
++    });
++    assert.equal(rows.length, 1, 'disabled-source decline runs before the dep gate');
++    assert.equal(rows[0]!.outcome, 'declined');
++    assert.equal(rows[0]!.declineReason, 'source_banned');
++    assert.equal(rows[0]!.remediationHint, 'tester.dep');
++    const reread = await fix.clerk.show(writ.id);
++    assert.equal(reread.phase, 'cancelled', 'disabled source transitions to cancelled');
++    assert.match(
++      String(reread.resolution),
++      /\[reckoner\] declined: source 'tester\.dep' is in disabledSources\./,
++    );
+   });
+ 
+   // ── Case 12b: rule ordering — registration enforce → decline (no defer) ─
+@@ -698,7 +706,7 @@ describe('Reckoner dependency-aware consideration gate', () => {
+     await fix.clerk.transition(dep.id, 'open', {}); // gating
+ 
+     // Bypass the helper's registry guard by stamping ext via Clerk
+-    // directly with an unregistered source. The CDC handler then
++    // directly with an unregistered source. Driving one tick then
+     // takes the decline path before reaching the dep gate.
+     const writ = await fix.clerk.post({ title: 't', body: 'b' });
+     await fix.clerk.link(writ.id, dep.id, 'depends-on', 'depends-on');
+@@ -713,6 +721,8 @@ describe('Reckoner dependency-aware consideration gate', () => {
+       },
+     });
+ 
++    await fix.hooks.runTick();
++
+     const reread = await fix.clerk.show(writ.id);
+     assert.equal(
+       reread.phase,
+diff --git a/packages/plugins/reckoner/src/reckoner-scheduler.test.ts b/packages/plugins/reckoner/src/reckoner-scheduler.test.ts
+index 6bc7e6a..c8cbf9e 100644
+--- a/packages/plugins/reckoner/src/reckoner-scheduler.test.ts
++++ b/packages/plugins/reckoner/src/reckoner-scheduler.test.ts
+@@ -1,10 +1,12 @@
+ /**
+  * Reckoner scheduler-registry tests.
+  *
+- * Companion to `reckoner.test.ts` and `reckoner-cdc.test.ts`. Targets
+- * the registry-resolved scheduler call site (Rule 5 in `considerWrit`)
+- * and the kit-static scheduler registry. Covers every entry in the
+- * commission's Acceptance Signal:
++ * Companion to `reckoner.test.ts` and `reckoner-tick.test.ts`. Targets
++ * the registry-resolved scheduler call site driven by the periodic-
++ * tick relay and the kit-static scheduler registry. Every behavioral
++ * case is exercised through `hooks.runTick` after a `petition()` —
++ * the tick is the canonical evaluation surface and there is no
++ * other path that drives the scheduler. The covered cases:
+  *
+  *   - duplicate scheduler id across two kits → fail-loud naming both
+  *     kits;
+@@ -16,16 +18,19 @@
+  *   - set-but-unregistered `reckoner.scheduler` → fail-loud at startup
+  *     listing every registered id;
+  *   - `validateConfig` throw → log + skip, no row, no transition;
+- *   - `evaluate` throw → log + skip;
+- *   - multiple decisions for one writ id → log + skip;
++ *   - `evaluate` throw → log + skip the entire tick;
++ *   - multiple decisions for one writ id → log + skip the entire tick;
+  *   - non-candidate decisions → log + ignore;
+- *   - CDC events arriving pre-seal → silently skipped;
++ *   - pre-seal tick → fail-loud throw (D8);
++ *   - first tick after seal picks up pre-existing held petitions;
+  *   - approve / defer / decline outcomes map to the prescribed
+- *     transitions and Reckonings rows;
++ *     transitions and Reckonings rows. The defer outcome (D3) writes
++ *     a deferred row carrying `deferReason: 'other'` and the
++ *     decision's reason in `deferNote`;
+  *   - `weight` is threaded from a `SchedulerDecision` to the
+  *     Reckonings row when present.
+  *
+- * The fixture mirrors the one in `reckoner-cdc.test.ts`: real Stacks
++ * The fixture mirrors the one in `reckoner-tick.test.ts`: real Stacks
+  * + Clerk + Reckoner against `MemoryBackend`, with explicit book
+  * pre-creation and a phase-started capable StartupContext.
+  */
+@@ -539,6 +544,7 @@ describe('Reckoner scheduler registry', () => {
+           title: 't',
+           body: 'b',
+         });
++        await fix.hooks.runTick();
+         const reread = await fix.clerk.show(writ.id);
+         assert.equal(reread.phase, 'new', 'writ stays in new on validateConfig throw');
+         const rows = await fix.reckoningsBook.find({
+@@ -549,7 +555,7 @@ describe('Reckoner scheduler registry', () => {
+         assert.ok(
+           warnings.some(
+             (w) =>
+-              /\[reckoner\] scheduler:/.test(w) &&
++              /\[reckoner\] tick:/.test(w) &&
+               /validateConfig threw/.test(w),
+           ),
+           `expected fail-loud log line; got: ${JSON.stringify(warnings)}`,
+@@ -588,6 +594,7 @@ describe('Reckoner scheduler registry', () => {
+           title: 't',
+           body: 'b',
+         });
++        await fix.hooks.runTick();
+         const reread = await fix.clerk.show(writ.id);
+         assert.equal(reread.phase, 'new');
+         const rows = await fix.reckoningsBook.find({
+@@ -597,7 +604,7 @@ describe('Reckoner scheduler registry', () => {
+         assert.ok(
+           warnings.some(
+             (w) =>
+-              /\[reckoner\] scheduler:/.test(w) &&
++              /\[reckoner\] tick:/.test(w) &&
+               /evaluate threw/.test(w),
+           ),
+           `expected fail-loud log line; got: ${JSON.stringify(warnings)}`,
+@@ -640,6 +647,7 @@ describe('Reckoner scheduler registry', () => {
+           title: 't',
+           body: 'b',
+         });
++        await fix.hooks.runTick();
+         const reread = await fix.clerk.show(writ.id);
+         assert.equal(reread.phase, 'new', 'writ untouched on multi-decision');
+         const rows = await fix.reckoningsBook.find({
+@@ -649,7 +657,7 @@ describe('Reckoner scheduler registry', () => {
+         assert.ok(
+           warnings.some(
+             (w) =>
+-              /\[reckoner\] scheduler:/.test(w) &&
++              /\[reckoner\] tick:/.test(w) &&
+               /returned 2 decisions/.test(w),
+           ),
+           `expected fail-loud log line; got: ${JSON.stringify(warnings)}`,
+@@ -692,6 +700,7 @@ describe('Reckoner scheduler registry', () => {
+           title: 't',
+           body: 'b',
+         });
++        await fix.hooks.runTick();
+         const reread = await fix.clerk.show(writ.id);
+         assert.equal(reread.phase, 'open', 'in-scope decision is applied');
+         const rows = await fix.reckoningsBook.find({
+@@ -702,7 +711,7 @@ describe('Reckoner scheduler registry', () => {
+         assert.ok(
+           warnings.some(
+             (w) =>
+-              /\[reckoner\] scheduler:/.test(w) &&
++              /\[reckoner\] tick:/.test(w) &&
+               /w-stranger/.test(w) &&
+               /not in the candidate set/.test(w),
+           ),
+@@ -714,44 +723,27 @@ describe('Reckoner scheduler registry', () => {
+     });
+   });
+ 
+-  // ── Pre-seal CDC events silently skipped ───────────────────────────
++  // ── Pre-seal tick fail-loud (D8) ───────────────────────────────────
+ 
+-  describe('pre-seal CDC events', () => {
+-    it('silently skips when activeScheduler has not yet resolved', async () => {
++  describe('pre-seal tick', () => {
++    it('throws fail-loud when runTick fires before activeScheduler resolves', async () => {
+       const fix = await buildFixture({
+         petitionerKits: [REGISTERED_PETITIONER],
+         skipPhaseStarted: true,
+       });
+       assert.equal(fix.hooks.getActiveSchedulerId(), undefined);
+ 
+-      // Suppress the petition-helper's expected warning about the
+-      // unregistered source path; this test stamps ext directly.
+-      const originalWarn = console.warn;
+-      console.warn = () => {};
+-      try {
+-        const writ = await fix.clerk.post({ title: 't', body: 'b' });
+-        await fix.clerk.setWritExt(writ.id, 'reckoner', {
+-          source: 'tester.kind',
+-          priority: {
+-            visionRelation: 'vision-neutral',
+-            severity: 'minor',
+-            scope: 'minor-area',
+-            time: { decay: false, deadline: null },
+-            domain: [],
+-          },
+-        });
+-        const reread = await fix.clerk.show(writ.id);
+-        assert.equal(reread.phase, 'new', 'pre-seal events leave writ in new');
+-        const rows = await fix.reckoningsBook.find({
+-          where: [['writId', '=', writ.id]],
+-        });
+-        assert.equal(rows.length, 0);
+-      } finally {
+-        console.warn = originalWarn;
+-      }
++      await assert.rejects(
++        () => fix.hooks.runTick(),
++        (err: Error) => {
++          assert.match(err.message, /activeScheduler not resolved/);
++          assert.match(err.message, /phase:started/);
++          return true;
++        },
++      );
+     });
+ 
+-    it('catch-up scan reprocesses pre-seal events post-seal', async () => {
++    it('first tick after seal picks up pre-existing held petitions', async () => {
+       const fix = await buildFixture({
+         petitionerKits: [REGISTERED_PETITIONER],
+         skipPhaseStarted: true,
+@@ -770,10 +762,11 @@ describe('Reckoner scheduler registry', () => {
+             domain: [],
+           },
+         });
+-        // Now fire phase:started → seal + catch-up scan.
++        // Seal + active scheduler resolve, then drive the first tick.
+         await fix.firePhaseStarted();
++        await fix.hooks.runTick();
+         const reread = await fix.clerk.show(writ.id);
+-        assert.equal(reread.phase, 'open', 'catch-up scan auto-approves the writ');
++        assert.equal(reread.phase, 'open', 'first tick auto-approves pre-existing held writ');
+         const rows = await fix.reckoningsBook.find({
+           where: [['writId', '=', writ.id]],
+         });
+@@ -797,6 +790,7 @@ describe('Reckoner scheduler registry', () => {
+         title: 't',
+         body: 'b',
+       });
++      await fix.hooks.runTick();
+       const reread = await fix.clerk.show(writ.id);
+       assert.equal(reread.phase, 'open');
+       const rows = await fix.reckoningsBook.find({
+@@ -810,7 +804,7 @@ describe('Reckoner scheduler registry', () => {
+   // ── Outcome mapping: defer ────────────────────────────────────────
+ 
+   describe('outcome: defer', () => {
+-    it('leaves writ in new with no row and no transition', async () => {
++    it('leaves writ in new and writes a deferred row carrying deferReason: other (D3)', async () => {
+       const scheduler: Scheduler = makeScheduler({
+         id: 'kit-a.defer',
+         async evaluate(input: SchedulerInput<unknown>): Promise<readonly SchedulerDecision[]> {
+@@ -833,12 +827,21 @@ describe('Reckoner scheduler registry', () => {
+         title: 't',
+         body: 'b',
+       });
++      await fix.hooks.runTick();
+       const reread = await fix.clerk.show(writ.id);
+       assert.equal(reread.phase, 'new', 'defer leaves writ in new');
+       const rows = await fix.reckoningsBook.find({
+         where: [['writId', '=', writ.id]],
+       });
+-      assert.equal(rows.length, 0, 'defer writes no row in v0');
++      assert.equal(rows.length, 1, 'defer outcome writes one row');
++      const row = rows[0]!;
++      assert.equal(row.outcome, 'deferred');
++      assert.equal(row.deferReason, 'other');
++      assert.equal(row.deferNote, 'capacity hold');
++      // Counter / wake-up companions stay absent in v0.
++      assert.equal(row.deferCount, undefined);
++      assert.equal(row.deferUntil, undefined);
++      assert.equal(row.deferSignal, undefined);
+     });
+   });
+ 
+@@ -869,6 +872,7 @@ describe('Reckoner scheduler registry', () => {
+         title: 't',
+         body: 'b',
+       });
++      await fix.hooks.runTick();
+       const reread = await fix.clerk.show(writ.id);
+       assert.equal(reread.phase, 'cancelled');
+       assert.equal(reread.resolution, reason);
+@@ -910,6 +914,7 @@ describe('Reckoner scheduler registry', () => {
+         title: 't',
+         body: 'b',
+       });
++      await fix.hooks.runTick();
+       const rows = await fix.reckoningsBook.find({
+         where: [['writId', '=', writ.id]],
+       });
+@@ -927,6 +932,7 @@ describe('Reckoner scheduler registry', () => {
+         title: 't',
+         body: 'b',
+       });
++      await fix.hooks.runTick();
+       const rows = await fix.reckoningsBook.find({
+         where: [['writId', '=', writ.id]],
+       });
+diff --git a/packages/plugins/reckoner/src/reckoner-tick.test.ts b/packages/plugins/reckoner/src/reckoner-tick.test.ts
+new file mode 100644
+index 0000000..28ad1c7
+--- /dev/null
++++ b/packages/plugins/reckoner/src/reckoner-tick.test.ts
+@@ -0,0 +1,633 @@
++/**
++ * Reckoner periodic-tick handler tests.
++ *
++ * Covers the behavioral matrix the periodic-tick commission's
++ * Acceptance Signal enumerates, every case driven through
++ * `hooks.runTick`:
++ *
++ *   1. empty-candidate ticks — no rows, no errors.
++ *   2. first tick after start picks up pre-existing held writs.
++ *   3. evaluate-throw isolation — apparatus stays up, no rows.
++ *   4. disabled-source mid-flight decline + cancel (D2) —
++ *      writes a `declined` row carrying `declineReason: 'source_banned'`
++ *      and the source name in `remediationHint`; transitions the
++ *      writ to its cancelled target.
++ *   5. repeated-tick idempotency — same `(writId, writUpdatedAt)`
++ *      pair produces exactly one row.
++ *   6. type-aware target-phase resolution — non-mandate types land
++ *      in their registered active state.
++ *   7. withdrawal mid-flight — withdrawn writs leave the
++ *      candidate set without producing a row.
++ *   8. defer outcome (D3) — writes a deferred row with
++ *      `deferReason: 'other'` and the decision's reason in
++ *      `deferNote`; no transition.
++ *   9. pre-seal tick (D8) — fail-loud throw; no rows.
++ *
++ * The fixture mirrors `reckoner-scheduler.test.ts` — real Stacks
++ * + Clerk + Reckoner against `MemoryBackend`, with explicit book
++ * pre-creation. Writ types beyond `mandate` are registered through
++ * `clerk.registerWritType` for the type-aware target-phase case.
++ */
++
++import { describe, it, afterEach } from 'node:test';
++import assert from 'node:assert/strict';
++
++import { setGuild, clearGuild } from '@shardworks/nexus-core';
++import type {
++  Guild,
++  GuildConfig,
++  KitEntry,
++  LoadedApparatus,
++  LoadedKit,
++  StartupContext,
++} from '@shardworks/nexus-core';
++
++import { createStacksApparatus } from '@shardworks/stacks-apparatus';
++import { MemoryBackend } from '@shardworks/stacks-apparatus/testing';
++import type { ReadOnlyBook, StacksApi } from '@shardworks/stacks-apparatus';
++
++import { createClerk } from '@shardworks/clerk-apparatus';
++import type { ClerkApi, WritTypeConfig } from '@shardworks/clerk-apparatus';
++
++import { createReckonerWithHooks } from './reckoner.ts';
++import { alwaysApproveScheduler } from './schedulers/always-approve.ts';
++import type {
++  ReckoningDoc,
++  ReckonerApi,
++  ReckonerConfig,
++  Scheduler,
++  SchedulerDecision,
++  SchedulerInput,
++} from './types.ts';
++
++// ── Test harness ─────────────────────────────────────────────────────
++
++interface Fixture {
++  stacks: StacksApi;
++  clerk: ClerkApi;
++  reckoner: ReckonerApi;
++  hooks: ReturnType<typeof createReckonerWithHooks>['hooks'];
++  reckoningsBook: ReadOnlyBook<ReckoningDoc>;
++  fakeGuildConfig: GuildConfig & { reckoner?: ReckonerConfig };
++  firePhaseStarted: () => Promise<void>;
++}
++
++function buildFakeGuild(
++  apparatusMap: Map<string, unknown>,
++  fakeGuildConfig: GuildConfig,
++): Guild {
++  return {
++    home: '/tmp/reckoner-tick-test-guild',
++    apparatus<T>(name: string): T {
++      const a = apparatusMap.get(name);
++      if (!a) throw new Error(`Apparatus "${name}" not installed`);
++      return a as T;
++    },
++    config<T>(_pluginId: string): T {
++      return {} as T;
++    },
++    writeConfig(): void {},
++    guildConfig(): GuildConfig {
++      return fakeGuildConfig;
++    },
++    kits(): LoadedKit[] {
++      return [];
++    },
++    apparatuses(): LoadedApparatus[] {
++      return [];
++    },
++    failedPlugins() {
++      return [];
++    },
++    startupWarnings(): string[] {
++      return [];
++    },
++  };
++}
++
++interface FixtureOptions {
++  petitionerKits?: Array<{ pluginId: string; value: unknown }>;
++  schedulerKits?: Array<{ pluginId: string; value: Scheduler[] }>;
++  config?: ReckonerConfig | undefined;
++  writTypes?: WritTypeConfig[];
++  /** When true, do not fire phase:started after start (pre-seal tests). */
++  skipPhaseStarted?: boolean;
++  /**
++   * Pre-Reckoner-start hook — used by the "first tick picks up
++   * pre-existing held writs" case to seed writs into the writs book
++   * before the apparatus is wired.
++   */
++  preStart?: (deps: { stacks: StacksApi; clerk: ClerkApi }) => Promise<void>;
++}
++
++async function buildFixture(opts: FixtureOptions = {}): Promise<Fixture> {
++  const memBackend = new MemoryBackend();
++  const stacksPlugin = createStacksApparatus(memBackend);
++  const clerkPlugin = createClerk();
++  const built = createReckonerWithHooks();
++  const reckonerPlugin = built.plugin;
++
++  const apparatusMap = new Map<string, unknown>();
++
++  const fakeGuildConfig: GuildConfig & { reckoner?: ReckonerConfig } = {
++    name: 'reckoner-tick-test-guild',
++    nexus: '0.0.0',
++    plugins: [],
++    ...(opts.config !== undefined ? { reckoner: opts.config } : {}),
++  };
++
++  setGuild(buildFakeGuild(apparatusMap, fakeGuildConfig));
++
++  memBackend.ensureBook(
++    { ownerId: 'clerk', book: 'writs' },
++    {
++      indexes: [
++        'phase',
++        'type',
++        'createdAt',
++        'parentId',
++        ['phase', 'type'],
++        ['phase', 'createdAt'],
++        ['parentId', 'phase'],
++      ],
++    },
++  );
++  memBackend.ensureBook(
++    { ownerId: 'clerk', book: 'links' },
++    {
++      indexes: [
++        'sourceId',
++        'targetId',
++        'label',
++        ['sourceId', 'label'],
++        ['targetId', 'label'],
++      ],
++    },
++  );
++  memBackend.ensureBook(
++    { ownerId: 'reckoner', book: 'reckonings' },
++    {
++      indexes: [
++        'writId',
++        'consideredAt',
++        'outcome',
++        'source',
++        'visionRelation',
++        'severity',
++        'declineReason',
++        ['outcome', 'consideredAt'],
++        ['visionRelation', 'consideredAt'],
++        ['severity', 'consideredAt'],
++        ['writId', 'consideredAt'],
++      ],
++    },
++  );
++
++  const phaseStartedHandlers: Array<(...args: unknown[]) => void | Promise<void>> = [];
++  const firePhaseStarted = async (): Promise<void> => {
++    for (const handler of phaseStartedHandlers) {
++      await handler();
++    }
++  };
++
++  function buildCtx(kitEntries: KitEntry[]): StartupContext {
++    return {
++      on(event, handler) {
++        if (event === 'phase:started') {
++          phaseStartedHandlers.push(handler);
++        }
++      },
++      kits(type: string): KitEntry[] {
++        return kitEntries.filter((e) => e.type === type);
++      },
++    };
++  }
++
++  // ── Stacks ────────────────────────────────────────────────────────
++  await stacksPlugin.apparatus.start(buildCtx([]));
++  const stacks = stacksPlugin.apparatus.provides as StacksApi;
++  apparatusMap.set('stacks', stacks);
++
++  // ── Clerk ─────────────────────────────────────────────────────────
++  await clerkPlugin.apparatus.start(buildCtx([]));
++  const clerk = clerkPlugin.apparatus.provides as ClerkApi;
++  apparatusMap.set('clerk', clerk);
++
++  if (opts.writTypes) {
++    for (const config of opts.writTypes) {
++      clerk.registerWritType(config);
++    }
++  }
++
++  if (opts.preStart) {
++    await opts.preStart({ stacks, clerk });
++  }
++
++  // ── Reckoner ──────────────────────────────────────────────────────
++  const petitionerKitEntries: KitEntry[] = (opts.petitionerKits ?? []).map(
++    (entry) => ({
++      pluginId: entry.pluginId,
++      packageName: `@test/${entry.pluginId}`,
++      type: 'petitioners',
++      value: entry.value,
++    }),
++  );
++  const schedulerKitEntries: KitEntry[] = [
++    {
++      pluginId: 'reckoner',
++      packageName: '@shardworks/reckoner-apparatus',
++      type: 'schedulers',
++      value: [alwaysApproveScheduler],
++    },
++    ...(opts.schedulerKits ?? []).map((entry) => ({
++      pluginId: entry.pluginId,
++      packageName: `@test/${entry.pluginId}`,
++      type: 'schedulers',
++      value: entry.value,
++    })),
++  ];
++
++  await reckonerPlugin.apparatus.start(
++    buildCtx([...petitionerKitEntries, ...schedulerKitEntries]),
++  );
++  const reckoner = reckonerPlugin.apparatus.provides as ReckonerApi;
++  apparatusMap.set('reckoner', reckoner);
++
++  if (!opts.skipPhaseStarted) {
++    await firePhaseStarted();
++  }
++
++  return {
++    stacks,
++    clerk,
++    reckoner,
++    hooks: built.hooks,
++    reckoningsBook: stacks.readBook<ReckoningDoc>('reckoner', 'reckonings'),
++    fakeGuildConfig,
++    firePhaseStarted,
++  };
++}
++
++const REGISTERED_PETITIONER = {
++  pluginId: 'tester',
++  value: [{ source: 'tester.kind', description: 'tester petitioner' }],
++};
++
++// ── Tests ────────────────────────────────────────────────────────────
++
++describe('Reckoner periodic-tick handler', () => {
++  afterEach(() => clearGuild());
++
++  // ── 1: empty-candidate tick ────────────────────────────────────────
++
++  describe('empty candidate set', () => {
++    it('writes nothing and does not error when no held petitions exist', async () => {
++      const fix = await buildFixture({});
++
++      await fix.hooks.runTick();
++
++      const rows = await fix.reckoningsBook.find({});
++      assert.equal(rows.length, 0, 'empty tick produces no rows');
++    });
++  });
++
++  // ── 2: first tick picks up pre-existing held petitions ────────────
++
++  describe('first tick after start', () => {
++    it('picks up pre-existing held petitions seeded before apparatus boot', async () => {
++      const fix = await buildFixture({
++        petitionerKits: [REGISTERED_PETITIONER],
++        async preStart({ clerk }) {
++          // Seed a writ with ext before the apparatus starts —
++          // there is no CDC observer to pick it up; the first tick
++          // is expected to evaluate it.
++          const w = await clerk.post({ title: 'pre-existing', body: 'b' });
++          await clerk.setWritExt(w.id, 'reckoner', {
++            source: 'tester.kind',
++            priority: {
++              visionRelation: 'vision-neutral',
++              severity: 'minor',
++              scope: 'minor-area',
++              time: { decay: false, deadline: null },
++              domain: [],
++            },
++          });
++        },
++      });
++
++      // No tick has run yet.
++      const beforeTick = await fix.reckoningsBook.find({});
++      assert.equal(beforeTick.length, 0);
++
++      await fix.hooks.runTick();
++
++      const all = await fix.clerk.list({ limit: 100 });
++      assert.equal(all.length, 1);
++      const writ = all[0]!;
++      assert.equal(writ.phase, 'open', 'first tick auto-approves the seeded writ');
++
++      const rows = await fix.reckoningsBook.find({
++        where: [['writId', '=', writ.id]],
++      });
++      assert.equal(rows.length, 1);
++      assert.equal(rows[0]!.outcome, 'accepted');
++    });
++  });
++
++  // ── 3: evaluate-throw isolation ────────────────────────────────────
++
++  describe('evaluate throw', () => {
++    it('apparatus stays up; no rows; no transitions for any candidate', async () => {
++      const scheduler: Scheduler = {
++        id: 'kit-a.thrower',
++        description: 'a scheduler that throws',
++        async evaluate(): Promise<readonly SchedulerDecision[]> {
++          throw new Error('evaluate deliberately threw');
++        },
++      };
++
++      const fix = await buildFixture({
++        petitionerKits: [REGISTERED_PETITIONER],
++        schedulerKits: [{ pluginId: 'kit-a', value: [scheduler] }],
++        config: { scheduler: 'kit-a.thrower' },
++      });
++
++      const originalWarn = console.warn;
++      const warnings: string[] = [];
++      console.warn = (msg: unknown) => {
++        warnings.push(String(msg));
++      };
++      try {
++        const writA = await fix.reckoner.petition({
++          source: 'tester.kind',
++          title: 'a',
++          body: 'b',
++        });
++        const writB = await fix.reckoner.petition({
++          source: 'tester.kind',
++          title: 'b',
++          body: 'b',
++        });
++
++        // Should not throw — the apparatus stays up.
++        await fix.hooks.runTick();
++
++        for (const w of [writA, writB]) {
++          const reread = await fix.clerk.show(w.id);
++          assert.equal(reread.phase, 'new', 'no transition on evaluate throw');
++        }
++        const rows = await fix.reckoningsBook.find({});
++        assert.equal(rows.length, 0, 'no rows on evaluate throw');
++        assert.ok(
++          warnings.some((w) => /\[reckoner\] tick:/.test(w) && /evaluate threw/.test(w)),
++          `expected fail-loud log line; got: ${JSON.stringify(warnings)}`,
++        );
++      } finally {
++        console.warn = originalWarn;
++      }
++    });
++  });
++
++  // ── 4: disabled-source mid-flight decline + cancel ────────────────
++
++  describe('disabled source', () => {
++    it('declines (source_banned) and transitions to cancelled', async () => {
++      const fix = await buildFixture({
++        petitionerKits: [REGISTERED_PETITIONER],
++        config: { disabledSources: ['tester.kind'] },
++      });
++
++      const writ = await fix.reckoner.petition({
++        source: 'tester.kind',
++        title: 'banned',
++        body: 'b',
++      });
++
++      await fix.hooks.runTick();
++
++      const reread = await fix.clerk.show(writ.id);
++      assert.equal(reread.phase, 'cancelled', 'banned source transitions to cancelled');
++      assert.match(
++        String(reread.resolution),
++        /\[reckoner\] declined: source 'tester\.kind' is in disabledSources\./,
++      );
++
++      const rows = await fix.reckoningsBook.find({
++        where: [['writId', '=', writ.id]],
++      });
++      assert.equal(rows.length, 1);
++      const row = rows[0]!;
++      assert.equal(row.outcome, 'declined');
++      assert.equal(row.declineReason, 'source_banned');
++      assert.equal(row.remediationHint, 'tester.kind');
++      assert.equal(row.source, 'tester.kind');
++    });
++  });
++
++  // ── 5: repeated-tick idempotency ──────────────────────────────────
++
++  describe('repeated-tick idempotency', () => {
++    it('produces exactly one row across repeated ticks at the same writ-version', async () => {
++      const fix = await buildFixture({
++        petitionerKits: [REGISTERED_PETITIONER],
++      });
++
++      const writ = await fix.reckoner.petition({
++        source: 'tester.kind',
++        title: 't',
++        body: 'b',
++      });
++
++      // Tick three times — only the first does any work; the
++      // dedupe lookup short-circuits the rest.
++      await fix.hooks.runTick();
++      await fix.hooks.runTick();
++      await fix.hooks.runTick();
++
++      const rows = await fix.reckoningsBook.find({
++        where: [['writId', '=', writ.id]],
++      });
++      assert.equal(rows.length, 1, 'dedupe holds across repeated ticks');
++
++      const reread = await fix.clerk.show(writ.id);
++      assert.equal(reread.phase, 'open', 'no second transition on replay');
++    });
++  });
++
++  // ── 6: type-aware target-phase resolution ─────────────────────────
++
++  describe('type-aware target-phase resolution', () => {
++    it('mandate writs land in `open`', async () => {
++      const fix = await buildFixture({
++        petitionerKits: [REGISTERED_PETITIONER],
++      });
++      const writ = await fix.reckoner.petition({
++        source: 'tester.kind',
++        title: 't',
++        body: 'b',
++      });
++      await fix.hooks.runTick();
++      const reread = await fix.clerk.show(writ.id);
++      assert.equal(reread.phase, 'open');
++      assert.equal(reread.type, 'mandate');
++    });
++
++    it('non-mandate types land in their registered active state', async () => {
++      const fix = await buildFixture({
++        petitionerKits: [REGISTERED_PETITIONER],
++        writTypes: [
++          {
++            name: 'task',
++            states: [
++              {
++                name: 'new',
++                classification: 'initial',
++                allowedTransitions: ['running', 'cancelled'],
++              },
++              {
++                name: 'running',
++                classification: 'active',
++                allowedTransitions: ['done', 'cancelled'],
++              },
++              {
++                name: 'done',
++                classification: 'terminal',
++                attrs: ['success'],
++                allowedTransitions: [],
++              },
++              {
++                name: 'cancelled',
++                classification: 'terminal',
++                attrs: ['cancelled'],
++                allowedTransitions: [],
++              },
++            ],
++          },
++        ],
++      });
++
++      const writ = await fix.reckoner.petition({
++        type: 'task',
++        source: 'tester.kind',
++        title: 't',
++        body: 'b',
++      });
++      await fix.hooks.runTick();
++      const reread = await fix.clerk.show(writ.id);
++      assert.equal(reread.type, 'task');
++      assert.equal(
++        reread.phase,
++        'running',
++        'non-mandate type lands in its registered active state',
++      );
++
++      const rows = await fix.reckoningsBook.find({
++        where: [['writId', '=', writ.id]],
++      });
++      assert.equal(rows.length, 1);
++      assert.equal(rows[0]!.outcome, 'accepted');
++    });
++  });
++
++  // ── 7: withdrawal mid-flight ──────────────────────────────────────
++
++  describe('withdrawal mid-flight', () => {
++    it('produces no Reckonings row when the petitioner withdraws before any tick fires', async () => {
++      const fix = await buildFixture({
++        petitionerKits: [REGISTERED_PETITIONER],
++      });
++
++      const writ = await fix.reckoner.petition({
++        source: 'tester.kind',
++        title: 't',
++        body: 'b',
++      });
++      // Withdraw before the first tick runs.
++      await fix.reckoner.withdraw(writ.id, 'no longer relevant');
++
++      // Tick — the writ is no longer in `new`, so it falls out of
++      // the held-petition query.
++      await fix.hooks.runTick();
++
++      const rows = await fix.reckoningsBook.find({
++        where: [['writId', '=', writ.id]],
++      });
++      assert.equal(rows.length, 0, 'withdrawn writ produces no row');
++
++      const reread = await fix.clerk.show(writ.id);
++      assert.equal(reread.phase, 'cancelled');
++    });
++  });
++
++  // ── 8: defer outcome (D3) ─────────────────────────────────────────
++
++  describe('scheduler defer outcome', () => {
++    it('writes a deferred row carrying deferReason: other; no transition', async () => {
++      const reason = 'capacity hold from scheduler';
++      const scheduler: Scheduler = {
++        id: 'kit-a.deferring',
++        description: 'always-defer',
++        async evaluate(input: SchedulerInput<unknown>): Promise<readonly SchedulerDecision[]> {
++          return input.candidates.map((w) => ({
++            writId: w.id,
++            outcome: 'defer' as const,
++            reason,
++          }));
++        },
++      };
++
++      const fix = await buildFixture({
++        petitionerKits: [REGISTERED_PETITIONER],
++        schedulerKits: [{ pluginId: 'kit-a', value: [scheduler] }],
++        config: { scheduler: 'kit-a.deferring' },
++      });
++
++      const writ = await fix.reckoner.petition({
++        source: 'tester.kind',
++        title: 't',
++        body: 'b',
++      });
++      await fix.hooks.runTick();
++
++      const reread = await fix.clerk.show(writ.id);
++      assert.equal(reread.phase, 'new', 'defer leaves writ in new');
++
++      const rows = await fix.reckoningsBook.find({
++        where: [['writId', '=', writ.id]],
++      });
++      assert.equal(rows.length, 1, 'defer writes one row');
++      const row = rows[0]!;
++      assert.equal(row.outcome, 'deferred');
++      assert.equal(row.deferReason, 'other');
++      assert.equal(row.deferNote, reason);
++      // Counter / wake-up companions remain absent in v0.
++      assert.equal(row.deferCount, undefined);
++      assert.equal(row.deferUntil, undefined);
++      assert.equal(row.deferSignal, undefined);
++    });
++  });
++
++  // ── 9: pre-seal tick (D8) ─────────────────────────────────────────
++
++  describe('pre-seal tick', () => {
++    it('throws fail-loud when activeScheduler has not yet resolved', async () => {
++      const fix = await buildFixture({
++        petitionerKits: [REGISTERED_PETITIONER],
++        skipPhaseStarted: true,
++      });
++      assert.equal(fix.hooks.getActiveSchedulerId(), undefined);
++
++      await assert.rejects(
++        () => fix.hooks.runTick(),
++        (err: Error) => {
++          assert.match(err.message, /activeScheduler not resolved/);
++          assert.match(err.message, /phase:started/);
++          return true;
++        },
++      );
++
++      const rows = await fix.reckoningsBook.find({});
++      assert.equal(rows.length, 0, 'pre-seal tick must not write rows');
++    });
++  });
++});
+diff --git a/packages/plugins/reckoner/src/reckoner.test.ts b/packages/plugins/reckoner/src/reckoner.test.ts
+index e9eebaa..7608923 100644
+--- a/packages/plugins/reckoner/src/reckoner.test.ts
++++ b/packages/plugins/reckoner/src/reckoner.test.ts
+@@ -69,7 +69,8 @@ interface Fixture {
+    * Re-fire `phase:started` against the registered handlers — used
+    * by the seal-test to flip `registrySealed` without driving the
+    * full Arbor lifecycle. Awaits any async handlers (the Reckoner's
+-   * seal handler runs the catch-up scan async).
++   * seal handler resolves the active scheduler and constructs the
++   * tick context).
+    */
+   firePhaseStarted: () => Promise<void>;
+ }
+@@ -667,10 +668,12 @@ describe('Reckoner apparatus', () => {
+     });
+ 
+     it('fails loud and writes nothing when ext.reckoner is already present', async () => {
+-      // Disable the CDC auto-accept path so a successful create+stamp
+-      // leaves the writ in its initial phase with ext.reckoner set.
+-      // That isolates the existing-ext guard from the initial-phase
+-      // guard for this test.
++      // Disable the source so that even a tick driven against this
++      // fixture would not transition the writ — that isolates the
++      // existing-ext guard from the initial-phase guard. (The tick
++      // does not auto-fire in unit tests since no Clockworks is
++      // installed, but pinning the source as disabled keeps the
++      // assertion robust against future fixture changes.)
+       const originalDebug = console.debug;
+       console.debug = () => {};
+       const fix = await buildFixture({
+@@ -937,10 +940,10 @@ describe('Reckoner apparatus', () => {
+      * The writ is Reckoner-visible only after the transaction
+      * commits: the test installs a Phase-2 writs watcher and
+      * asserts no events fire while the body is still executing,
+-     * then verifies the Reckoner CDC handler sees the post-commit
+-     * UPDATE event and produces a Reckonings row.
++     * then drives one tick post-commit and verifies the Reckonings
++     * row appears for the now-Reckoner-visible writ.
+      */
+-    it('composes with stacks.transaction(): CDC events fire only after the outer commit', async () => {
++    it('composes with stacks.transaction(): Phase-2 writs events fire only after the outer commit', async () => {
+       const fix = await buildFixture({
+         petitionerKits: [
+           {
+@@ -955,10 +958,10 @@ describe('Reckoner apparatus', () => {
+         ],
+       });
+ 
+-      // Pre-create the reckonings book so the Reckoner's CDC handler
+-      // can append a row without falling back to its failOnError
+-      // warn-and-proceed branch — that lets the test assertion read
+-      // a Reckonings row count rather than relying on indirect proof.
++      // Pre-create the reckonings book so the post-commit tick can
++      // append a row without falling back to its put-error warn
++      // branch — that lets the test assertion read a Reckonings row
++      // count rather than relying on indirect proof.
+       fix.memBackend.ensureBook(
+         { ownerId: 'reckoner', book: 'reckonings' },
+         {
+@@ -979,9 +982,9 @@ describe('Reckoner apparatus', () => {
+       );
+ 
+       // Capture every writs CDC event our test sees. Phase 2
+-      // (`failOnError: false`) — the framework dispatches these
+-      // strictly post-commit. If the stamp-only form joined an
+-      // outer transaction correctly, no events arrive while the
++      // (`failOnError: false`) — Stacks dispatches these strictly
++      // post-commit. If the stamp-only form joined an outer
++      // transaction correctly, no events arrive while the
+       // transaction body is still executing.
+       const observed: Array<ChangeEvent<WritDoc>> = [];
+       fix.stacks.watch<WritDoc>(
+@@ -994,12 +997,11 @@ describe('Reckoner apparatus', () => {
+       );
+ 
+       // Seal the registry and resolve the active scheduler — the
+-      // Reckoner's pre-seal guard short-circuits `runScheduler` until
+-      // `phase:started` fires, so a CDC handler invocation that
+-      // arrives before this point produces no row even when every
+-      // gate would otherwise pass. Fired after the observer's
+-      // `stacks.watch()` so the CDC registry has not sealed when
+-      // the test's own watcher registers.
++      // tick handler's pre-seal guard fail-loud throws until
++      // `phase:started` fires, so a tick that runs before this
++      // point would surface as a thrown error. Fired after the
++      // observer's `stacks.watch()` so the CDC registry has not
++      // sealed when the test's own watcher registers.
+       await fix.firePhaseStarted();
+ 
+       // A pre-existing sibling and the draft writ — both posted
+@@ -1018,9 +1020,10 @@ describe('Reckoner apparatus', () => {
+ 
+       // Now wire a depends-on link and stamp via the stamp-only form
+       // inside a single transaction. The setWritExt produces an
+-      // UPDATE event on the writs book — the Reckoner's CDC handler
+-      // gates on update-shape events (D14), so this is the natural
+-      // shape that drives consideration after commit.
++      // UPDATE event on the writs book — the periodic-tick relay
++      // doesn't observe these events directly, but the Phase-2
++      // dispatch contract (events flush post-commit) is what we're
++      // verifying here.
+       let countAtBodyEnd = -1;
+       await fix.stacks.transaction(async () => {
+         await fix.clerk.link(draftId, sibling.id, 'depends-on');
+@@ -1045,14 +1048,14 @@ describe('Reckoner apparatus', () => {
+         countAtBodyEnd = observed.length;
+       });
+ 
+-      // The Reckoner-visibility invariant: zero CDC events for the
+-      // newly-posted writ during the body, then events delivered
++      // The transaction-isolation invariant: zero Phase-2 events for
++      // the newly-posted writ during the body, then events delivered
+       // post-commit. The body-end snapshot proves the first half;
+       // the post-await length proves the second.
+       assert.equal(
+         countAtBodyEnd,
+         0,
+-        `no Phase-2 CDC events fire while the transaction body is still executing; got ${JSON.stringify(observed)}`,
++        `no Phase-2 events fire while the transaction body is still executing; got ${JSON.stringify(observed)}`,
+       );
+       assert.ok(
+         observed.length >= 1,
+@@ -1060,13 +1063,15 @@ describe('Reckoner apparatus', () => {
+       );
+ 
+       // Reckoner-visibility: the on-disk writ now carries
+-      // ext.reckoner and the CDC handler has produced a Reckonings
+-      // row from the post-commit UPDATE event.
++      // ext.reckoner. Drive a tick to produce the Reckonings row
++      // for the now-published petition.
+       const reread = await fix.clerk.show(draftId);
+       const ext = reread.ext?.reckoner as ReckonerExt | undefined;
+       assert.ok(ext, 'ext.reckoner is set after commit');
+       assert.equal(ext!.source, 'vision-keeper.snapshot');
+ 
++      await fix.hooks.runTick();
++
+       const reckoningsBook = fix.stacks.readBook<{ writId: string; outcome: string; [k: string]: unknown }>(
+         'reckoner',
+         'reckonings',
+@@ -1074,7 +1079,7 @@ describe('Reckoner apparatus', () => {
+       const rows = await reckoningsBook.find({
+         where: [['writId', '=', draftId]],
+       });
+-      assert.equal(rows.length, 1, 'exactly one Reckonings row written by the post-commit CDC handler');
++      assert.equal(rows.length, 1, 'exactly one Reckonings row written by the post-commit tick');
+       assert.equal(rows[0]!.outcome, 'accepted');
+     });
+   });
+diff --git a/packages/plugins/reckoner/src/reckoner.ts b/packages/plugins/reckoner/src/reckoner.ts
+index 0e29453..1657ee8 100644
+--- a/packages/plugins/reckoner/src/reckoner.ts
++++ b/packages/plugins/reckoner/src/reckoner.ts
+@@ -16,36 +16,36 @@
+  *      and non-atomic by design (D7).
+  *   4. The inspection helpers — `isSourceRegistered`,
+  *      `isSourceDisabled`, `listPetitioners` — surfaced as a
+- *      coherent set on `provides` so the CDC handler and any other
+- *      downstream consumer can read the same registry and config
+- *      the helpers see.
++ *      coherent set on `provides` so the periodic-tick relay and
++ *      any other downstream consumer can read the same registry and
++ *      config the helpers see.
+  *   5. The Reckonings book (`reckoner/reckonings`) — declared via
+  *      `supportKit.books` so the Stacks Wire phase materialises it
+  *      with the contract index set; the auto-wired
+  *      `book.reckoner.reckonings.{created,updated,deleted}`
+  *      Clockworks events fire normally (no carve-out).
+- *   6. A Phase 2 CDC handler on `clerk/writs` that observes update
+- *      events on held petitions (writs in `new` phase carrying
+- *      `ext.reckoner`), runs the rule sequence (skip / disabled /
+- *      source-check / dependency-gate / scheduler-evaluate), drives
+- *      `clerk.transition()` on accept or decline, and idempotently
+- *      appends one Reckonings row per consideration. The default
+- *      scheduler is always-approve; petitions can decline through
+- *      the source-unregistered + `enforceRegistration: true` rule
+- *      and defer through the dependency-aware gate (rule 5) when an
+- *      outbound `depends-on` target is not yet cleared.
+- *   7. A startup catch-up scan that re-routes pre-existing held
+- *      petitions through the same handler at boot. Dependency-
+- *      deferred petitions surface here every time the scan runs and
+- *      release naturally as their dependencies clear (the v0 wake-
+- *      up mechanism is the polling tick).
++ *   6. The `reckoner.tick` relay (kit-contributed via
++ *      `supportKit.relays`) plus a single kit-contributed standing
++ *      order at `@every 60s` (via `supportKit.standingOrders`). On
++ *      every fire the relay queries every held petition (writs in
++ *      `new` phase carrying `ext.reckoner`), applies source/disabled
++ *      gates inline, runs the dependency-aware gate, dedupes against
++ *      the `(writId, writUpdatedAt)` index, and hands the survivors
++ *      to the configured scheduler in one batch. Each decision
++ *      drives `clerk.transition()` on accept or decline, leaves the
++ *      writ in `new` on defer, and appends one Reckonings row per
++ *      writ considered. The default scheduler is always-approve;
++ *      petitions can decline through the source-unregistered +
++ *      `enforceRegistration: true` rule and defer through the
++ *      dependency-aware gate when an outbound `depends-on` target is
++ *      not yet cleared.
+  *
+  * The structural template for the kit-static registry is the
+  * Clerk's `registerKitLinkKinds` (link-kind registry); the seal
+  * pattern mirrors Clerk's writ-type registry. Diagnostic messages
+  * intentionally echo Clerk's `[clerk] registerWritType:` shape
+  * with a `[reckoner]` prefix so kit authors see a familiar shape.
+- * The CDC handler's idempotency strategy (persisted dedupe via the
++ * The tick handler's idempotency strategy (persisted dedupe via the
+  * `[writId, consideredAt]` index plus in-process `writUpdatedAt`
+  * filter) mirrors the Sentinel apparatus's `alreadyEmitted` pattern.
+  *
+@@ -58,19 +58,23 @@
+  *     observation `obs-4` / `obs-5` for future consideration.
+  *   - implement no-op, throttling, or per-source quotas — reserved
+  *     for future commissions. (Dependency-aware deferral is
+- *     implemented; the scheduler-emitted `defer` outcome remains
+- *     row-less.)
++ *     implemented; scheduler-emitted `defer` outcomes write a
++ *     deferred row carrying `deferReason: 'other'` and the
++ *     decision's reason in `deferNote`.)
+  *   - implement the deferred-petition staleness diagnostic,
+  *     dangling-target escalation, or `dependency_failed`
+  *     petitioner notification — those belong to a sibling
+  *     commission. Stop at "petition stays deferred"; the v0 row
+  *     emits a `deferNote` audit trail and that is all the surface
+  *     this commission ships.
++ *   - ship an operator-configurable tick cadence. The schedule is
++ *     hard-coded `@every 60s` in the kit contribution; future
++ *     improvement (`reckoner.tickSchedule`) is parked.
+  *
+  * See: docs/architecture/petitioner-registration.md (the
+  * load-bearing contract document),
+  * docs/architecture/reckonings-book.md (the Reckonings book schema
+- * and CDC contract), and
++ * and tick-identity contract), and
+  * docs/architecture/apparatus/reckoner.md (the apparatus shape).
+  */
+ 
+@@ -78,7 +82,6 @@ import type { Plugin, StartupContext } from '@shardworks/nexus-core';
+ import { guild, generateId } from '@shardworks/nexus-core';
+ import type {
+   Book,
+-  ChangeEvent,
+   ReadOnlyBook,
+   StacksApi,
+ } from '@shardworks/stacks-apparatus';
+@@ -88,6 +91,7 @@ import type {
+   WritPhase,
+   WritTypeConfig,
+ } from '@shardworks/clerk-apparatus';
++import type { GuildEvent } from '@shardworks/clockworks-apparatus';
+ 
+ import type {
+   PetitionExtRequest,
+@@ -99,7 +103,6 @@ import type {
+   ReckonerExt,
+   ReckoningDoc,
+   Scheduler,
+-  SchedulerDecision,
+ } from './types.ts';
+ 
+ import {
+@@ -110,6 +113,12 @@ import {
+ } from './types.ts';
+ 
+ import { alwaysApproveScheduler } from './schedulers/always-approve.ts';
++import {
++  RECKONER_TICK_RELAY,
++  createTickRelay,
++  runTickHandler,
++  type TickHandlerContext,
++} from './tick.ts';
+ 
+ /**
+  * Plugin id stamped on `writ.ext['reckoner']`. Hardcoded literal
+@@ -256,18 +265,15 @@ export interface ReckonerTestHooks {
+   /** Force the registry into the sealed state — bypasses `phase:started`. */
+   sealRegistry(): void;
+   /**
+-   * Drive the CDC handler directly with a synthetic `ChangeEvent`.
+-   * Used by `reckoner-cdc.test.ts` to exercise the rule sequence,
+-   * the dedupe path, and the re-firing gate without driving Stacks'
+-   * watcher machinery.
+-   */
+-  handleWritsChange(event: ChangeEvent<WritDoc>): Promise<void>;
+-  /**
+-   * Run the startup catch-up scan on demand. Used to test that
+-   * held petitions are processed at boot and that running the scan
+-   * twice does not produce duplicate Reckonings rows.
++   * Drive the periodic-tick handler directly. The tick is the
++   * canonical evaluation surface, so tests exercise it through
++   * this hook.
++   *
++   * The synthetic `event` argument is forwarded to the handler so
++   * callers can populate `tickEventId` on resulting Reckonings rows;
++   * pass `null` (the default) for the no-event-id shape.
+    */
+-  runCatchUpScan(): Promise<void>;
++  runTick(event?: GuildEvent | null): Promise<void>;
+   /**
+    * Return the resolved active scheduler's id, or `undefined` when
+    * the registry has not yet sealed (D32). Tests assert this against
+@@ -672,13 +678,13 @@ function buildReckoner(): { plugin: Plugin; hooks: ReckonerTestHooks } {
+     const config: WritTypeConfig | undefined = clerk.getWritTypeConfig(writ.type);
+     if (!config) {
+       throw new Error(
+-        `[reckoner] cdc: writ "${writ.id}" has type "${writt(writ)}" with no registered WritTypeConfig — refusing to choose an acceptance target.`,
++        `[reckoner] tick: writ "${writ.id}" has type "${writt(writ)}" with no registered WritTypeConfig — refusing to choose an acceptance target.`,
+       );
+     }
+     const currentState = config.states.find((s) => s.name === writ.phase);
+     if (!currentState) {
+       throw new Error(
+-        `[reckoner] cdc: writ "${writ.id}" type "${writ.type}" has no declared state "${writ.phase}" in its WritTypeConfig — refusing to choose an acceptance target.`,
++        `[reckoner] tick: writ "${writ.id}" type "${writ.type}" has no declared state "${writ.phase}" in its WritTypeConfig — refusing to choose an acceptance target.`,
+       );
+     }
+     const candidates: string[] = [];
+@@ -691,12 +697,12 @@ function buildReckoner(): { plugin: Plugin; hooks: ReckonerTestHooks } {
+     }
+     if (candidates.length === 0) {
+       throw new Error(
+-        `[reckoner] cdc: writ "${writ.id}" type "${writ.type}" current state "${writ.phase}" has no outbound transition to an active state — cannot accept.`,
++        `[reckoner] tick: writ "${writ.id}" type "${writ.type}" current state "${writ.phase}" has no outbound transition to an active state — cannot accept.`,
+       );
+     }
+     if (candidates.length > 1) {
+       throw new Error(
+-        `[reckoner] cdc: writ "${writ.id}" type "${writ.type}" current state "${writ.phase}" has multiple outbound transitions to active states (${candidates.map((c) => `"${c}"`).join(', ')}) — refusing to guess. The Reckoner expects exactly one active candidate.`,
++        `[reckoner] tick: writ "${writ.id}" type "${writ.type}" current state "${writ.phase}" has multiple outbound transitions to active states (${candidates.map((c) => `"${c}"`).join(', ')}) — refusing to guess. The Reckoner expects exactly one active candidate.`,
+       );
+     }
+     return candidates[0]!;
+@@ -826,7 +832,7 @@ function buildReckoner(): { plugin: Plugin; hooks: ReckonerTestHooks } {
+       // without it. Falling through to proceed would silently
+       // bypass the gate, so fail-loud-skip with a warning instead.
+       // (In practice this branch is unreachable — start() runs
+-      // before considerWrit can fire.)
++      // before the periodic-tick handler can invoke this gate.)
+       // eslint-disable-next-line no-console
+       console.warn(
+         `[reckoner] dependency: stacks handle is unavailable; skipping dependency gate for writ "${writId}".`,
+@@ -981,6 +987,14 @@ function buildReckoner(): { plugin: Plugin; hooks: ReckonerTestHooks } {
+      * decisions whose `SchedulerDecision.weight` was undefined.
+      */
+     weight?: number;
++    /**
++     * Triggering Clockworks `clockworks.timer` event id (D6 of the
++     * periodic-tick commission). Stamped onto the row when the tick
++     * was driven by a real event (production); absent on test-driven
++     * paths that supply `null` for the triggering event. Synthesizing
++     * a fallback would pollute rows with non-joinable ids.
++     */
++    tickEventId?: string;
+   }): ReckoningDoc {
+     const consideredAt = params.now.toISOString();
+     const row: ReckoningDoc = {
+@@ -1012,497 +1026,10 @@ function buildReckoner(): { plugin: Plugin; hooks: ReckonerTestHooks } {
+     if (params.weight !== undefined) {
+       row.weight = params.weight;
+     }
+-    return row;
+-  }
+-
+-  /**
+-   * Run the rule sequence against a single writ and, on a non-skip
+-   * outcome, drive the transition + append a Reckonings row.
+-   *
+-   * The same code path is used by both the Phase 2 CDC handler and
+-   * the startup catch-up scan (D12) — re-routing held writs that
+-   * pre-date the watcher through this function preserves the dedupe
+-   * guarantee on restart.
+-   *
+-   * Skip semantics (returns without writing a row or transitioning):
+-   *   - `writ.phase !== 'new'`  (D16: withdrawals + already-handled)
+-   *   - `writ.ext?.reckoner` missing or has empty source string (D15)
+-   *   - source is in `disabledSources` (D18: debug-log only, no row)
+-   *
+-   * Decline path (writes a row, transitions to `cancelled`):
+-   *   - source unregistered + `enforceRegistration: true` (D8)
+-   *
+-   * Dependency-defer path (writes a row, no transition):
+-   *   - the writ has one or more outbound `depends-on` links whose
+-   *     targets are not all in a *cleared* state. Failed-precedence
+-   *     aggregation chooses between `dependency_pending` and
+-   *     `dependency_failed`. The dep gate runs every tick (outside
+-   *     the `(writId, writUpdatedAt)` dedupe short-circuit); the
+-   *     row write is suppressed when the outcome shape is
+-   *     unchanged from the writ's most-recent deferred row, so
+-   *     re-evaluation at the same state does not produce a
+-   *     heartbeat duplicate (D6/D12).
+-   *
+-   * Scheduler path:
+-   *   - source registered (or `enforceRegistration: false`) and the
+-   *     dependency gate has produced `proceed`. Delegated to
+-   *     `runScheduler`, which calls the registry-resolved active
+-   *     scheduler and maps its decision per D21.
+-   *
+-   * Rule ordering (D11): disabled-source skip and registration
+-   * enforcement run *before* the dependency check. A disabled-
+-   * source writ produces no row and no dep evaluation; an
+-   * unregistered-source writ under `enforceRegistration: true`
+-   * declines + transitions and never reaches the dep check.
+-   *
+-   * Idempotency: the accept/decline paths consult `alreadyConsidered`
+-   * before writing — a re-delivery of the same (writId,
+-   * writUpdatedAt) short-circuits without a second row or
+-   * transition. Deferred rows do not count as "already considered"
+-   * (the gate must remain free to re-evaluate every tick).
+-   */
+-  async function considerWrit(writ: WritDoc): Promise<void> {
+-    if (!reckoningsBook) {
+-      // Phase ordering safety: the reckonings book handle is set
+-      // inside `start()`. If the handler fires before that, we
+-      // silently skip — the catch-up scan will reprocess the writ
+-      // once the book handle is available.
+-      return;
+-    }
+-
+-    // Rule 1 — phase gate. Withdrawals and already-handled writs
+-    // produce no row.
+-    if (writ.phase !== 'new') return;
+-
+-    // Rule 2 — ext gate (D15). The petition() helper is the
+-    // validation boundary; the CDC handler does only the minimum
+-    // source-string check.
+-    const ext = writ.ext?.[RECKONER_PLUGIN_ID] as ReckonerExt | undefined;
+-    if (!ext) return;
+-    if (typeof ext.source !== 'string' || ext.source.length === 0) return;
+-
+-    const config = resolveConfig();
+-
+-    // Rule 3 — disabled-source skip (D18). No row, no transition;
+-    // a single debug log line gives operators a finding-by-grep
+-    // path. We use console.debug so the line is suppressible by
+-    // the Node runtime's default level if operators don't want it.
+-    if (config.disabledSources.includes(ext.source)) {
+-      // eslint-disable-next-line no-console
+-      console.debug(
+-        `[reckoner] cdc: source "${ext.source}" is in disabledSources; skipping writ "${writ.id}".`,
+-      );
+-      return;
+-    }
+-
+-    // Sample `now` once at handler entry (D17). Reused for the row
+-    // id seed and consideredAt.
+-    const now = new Date();
+-
+-    // Rule 4 — registration check.
+-    const isRegistered = registry.has(ext.source);
+-    if (!isRegistered && config.enforceRegistration) {
+-      // Decline path. Idempotency lookup first.
+-      if (await alreadyConsidered(reckoningsBook, writ.id, writ.updatedAt)) {
+-        return;
+-      }
+-      const resolution =
+-        `[reckoner] declined: source '${ext.source}' is not registered (enforceRegistration: true).`;
+-      try {
+-        await clerk.transition(writ.id, 'cancelled' as WritPhase, { resolution });
+-      } catch (err) {
+-        // Surface but do not crash the watcher; Phase 2 absorbs
+-        // the throw via failOnError: false.
+-        const msg = err instanceof Error ? err.message : String(err);
+-        // eslint-disable-next-line no-console
+-        console.warn(
+-          `[reckoner] cdc: failed to transition writ "${writ.id}" to cancelled (decline path): ${msg}`,
+-        );
+-        return;
+-      }
+-      const row = buildReckoningRow({
+-        now,
+-        writ,
+-        ext,
+-        outcome: 'declined',
+-        declineReason: 'source_unregistered',
+-        remediationHint: ext.source,
+-      });
+-      try {
+-        await reckoningsBook.put(row);
+-      } catch (err) {
+-        const msg = err instanceof Error ? err.message : String(err);
+-        // eslint-disable-next-line no-console
+-        console.warn(
+-          `[reckoner] cdc: failed to persist Reckonings row for writ "${writ.id}" (decline path): ${msg}`,
+-        );
+-      }
+-      return;
+-    }
+-
+-    // Rule 5 — dependency-aware defer (D1 of the dependency-aware-
+-    // consideration commission). Runs every tick, *outside* the
+-    // `(writId, writUpdatedAt)` dedupe short-circuit (which lives
+-    // inside `runScheduler`) so a deferred-with-deps writ keeps
+-    // being re-evaluated as its dependencies clear (D6). Only the
+-    // row write is dedupe-aware — the no-op-row suppression below
+-    // compares the new outcome shape to the writ's most-recent
+-    // deferred row.
+-    let depOutcome: DependencyOutcome;
+-    try {
+-      depOutcome = await evaluateDependencyGate(writ.id);
+-    } catch (err) {
+-      // The classifier fail-loud throws on missing/unknown writ-type
+-      // config (D10). Surface but do not crash the watcher; Phase 2
+-      // absorbs throws via failOnError: false.
+-      const msg = err instanceof Error ? err.message : String(err);
+-      // eslint-disable-next-line no-console
+-      console.warn(
+-        `[reckoner] cdc: dependency gate threw for writ "${writ.id}" — leaving in new without a row. ${msg}`,
+-      );
+-      return;
+-    }
+-    if (depOutcome.kind !== 'proceed') {
+-      const reason: ReckoningDoc['deferReason'] =
+-        depOutcome.kind === 'defer-failed' ? 'dependency_failed' : 'dependency_pending';
+-      const ids =
+-        depOutcome.kind === 'defer-failed' ? depOutcome.failedIds : depOutcome.gatingIds;
+-      const deferNote = buildDependencyDeferNote(depOutcome.kind, ids);
+-
+-      // No-op-row suppression (D12). Re-evaluation at the same
+-      // outcome shape produces no row. A new row appears only when
+-      // a dep cleared, a new dep failed, or the dep set's
+-      // classification mix changed.
+-      const last = await findLastDeferredRow(reckoningsBook, writ.id);
+-      if (
+-        last &&
+-        last.deferReason === reason &&
+-        last.deferNote === deferNote
+-      ) {
+-        return;
+-      }
+-
+-      const row = buildReckoningRow({
+-        now,
+-        writ,
+-        ext,
+-        outcome: 'deferred',
+-        deferReason: reason,
+-        deferNote,
+-      });
+-      try {
+-        await reckoningsBook.put(row);
+-      } catch (err) {
+-        const msg = err instanceof Error ? err.message : String(err);
+-        // eslint-disable-next-line no-console
+-        console.warn(
+-          `[reckoner] cdc: failed to persist Reckonings row for writ "${writ.id}" (dependency-defer path): ${msg}`,
+-        );
+-      }
+-      return;
+-    }
+-
+-    // Rule 6 — registry-resolved scheduler.
+-    await runScheduler(writ, ext, now);
+-  }
+-
+-  /**
+-   * Run the active scheduler against a single held writ and apply
+-   * the resulting decision (D20). Extracted from `considerWrit` so
+-   * the tick-relay follow-on can call the same helper at a different
+-   * call site without re-extracting the evaluation logic.
+-   *
+-   * Sequence:
+-   *
+-   *   1. Pre-seal guard (D35) — if the active scheduler reference has
+-   *      not been resolved yet, skip silently. The catch-up scan
+-   *      reprocesses the writ post-seal.
+-   *   2. Dedupe lookup (D25) — short-circuit before paying the
+-   *      `validateConfig` / `evaluate` cost on duplicate CDC delivery.
+-   *   3. Per-evaluation `schedulerConfig` re-read (D17) +
+-   *      `validateConfig` narrow (D18) — on throw, log fail-loud and
+-   *      return without writing a row or transitioning.
+-   *   4. `evaluate` — on throw, log fail-loud and return.
+-   *   5. Decision validation: filter-and-warn on `writId` not in the
+-   *      candidate set (D24); fail-loud-skip if any `writId` carries
+-   *      more than one decision (D23).
+-   *   6. Outcome mapping (D21) —
+-   *        - `approve`  → transition to active target + accepted row.
+-   *        - `defer`    → no transition, no row.
+-   *        - `decline`  → transition to cancelled with the decision's
+-   *                       reason as resolution + declined row carrying
+-   *                       `declineReason: 'other'` (D22) and the
+-   *                       reason in `remediationHint`.
+-   */
+-  async function runScheduler(
+-    writ: WritDoc,
+-    ext: ReckonerExt,
+-    now: Date,
+-  ): Promise<void> {
+-    if (!reckoningsBook) return;
+-
+-    // 1. Pre-seal guard (D35).
+-    if (!activeScheduler) return;
+-
+-    // 2. Dedupe before paying the scheduler cost.
+-    if (await alreadyConsidered(reckoningsBook, writ.id, writ.updatedAt)) {
+-      return;
+-    }
+-
+-    // 3. Per-evaluation config re-read + validate.
+-    const rawSchedulerConfig = resolveSchedulerConfig();
+-    let validatedConfig: unknown = rawSchedulerConfig;
+-    if (typeof activeScheduler.validateConfig === 'function') {
+-      try {
+-        validatedConfig = activeScheduler.validateConfig(rawSchedulerConfig);
+-      } catch (err) {
+-        const msg = err instanceof Error ? err.message : String(err);
+-        // eslint-disable-next-line no-console
+-        console.warn(
+-          `[reckoner] scheduler: "${activeScheduler.id}" validateConfig threw — skipping evaluation for writ "${writ.id}". ${msg}`,
+-        );
+-        return;
+-      }
+-    }
+-
+-    // 4. Evaluate.
+-    let decisions: readonly SchedulerDecision[];
+-    try {
+-      const result = await activeScheduler.evaluate({
+-        candidates: [writ],
+-        capacity: {},
+-        now,
+-        config: validatedConfig,
+-      });
+-      decisions = result;
+-    } catch (err) {
+-      const msg = err instanceof Error ? err.message : String(err);
+-      // eslint-disable-next-line no-console
+-      console.warn(
+-        `[reckoner] scheduler: "${activeScheduler.id}" evaluate threw — skipping evaluation for writ "${writ.id}". ${msg}`,
+-      );
+-      return;
+-    }
+-
+-    if (!Array.isArray(decisions)) {
+-      // eslint-disable-next-line no-console
+-      console.warn(
+-        `[reckoner] scheduler: "${activeScheduler.id}" evaluate did not return an array — skipping evaluation for writ "${writ.id}".`,
+-      );
+-      return;
+-    }
+-
+-    // 5. Validate decisions: filter-and-warn on stranger writIds (D24).
+-    const candidateIds = new Set<string>([writ.id]);
+-    const inScope: SchedulerDecision[] = [];
+-    for (const decision of decisions) {
+-      if (
+-        decision === null ||
+-        typeof decision !== 'object' ||
+-        typeof decision.writId !== 'string' ||
+-        decision.writId.length === 0
+-      ) {
+-        // eslint-disable-next-line no-console
+-        console.warn(
+-          `[reckoner] scheduler: "${activeScheduler.id}" returned a malformed decision (missing writId) — ignoring.`,
+-        );
+-        continue;
+-      }
+-      if (!candidateIds.has(decision.writId)) {
+-        // eslint-disable-next-line no-console
+-        console.warn(
+-          `[reckoner] scheduler: "${activeScheduler.id}" returned a decision for writ "${decision.writId}" which was not in the candidate set — ignoring.`,
+-        );
+-        continue;
+-      }
+-      inScope.push(decision);
+-    }
+-
+-    // Group by writId; fail-loud-skip on multi-decision-per-writ (D23).
+-    const grouped = new Map<string, SchedulerDecision[]>();
+-    for (const decision of inScope) {
+-      const list = grouped.get(decision.writId) ?? [];
+-      list.push(decision);
+-      grouped.set(decision.writId, list);
+-    }
+-    for (const [writId, list] of grouped) {
+-      if (list.length > 1) {
+-        // eslint-disable-next-line no-console
+-        console.warn(
+-          `[reckoner] scheduler: "${activeScheduler.id}" returned ${list.length} decisions for writ "${writId}" — refusing to apply any. Schedulers must emit at most one decision per candidate.`,
+-        );
+-        return;
+-      }
+-    }
+-
+-    const decision = grouped.get(writ.id)?.[0];
+-    if (!decision) {
+-      // No decision for this candidate — defer-equivalent, no row, no transition.
+-      return;
+-    }
+-
+-    // 6. Outcome mapping (D21).
+-    if (decision.outcome === 'defer') {
+-      // No transition, no row. The scheduler-emitted defer path
+-      // remains row-less in v0 — only the dependency-aware defer
+-      // path in `considerWrit` writes deferred rows (the
+-      // `SchedulerDecision` shape does not carry the
+-      // `deferReason` / `deferNote` metadata required to populate
+-      // a deferred row faithfully). Extending scheduler-emitted
+-      // defers to write rows is a separately-scoped commission.
+-      return;
+-    }
+-
+-    if (
+-      decision.outcome !== 'approve' &&
+-      decision.outcome !== 'decline' &&
+-      decision.outcome !== 'defer'
+-    ) {
+-      // eslint-disable-next-line no-console
+-      console.warn(
+-        `[reckoner] scheduler: "${activeScheduler.id}" returned an unknown outcome "${String((decision as { outcome?: unknown }).outcome)}" for writ "${writ.id}" — ignoring.`,
+-      );
+-      return;
+-    }
+-
+-    if (decision.outcome === 'decline') {
+-      const resolution = decision.reason;
+-      try {
+-        await clerk.transition(writ.id, 'cancelled' as WritPhase, { resolution });
+-      } catch (err) {
+-        const msg = err instanceof Error ? err.message : String(err);
+-        // eslint-disable-next-line no-console
+-        console.warn(
+-          `[reckoner] cdc: failed to transition writ "${writ.id}" to cancelled (scheduler decline): ${msg}`,
+-        );
+-        return;
+-      }
+-      const row = buildReckoningRow({
+-        now,
+-        writ,
+-        ext,
+-        outcome: 'declined',
+-        declineReason: 'other',
+-        remediationHint: decision.reason,
+-        ...(decision.weight !== undefined ? { weight: decision.weight } : {}),
+-      });
+-      try {
+-        await reckoningsBook!.put(row);
+-      } catch (err) {
+-        const msg = err instanceof Error ? err.message : String(err);
+-        // eslint-disable-next-line no-console
+-        console.warn(
+-          `[reckoner] cdc: failed to persist Reckonings row for writ "${writ.id}" (scheduler decline): ${msg}`,
+-        );
+-      }
+-      return;
+-    }
+-
+-    // approve.
+-    let target: string;
+-    try {
+-      target = resolveActiveTargetPhase(writ);
+-    } catch (err) {
+-      const msg = err instanceof Error ? err.message : String(err);
+-      // eslint-disable-next-line no-console
+-      console.warn(
+-        `[reckoner] cdc: writ "${writ.id}" has no resolvable active target — leaving in new. ${msg}`,
+-      );
+-      return;
+-    }
+-
+-    try {
+-      await clerk.transition(writ.id, target as WritPhase, {});
+-    } catch (err) {
+-      const msg = err instanceof Error ? err.message : String(err);
+-      // eslint-disable-next-line no-console
+-      console.warn(
+-        `[reckoner] cdc: failed to transition writ "${writ.id}" to "${target}" (scheduler approve): ${msg}`,
+-      );
+-      return;
+-    }
+-
+-    const row = buildReckoningRow({
+-      now,
+-      writ,
+-      ext,
+-      outcome: 'accepted',
+-      ...(decision.weight !== undefined ? { weight: decision.weight } : {}),
+-    });
+-    try {
+-      await reckoningsBook!.put(row);
+-    } catch (err) {
+-      const msg = err instanceof Error ? err.message : String(err);
+-      // eslint-disable-next-line no-console
+-      console.warn(
+-        `[reckoner] cdc: failed to persist Reckonings row for writ "${writ.id}" (scheduler approve): ${msg}`,
+-      );
+-    }
+-  }
+-
+-  /**
+-   * Phase 2 CDC handler body. Filters to update events only (D10),
+-   * gates on the `phase`-or-`ext.reckoner`-changed predicate (D14),
+-   * then routes through `considerWrit`.
+-   */
+-  async function handleWritsChange(event: ChangeEvent<WritDoc>): Promise<void> {
+-    if (event.type !== 'update') return;
+-
+-    const entry = event.entry;
+-    const prev = event.prev;
+-
+-    // Re-firing gate (D14): run the rule sequence only when the
+-    // phase changed or when `ext.reckoner` differs deeply between
+-    // the two snapshots. Other update events are ignored at the
+-    // gate so unrelated ext writes don't amplify the dedupe-lookup
+-    // budget. JSON.stringify is the project's accepted deep-equal
+-    // proxy (no in-tree deepEqual helper).
+-    const phaseChanged = entry.phase !== prev.phase;
+-    const extPrev = prev.ext?.[RECKONER_PLUGIN_ID];
+-    const extNext = entry.ext?.[RECKONER_PLUGIN_ID];
+-    const extChanged = JSON.stringify(extPrev) !== JSON.stringify(extNext);
+-    if (!phaseChanged && !extChanged) return;
+-
+-    await considerWrit(entry);
+-  }
+-
+-  /**
+-   * Startup catch-up scan (D12). Held writs that pre-date the
+-   * apparatus's `start()` would otherwise sit in `new` forever; we
+-   * sweep them through the same handler path so dedupe and the rule
+-   * sequence apply uniformly. Runs after the watcher is registered
+-   * so events arriving during the scan are not lost.
+-   *
+-   * The query uses a direct read of `clerk/writs` rather than
+-   * `clerk.list({ phase: 'new' })` because Clerk's list applies an
+-   * implicit `type = 'mandate'` filter when `phase` is supplied
+-   * without `type` — a non-mandate held petition (with its own
+-   * type carrying a `new` initial state) would not surface through
+-   * that path.
+-   */
+-  async function runCatchUpScan(): Promise<void> {
+-    if (!stacks || !reckoningsBook) return;
+-    const writsBook: ReadOnlyBook<WritDoc> = stacks.readBook<WritDoc>('clerk', 'writs');
+-    const candidates = await writsBook.find({
+-      where: [['phase', '=', 'new']],
+-      orderBy: ['createdAt', 'asc'],
+-    });
+-    for (const writ of candidates) {
+-      // Cheap pre-filter so writs without a Reckoner ext slot don't
+-      // walk through the handler path or the dedupe lookup.
+-      if (!writ.ext?.[RECKONER_PLUGIN_ID]) continue;
+-      try {
+-        await considerWrit(writ);
+-      } catch (err) {
+-        // Per-writ swallow — one corrupt held writ should not stop
+-        // the scan from reaching the rest.
+-        const msg = err instanceof Error ? err.message : String(err);
+-        // eslint-disable-next-line no-console
+-        console.warn(
+-          `[reckoner] cdc: catch-up scan: considerWrit failed on "${writ.id}": ${msg}`,
+-        );
+-      }
++    if (params.tickEventId !== undefined) {
++      row.tickEventId = params.tickEventId;
+     }
++    return row;
+   }
+ 
+   /**
+@@ -1708,13 +1235,45 @@ function buildReckoner(): { plugin: Plugin; hooks: ReckonerTestHooks } {
+ 
+   // ── Apparatus ──────────────────────────────────────────────────────
+ 
++  // Tick context construction is deferred until `start()` runs (we
++  // need the resolved `clerk` and `stacks` handles plus the
++  // populated `reckoningsBook`). The closure-scoped variable holds
++  // the live context once `start()` builds it; `runTick` reads
++  // through it so post-start invocations always see the up-to-date
++  // helpers.
++  let tickCtx: TickHandlerContext | undefined;
++
++  /**
++   * Run one tick of the Reckoner. Exposed through the test hooks
++   * (`hooks.runTick`) so unit tests can drive the periodic-tick path
++   * without booting Clockworks. The relay handler delegates to the
++   * same helper so production and test paths share an entry point.
++   *
++   * Pre-start invocation throws because `tickCtx` has not been
++   * constructed yet. Pre-seal invocation throws via the inner
++   * `runTickHandler`'s `activeScheduler not resolved` guard (D8) —
++   * neither shape is silently swallowed.
++   */
++  async function runTick(event: GuildEvent | null = null): Promise<void> {
++    if (!tickCtx) {
++      throw new Error(
++        '[reckoner] tick: apparatus has not started yet — runTick called before start() resolved book / clerk handles.',
++      );
++    }
++    await runTickHandler(tickCtx, event);
++  }
++
+   const plugin: Plugin = {
+     apparatus: {
+-      // `requires: ['clerk']` only (D22). No explicit Stacks
+-      // dependency — the topo sort handles transitives. No
+-      // `recommends` because no consumer of one exists in this
+-      // commission.
++      // `requires: ['clerk']` is hard. The Clockworks is a soft
++      // dependency surfaced via `recommends` (D5 of the periodic-
++      // tick commission) — its dispatcher is what fires the standing
++      // order targeting `reckoner.tick`, but the Reckoner boots
++      // without it (the relay simply never fires). The patron
++      // override on the registry commission added `recommends` here;
++      // this commission upgrades it to name Clockworks specifically.
+       requires: ['clerk'],
++      recommends: ['clockworks'],
+ 
+       // The Reckoner is the consumer of `petitioners` and
+       // `schedulers` kit contributions. Declaring `consumes` here
+@@ -1725,13 +1284,16 @@ function buildReckoner(): { plugin: Plugin; hooks: ReckonerTestHooks } {
+       provides: api,
+ 
+       // Reckoner-owned book (D1, D9, D21) plus the Reckoner's own
+-      // contribution to its own scheduler registry — the built-in
+-      // `reckoner.always-approve` scheduler flows through
+-      // `ctx.kits('schedulers')` exactly like a user-contributed
+-      // scheduler (D29). Stacks materialises the book during the
+-      // Wire phase from the supportKit declaration; the Wire-phase
+-      // ensure call carries the index set forward to the backend.
+-      // The Reckoner is the sole writer.
++      // contributions to two registries it consumes: the built-in
++      // `reckoner.always-approve` scheduler under `schedulers`, and
++      // the periodic-tick relay + matching standing order under
++      // `relays` / `standingOrders`.
++      //
++      // The standing order has no `id` field per the additive-merge
++      // model from the kit-standing-orders commission; operators can
++      // append their own standing orders but cannot disable or
++      // override this one. The cadence is hard-coded `@every 60s`.
++      // (Operator-configurable cadence is a parked future improvement.)
+       supportKit: {
+         books: {
+           reckonings: {
+@@ -1751,6 +1313,42 @@ function buildReckoner(): { plugin: Plugin; hooks: ReckonerTestHooks } {
+           },
+         },
+         schedulers: [alwaysApproveScheduler],
++        relays: [
++          createTickRelay({
++            // Defer field reads to call time. Only the `relays` kit
++            // surface is read at apparatus-descriptor build time;
++            // every method on this object delegates through `tickCtx`
++            // which start() populates. A pre-start tick (e.g. a
++            // standing order racing apparatus boot) throws via
++            // runTick's defensive guard.
++            pluginId: RECKONER_PLUGIN_ID,
++            get clerk() {
++              if (!tickCtx) throw new Error('[reckoner] tick: not started');
++              return tickCtx.clerk;
++            },
++            get stacks() {
++              if (!tickCtx) throw new Error('[reckoner] tick: not started');
++              return tickCtx.stacks;
++            },
++            get reckoningsBook() {
++              if (!tickCtx) throw new Error('[reckoner] tick: not started');
++              return tickCtx.reckoningsBook;
++            },
++            registry,
++            getActiveScheduler: () => activeScheduler,
++            resolveConfig,
++            resolveSchedulerConfig,
++            resolveActiveTargetPhase,
++            alreadyConsidered,
++            findLastDeferredRow,
++            evaluateDependencyGate,
++            buildDependencyDeferNote,
++            buildReckoningRow,
++          }),
++        ],
++        standingOrders: [
++          { schedule: '@every 60s', run: RECKONER_TICK_RELAY },
++        ],
+       },
+ 
+       async start(ctx: StartupContext): Promise<void> {
+@@ -1760,8 +1358,8 @@ function buildReckoner(): { plugin: Plugin; hooks: ReckonerTestHooks } {
+         // Clerk has already started.
+         clerk = guild().apparatus<ClerkApi>('clerk');
+         // Stacks is reached transitively via Clerk's hard-require
+-        // (D22). Resolving it here keeps the topology declaration
+-        // minimal while letting the CDC handler subscribe.
++        // (D22). Resolving it here gives the tick handler the read-
++        // book handle for the held-petition query.
+         stacks = guild().apparatus<StacksApi>('stacks');
+         reckoningsBook = stacks.book<ReckoningDoc>('reckoner', 'reckonings');
+ 
+@@ -1789,29 +1387,34 @@ function buildReckoner(): { plugin: Plugin; hooks: ReckonerTestHooks } {
+         // `[clerk] registerWritType:` diagnostic. Immediately after
+         // sealing, resolve the active scheduler (D14) so any
+         // selector misconfiguration surfaces at startup rather than
+-        // on the first considered writ. The catch-up scan is
+-        // deferred to this same handler (D35) — pre-seal CDC events
+-        // are silently skipped via the `activeScheduler` guard, and
+-        // the scan reprocesses every held writ post-seal so no
+-        // event is lost.
+-        ctx.on('phase:started', async () => {
++        // on the first tick. There is no catch-up scan — the
++        // periodic tick is the canonical evaluation surface and
++        // picks up pre-existing held petitions on its first fire.
++        ctx.on('phase:started', () => {
+           registrySealed = true;
+           schedulerRegistrySealed = true;
+           activeScheduler = resolveActiveScheduler();
+-          await runCatchUpScan();
+         });
+ 
+-        // ── Phase 2 CDC subscription (D2/D3) ─────────────────────
+-        // `failOnError: false` keeps the handler post-commit so a
+-        // throw never rolls back the petitioner's `clerk.post()`
+-        // (or any other writ write). The Reckoner's decisions are
+-        // post-hoc by design.
+-        stacks.watch<WritDoc>(
+-          'clerk',
+-          'writs',
+-          (event) => handleWritsChange(event),
+-          { failOnError: false },
+-        );
++        // Build the live tick context now that handles are resolved.
++        // The relay factory's getters read through `tickCtx` so the
++        // handler always sees the up-to-date references.
++        tickCtx = {
++          pluginId: RECKONER_PLUGIN_ID,
++          clerk,
++          stacks,
++          reckoningsBook,
++          registry,
++          getActiveScheduler: () => activeScheduler,
++          resolveConfig,
++          resolveSchedulerConfig,
++          resolveActiveTargetPhase,
++          alreadyConsidered,
++          findLastDeferredRow,
++          evaluateDependencyGate,
++          buildDependencyDeferNote,
++          buildReckoningRow,
++        };
+       },
+     },
+   };
+@@ -1824,8 +1427,7 @@ function buildReckoner(): { plugin: Plugin; hooks: ReckonerTestHooks } {
+       registrySealed = true;
+       schedulerRegistrySealed = true;
+     },
+-    handleWritsChange: (event) => handleWritsChange(event),
+-    runCatchUpScan: () => runCatchUpScan(),
++    runTick: (event = null) => runTick(event),
+     getActiveSchedulerId: () => activeScheduler?.id,
+     getRegisteredSchedulerIds: () => [...schedulerRegistry.keys()].sort(),
+   };
+diff --git a/packages/plugins/reckoner/src/tick.ts b/packages/plugins/reckoner/src/tick.ts
+new file mode 100644
+index 0000000..b4e243b
+--- /dev/null
++++ b/packages/plugins/reckoner/src/tick.ts
+@@ -0,0 +1,724 @@
++/**
++ * `reckoner.tick` — periodic-tick relay.
++ *
++ * Wired into the apparatus's `supportKit.relays` so every guild that
++ * installs the Reckoner alongside the Clockworks evaluates its held
++ * petitions through the configured scheduler on a fixed cadence. The
++ * matching `supportKit.standingOrders` entry pins the cadence at
++ * `@every 60s`; operators cannot reduce it in this commission (the
++ * future improvement is a `reckoner.tickSchedule` knob, parked).
++ *
++ * The tick is the canonical evaluation surface — it replaces the
++ * earlier per-writ-update CDC handler, which could not give the
++ * scheduler a global candidate-set view. The handler:
++ *
++ *   1. Fail-loud throws when `activeScheduler` has not yet resolved
++ *      (D8 of the periodic-tick commission). In production
++ *      `phase:started` always fires before the first tick; the throw
++ *      surfaces ordering drift loudly rather than silently swallowing it.
++ *   2. Queries held petitions with the same shape the prior catch-up
++ *      scan used (`where: [['phase', '=', 'new']]`) and filters to
++ *      writs carrying `ext.reckoner`.
++ *   3. Applies the source-disabled and unregistered-strict gates
++ *      inline. Failing writs receive a decline Reckonings row and a
++ *      transition to their cancelled target; they never reach the
++ *      scheduler.
++ *   4. Filters the survivors against the persisted dedupe lookup
++ *      (`(writId, writUpdatedAt)` — D7) before assembling the
++ *      candidate set so the scheduler never sees a writ-version it
++ *      has already terminally considered.
++ *   5. Re-reads + validates `reckoner.schedulerConfig` per fire (D17
++ *      of the registry commission); a `validateConfig` throw
++ *      fail-loud-skips the tick.
++ *   6. Builds a single `SchedulerInput { candidates, capacity, now,
++ *      config }` with the v0 capacity stub and calls `evaluate`. A
++ *      throw inside `evaluate` fail-loud-skips the entire tick (no
++ *      rows, no transitions).
++ *   7. Filters-and-warns on stranger writIds (apply only in-scope
++ *      decisions). Fail-loud-skips the entire tick on any
++ *      multi-decision-per-writ (D9).
++ *   8. Applies each decision: approve → transition to active target;
++ *      decline → transition to cancelled with the decision's reason;
++ *      defer → no transition. Appends one Reckonings row per writ
++ *      considered, stamping `tickEventId` from `event.id` when
++ *      present (D6). Defer rows carry `deferReason: 'other'` and the
++ *      decision's reason in `deferNote` (D3).
++ *
++ * The handler is co-located with the apparatus (`tick.ts` sibling of
++ * `reckoner.ts`) following the `summon-relay.ts` / `decline-relay.ts`
++ * template. The pure handler-body helper exported alongside the
++ * factory takes a dependency-injection context object so unit tests
++ * can drive the tick directly without booting Clockworks.
++ *
++ * See: docs/architecture/apparatus/reckoner.md ("Schedulers"),
++ * docs/architecture/reckonings-book.md ("Tick identity"), and the
++ * commission brief w-moj12h4o.
++ */
++
++import type { Book, ReadOnlyBook, StacksApi } from '@shardworks/stacks-apparatus';
++import type { ClerkApi, WritDoc, WritPhase } from '@shardworks/clerk-apparatus';
++
++import type {
++  GuildEvent,
++  RelayDefinition,
++} from '@shardworks/clockworks-apparatus';
++import { relay } from '@shardworks/clockworks-apparatus';
++
++import type {
++  CapacitySnapshot,
++  ReckonerExt,
++  ReckoningDoc,
++  Scheduler,
++  SchedulerDecision,
++} from './types.ts';
++
++// ── Relay-name constant ─────────────────────────────────────────────
++
++/**
++ * The relay name. Dotted form (D1) — matches the apparatus's
++ * existing contributed-id grammar (scheduler ids, petitioner sources).
++ * The kit-contributed standing order targets this relay verbatim.
++ */
++export const RECKONER_TICK_RELAY = 'reckoner.tick';
++
++// ── Dependency context — closed over the apparatus, passed in here ─
++
++/**
++ * Internal registry shape exposed to the tick handler. Mirrors the
++ * `RegistryEntry` declared in `reckoner.ts`'s `buildReckoner` closure;
++ * the tick reads `descriptor.source` only — `contributingPluginId` is
++ * part of the same object only because the apparatus's existing
++ * registry stores both.
++ */
++export interface PetitionerRegistryEntry {
++  descriptor: { source: string; description: string };
++  contributingPluginId: string;
++}
++
++/**
++ * Resolved Reckoner config fields the tick gate consults (subset of
++ * `ReckonerConfig` — selector + scheduler-config slot are read on
++ * separate paths). Defaulted (`enforceRegistration: false`,
++ * `disabledSources: []`) by `resolveConfig` in `reckoner.ts`.
++ */
++export interface TickReckonerConfig {
++  enforceRegistration: boolean;
++  disabledSources: string[];
++}
++
++/**
++ * Dependency-aware gate outcomes the tick consults via the injected
++ * `evaluateDependencyGate`. Mirrors the in-`reckoner.ts` shape —
++ * see the dep-gate doc block there for the classification rules.
++ */
++export type TickDependencyOutcome =
++  | { kind: 'proceed' }
++  | { kind: 'defer-pending'; gatingIds: string[] }
++  | { kind: 'defer-failed'; failedIds: string[] };
++
++/**
++ * Dependency-injection context for the tick handler. The apparatus
++ * builds one of these inside `buildReckoner()` and threads it into
++ * the relay factory; tests build a stub context to drive the pure
++ * handler-body helper directly.
++ */
++export interface TickHandlerContext {
++  /** Plugin id stamped on `writ.ext['reckoner']` — used to read the slot. */
++  pluginId: string;
++  /** Live Clerk handle. */
++  clerk: ClerkApi;
++  /** Live Stacks handle (for the held-writs query). */
++  stacks: StacksApi;
++  /** Reckoner-owned book handle (for row writes + dedupe lookups). */
++  reckoningsBook: Book<ReckoningDoc>;
++  /** Petitioner registry — `source` membership decides registration enforcement. */
++  registry: Map<string, PetitionerRegistryEntry>;
++  /** Resolved active scheduler accessor — returns `undefined` pre-seal. */
++  getActiveScheduler(): Scheduler | undefined;
++  /** Re-reads + validates the operator-side Reckoner config block. */
++  resolveConfig(): TickReckonerConfig;
++  /** Re-reads the operator-side `reckoner.schedulerConfig` slot. */
++  resolveSchedulerConfig(): unknown;
++  /** Picks the type-aware active target phase for a writ. */
++  resolveActiveTargetPhase(writ: WritDoc): string;
++  /** Persisted `(writId, writUpdatedAt)` dedupe lookup. */
++  alreadyConsidered(
++    book: Book<ReckoningDoc>,
++    writId: string,
++    writUpdatedAt: string,
++  ): Promise<boolean>;
++  /** Fetch the most-recent deferred row for `writId` (no-op-row suppression). */
++  findLastDeferredRow(
++    book: Book<ReckoningDoc>,
++    writId: string,
++  ): Promise<ReckoningDoc | undefined>;
++  /** Run the dependency gate against one held writ. */
++  evaluateDependencyGate(writId: string): Promise<TickDependencyOutcome>;
++  /** Format the dep-defer `deferNote` (deterministic id ordering). */
++  buildDependencyDeferNote(
++    kind: 'defer-pending' | 'defer-failed',
++    ids: readonly string[],
++  ): string;
++  /** Build a Reckonings row from in-flight consideration state. */
++  buildReckoningRow(params: {
++    now: Date;
++    writ: WritDoc;
++    ext: ReckonerExt;
++    outcome: 'accepted' | 'declined' | 'deferred';
++    declineReason?: ReckoningDoc['declineReason'];
++    remediationHint?: string;
++    deferReason?: ReckoningDoc['deferReason'];
++    deferNote?: string;
++    weight?: number;
++    tickEventId?: string;
++  }): ReckoningDoc;
++}
++
++// ── Pure handler body — exported for unit tests ─────────────────────
++
++/**
++ * Run one tick of the Reckoner against the live writs/reckonings
++ * books using the supplied dependency context. Exported so unit tests
++ * can drive it without standing up Clockworks.
++ *
++ * `event` is `null` when invoked directly (tests, `hooks.runTick()`).
++ * In production it is the triggering `clockworks.timer` event id;
++ * `event.id` is stamped onto every Reckonings row this fire writes.
++ */
++export async function runTickHandler(
++  ctx: TickHandlerContext,
++  event: GuildEvent | null,
++): Promise<void> {
++  // D8 — fail-loud when the active scheduler has not yet resolved.
++  // Production never trips this (phase:started fires before the first
++  // tick). Test fixtures that drive runTick pre-seal get a loud signal.
++  const activeScheduler = ctx.getActiveScheduler();
++  if (!activeScheduler) {
++    throw new Error(
++      '[reckoner] tick: activeScheduler not resolved — phase:started has not fired',
++    );
++  }
++
++  // Sample `now` once at handler entry — reused for every Reckonings
++  // row this tick writes (consideredAt + the row id seed).
++  const now = new Date();
++
++  const tickEventId = event?.id;
++
++  // Held-petition query. Same shape today's catch-up scan uses — a
++  // direct read on `clerk/writs` rather than `clerk.list({ phase })`,
++  // because `clerk.list({ phase })` applies an implicit
++  // `type = 'mandate'` filter when `phase` is supplied without `type`.
++  // Non-mandate held petitions (with their own type carrying a `new`
++  // initial state) would not surface through that path.
++  const writsBook: ReadOnlyBook<WritDoc> = ctx.stacks.readBook<WritDoc>(
++    'clerk',
++    'writs',
++  );
++  const heldRaw = await writsBook.find({
++    where: [['phase', '=', 'new']],
++    orderBy: ['createdAt', 'asc'],
++  });
++
++  // Filter to writs carrying a Reckoner ext slot. Without the slot,
++  // a writ in `new` phase is not a held petition and the tick must
++  // ignore it.
++  const held: WritDoc[] = [];
++  for (const writ of heldRaw) {
++    const ext = writ.ext?.[ctx.pluginId] as ReckonerExt | undefined;
++    if (!ext) continue;
++    if (typeof ext.source !== 'string' || ext.source.length === 0) continue;
++    held.push(writ);
++  }
++
++  // D10 — empty candidate set. No rows, no errors, no scheduler call.
++  if (held.length === 0) return;
++
++  const config = ctx.resolveConfig();
++
++  // ── Source / disabled gates ────────────────────────────────────────
++  //
++  // Run inline before dep gate / dedupe / scheduler. Two paths produce
++  // a row + transition (no scheduler call):
++  //
++  //   - disabled-source: D2 of the periodic-tick commission — write
++  //     a `declined` row carrying `declineReason: 'source_banned'`
++  //     and the source name in `remediationHint`; transition the
++  //     writ to the cancelled target.
++  //   - unregistered-strict: existing decline path — write a
++  //     `declined` row carrying `declineReason: 'source_unregistered'`,
++  //     `remediationHint: ext.source`; transition to cancelled.
++  //
++  // Survivors continue to the dep gate + dedupe + scheduler.
++  const survivors: WritDoc[] = [];
++  for (const writ of held) {
++    const ext = writ.ext?.[ctx.pluginId] as ReckonerExt;
++    const source = ext.source;
++
++    if (config.disabledSources.includes(source)) {
++      await applyDisabledSourceDecline({
++        ctx,
++        now,
++        writ,
++        ext,
++        tickEventId,
++      });
++      continue;
++    }
++
++    if (!ctx.registry.has(source) && config.enforceRegistration) {
++      await applyUnregisteredStrictDecline({
++        ctx,
++        now,
++        writ,
++        ext,
++        tickEventId,
++      });
++      continue;
++    }
++
++    survivors.push(writ);
++  }
++
++  // ── Dependency gate ────────────────────────────────────────────────
++  //
++  // Runs every tick, *outside* the dedupe short-circuit, so a writ
++  // that deferred on dep state keeps being re-evaluated as its
++  // dependencies clear. Failed-precedence aggregation chooses between
++  // `dependency_pending` and `dependency_failed`. No-op-row
++  // suppression (compare to the writ's most-recent deferred row)
++  // prevents heartbeat duplicates when the dep set is unchanged.
++  const cleared: WritDoc[] = [];
++  for (const writ of survivors) {
++    const ext = writ.ext?.[ctx.pluginId] as ReckonerExt;
++    let depOutcome: TickDependencyOutcome;
++    try {
++      depOutcome = await ctx.evaluateDependencyGate(writ.id);
++    } catch (err) {
++      const msg = err instanceof Error ? err.message : String(err);
++      // eslint-disable-next-line no-console
++      console.warn(
++        `[reckoner] tick: dependency gate threw for writ "${writ.id}" — leaving in new without a row. ${msg}`,
++      );
++      continue;
++    }
++    if (depOutcome.kind === 'proceed') {
++      cleared.push(writ);
++      continue;
++    }
++
++    const reason: ReckoningDoc['deferReason'] =
++      depOutcome.kind === 'defer-failed'
++        ? 'dependency_failed'
++        : 'dependency_pending';
++    const ids =
++      depOutcome.kind === 'defer-failed'
++        ? depOutcome.failedIds
++        : depOutcome.gatingIds;
++    const deferNote = ctx.buildDependencyDeferNote(depOutcome.kind, ids);
++
++    const last = await ctx.findLastDeferredRow(ctx.reckoningsBook, writ.id);
++    if (
++      last &&
++      last.deferReason === reason &&
++      last.deferNote === deferNote
++    ) {
++      continue;
++    }
++
++    const row = ctx.buildReckoningRow({
++      now,
++      writ,
++      ext,
++      outcome: 'deferred',
++      deferReason: reason,
++      deferNote,
++      ...(tickEventId !== undefined ? { tickEventId } : {}),
++    });
++    try {
++      await ctx.reckoningsBook.put(row);
++    } catch (err) {
++      const msg = err instanceof Error ? err.message : String(err);
++      // eslint-disable-next-line no-console
++      console.warn(
++        `[reckoner] tick: failed to persist Reckonings row for writ "${writ.id}" (dependency-defer path): ${msg}`,
++      );
++    }
++  }
++
++  // ── Dedupe (D7) ────────────────────────────────────────────────────
++  //
++  // Filter the candidate set against the persisted dedupe lookup
++  // *before* building SchedulerInput so the scheduler never sees a
++  // writ-version it already terminally considered. The dedupe lookup
++  // counts only non-deferred prior rows — repeated dep-deferred ticks
++  // remain free to keep evaluating.
++  const candidates: WritDoc[] = [];
++  for (const writ of cleared) {
++    const seen = await ctx.alreadyConsidered(
++      ctx.reckoningsBook,
++      writ.id,
++      writ.updatedAt,
++    );
++    if (!seen) candidates.push(writ);
++  }
++
++  if (candidates.length === 0) return;
++
++  // ── Scheduler config validation ────────────────────────────────────
++  //
++  // Per-fire re-read + narrow. A `validateConfig` throw fail-loud-skips
++  // the entire tick (no rows, no transitions for any writ in the
++  // candidate set).
++  const rawSchedulerConfig = ctx.resolveSchedulerConfig();
++  let validatedConfig: unknown = rawSchedulerConfig;
++  if (typeof activeScheduler.validateConfig === 'function') {
++    try {
++      validatedConfig = activeScheduler.validateConfig(rawSchedulerConfig);
++    } catch (err) {
++      const msg = err instanceof Error ? err.message : String(err);
++      // eslint-disable-next-line no-console
++      console.warn(
++        `[reckoner] tick: scheduler "${activeScheduler.id}" validateConfig threw — skipping the entire tick. ${msg}`,
++      );
++      return;
++    }
++  }
++
++  // ── Evaluate ───────────────────────────────────────────────────────
++  //
++  // One call against the whole candidate set per fire. A throw inside
++  // evaluate fail-loud-skips the entire tick.
++  const capacity: CapacitySnapshot = {};
++  let decisions: readonly SchedulerDecision[];
++  try {
++    decisions = await activeScheduler.evaluate({
++      candidates,
++      capacity,
++      now,
++      config: validatedConfig,
++    });
++  } catch (err) {
++    const msg = err instanceof Error ? err.message : String(err);
++    // eslint-disable-next-line no-console
++    console.warn(
++      `[reckoner] tick: scheduler "${activeScheduler.id}" evaluate threw — skipping the entire tick. ${msg}`,
++    );
++    return;
++  }
++
++  if (!Array.isArray(decisions)) {
++    // eslint-disable-next-line no-console
++    console.warn(
++      `[reckoner] tick: scheduler "${activeScheduler.id}" evaluate did not return an array — skipping the entire tick.`,
++    );
++    return;
++  }
++
++  // ── Decision validation (D9) ───────────────────────────────────────
++  //
++  // Filter-and-warn on stranger writIds; fail-loud-skip the whole tick
++  // on any multi-decision-per-writ.
++  const candidateIds = new Set<string>(candidates.map((w) => w.id));
++  const inScope: SchedulerDecision[] = [];
++  for (const decision of decisions) {
++    if (
++      decision === null ||
++      typeof decision !== 'object' ||
++      typeof decision.writId !== 'string' ||
++      decision.writId.length === 0
++    ) {
++      // eslint-disable-next-line no-console
++      console.warn(
++        `[reckoner] tick: scheduler "${activeScheduler.id}" returned a malformed decision (missing writId) — ignoring.`,
++      );
++      continue;
++    }
++    if (!candidateIds.has(decision.writId)) {
++      // eslint-disable-next-line no-console
++      console.warn(
++        `[reckoner] tick: scheduler "${activeScheduler.id}" returned a decision for writ "${decision.writId}" which was not in the candidate set — ignoring.`,
++      );
++      continue;
++    }
++    inScope.push(decision);
++  }
++
++  const grouped = new Map<string, SchedulerDecision[]>();
++  for (const decision of inScope) {
++    const list = grouped.get(decision.writId) ?? [];
++    list.push(decision);
++    grouped.set(decision.writId, list);
++  }
++  for (const [writId, list] of grouped) {
++    if (list.length > 1) {
++      // eslint-disable-next-line no-console
++      console.warn(
++        `[reckoner] tick: scheduler "${activeScheduler.id}" returned ${list.length} decisions for writ "${writId}" — refusing to apply any. Schedulers must emit at most one decision per candidate. Skipping the entire tick.`,
++      );
++      return;
++    }
++  }
++
++  // ── Apply decisions ────────────────────────────────────────────────
++  //
++  // Walk the candidate set in iteration order so per-writ side effects
++  // are deterministic. A candidate with no decision is treated as a
++  // no-row, no-transition skip (defer-equivalent) — schedulers
++  // signalling "leave alone" simply omit a decision.
++  for (const writ of candidates) {
++    const decision = grouped.get(writ.id)?.[0];
++    if (!decision) continue;
++
++    const ext = writ.ext?.[ctx.pluginId] as ReckonerExt;
++
++    // Validate outcome enum membership defensively. Unknown values
++    // surface as a warning and skip the writ.
++    if (
++      decision.outcome !== 'approve' &&
++      decision.outcome !== 'decline' &&
++      decision.outcome !== 'defer'
++    ) {
++      // eslint-disable-next-line no-console
++      console.warn(
++        `[reckoner] tick: scheduler "${activeScheduler.id}" returned an unknown outcome "${String((decision as { outcome?: unknown }).outcome)}" for writ "${writ.id}" — ignoring.`,
++      );
++      continue;
++    }
++
++    if (decision.outcome === 'defer') {
++      // D3 — defer outcome writes a row, no transition. `deferReason`
++      // is `'other'`; the decision's reason lands in `deferNote`. The
++      // counter / deferUntil / deferSignal fields stay absent (the
++      // shape is reserved for a future named consumer).
++      const row = ctx.buildReckoningRow({
++        now,
++        writ,
++        ext,
++        outcome: 'deferred',
++        deferReason: 'other',
++        ...(decision.reason !== undefined
++          ? { deferNote: decision.reason }
++          : {}),
++        ...(decision.weight !== undefined ? { weight: decision.weight } : {}),
++        ...(tickEventId !== undefined ? { tickEventId } : {}),
++      });
++      try {
++        await ctx.reckoningsBook.put(row);
++      } catch (err) {
++        const msg = err instanceof Error ? err.message : String(err);
++        // eslint-disable-next-line no-console
++        console.warn(
++          `[reckoner] tick: failed to persist Reckonings row for writ "${writ.id}" (scheduler defer): ${msg}`,
++        );
++      }
++      continue;
++    }
++
++    if (decision.outcome === 'decline') {
++      const resolution = decision.reason;
++      try {
++        await ctx.clerk.transition(writ.id, 'cancelled' as WritPhase, {
++          resolution,
++        });
++      } catch (err) {
++        const msg = err instanceof Error ? err.message : String(err);
++        // eslint-disable-next-line no-console
++        console.warn(
++          `[reckoner] tick: failed to transition writ "${writ.id}" to cancelled (scheduler decline): ${msg}`,
++        );
++        continue;
++      }
++      const row = ctx.buildReckoningRow({
++        now,
++        writ,
++        ext,
++        outcome: 'declined',
++        declineReason: 'other',
++        remediationHint: decision.reason,
++        ...(decision.weight !== undefined ? { weight: decision.weight } : {}),
++        ...(tickEventId !== undefined ? { tickEventId } : {}),
++      });
++      try {
++        await ctx.reckoningsBook.put(row);
++      } catch (err) {
++        const msg = err instanceof Error ? err.message : String(err);
++        // eslint-disable-next-line no-console
++        console.warn(
++          `[reckoner] tick: failed to persist Reckonings row for writ "${writ.id}" (scheduler decline): ${msg}`,
++        );
++      }
++      continue;
++    }
++
++    // approve.
++    let target: string;
++    try {
++      target = ctx.resolveActiveTargetPhase(writ);
++    } catch (err) {
++      const msg = err instanceof Error ? err.message : String(err);
++      // eslint-disable-next-line no-console
++      console.warn(
++        `[reckoner] tick: writ "${writ.id}" has no resolvable active target — leaving in new. ${msg}`,
++      );
++      continue;
++    }
++
++    try {
++      await ctx.clerk.transition(writ.id, target as WritPhase, {});
++    } catch (err) {
++      const msg = err instanceof Error ? err.message : String(err);
++      // eslint-disable-next-line no-console
++      console.warn(
++        `[reckoner] tick: failed to transition writ "${writ.id}" to "${target}" (scheduler approve): ${msg}`,
++      );
++      continue;
++    }
++
++    const row = ctx.buildReckoningRow({
++      now,
++      writ,
++      ext,
++      outcome: 'accepted',
++      ...(decision.weight !== undefined ? { weight: decision.weight } : {}),
++      ...(tickEventId !== undefined ? { tickEventId } : {}),
++    });
++    try {
++      await ctx.reckoningsBook.put(row);
++    } catch (err) {
++      const msg = err instanceof Error ? err.message : String(err);
++      // eslint-disable-next-line no-console
++      console.warn(
++        `[reckoner] tick: failed to persist Reckonings row for writ "${writ.id}" (scheduler approve): ${msg}`,
++      );
++    }
++  }
++}
++
++// ── Source-gate decline helpers ────────────────────────────────────
++
++/**
++ * Disabled-source decline (D2). Symmetric with the unregistered-
++ * strict decline path: writes a `declined` Reckonings row with
++ * `declineReason: 'source_banned'` and the source name in
++ * `remediationHint`, then transitions the writ to its cancelled
++ * target. Builds a parallel resolution-string template (the
++ * unregistered-strict template is left untouched per the brief).
++ */
++async function applyDisabledSourceDecline(args: {
++  ctx: TickHandlerContext;
++  now: Date;
++  writ: WritDoc;
++  ext: ReckonerExt;
++  tickEventId: string | undefined;
++}): Promise<void> {
++  const { ctx, now, writ, ext, tickEventId } = args;
++  // Dedupe — only write the row + transition once for this writ-version.
++  if (await ctx.alreadyConsidered(ctx.reckoningsBook, writ.id, writ.updatedAt)) {
++    return;
++  }
++  const resolution =
++    `[reckoner] declined: source '${ext.source}' is in disabledSources.`;
++  try {
++    await ctx.clerk.transition(writ.id, 'cancelled' as WritPhase, {
++      resolution,
++    });
++  } catch (err) {
++    const msg = err instanceof Error ? err.message : String(err);
++    // eslint-disable-next-line no-console
++    console.warn(
++      `[reckoner] tick: failed to transition writ "${writ.id}" to cancelled (disabled-source decline): ${msg}`,
++    );
++    return;
++  }
++  const row = ctx.buildReckoningRow({
++    now,
++    writ,
++    ext,
++    outcome: 'declined',
++    declineReason: 'source_banned',
++    remediationHint: ext.source,
++    ...(tickEventId !== undefined ? { tickEventId } : {}),
++  });
++  try {
++    await ctx.reckoningsBook.put(row);
++  } catch (err) {
++    const msg = err instanceof Error ? err.message : String(err);
++    // eslint-disable-next-line no-console
++    console.warn(
++      `[reckoner] tick: failed to persist Reckonings row for writ "${writ.id}" (disabled-source decline): ${msg}`,
++    );
++  }
++}
++
++/**
++ * Unregistered-strict decline. Existing path — preserved verbatim
++ * from the prior CDC handler; the resolution-string template is
++ * unchanged so external consumers grepping for it stay green.
++ */
++async function applyUnregisteredStrictDecline(args: {
++  ctx: TickHandlerContext;
++  now: Date;
++  writ: WritDoc;
++  ext: ReckonerExt;
++  tickEventId: string | undefined;
++}): Promise<void> {
++  const { ctx, now, writ, ext, tickEventId } = args;
++  if (await ctx.alreadyConsidered(ctx.reckoningsBook, writ.id, writ.updatedAt)) {
++    return;
++  }
++  const resolution =
++    `[reckoner] declined: source '${ext.source}' is not registered (enforceRegistration: true).`;
++  try {
++    await ctx.clerk.transition(writ.id, 'cancelled' as WritPhase, {
++      resolution,
++    });
++  } catch (err) {
++    const msg = err instanceof Error ? err.message : String(err);
++    // eslint-disable-next-line no-console
++    console.warn(
++      `[reckoner] tick: failed to transition writ "${writ.id}" to cancelled (unregistered-strict decline): ${msg}`,
++    );
++    return;
++  }
++  const row = ctx.buildReckoningRow({
++    now,
++    writ,
++    ext,
++    outcome: 'declined',
++    declineReason: 'source_unregistered',
++    remediationHint: ext.source,
++    ...(tickEventId !== undefined ? { tickEventId } : {}),
++  });
++  try {
++    await ctx.reckoningsBook.put(row);
++  } catch (err) {
++    const msg = err instanceof Error ? err.message : String(err);
++    // eslint-disable-next-line no-console
++    console.warn(
++      `[reckoner] tick: failed to persist Reckonings row for writ "${writ.id}" (unregistered-strict decline): ${msg}`,
++    );
++  }
++}
++
++// ── Relay factory ───────────────────────────────────────────────────
++
++/**
++ * Build the `reckoner.tick` `RelayDefinition`. The apparatus boot
++ * path wires this into `supportKit.relays`; the matching standing
++ * order targets `run: 'reckoner.tick'` on `schedule: '@every 60s'`.
++ *
++ * The factory closes over the apparatus's dependency context so the
++ * handler can reach the closure-scoped registry, scheduler, and
++ * helpers without re-resolving them per fire.
++ */
++export function createTickRelay(ctx: TickHandlerContext): RelayDefinition {
++  return relay({
++    name: RECKONER_TICK_RELAY,
++    description:
++      'Periodically evaluate every held petition through the configured scheduler.',
++    handler: async (event, _context) => {
++      await runTickHandler(ctx, event);
++    },
++  });
++}
+diff --git a/packages/plugins/reckoner/src/types.ts b/packages/plugins/reckoner/src/types.ts
+index 491f0ce..c589927 100644
+--- a/packages/plugins/reckoner/src/types.ts
++++ b/packages/plugins/reckoner/src/types.ts
+@@ -326,10 +326,13 @@ export interface ReckoningDoc {
+   /** Outcome enum — drives the discriminated-union reason fields. */
+   outcome: ReckoningOutcome;
+   /**
+-   * Triggering Clockworks event id, when the consideration was
+-   * triggered by a scheduling tick. Absent for considerations
+-   * triggered by a CDC event on `clerk/writs`. The v0 handler is
+-   * CDC-only, so this field is always absent on v0 rows.
++   * Triggering Clockworks event id — stamped from the
++   * `clockworks.timer` event that fired the periodic tick (D6 of
++   * the periodic-tick commission). Present on every production-
++   * path row; absent only when a test drives the handler directly
++   * with `null` for the triggering event. The Reckoner is the only
++   * writer of this book and the periodic tick is now the only
++   * evaluation surface, so absence is purely a test-fixture signal.
+    */
+   tickEventId?: string;
+   /** ISO timestamp when the Reckoner completed this consideration. */
+diff --git a/packages/plugins/vision-keeper/src/integration.test.ts b/packages/plugins/vision-keeper/src/integration.test.ts
+index ff5fff4..625342f 100644
+--- a/packages/plugins/vision-keeper/src/integration.test.ts
++++ b/packages/plugins/vision-keeper/src/integration.test.ts
+@@ -432,12 +432,13 @@ describe('Vision-keeper — end-to-end', () => {
+       });
+ 
+       // Re-read through Clerk to confirm the row is persisted. The
+-      // Reckoner CDC handler auto-approves on its always-approve
+-      // stub for registered sources, so the writ ends up in the
+-      // type's active phase (`open` for mandate). The contract ext
+-      // slot survives the transition.
++      // Reckoner now evaluates held petitions on a periodic tick
++      // (kit-contributed `@every 60s` standing order). No tick has
++      // fired in this test, so the writ remains in its initial
++      // phase. The contract ext slot is on the freshly-stamped
++      // writ regardless.
+       const reread = await fix.clerk.show(writ.id);
+-      assert.equal(reread.phase, 'open');
++      assert.equal(reread.phase, 'new');
+       const ext = reread.ext?.reckoner as ReckonerExt | undefined;
+       assert.ok(ext);
+       assert.equal(ext!.source, VISION_KEEPER_SOURCE);
+@@ -481,10 +482,12 @@ describe('Vision-keeper — end-to-end', () => {
+         /superseded by newer snapshot/i,
+       );
+ 
+-      // The new petition gets auto-approved by the Reckoner CDC
+-      // handler — it ends up in the type's active phase.
++      // The new petition stays in `new` phase — the periodic tick
++      // is the only path that approves now, and no tick has fired
++      // in this test. The supersede behavior of the keeper's
++      // submitDriftSnapshot is what's under test here.
+       const secondReread = await fix.clerk.show(second.id);
+-      assert.equal(secondReread.phase, 'open');
++      assert.equal(secondReread.phase, 'new');
+     } finally {
+       await teardown(fix);
+     }
+@@ -522,11 +525,12 @@ describe('Vision-keeper — end-to-end', () => {
+         'context shifted; nudge no longer relevant',
+       );
+ 
+-      // Vision-a's petition is untouched by the explicit supersede
+-      // — it remains in the active phase the Reckoner CDC handler
+-      // approved it into.
++      // Vision-a's petition is untouched by the explicit supersede.
++      // No tick has fired so it remains in `new`; the assertion's
++      // intent is "supersede('vision-b') does not transition
++      // vision-a's writ", which `new` satisfies.
+       const aReread = await fix.clerk.show(a.id);
+-      assert.equal(aReread.phase, 'open');
++      assert.equal(aReread.phase, 'new');
+     } finally {
+       await teardown(fix);
+     }
+diff --git a/packages/plugins/vision-keeper/src/vision-keeper.test.ts b/packages/plugins/vision-keeper/src/vision-keeper.test.ts
+index 14cc276..115d0b8 100644
+--- a/packages/plugins/vision-keeper/src/vision-keeper.test.ts
++++ b/packages/plugins/vision-keeper/src/vision-keeper.test.ts
+@@ -577,13 +577,13 @@ describe('Vision-keeper apparatus', () => {
+       assert.ok(withdrawnA, 'vision-a outstanding petition must be withdrawn');
+       assert.equal(withdrawnA!.id, a.id);
+ 
+-      // The Reckoner CDC handler auto-approves registered-source
+-      // petitions; vision-b's writ is now in `open` (the type's
+-      // active phase), not `new`. The assertion's intent is "vision-
+-      // b's writ is not transitioned by superseded('vision-a')" —
+-      // the active phase satisfies that intent.
++      // The Reckoner now evaluates on a periodic tick; this test
++      // does not fire one, so vision-b's writ remains in `new`.
++      // The assertion's intent — "vision-b's writ is not transitioned
++      // by superseded('vision-a')" — is satisfied by `new` just as
++      // well as `open` would be.
+       const bReread = await fix.clerk.show(b.id);
+-      assert.equal(bReread.phase, 'open', 'vision-b petition must not be touched');
++      assert.equal(bReread.phase, 'new', 'vision-b petition must not be touched');
+     });
+   });
+ 
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 1b008bc..7b389cd 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -406,6 +406,9 @@ importers:
+       '@shardworks/clerk-apparatus':
+         specifier: workspace:*
+         version: link:../clerk
++      '@shardworks/clockworks-apparatus':
++        specifier: workspace:*
++        version: link:../clockworks
+       '@shardworks/stacks-apparatus':
+         specifier: workspace:*
+         version: link:../stacks

@@ -1,0 +1,45 @@
+slug: x022-rig-moji64hs-combined
+frameworkVersion: 0.1.304
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: d6e34097f698df66d595f81f928320eafde8276f
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    givens:
+      bareLocalPath: ${yields.fixture-codex-setup.bareLocalPath}
+      baseSha: d6e34097f698df66d595f81f928320eafde8276f
+      codexName: ${yields.fixture-codex-setup.codexName}
+    dependsOn:
+      - codex
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/fixtures/test-guild/roles/artificer-combined-nudges.md
+      briefPath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/briefs/rig-moji64hs-baseline.md
+      model: opus
+      executionWrap: production
+      cwd: ${yields.fixture-codex-checkout-setup.workdir}
+      verifyCommand: |
+        set -e
+        pnpm -w typecheck
+        git push origin HEAD:main
+      verifyTimeoutMs: 600000
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+archive:
+  engineId: lab.archive
+  givens: {}
+manifestPath: /workspace/nexus-mk2/experiments/X022-implementer-behavior-nudges/manifests/rig-moji64hs-combined.yaml

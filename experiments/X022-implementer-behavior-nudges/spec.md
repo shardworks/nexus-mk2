@@ -32,10 +32,13 @@ landscape under `c-mok4nke6-06b21ff2a765`.
 >
 > **For run-to-run variance and hypothesis-power planning**, see
 > X021 results.md § Run-to-run variance — measured. With n=1
-> per cell as currently specced, X022's design is underpowered
-> against effect sizes <20%. **Strongly recommend expanding to
-> n=3 per cell** before running, mirroring X021's noise-control
-> approach.
+> per cell as originally specced, X022's design is underpowered
+> against effect sizes <20%. **Design upgraded to n=3 per
+> variant cell on 2026-05-07** (Sean) to mirror X021's noise-control
+> approach. Substantive baseline retained at n=1 (trial 1 already
+> ran clean at $39.76); control baseline remains conditional. The
+> six new trials are posted as a serialized depends-on chain so
+> Spider runs them strictly one at a time.
 
 ## Research question
 
@@ -227,22 +230,33 @@ role-file only.
 
 ### Phase 3 — Trial sequence
 
-**Twelve trials, n=3 per cell, run sequentially:**
+**Active plan (revised 2026-05-07, Sean):** Six new trials, n=3
+per variant cell, interleaved. Substantive baseline retained at
+n=1 (trial 1's $39.76); control baseline remains conditional.
 
-| group | rig | variant | manifest | n |
-|---|---|---|---|---|
-| 1 | rig-moj12h4o (substantive) | baseline | `manifests/rig-moj12h4o-baseline.yaml` | 3 |
-| 2 | rig-moj12h4o (substantive) | combined | `manifests/rig-moj12h4o-combined.yaml` | 3 |
-| 3 | rig-moji64hs (control) | baseline | `manifests/rig-moji64hs-baseline.yaml` | 3 |
-| 4 | rig-moji64hs (control) | combined | `manifests/rig-moji64hs-combined.yaml` | 3 |
+| run order | rig | variant | manifest |
+|---|---|---|---|
+| 2 | rig-moj12h4o (substantive) | combined | `manifests/rig-moj12h4o-combined.yaml` |
+| 3 | rig-moji64hs (control) | combined | `manifests/rig-moji64hs-combined.yaml` |
+| 4 | rig-moj12h4o (substantive) | combined | `manifests/rig-moj12h4o-combined.yaml` |
+| 5 | rig-moji64hs (control) | combined | `manifests/rig-moji64hs-combined.yaml` |
+| 6 | rig-moj12h4o (substantive) | combined | `manifests/rig-moj12h4o-combined.yaml` |
+| 7 | rig-moji64hs (control) | combined | `manifests/rig-moji64hs-combined.yaml` |
 
-Sequenced one at a time. Run all three trials of group 1, then
-group 2, then group 3, then group 4 — same workflow as X021's
-n=3 sequencing.
+Interleaved (sub, ctrl, sub, ctrl, sub, ctrl) so any host-level
+or framework-level drift across the run window distributes
+evenly across both cells. Posted as a single depends-on chain
+(each trial's writ has a `depends-on` link to its predecessor)
+then all published — Spider holds successors in `open` until
+each predecessor reaches a terminal state.
 
-**MVP fallback:** if budget-tight, run groups 1 + 2 only (substantive
-baseline + combined, n=3 each = 6 trials). Answers H1 cleanly;
-H2 requires control trials.
+**Theoretical full design (12 trials):** n=3 in all four cells
+(both rigs × baseline + variant). Not run because trial 1's
+substantive baseline is clean and the bottleneck for H1/H2 is
+variant-cell signal. If the variant cells hit ambiguous results
+the load-bearing fallback is to add 2× substantive baseline
+trials (raising sub-baseline to n=3); only spend on control
+baseline if variant lands outside production envelope.
 
 **Original n=1 design (4 trials):** **superseded 2026-05-08**. The
 n=1-per-cell design was authored before X021's noise-floor
@@ -272,8 +286,10 @@ under claude-direct:
 
 | plan | trials | total |
 |---|---|---|
-| **MVP** | 6 substantive (n=3 baseline + n=3 combined) | $108–$170 |
-| **Full** | 12 (above + 6 control) | $174–$260 |
+| **Active** (3 sub-combined + 3 ctrl-combined, interleaved) | 6 | $87–$129 |
+| **Already spent** (trial 1, sub-baseline) | 1 | $39.76 |
+| **Active + trial 1** | 7 | ~$127–$169 |
+| **Theoretical full (n=3 all cells)** | 12 | $174–$260 |
 
 Original n=1 4-trial estimate ($30–$60) is superseded — it was
 based on the smoke-trial-derived cost claim that turned out 30×

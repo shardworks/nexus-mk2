@@ -1,0 +1,36 @@
+[
+  {
+    "id": "ses-mowea6s2-142c7780",
+    "status": "completed",
+    "startedAt": "2026-05-08T04:08:13.778Z",
+    "provider": "claude-code",
+    "authorizedTools": [
+      "session-running",
+      "session-record",
+      "session-heartbeat"
+    ],
+    "lastActivityAt": "2026-05-08T05:03:23.442Z",
+    "cancelHandle": {
+      "kind": "local-pgid",
+      "pgid": 2142088
+    },
+    "metadata": {
+      "engineId": "implement",
+      "trialId": "w-mowe5lsl-a393e6b6fe8e",
+      "stage": "implement",
+      "provider": "lab.claude-session"
+    },
+    "endedAt": "2026-05-08T05:03:23.442Z",
+    "durationMs": 3309664,
+    "exitCode": 0,
+    "costUsd": 34.40039674999999,
+    "tokenUsage": {
+      "inputTokens": 209,
+      "outputTokens": 143081,
+      "cacheReadTokens": 55634859,
+      "cacheWriteTokens": 479657
+    },
+    "output": "Commit `ffcf038` landed successfully. The working tree is clean.\n\n## Summary\n\nThe Reckoner now evaluates held petitions through a single canonical periodic tick instead of per-writ CDC events. The implementation across all six tasks:\n\n- **t1/t2 (tick relay + scheduler invocation):** New `tick.ts` exports `runReckonerTick(ctx, event)` (the pure handler the test hook drives) and `createTickRelay(ctx)` (the relay factory wired into `supportKit.relays`). The handler resolves the active scheduler, re-validates `schedulerConfig`, queries held petitions, applies source/disabled gates, dedupes against `(writId, writUpdatedAt)`, calls `evaluate` once on the whole candidate batch, and applies each decision (approve / decline / defer with `deferReason: 'other'` per D3). Pre-seal ticks throw fail-loud per D8; tick-event-id stamping per D6.\n- **t3 (CDC removal):** Deleted the `stacks.watch('clerk', 'writs')` subscription, `handleWritsChange`, `runCatchUpScan`, `runScheduler`, `considerWrit`, the dependency-aware defer machinery, and the related test hooks; replaced with a `runTick(event?)` hook. Apparatus declares `recommends: ['clockworks']`.\n- **t4 (test refresh):** New `reckoner-tick.test.ts` covers all enumerated behavioral cases. `reckoner-scheduler.test.ts` shifted to drive ticks; `integration.test.ts` fires a tick after petition. Vision-keeper integration test resolves `reckoner.tick` via `clockworks.resolveRelay()` and invokes it directly. Deleted `reckoner-cdc.test.ts` and `reckoner-depends-on.test.ts`.\n- **t5 (docs):** Updated the Reckoner architecture doc, Reckonings book doc, petitioner-registration doc, README, and `tickEventId` field comment to describe the tick model.\n- **t6:** Workspace `pnpm -w typecheck` passes; `pnpm -w test` shows **3828 passes, 0 failures**, 1 pre-existing claude-code skip. Audit greps return only intentional in-scope references.",
+    "providerSessionId": "f858bf70-c842-4ebe-a8c8-ea8827ae90c7"
+  }
+]
