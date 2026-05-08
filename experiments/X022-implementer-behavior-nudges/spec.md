@@ -79,6 +79,31 @@ larger-than-production briefs (full plandoc concatenation,
 2026-05-03 (commit `5a7ff5ae`) once the X021 trial-runner
 identified the mismatch.
 
+## Terminology note — "substantive" and "control" rigs
+
+These labels are used loosely throughout the spec and runlog:
+
+- **"substantive" rig** (rig-moj12h4o, the Reckoner refactor) is the
+  heavyweight rig where the bundle's load-bearing ideas (#10 repeat
+  greps, #11 narrow test filters, #12 don't re-test) all fire strongly.
+  Primary testbed for H1.
+- **"control" rig** (rig-moji64hs, the vision-keeper deletion) is the
+  lighter, rename-heavy rig where idea #8 (Bash bulk edits) is the
+  dominant mechanism. Cross-check on a different work shape — testbed
+  for H2.
+
+**These are not experimental control vs treatment arms.** The actual
+within-experiment control is the *baseline role file* (no nudges) vs
+*combined-nudges role file* on the same rig, same brief, same codex
+pin. Both rigs receive both treatments. The "substantive"/"control"
+naming captures workload character (which ideas should fire) rather
+than experimental role.
+
+A clearer naming would have been "heavyweight rig"/"foil rig" or
+"primary testbed"/"secondary testbed". Calling it out here so the
+labels don't mislead anyone reading the results writeup or
+follow-on experiments.
+
 ## Background
 
 The Apr 29 cost-optimization landscape (`c-mok4nke6`) analyzed two
