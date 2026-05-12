@@ -45,6 +45,19 @@ experiments and xguild for everything else.
   and manual list-price recalculations, and the discipline for
   keeping experiment cost numbers comparable across trials.
   Applies to both trial doctypes.
+- **[trial-workload-portfolio.md](./trial-workload-portfolio.md)** —
+  curated set of historical implementer rigs cleared for use as
+  benchmark workloads. Each workload calibrated with codex pin,
+  sealed-state baseline failure profile, discrimination thresholds,
+  and ready-to-drop manifest fixtures spanning 11 distinct work
+  shapes (cross-package rename, greenfield apparatus, bugfix,
+  frontend, non-nexus codex, etc.).
+- **[experiment-discipline.md](./experiment-discipline.md)** —
+  two-tier threshold framework distinguishing detection (statistical
+  confidence at low n) from deployment (expected-value gate for
+  low-risk shipping). Codifies when to use production telemetry as
+  primary evidence vs trial measurement, and the discipline for
+  stacking small wins and rolling back from production monitoring.
 
 More guides land here as the apparatus grows. Examples of likely
 future additions: probe authoring, fixture composition patterns,
