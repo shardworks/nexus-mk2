@@ -1,0 +1,2346 @@
+
+
+diff --git a/packages/plugins/reckoner/README.md b/packages/plugins/reckoner/README.md
+new file mode 100644
+index 0000000..901ee8e
+--- /dev/null
++++ b/packages/plugins/reckoner/README.md
+@@ -0,0 +1,303 @@
++# `@shardworks/reckoner-apparatus`
++
++The Reckoner — kit-static petitioner registry, `guild.json` configuration
++parsing, priority dimension types with default-filling, and the
++`reckoner.petition()` / `reckoner.withdraw()` helper APIs.
++
++This package is the foundation that lets petitioners declare themselves and
++emit properly-formed held writs through an ergonomic API. The CDC handler
++that watches held writs and decides their fate (approve / defer / decline)
++is a separate commission that follows this one.
++
++See also: [`docs/architecture/petitioner-registration.md`](../../../docs/architecture/petitioner-registration.md).
++
++---
++
++## Installation
++
++```sh
++pnpm add @shardworks/reckoner-apparatus
++```
++
++Register the apparatus in `guild.json`:
++
++```json
++{
++  "plugins": [
++    "@shardworks/clerk-apparatus",
++    "@shardworks/reckoner-apparatus"
++  ]
++}
++```
++
++The Reckoner must be started after the Clerk (its `requires` declaration
++enforces this automatically).
++
++---
++
++## API
++
++```typescript
++import type { ReckonerApi } from '@shardworks/reckoner-apparatus';
++
++const reckoner = guild().apparatus<ReckonerApi>('reckoner');
++```
++
++### `reckoner.petition(request)` → `Promise<WritDoc>`
++
++Post a writ in `new` phase with Reckoner ext set correctly. This is
++**Workflow 2** — the canonical ergonomic path.
++
++```typescript
++const writ = await reckoner.petition({
++  // Writ fields
++  type:     'mandate',
++  title:    'Address vision drift detected at 04:00 UTC',
++  body:     'Keeper observed 12% drift on nexus vision.',
++  codex:    'nexus',
++  parentId: 'w-...', // optional
++
++  // ext.reckoner fields
++  source:     'vision-keeper.snapshot',
++  priority: {
++    visionRelation: 'vision-violator',
++    severity:       'serious',
++    scope:          'major-area',
++    time:           { decay: true, deadline: null },
++    domain:         ['quality'],
++  },
++  complexity: 'bounded',     // optional
++  payload:    { ... },       // opaque petitioner data, optional
++  labels:     { 'vision-keeper.io/vision-id': 'nexus' }, // optional
++});
++// writ.phase === 'new'
++// writ.ext?.reckoner === { source, priority, complexity?, payload?, labels? }
++```
++
++`petition()` performs, in order:
++
++1. Validates `source` against the petitioner registry (subject to
++   `enforceRegistration` configuration).
++2. Applies contract defaults for any omitted `priority` dimensions:
++   `vision-neutral / minor / minor-area / {decay: false, deadline: null} / []`.
++3. Validates all five priority dimension values against their schema.
++4. Calls `clerk.post()` to create the writ.
++5. Writes `ext.reckoner` via `clerk.setWritExt()`.
++6. Returns the final `WritDoc`.
++
++### `reckoner.withdraw(writId, reason?)` → `Promise<WritDoc>`
++
++Withdraw a held writ — transition it to `cancelled`. Thin wrapper around
++`clerk.transition(writId, 'cancelled', { resolution: reason })`.
++
++```typescript
++await reckoner.withdraw(writId, 'Snapshot superseded by newer drift.');
++```
++
++No source-check is performed — any caller may withdraw any writ via this
++helper. The purpose is ergonomic discoverability, not enforcement.
++
++### `reckoner.getRegisteredSources()` → `ReadonlyArray<PetitionerDescriptor>`
++
++Return all sources registered via `petitioners` kit contributions. Sealed
++after startup. Useful for operator / observability tooling.
++
++```typescript
++const sources = reckoner.getRegisteredSources();
++// [{ source: 'vision-keeper.snapshot', description: '...' }, ...]
++```
++
++---
++
++## Configuration
++
++Configure the Reckoner under the `reckoner` key in `guild.json`:
++
++```json
++{
++  "reckoner": {
++    "enforceRegistration": false,
++    "disabledSources": []
++  }
++}
++```
++
++### `enforceRegistration` (boolean, default `false`)
++
++Controls behaviour when a petition's `source` is not in the registry:
++
++- `false` — log a warning and proceed. Emergent petitioners that haven't
++  registered yet still get their writs created.
++- `true` — decline the petition with an error; no writ is posted. Guards
++  against typos and abandoned sources.
++
++### `disabledSources` (string array, default `[]`)
++
++Per-source disable list. Petitions from any source in this array are skipped
++by the Reckoner (left in `new` phase with no reckoning entry). Removing a
++source from the list resumes normal consideration of pending writs.
++
++```json
++{
++  "reckoner": {
++    "disabledSources": ["tech-debt.detected"]
++  }
++}
++```
++
++---
++
++## Kit Interface
++
++Petitioners declare themselves via the `petitioners` kit contribution:
++
++```typescript
++// In a plugin's kit (or apparatus's supportKit)
++export default {
++  kit: {
++    requires: ['reckoner'],
++    petitioners: [
++      {
++        source:      'vision-keeper.snapshot',
++        description: 'Vision-vs-reality snapshots emitted when the keeper ' +
++                     'observes drift worth surfacing.',
++      },
++    ],
++  },
++};
++```
++
++```typescript
++interface PetitionerDescriptor {
++  /** Format: `{pluginId}.{kebab-suffix}`. Must be prefixed with the contributing plugin id. */
++  source:      string;
++  /** Human-readable one-liner for operators. */
++  description: string;
++}
++```
++
++### Source-id grammar
++
++Source ids must be `{pluginId}.{kebab-suffix}`:
++
++- Both segments are kebab-case (lowercase letters, digits, single hyphens;
++  no leading or trailing hyphens).
++- The prefix **must** match the contributing plugin's id.
++- Malformed ids fail at guild startup, never silently at first emit.
++
++Valid examples: `vision-keeper.snapshot`, `patron-bridge.commission`,
++`tech-debt.detected`.
++
++### Collision policy
++
++Two `petitioners` entries with the same `source` string are a hard startup
++error — the Reckoner refuses to start with a diagnostic naming both
++contributing plugin ids. This mirrors the framework-wide collision rule
++applied to writ-types, rig-template-mappings, and engine designs.
++
++---
++
++## Types
++
++### `Priority`
++
++Five-axis priority schema:
++
++```typescript
++type Priority = {
++  visionRelation:
++    | 'vision-blocker'   // vision is unreachable without this
++    | 'vision-violator'  // current state actively diverges from the vision
++    | 'vision-advancer'  // pushes toward an aspirational aspect
++    | 'vision-neutral';  // operational / hygiene / research
++  severity:
++    | 'critical'   // production breakage, agents blocked
++    | 'serious'    // significant degradation, daily workarounds
++    | 'moderate'   // noticeable but tolerable
++    | 'minor';     // cosmetic, convenience, polish
++  scope:
++    | 'whole-product'  // every user / every commission
++    | 'major-area'     // a major feature or subsystem
++    | 'minor-area';    // a small slice or one workflow
++  time: {
++    decay:    boolean;         // urgency grows over time
++    deadline: string | null;   // ISO date or null
++  };
++  domain: Array<DomainTag>;  // multi-valued classification
++};
++
++type DomainTag =
++  | 'security' | 'compliance' | 'cost' | 'feature' | 'quality'
++  | 'infrastructure' | 'documentation' | 'research' | 'ergonomics';
++```
++
++### `ComplexityTier`
++
++Petitioner-side coarse cost estimate (optional; omit rather than guess):
++
++```typescript
++type ComplexityTier =
++  | 'mechanical'   // ~50K–200K tokens
++  | 'bounded'      // ~200K–1M tokens
++  | 'exploratory'  // ~1M–5M tokens
++  | 'open-ended';  // 5M+ tokens
++```
++
++### `defaultPriority(partial?)`
++
++Apply contract defaults for any omitted dimensions:
++
++```typescript
++import { defaultPriority } from '@shardworks/reckoner-apparatus';
++
++const p = defaultPriority({ visionRelation: 'vision-violator' });
++// p.severity === 'minor', p.scope === 'minor-area', etc.
++```
++
++### `validateSourceId(source)`
++
++Return `true` when `source` matches the `{pluginId}.{kebab-suffix}` grammar:
++
++```typescript
++import { validateSourceId } from '@shardworks/reckoner-apparatus';
++
++validateSourceId('vision-keeper.snapshot'); // true
++validateSourceId('no-dot');                 // false
++```
++
++---
++
++## Workflow 1 — Direct post (always available)
++
++Petitioners that prefer to call `clerk.post()` directly obtain identical
++Reckoner behavior. The `petition()` helper is a convenience layer, not a
++gate:
++
++```typescript
++await clerk.post({
++  type:     'mandate',
++  title:    'Address vision drift detected at 04:00 UTC',
++  body:     '...',
++  codex:    'nexus',
++  parentId: 'w-...',
++});
++await clerk.setWritExt(writ.id, 'reckoner', {
++  source:    'vision-keeper.snapshot',
++  priority: {
++    visionRelation: 'vision-violator',
++    severity:       'serious',
++    scope:          'major-area',
++    time:           { decay: true, deadline: null },
++    domain:         ['quality'],
++  },
++  complexity: 'bounded',
++});
++```
++
++---
++
++## Dependencies
++
++- **Required:** `@shardworks/clerk-apparatus` — `petition()` and `withdraw()`
++  call Clerk APIs; the Reckoner `requires: ['clerk']` in its apparatus
++  declaration.
+diff --git a/packages/plugins/reckoner/package.json b/packages/plugins/reckoner/package.json
+new file mode 100644
+index 0000000..4db3192
+--- /dev/null
++++ b/packages/plugins/reckoner/package.json
+@@ -0,0 +1,41 @@
++{
++  "name": "@shardworks/reckoner-apparatus",
++  "version": "0.0.0",
++  "license": "ISC",
++  "repository": {
++    "type": "git",
++    "url": "https://github.com/shardworks/nexus",
++    "directory": "packages/plugins/reckoner"
++  },
++  "description": "The Reckoner — kit-static petitioner registry, guild.json configuration, priority dimension types, and reckoner.petition() / reckoner.withdraw() helper APIs.",
++  "type": "module",
++  "exports": {
++    ".": "./src/index.ts"
++  },
++  "scripts": {
++    "build": "tsc",
++    "test": "node --disable-warning=ExperimentalWarning --experimental-transform-types --test 'src/**/*.test.ts'",
++    "typecheck": "tsc --noEmit"
++  },
++  "peerDependencies": {
++    "@shardworks/nexus-core": "0.x"
++  },
++  "dependencies": {
++    "@shardworks/clerk-apparatus": "workspace:*"
++  },
++  "devDependencies": {
++    "@shardworks/nexus-core": "workspace:*",
++    "@types/node": "25.5.0"
++  },
++  "files": [
++    "dist"
++  ],
++  "publishConfig": {
++    "exports": {
++      ".": {
++        "types": "./dist/index.d.ts",
++        "import": "./dist/index.js"
++      }
++    }
++  }
++}
+diff --git a/packages/plugins/reckoner/src/defaults.test.ts b/packages/plugins/reckoner/src/defaults.test.ts
+new file mode 100644
+index 0000000..c2cff89
+--- /dev/null
++++ b/packages/plugins/reckoner/src/defaults.test.ts
+@@ -0,0 +1,132 @@
++/**
++ * Tests for defaultPriority().
++ *
++ * Covers:
++ * - No-arg call returns full defaults.
++ * - Empty-object call returns full defaults.
++ * - Each dimension can be overridden independently.
++ * - The time sub-object is merged field by field, not replaced wholesale.
++ * - The returned object is a new value (not a reference to DEFAULT_PRIORITY).
++ */
++
++import { describe, it } from 'node:test';
++import assert from 'node:assert/strict';
++
++import { defaultPriority, DEFAULT_PRIORITY } from './defaults.ts';
++import type { Priority } from './types.ts';
++
++describe('defaultPriority', () => {
++  describe('called with no argument', () => {
++    it('returns the contract-specified defaults', () => {
++      const p = defaultPriority();
++      assert.equal(p.visionRelation, 'vision-neutral');
++      assert.equal(p.severity, 'minor');
++      assert.equal(p.scope, 'minor-area');
++      assert.equal(p.time.decay, false);
++      assert.equal(p.time.deadline, null);
++      assert.deepEqual(p.domain, []);
++    });
++
++    it('matches DEFAULT_PRIORITY', () => {
++      const p = defaultPriority();
++      assert.equal(p.visionRelation, DEFAULT_PRIORITY.visionRelation);
++      assert.equal(p.severity, DEFAULT_PRIORITY.severity);
++      assert.equal(p.scope, DEFAULT_PRIORITY.scope);
++      assert.equal(p.time.decay, DEFAULT_PRIORITY.time.decay);
++      assert.equal(p.time.deadline, DEFAULT_PRIORITY.time.deadline);
++      assert.deepEqual(p.domain, DEFAULT_PRIORITY.domain);
++    });
++  });
++
++  describe('called with an empty object', () => {
++    it('returns the same defaults as a no-arg call', () => {
++      const p = defaultPriority({});
++      assert.equal(p.visionRelation, 'vision-neutral');
++      assert.equal(p.severity, 'minor');
++      assert.equal(p.scope, 'minor-area');
++      assert.equal(p.time.decay, false);
++      assert.equal(p.time.deadline, null);
++      assert.deepEqual(p.domain, []);
++    });
++  });
++
++  describe('overriding individual dimensions', () => {
++    it('overrides visionRelation only', () => {
++      const p = defaultPriority({ visionRelation: 'vision-violator' });
++      assert.equal(p.visionRelation, 'vision-violator');
++      assert.equal(p.severity, 'minor');
++      assert.equal(p.scope, 'minor-area');
++    });
++
++    it('overrides severity only', () => {
++      const p = defaultPriority({ severity: 'critical' });
++      assert.equal(p.visionRelation, 'vision-neutral');
++      assert.equal(p.severity, 'critical');
++      assert.equal(p.scope, 'minor-area');
++    });
++
++    it('overrides scope only', () => {
++      const p = defaultPriority({ scope: 'whole-product' });
++      assert.equal(p.scope, 'whole-product');
++      assert.equal(p.visionRelation, 'vision-neutral');
++      assert.equal(p.severity, 'minor');
++    });
++
++    it('overrides time.decay only', () => {
++      const p = defaultPriority({ time: { decay: true, deadline: null } });
++      assert.equal(p.time.decay, true);
++      assert.equal(p.time.deadline, null);
++    });
++
++    it('overrides time.deadline only', () => {
++      const p = defaultPriority({ time: { decay: false, deadline: '2025-06-01' } });
++      assert.equal(p.time.decay, false);
++      assert.equal(p.time.deadline, '2025-06-01');
++    });
++
++    it('overrides both time fields', () => {
++      const p = defaultPriority({ time: { decay: true, deadline: '2025-12-31' } });
++      assert.equal(p.time.decay, true);
++      assert.equal(p.time.deadline, '2025-12-31');
++    });
++
++    it('overrides domain', () => {
++      const p = defaultPriority({ domain: ['security', 'quality'] });
++      assert.deepEqual(p.domain, ['security', 'quality']);
++    });
++
++    it('preserves empty domain array when explicitly provided', () => {
++      const p = defaultPriority({ domain: [] });
++      assert.deepEqual(p.domain, []);
++    });
++  });
++
++  describe('full override', () => {
++    it('preserves all provided values when all dimensions are given', () => {
++      const input: Partial<Priority> = {
++        visionRelation: 'vision-blocker',
++        severity: 'critical',
++        scope: 'whole-product',
++        time: { decay: true, deadline: '2025-03-15' },
++        domain: ['security', 'compliance'],
++      };
++      const p = defaultPriority(input);
++      assert.equal(p.visionRelation, 'vision-blocker');
++      assert.equal(p.severity, 'critical');
++      assert.equal(p.scope, 'whole-product');
++      assert.equal(p.time.decay, true);
++      assert.equal(p.time.deadline, '2025-03-15');
++      assert.deepEqual(p.domain, ['security', 'compliance']);
++    });
++  });
++
++  describe('returned value is independent of DEFAULT_PRIORITY', () => {
++    it('mutations to the returned object do not affect DEFAULT_PRIORITY', () => {
++      const p = defaultPriority() as Priority & { time: { decay: boolean } };
++      p.time.decay = true;
++      // DEFAULT_PRIORITY is frozen — this also verifies the returned `time`
++      // is a new object, not a reference to the frozen DEFAULT_PRIORITY.time.
++      assert.equal(DEFAULT_PRIORITY.time.decay, false);
++    });
++  });
++});
+diff --git a/packages/plugins/reckoner/src/defaults.ts b/packages/plugins/reckoner/src/defaults.ts
+new file mode 100644
+index 0000000..ed03181
+--- /dev/null
++++ b/packages/plugins/reckoner/src/defaults.ts
+@@ -0,0 +1,62 @@
++/**
++ * Priority default-filling helper.
++ *
++ * See: docs/architecture/petitioner-registration.md §3 "Defaults when omitted"
++ */
++
++import type { Priority } from './types.ts';
++
++/**
++ * The contract-specified defaults for omitted priority dimensions.
++ *
++ * vision-neutral / minor / minor-area / {decay: false, deadline: null} / []
++ */
++export const DEFAULT_PRIORITY: Readonly<Priority> = Object.freeze({
++  visionRelation: 'vision-neutral' as const,
++  severity: 'minor' as const,
++  scope: 'minor-area' as const,
++  time: Object.freeze({ decay: false, deadline: null }) as {
++    readonly decay: boolean;
++    readonly deadline: string | null;
++  },
++  domain: [] as Priority['domain'],
++});
++
++/**
++ * Apply the contract's default values for any omitted priority dimensions.
++ *
++ * The `reckoner.petition()` helper calls this before validation so callers
++ * never need to supply the full five-dimension object. Direct `clerk.post()`
++ * callers (Workflow 1) are responsible for supplying priority values, though
++ * omitted dimension fields on the writ's ext fall back to these same defaults
++ * at CDC consideration time.
++ *
++ * Returns a fresh `Priority` object — the original `partial` is not mutated.
++ *
++ * @example
++ * // Only overriding visionRelation; other dimensions get defaults.
++ * const p = defaultPriority({ visionRelation: 'vision-violator' });
++ * // p.severity === 'minor', p.scope === 'minor-area', ...
++ */
++export function defaultPriority(partial?: Partial<Priority>): Priority {
++  if (!partial) {
++    return {
++      visionRelation: DEFAULT_PRIORITY.visionRelation,
++      severity: DEFAULT_PRIORITY.severity,
++      scope: DEFAULT_PRIORITY.scope,
++      time: { decay: DEFAULT_PRIORITY.time.decay, deadline: DEFAULT_PRIORITY.time.deadline },
++      domain: [],
++    };
++  }
++
++  return {
++    visionRelation: partial.visionRelation ?? DEFAULT_PRIORITY.visionRelation,
++    severity: partial.severity ?? DEFAULT_PRIORITY.severity,
++    scope: partial.scope ?? DEFAULT_PRIORITY.scope,
++    time: {
++      decay: partial.time?.decay ?? DEFAULT_PRIORITY.time.decay,
++      deadline: partial.time?.deadline ?? DEFAULT_PRIORITY.time.deadline,
++    },
++    domain: partial.domain !== undefined ? [...partial.domain] : [],
++  };
++}
+diff --git a/packages/plugins/reckoner/src/index.ts b/packages/plugins/reckoner/src/index.ts
+new file mode 100644
+index 0000000..f1e1008
+--- /dev/null
++++ b/packages/plugins/reckoner/src/index.ts
+@@ -0,0 +1,56 @@
++/**
++ * @shardworks/reckoner-apparatus — The Reckoner.
++ *
++ * Kit-static petitioner registry, guild.json configuration parsing, priority
++ * dimension types with default-filling, and reckoner.petition() / reckoner.withdraw()
++ * helper APIs. The foundation that lets petitioners declare themselves and
++ * emit properly-formed held writs through an ergonomic API.
++ *
++ * The CDC handler that watches held writs and decides their fate (approve /
++ * defer / decline) is a separate commission that follows this one.
++ *
++ * See: docs/architecture/petitioner-registration.md
++ */
++
++import { createReckoner } from './reckoner.ts';
++
++// ── Public types ──────────────────────────────────────────────────────
++
++export {
++  type DomainTag,
++  type Priority,
++  type ComplexityTier,
++  type ReckonerExt,
++  type PetitionRequest,
++  type PetitionerDescriptor,
++  type ReckonerConfig,
++  type ResolvedReckonerConfig,
++  type ReckonerApi,
++} from './types.ts';
++
++// ── Registry ──────────────────────────────────────────────────────────
++
++export { validateSourceId, PetitionerRegistry } from './registry.ts';
++
++// ── Defaults and validation ───────────────────────────────────────────
++
++export { defaultPriority, DEFAULT_PRIORITY } from './defaults.ts';
++export {
++  validatePriority,
++  VALID_VISION_RELATIONS,
++  VALID_SEVERITIES,
++  VALID_SCOPES,
++  VALID_DOMAIN_TAGS,
++} from './validation.ts';
++
++// ── Apparatus factory ─────────────────────────────────────────────────
++
++export { createReckoner } from './reckoner.ts';
++
++// ── Constants ─────────────────────────────────────────────────────────
++
++export { RECKONER_PLUGIN_ID } from './petition.ts';
++
++// ── Default export: the apparatus plugin ─────────────────────────────
++
++export default createReckoner();
+diff --git a/packages/plugins/reckoner/src/petition.test.ts b/packages/plugins/reckoner/src/petition.test.ts
+new file mode 100644
+index 0000000..2d1d202
+--- /dev/null
++++ b/packages/plugins/reckoner/src/petition.test.ts
+@@ -0,0 +1,471 @@
++/**
++ * Tests for executePetition() and executeWithdraw().
++ *
++ * Covers the behavioural cases from the commission brief:
++ *
++ * - petition() with unregistered source + enforceRegistration=false → succeeds
++ *   (warning logged).
++ * - petition() with unregistered source + enforceRegistration=true → throws
++ *   fail-loud, no writ posted.
++ * - petition() with registered source → posts writ, sets ext.reckoner.
++ * - petition() with partial priority → defaults applied before writing ext.
++ * - petition() with invalid priority dimension → throws, no writ posted.
++ * - The resulting writ carries ext.reckoner = { source, priority,
++ *   complexity?, payload?, labels? }.
++ * - withdraw() calls clerk.transition() with 'cancelled' + resolution.
++ * - withdraw() without reason calls clerk.transition() without fields.
++ */
++
++import { describe, it, beforeEach } from 'node:test';
++import assert from 'node:assert/strict';
++
++import { executePetition, executeWithdraw } from './petition.ts';
++import { PetitionerRegistry } from './registry.ts';
++import type { ClerkApi, WritDoc } from '@shardworks/clerk-apparatus';
++import type { ResolvedReckonerConfig, ReckonerExt } from './types.ts';
++
++// ── Minimal WritDoc factory ───────────────────────────────────────────
++
++function makeWrit(overrides: Partial<WritDoc> = {}): WritDoc {
++  return {
++    id: 'w-test-0001',
++    type: 'mandate',
++    phase: 'new',
++    title: 'Test writ',
++    body: 'Test body',
++    codex: 'nexus',
++    createdAt: '2025-01-01T00:00:00.000Z',
++    updatedAt: '2025-01-01T00:00:00.000Z',
++    ...overrides,
++  };
++}
++
++// ── Mock ClerkApi ─────────────────────────────────────────────────────
++
++interface ClerkCall {
++  method: 'post' | 'setWritExt' | 'transition';
++  args: unknown[];
++}
++
++function makeClerkMock(overrides: {
++  post?: (req: unknown) => Promise<WritDoc>;
++  setWritExt?: (writId: string, pluginId: string, value: unknown) => Promise<WritDoc>;
++  transition?: (id: string, to: string, fields?: unknown) => Promise<WritDoc>;
++} = {}): { clerk: ClerkApi; calls: ClerkCall[] } {
++  const calls: ClerkCall[] = [];
++  const baseWrit = makeWrit();
++
++  const clerk = {
++    async post(req: unknown): Promise<WritDoc> {
++      calls.push({ method: 'post', args: [req] });
++      return overrides.post ? overrides.post(req) : baseWrit;
++    },
++    async setWritExt(writId: string, pluginId: string, value: unknown): Promise<WritDoc> {
++      calls.push({ method: 'setWritExt', args: [writId, pluginId, value] });
++      if (overrides.setWritExt) return overrides.setWritExt(writId, pluginId, value);
++      return makeWrit({ id: writId, ext: { [pluginId]: value } });
++    },
++    async transition(id: string, to: string, fields?: unknown): Promise<WritDoc> {
++      calls.push({ method: 'transition', args: [id, to, fields] });
++      if (overrides.transition) return overrides.transition(id, to, fields);
++      return makeWrit({ id, phase: to });
++    },
++    // Stub out the rest of the interface to satisfy the type
++    async show() { return baseWrit; },
++    async resolveId(prefix: string) { return prefix; },
++    async list() { return []; },
++    async count() { return 0; },
++    async countActive() { return 0; },
++    async tree() { return []; },
++    async countDescendantsByPhase() { return {} as never; },
++    async link() { return {} as never; },
++    async links() { return { outbound: [], inbound: [] }; },
++    async unlink() { return; },
++    async edit() { return baseWrit; },
++    listWritTypes() { return []; },
++    async listKinds() { return []; },
++    registerWritType() { return; },
++    getWritTypeConfig() { return undefined; },
++    isInitial() { return true; },
++    isActive() { return false; },
++    isTerminal() { return false; },
++    setWritStatus: async (writId: string, pluginId: string, value: unknown) => {
++      return makeWrit({ id: writId, status: { [pluginId]: value } });
++    },
++  } satisfies ClerkApi;
++
++  return { clerk, calls };
++}
++
++// ── Helpers ───────────────────────────────────────────────────────────
++
++function makeRegistry(sources: Array<{ pluginId: string; source: string }> = []) {
++  const reg = new PetitionerRegistry();
++  for (const { pluginId, source } of sources) {
++    reg.register(pluginId, { source, description: `${source} test source` });
++  }
++  reg.seal();
++  return reg;
++}
++
++function makeConfig(overrides: Partial<ResolvedReckonerConfig> = {}): ResolvedReckonerConfig {
++  return {
++    enforceRegistration: false,
++    disabledSources: [],
++    ...overrides,
++  };
++}
++
++// ── executePetition ───────────────────────────────────────────────────
++
++describe('executePetition', () => {
++  describe('source registration checks', () => {
++    it('succeeds with warning when source is unregistered and enforceRegistration is false', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry(); // empty registry
++      const config = makeConfig({ enforceRegistration: false });
++      const warnCalls: unknown[] = [];
++      const origWarn = console.warn;
++      console.warn = (...args: unknown[]) => { warnCalls.push(args); };
++      try {
++        await executePetition(clerk, reg, config, {
++          type: 'mandate',
++          title: 'Test',
++          body: 'body',
++          codex: 'nexus',
++          source: 'unknown.source',
++          priority: {},
++        });
++      } finally {
++        console.warn = origWarn;
++      }
++      // Should have called post and setWritExt
++      assert.ok(calls.some((c) => c.method === 'post'));
++      assert.ok(calls.some((c) => c.method === 'setWritExt'));
++      // Should have logged a warning
++      assert.ok(warnCalls.length > 0);
++      assert.ok(
++        warnCalls.some((args) =>
++          (args as string[]).some((a) => String(a).includes('not registered')),
++        ),
++      );
++    });
++
++    it('throws fail-loud when source is unregistered and enforceRegistration is true', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry();
++      const config = makeConfig({ enforceRegistration: true });
++
++      await assert.rejects(
++        () =>
++          executePetition(clerk, reg, config, {
++            type: 'mandate',
++            title: 'Test',
++            body: 'body',
++            codex: 'nexus',
++            source: 'unknown.source',
++            priority: {},
++          }),
++        /Unregistered petitioner source/,
++      );
++
++      // No writ should have been posted
++      assert.equal(calls.filter((c) => c.method === 'post').length, 0);
++    });
++
++    it('succeeds when source is registered and enforceRegistration is true', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry([
++        { pluginId: 'vision-keeper', source: 'vision-keeper.snapshot' },
++      ]);
++      const config = makeConfig({ enforceRegistration: true });
++
++      await executePetition(clerk, reg, config, {
++        type: 'mandate',
++        title: 'Vision drift detected',
++        body: 'Detail here.',
++        codex: 'nexus',
++        source: 'vision-keeper.snapshot',
++        priority: { visionRelation: 'vision-violator' },
++      });
++
++      assert.ok(calls.some((c) => c.method === 'post'));
++      assert.ok(calls.some((c) => c.method === 'setWritExt'));
++    });
++  });
++
++  describe('priority defaults and validation', () => {
++    it('fills omitted priority dimensions with defaults', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry([
++        { pluginId: 'vision-keeper', source: 'vision-keeper.snapshot' },
++      ]);
++      const config = makeConfig();
++
++      await executePetition(clerk, reg, config, {
++        type: 'mandate',
++        title: 'Partial priority',
++        body: 'body',
++        codex: 'nexus',
++        source: 'vision-keeper.snapshot',
++        priority: { visionRelation: 'vision-violator' },
++      });
++
++      const extCall = calls.find((c) => c.method === 'setWritExt');
++      assert.ok(extCall, 'setWritExt should have been called');
++      const ext = extCall.args[2] as ReckonerExt;
++      // Provided dimension is preserved
++      assert.equal(ext.priority.visionRelation, 'vision-violator');
++      // Omitted dimensions get defaults
++      assert.equal(ext.priority.severity, 'minor');
++      assert.equal(ext.priority.scope, 'minor-area');
++      assert.equal(ext.priority.time.decay, false);
++      assert.equal(ext.priority.time.deadline, null);
++      assert.deepEqual(ext.priority.domain, []);
++    });
++
++    it('throws when a priority dimension has an invalid value', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry();
++      const config = makeConfig();
++
++      await assert.rejects(
++        () =>
++          executePetition(clerk, reg, config, {
++            type: 'mandate',
++            title: 'Bad priority',
++            body: 'body',
++            codex: 'nexus',
++            source: 'unknown.source',
++            // Cast to bypass TypeScript to simulate a runtime bad value
++            priority: { visionRelation: 'not-a-valid-relation' as never },
++          }),
++        /Invalid priority\.visionRelation/,
++      );
++
++      // No writ should have been posted
++      assert.equal(calls.filter((c) => c.method === 'post').length, 0);
++    });
++
++    it('throws when a domain tag is invalid', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry();
++      const config = makeConfig();
++
++      await assert.rejects(
++        () =>
++          executePetition(clerk, reg, config, {
++            type: 'mandate',
++            title: 'Bad domain',
++            body: 'body',
++            codex: 'nexus',
++            source: 'unknown.source',
++            priority: { domain: ['not-a-domain' as never] },
++          }),
++        /Invalid priority\.domain tag/,
++      );
++
++      assert.equal(calls.filter((c) => c.method === 'post').length, 0);
++    });
++  });
++
++  describe('ext.reckoner shape on the resulting writ', () => {
++    it('sets source on ext.reckoner', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry([
++        { pluginId: 'vision-keeper', source: 'vision-keeper.snapshot' },
++      ]);
++      const config = makeConfig();
++
++      await executePetition(clerk, reg, config, {
++        type: 'mandate',
++        title: 'T',
++        body: 'B',
++        codex: 'nexus',
++        source: 'vision-keeper.snapshot',
++        priority: {},
++      });
++
++      const extCall = calls.find((c) => c.method === 'setWritExt')!;
++      const ext = extCall.args[2] as ReckonerExt;
++      assert.equal(ext.source, 'vision-keeper.snapshot');
++    });
++
++    it('includes complexity when provided', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry([
++        { pluginId: 'vision-keeper', source: 'vision-keeper.snapshot' },
++      ]);
++      const config = makeConfig();
++
++      await executePetition(clerk, reg, config, {
++        type: 'mandate',
++        title: 'T',
++        body: 'B',
++        codex: 'nexus',
++        source: 'vision-keeper.snapshot',
++        priority: {},
++        complexity: 'bounded',
++      });
++
++      const extCall = calls.find((c) => c.method === 'setWritExt')!;
++      const ext = extCall.args[2] as ReckonerExt;
++      assert.equal(ext.complexity, 'bounded');
++    });
++
++    it('omits complexity when not provided', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry([
++        { pluginId: 'vision-keeper', source: 'vision-keeper.snapshot' },
++      ]);
++      const config = makeConfig();
++
++      await executePetition(clerk, reg, config, {
++        type: 'mandate',
++        title: 'T',
++        body: 'B',
++        codex: 'nexus',
++        source: 'vision-keeper.snapshot',
++        priority: {},
++      });
++
++      const extCall = calls.find((c) => c.method === 'setWritExt')!;
++      const ext = extCall.args[2] as ReckonerExt;
++      assert.equal('complexity' in ext, false);
++    });
++
++    it('includes payload when provided', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry([
++        { pluginId: 'vision-keeper', source: 'vision-keeper.snapshot' },
++      ]);
++      const config = makeConfig();
++      const payload = { visionId: 'nexus', driftScore: 0.87 };
++
++      await executePetition(clerk, reg, config, {
++        type: 'mandate',
++        title: 'T',
++        body: 'B',
++        codex: 'nexus',
++        source: 'vision-keeper.snapshot',
++        priority: {},
++        payload,
++      });
++
++      const extCall = calls.find((c) => c.method === 'setWritExt')!;
++      const ext = extCall.args[2] as ReckonerExt;
++      assert.deepEqual(ext.payload, payload);
++    });
++
++    it('includes labels when provided', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry([
++        { pluginId: 'vision-keeper', source: 'vision-keeper.snapshot' },
++      ]);
++      const config = makeConfig();
++      const labels = { 'vision-keeper.io/vision-id': 'nexus' };
++
++      await executePetition(clerk, reg, config, {
++        type: 'mandate',
++        title: 'T',
++        body: 'B',
++        codex: 'nexus',
++        source: 'vision-keeper.snapshot',
++        priority: {},
++        labels,
++      });
++
++      const extCall = calls.find((c) => c.method === 'setWritExt')!;
++      const ext = extCall.args[2] as ReckonerExt;
++      assert.deepEqual(ext.labels, labels);
++    });
++
++    it('uses the plugin id "reckoner" as the setWritExt slot key', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry([
++        { pluginId: 'vision-keeper', source: 'vision-keeper.snapshot' },
++      ]);
++      const config = makeConfig();
++
++      await executePetition(clerk, reg, config, {
++        type: 'mandate',
++        title: 'T',
++        body: 'B',
++        codex: 'nexus',
++        source: 'vision-keeper.snapshot',
++        priority: {},
++      });
++
++      const extCall = calls.find((c) => c.method === 'setWritExt')!;
++      assert.equal(extCall.args[1], 'reckoner');
++    });
++
++    it('passes parentId to clerk.post() when provided', async () => {
++      const { clerk, calls } = makeClerkMock();
++      const reg = makeRegistry([
++        { pluginId: 'vision-keeper', source: 'vision-keeper.snapshot' },
++      ]);
++      const config = makeConfig();
++
++      await executePetition(clerk, reg, config, {
++        type: 'mandate',
++        title: 'Child writ',
++        body: 'body',
++        codex: 'nexus',
++        source: 'vision-keeper.snapshot',
++        priority: {},
++        parentId: 'w-parent-001',
++      });
++
++      const postCall = calls.find((c) => c.method === 'post')!;
++      const req = postCall.args[0] as { parentId?: string };
++      assert.equal(req.parentId, 'w-parent-001');
++    });
++  });
++});
++
++// ── executeWithdraw ───────────────────────────────────────────────────
++
++describe('executeWithdraw', () => {
++  it('calls clerk.transition() with writId and "cancelled"', async () => {
++    const { clerk, calls } = makeClerkMock();
++
++    await executeWithdraw(clerk, 'w-test-0001');
++
++    const call = calls.find((c) => c.method === 'transition');
++    assert.ok(call, 'transition should have been called');
++    assert.equal(call.args[0], 'w-test-0001');
++    assert.equal(call.args[1], 'cancelled');
++  });
++
++  it('passes resolution when reason is provided', async () => {
++    const { clerk, calls } = makeClerkMock();
++    const reason = 'Snapshot superseded by newer drift.';
++
++    await executeWithdraw(clerk, 'w-test-0001', reason);
++
++    const call = calls.find((c) => c.method === 'transition')!;
++    const fields = call.args[2] as { resolution?: string } | undefined;
++    assert.ok(fields, 'fields should be present when reason is provided');
++    assert.equal(fields.resolution, reason);
++  });
++
++  it('passes undefined fields when no reason is provided', async () => {
++    const { clerk, calls } = makeClerkMock();
++
++    await executeWithdraw(clerk, 'w-test-0001');
++
++    const call = calls.find((c) => c.method === 'transition')!;
++    assert.equal(call.args[2], undefined);
++  });
++
++  it('returns the WritDoc from clerk.transition()', async () => {
++    const expectedWrit = makeWrit({ id: 'w-test-0001', phase: 'cancelled' });
++    const { clerk } = makeClerkMock({
++      transition: async () => expectedWrit,
++    });
++
++    const result = await executeWithdraw(clerk, 'w-test-0001');
++    assert.deepEqual(result, expectedWrit);
++  });
++});
+diff --git a/packages/plugins/reckoner/src/petition.ts b/packages/plugins/reckoner/src/petition.ts
+new file mode 100644
+index 0000000..bb44fcd
+--- /dev/null
++++ b/packages/plugins/reckoner/src/petition.ts
+@@ -0,0 +1,126 @@
++/**
++ * Core petition and withdrawal helpers — exported as standalone functions so
++ * tests can call them directly with mocked dependencies without needing to
++ * exercise the apparatus startup machinery.
++ *
++ * The apparatus's `ReckonerApi.petition()` and `ReckonerApi.withdraw()`
++ * implementations delegate directly to `executePetition()` and
++ * `executeWithdraw()`.
++ *
++ * See: docs/architecture/petitioner-registration.md §1
++ */
++
++import type { ClerkApi, WritDoc, WritPhase } from '@shardworks/clerk-apparatus';
++
++import type {
++  PetitionRequest,
++  ReckonerExt,
++  ResolvedReckonerConfig,
++} from './types.ts';
++import type { PetitionerRegistry } from './registry.ts';
++import { defaultPriority } from './defaults.ts';
++import { validatePriority } from './validation.ts';
++
++/** Plugin id stamped on `writ.ext` sub-slots written by the Reckoner. */
++export const RECKONER_PLUGIN_ID = 'reckoner';
++
++/**
++ * Execute a petition — the full Workflow 2 path.
++ *
++ * Steps (per the contract §1):
++ * 1. Validate `request.source` against `registry` (subject to
++ *    `config.enforceRegistration`).
++ * 2. Apply priority defaults for any omitted dimensions.
++ * 3. Validate all five priority dimension values against their enums.
++ * 4. Call `clerk.post()` to create the writ in its `initial` state.
++ * 5. Write `ext.reckoner` via `clerk.setWritExt()`.
++ * 6. Return the final `WritDoc` (with `ext.reckoner` populated).
++ *
++ * Throws on:
++ * - Unregistered source when `enforceRegistration` is `true`.
++ * - Invalid priority dimension values.
++ * - Any error propagated from `clerk.post()` or `clerk.setWritExt()`.
++ *
++ * @param clerk     - The Clerk apparatus API.
++ * @param registry  - The sealed petitioner registry.
++ * @param config    - Resolved Reckoner configuration (with defaults applied).
++ * @param request   - The petition request from the caller.
++ */
++export async function executePetition(
++  clerk: ClerkApi,
++  registry: PetitionerRegistry,
++  config: ResolvedReckonerConfig,
++  request: PetitionRequest,
++): Promise<WritDoc> {
++  const { source } = request;
++
++  // Step 1 — source validation
++  if (!registry.isRegistered(source)) {
++    if (config.enforceRegistration) {
++      throw new Error(
++        `[reckoner] Unregistered petitioner source '${source}'. ` +
++          `Register the source via a 'petitioners' kit contribution, or set ` +
++          `enforceRegistration: false in guild.json to allow unregistered sources.`,
++      );
++    }
++    // enforceRegistration === false: warn and proceed
++    console.warn(
++      `[reckoner] Warning: petitioner source '${source}' is not registered. ` +
++        `The writ will be created but the Reckoner cannot attribute it to a ` +
++        `known source. Add a petitioners kit entry to suppress this warning.`,
++    );
++  }
++
++  // Step 2 — apply priority defaults
++  const priority = defaultPriority(request.priority);
++
++  // Step 3 — validate dimension values
++  validatePriority(priority);
++
++  // Build the ext.reckoner payload
++  const reckonerExt: ReckonerExt = {
++    source,
++    priority,
++    ...(request.complexity !== undefined ? { complexity: request.complexity } : {}),
++    ...(request.payload !== undefined ? { payload: request.payload } : {}),
++    ...(request.labels !== undefined ? { labels: request.labels } : {}),
++  };
++
++  // Step 4 — create the writ via clerk.post()
++  const writ = await clerk.post({
++    type: request.type,
++    title: request.title,
++    body: request.body,
++    codex: request.codex,
++    ...(request.parentId !== undefined ? { parentId: request.parentId } : {}),
++  });
++
++  // Step 5 — write ext.reckoner via setWritExt()
++  return clerk.setWritExt(writ.id, RECKONER_PLUGIN_ID, reckonerExt);
++}
++
++/**
++ * Execute a withdrawal — transition a held writ to `cancelled`.
++ *
++ * Thin wrapper around `clerk.transition(writId, 'cancelled', ...)`. The
++ * `reason`, when provided, is stored in the writ's `resolution` field.
++ *
++ * No source-check is performed — any caller may withdraw any writ via this
++ * helper. The purpose is ergonomic discoverability, not enforcement.
++ *
++ * @param clerk   - The Clerk apparatus API.
++ * @param writId  - Id of the writ to cancel.
++ * @param reason  - Optional human-readable reason, stored in `writ.resolution`.
++ */
++export async function executeWithdraw(
++  clerk: ClerkApi,
++  writId: string,
++  reason?: string,
++): Promise<WritDoc> {
++  const to: WritPhase = 'cancelled';
++  return clerk.transition(
++    writId,
++    to,
++    reason !== undefined ? { resolution: reason } : undefined,
++  );
++}
+diff --git a/packages/plugins/reckoner/src/reckoner.ts b/packages/plugins/reckoner/src/reckoner.ts
+new file mode 100644
+index 0000000..d4405cc
+--- /dev/null
++++ b/packages/plugins/reckoner/src/reckoner.ts
+@@ -0,0 +1,157 @@
++/**
++ * The Reckoner apparatus — petitioner registry, guild.json configuration,
++ * and helper APIs for posting Reckoner-gated writs.
++ *
++ * This module provides the foundation that lets petitioners declare themselves
++ * and emit properly-formed held writs through an ergonomic API. The CDC
++ * handler that watches held writs and decides their fate (approve / defer /
++ * decline) is a separate commission that follows this one.
++ *
++ * Three responsibilities owned here:
++ *
++ *   1. **Kit-static petitioner registry** — consumed from kit `petitioners`
++ *      contributions at boot, sealed at `phase:started`. Duplicate-source
++ *      contributions are a hard startup error naming both plugin ids.
++ *
++ *   2. **Configuration** — reads `guild.json["reckoner"]` at startup, exposes
++ *      `enforceRegistration` (default `false`) and `disabledSources` (default
++ *      `[]`) to the CDC-handler commission via the apparatus's `provides`.
++ *
++ *   3. **Helper APIs** — `petition()` and `withdraw()` wrap `clerk.post()` /
++ *      `clerk.setWritExt()` / `clerk.transition()` with validation, defaults,
++ *      and discoverability.
++ *
++ * See: docs/architecture/petitioner-registration.md
++ */
++
++import type { Plugin, StartupContext } from '@shardworks/nexus-core';
++import { guild } from '@shardworks/nexus-core';
++import type { ClerkApi } from '@shardworks/clerk-apparatus';
++
++import type {
++  PetitionerDescriptor,
++  PetitionRequest,
++  ReckonerApi,
++  ResolvedReckonerConfig,
++} from './types.ts';
++import { PetitionerRegistry } from './registry.ts';
++import { executePetition, executeWithdraw } from './petition.ts';
++
++/**
++ * Create the Reckoner apparatus plugin.
++ *
++ * The returned plugin registers itself as an apparatus with id `reckoner`
++ * (derived from the package name `@shardworks/reckoner-apparatus`).
++ *
++ * At startup:
++ *   - Consumes all kit `petitioners` contributions and builds the registry.
++ *   - Validates each source id and throws on duplicates or malformed ids.
++ *   - Seals the registry so no further registrations are accepted.
++ *   - Reads `guild.json["reckoner"]` and resolves defaults.
++ *   - Exposes the `ReckonerApi` via `provides` so petitioners can call
++ *     `guild().apparatus<ReckonerApi>('reckoner').petition(...)`.
++ *
++ * Requires the `clerk` apparatus (used by `petition()` and `withdraw()`).
++ * Consumes the `petitioners` kit contribution type.
++ */
++export function createReckoner(): Plugin {
++  const registry = new PetitionerRegistry();
++
++  // These are initialised in `start()` and accessed only after the apparatus
++  // has started, so non-null assertions in the api closures are safe.
++  let clerk: ClerkApi;
++  let config: ResolvedReckonerConfig;
++
++  const api: ReckonerApi = {
++    async petition(request: PetitionRequest) {
++      return executePetition(clerk, registry, config, request);
++    },
++
++    async withdraw(writId: string, reason?: string) {
++      return executeWithdraw(clerk, writId, reason);
++    },
++
++    getRegisteredSources(): ReadonlyArray<PetitionerDescriptor> {
++      return registry.getAll();
++    },
++  };
++
++  return {
++    apparatus: {
++      /**
++       * `clerk` must be started before the Reckoner because `petition()` and
++       * `withdraw()` call Clerk APIs synchronously after startup.
++       */
++      requires: ['clerk'],
++
++      /**
++       * The `petitioners` contribution type — kit plugins declare their
++       * sources here; the Reckoner consumes them in `start()`.
++       */
++      consumes: ['petitioners'],
++
++      /**
++       * The runtime API exposed to other apparatuses and kit plugins.
++       * Retrieved via `guild().apparatus<ReckonerApi>('reckoner')`.
++       */
++      provides: api,
++
++      async start(ctx: StartupContext): Promise<void> {
++        // ── 1. Build the petitioner registry from kit contributions ──────
++
++        const petitionerEntries = ctx.kits('petitioners');
++
++        for (const entry of petitionerEntries) {
++          // Each kit entry's value is the array declared in the kit:
++          //   kit: { petitioners: [{ source, description }, ...] }
++          // Validate the shape defensively — a badly-shaped contribution
++          // should fail loudly at startup rather than produce silent drops.
++          const value = entry.value;
++          if (!Array.isArray(value)) {
++            throw new Error(
++              `[reckoner] Plugin '${entry.pluginId}' contributed an invalid ` +
++                `'petitioners' value: expected an array of PetitionerDescriptor ` +
++                `objects, got ${typeof value}.`,
++            );
++          }
++
++          for (const item of value as PetitionerDescriptor[]) {
++            if (
++              typeof item !== 'object' ||
++              item === null ||
++              typeof item.source !== 'string' ||
++              typeof item.description !== 'string'
++            ) {
++              throw new Error(
++                `[reckoner] Plugin '${entry.pluginId}' contributed a malformed ` +
++                  `petitioner entry: each entry must have { source: string, ` +
++                  `description: string }.`,
++              );
++            }
++            // register() validates source-id grammar and prefix match; it
++            // throws a descriptive error on any violation.
++            registry.register(entry.pluginId, item);
++          }
++        }
++
++        // Seal the registry — no further registrations are accepted after
++        // `phase:started`. Any attempt throws immediately.
++        registry.seal();
++
++        // ── 2. Read configuration from guild.json ────────────────────────
++
++        const rawConfig = guild().guildConfig().reckoner ?? {};
++        config = {
++          enforceRegistration: rawConfig.enforceRegistration ?? false,
++          disabledSources: rawConfig.disabledSources ?? [],
++        };
++
++        // ── 3. Capture the Clerk API handle ──────────────────────────────
++
++        // guild().apparatus() throws if 'clerk' is not started; `requires`
++        // guarantees it is started before us, so this is always safe.
++        clerk = guild().apparatus<ClerkApi>('clerk');
++      },
++    },
++  };
++}
+diff --git a/packages/plugins/reckoner/src/registry.test.ts b/packages/plugins/reckoner/src/registry.test.ts
+new file mode 100644
+index 0000000..2042e20
+--- /dev/null
++++ b/packages/plugins/reckoner/src/registry.test.ts
+@@ -0,0 +1,300 @@
++/**
++ * Tests for validateSourceId and PetitionerRegistry.
++ *
++ * Covers:
++ * - Source-id grammar validation (§5 "Source-id grammar").
++ * - Successful registration of valid petitioner sources.
++ * - Hard-error cases: duplicate source, malformed id, wrong prefix, post-seal.
++ * - Registry sealing.
++ * - isRegistered() and getAll() query methods.
++ */
++
++import { describe, it } from 'node:test';
++import assert from 'node:assert/strict';
++
++import { validateSourceId, PetitionerRegistry } from './registry.ts';
++
++// ── validateSourceId ──────────────────────────────────────────────────
++
++describe('validateSourceId', () => {
++  describe('valid ids', () => {
++    const valid = [
++      'vision-keeper.snapshot',
++      'patron-bridge.commission',
++      'tech-debt.detected',
++      'my-plugin.my-event',
++      'simple.source',
++      'a.b',
++      'abc.def',
++      'ab1.cd2',
++      'multi-part-plugin.multi-part-suffix',
++      'plugin1.source2',
++    ];
++
++    for (const id of valid) {
++      it(`accepts '${id}'`, () => {
++        assert.equal(validateSourceId(id), true);
++      });
++    }
++  });
++
++  describe('invalid ids', () => {
++    const invalid = [
++      // Missing dot separator
++      { id: 'nodot', reason: 'no dot separator' },
++      // Missing prefix
++      { id: '.no-prefix', reason: 'empty prefix' },
++      // Missing suffix
++      { id: 'no-suffix.', reason: 'empty suffix' },
++      // Uppercase letters
++      { id: 'Upper.Case', reason: 'uppercase letter in prefix' },
++      { id: 'plugin.Upper', reason: 'uppercase letter in suffix' },
++      // Special characters
++      { id: 'bad!.source', reason: 'bang in prefix' },
++      { id: 'plugin.bad!', reason: 'bang in suffix' },
++      // Leading/trailing hyphens in prefix
++      { id: '-leading.suffix', reason: 'leading hyphen in prefix' },
++      { id: 'trailing-.suffix', reason: 'trailing hyphen in prefix' },
++      // Leading/trailing hyphens in suffix
++      { id: 'plugin.-leading', reason: 'leading hyphen in suffix' },
++      { id: 'plugin.trailing-', reason: 'trailing hyphen in suffix' },
++      // Double dots
++      { id: 'double..dot', reason: 'double dot' },
++      // Empty string
++      { id: '', reason: 'empty string' },
++      // Only spaces
++      { id: '   ', reason: 'whitespace only' },
++      // Consecutive hyphens
++      { id: 'double--hyphen.suffix', reason: 'consecutive hyphens in prefix' },
++      { id: 'prefix.double--hyphen', reason: 'consecutive hyphens in suffix' },
++    ];
++
++    for (const { id, reason } of invalid) {
++      it(`rejects '${id}' (${reason})`, () => {
++        assert.equal(validateSourceId(id), false);
++      });
++    }
++  });
++});
++
++// ── PetitionerRegistry ────────────────────────────────────────────────
++
++describe('PetitionerRegistry', () => {
++  describe('register — success path', () => {
++    it('registers a valid petitioner source', () => {
++      const reg = new PetitionerRegistry();
++      reg.register('vision-keeper', {
++        source: 'vision-keeper.snapshot',
++        description: 'Vision snapshots.',
++      });
++      assert.equal(reg.isRegistered('vision-keeper.snapshot'), true);
++    });
++
++    it('registers multiple distinct sources from different plugins', () => {
++      const reg = new PetitionerRegistry();
++      reg.register('vision-keeper', {
++        source: 'vision-keeper.snapshot',
++        description: 'Vision snapshots.',
++      });
++      reg.register('patron-bridge', {
++        source: 'patron-bridge.commission',
++        description: 'Patron commissions.',
++      });
++      assert.equal(reg.isRegistered('vision-keeper.snapshot'), true);
++      assert.equal(reg.isRegistered('patron-bridge.commission'), true);
++    });
++
++    it('registers multiple sources from the same plugin', () => {
++      const reg = new PetitionerRegistry();
++      reg.register('my-plugin', {
++        source: 'my-plugin.first',
++        description: 'First source.',
++      });
++      reg.register('my-plugin', {
++        source: 'my-plugin.second',
++        description: 'Second source.',
++      });
++      assert.equal(reg.isRegistered('my-plugin.first'), true);
++      assert.equal(reg.isRegistered('my-plugin.second'), true);
++    });
++  });
++
++  describe('register — error: duplicate source', () => {
++    it('throws naming both plugin ids when the same source is contributed twice from different plugins', () => {
++      const reg = new PetitionerRegistry();
++      reg.register('vision-keeper', {
++        source: 'vision-keeper.snapshot',
++        description: 'First.',
++      });
++      // Attempt to register the same source from a different plugin
++      // (prefix check would fail first for 'other-plugin', so use a source
++      // that matches both validation criteria to reach the duplicate check)
++      assert.throws(
++        () =>
++          reg.register('vision-keeper', {
++            source: 'vision-keeper.snapshot',
++            description: 'Second.',
++          }),
++        (err: Error) => {
++          assert.match(err.message, /Duplicate petitioner source/);
++          assert.match(err.message, /vision-keeper\.snapshot/);
++          return true;
++        },
++      );
++    });
++
++    it('error message names both contributing plugin ids', () => {
++      const reg = new PetitionerRegistry();
++      // Register from plugin-a
++      reg.register('plugin-a', {
++        source: 'plugin-a.source',
++        description: 'Plugin A source.',
++      });
++      // Attempt duplicate from same plugin-a (only same plugin can share prefix)
++      let caught: Error | undefined;
++      try {
++        reg.register('plugin-a', {
++          source: 'plugin-a.source',
++          description: 'Duplicate.',
++        });
++      } catch (e) {
++        caught = e as Error;
++      }
++      assert.ok(caught, 'expected an error to be thrown');
++      assert.match(caught.message, /plugin-a/);
++    });
++  });
++
++  describe('register — error: malformed source id', () => {
++    it('throws on source id without a dot', () => {
++      const reg = new PetitionerRegistry();
++      assert.throws(
++        () => reg.register('bad', { source: 'nodot', description: 'test' }),
++        /Malformed source id/,
++      );
++    });
++
++    it('throws on source id with uppercase', () => {
++      const reg = new PetitionerRegistry();
++      assert.throws(
++        () => reg.register('bad', { source: 'Bad.source', description: 'test' }),
++        /Malformed source id/,
++      );
++    });
++
++    it('throws on source id with special characters', () => {
++      const reg = new PetitionerRegistry();
++      assert.throws(
++        () => reg.register('bad', { source: 'bad!.source', description: 'test' }),
++        /Malformed source id/,
++      );
++    });
++  });
++
++  describe('register — error: wrong prefix', () => {
++    it('throws when the source id prefix does not match the contributing plugin id', () => {
++      const reg = new PetitionerRegistry();
++      assert.throws(
++        () =>
++          reg.register('other-plugin', {
++            source: 'vision-keeper.snapshot',
++            description: 'test',
++          }),
++        (err: Error) => {
++          assert.match(err.message, /must be prefixed with the contributing plugin id/);
++          assert.match(err.message, /other-plugin/);
++          return true;
++        },
++      );
++    });
++  });
++
++  describe('register — error: post-seal registration', () => {
++    it('throws when register() is called after seal()', () => {
++      const reg = new PetitionerRegistry();
++      reg.seal();
++      assert.throws(
++        () =>
++          reg.register('vision-keeper', {
++            source: 'vision-keeper.snapshot',
++            description: 'test',
++          }),
++        /Registry is sealed/,
++      );
++    });
++
++    it('pre-seal registrations are preserved after sealing', () => {
++      const reg = new PetitionerRegistry();
++      reg.register('vision-keeper', {
++        source: 'vision-keeper.snapshot',
++        description: 'Snapshot.',
++      });
++      reg.seal();
++      assert.equal(reg.isRegistered('vision-keeper.snapshot'), true);
++    });
++  });
++
++  describe('isRegistered', () => {
++    it('returns false for an unregistered source', () => {
++      const reg = new PetitionerRegistry();
++      assert.equal(reg.isRegistered('unknown.source'), false);
++    });
++
++    it('returns false for an empty string', () => {
++      const reg = new PetitionerRegistry();
++      assert.equal(reg.isRegistered(''), false);
++    });
++  });
++
++  describe('isSealed', () => {
++    it('is false before seal()', () => {
++      const reg = new PetitionerRegistry();
++      assert.equal(reg.isSealed, false);
++    });
++
++    it('is true after seal()', () => {
++      const reg = new PetitionerRegistry();
++      reg.seal();
++      assert.equal(reg.isSealed, true);
++    });
++
++    it('seal() is idempotent', () => {
++      const reg = new PetitionerRegistry();
++      reg.seal();
++      reg.seal(); // should not throw
++      assert.equal(reg.isSealed, true);
++    });
++  });
++
++  describe('getAll', () => {
++    it('returns empty array when no sources are registered', () => {
++      const reg = new PetitionerRegistry();
++      assert.deepEqual(reg.getAll(), []);
++    });
++
++    it('returns all registered descriptors', () => {
++      const reg = new PetitionerRegistry();
++      const d1 = { source: 'vision-keeper.snapshot', description: 'A' };
++      const d2 = { source: 'patron-bridge.commission', description: 'B' };
++      reg.register('vision-keeper', d1);
++      reg.register('patron-bridge', d2);
++      const all = reg.getAll();
++      assert.equal(all.length, 2);
++      assert.ok(all.some((d) => d.source === d1.source && d.description === d1.description));
++      assert.ok(all.some((d) => d.source === d2.source && d.description === d2.description));
++    });
++
++    it('returns a snapshot — mutations to the registry afterwards are not reflected', () => {
++      const reg = new PetitionerRegistry();
++      reg.register('plugin-a', { source: 'plugin-a.first', description: 'first' });
++      const snapshot1 = reg.getAll();
++      assert.equal(snapshot1.length, 1);
++
++      reg.register('plugin-b', { source: 'plugin-b.second', description: 'second' });
++      const snapshot2 = reg.getAll();
++      assert.equal(snapshot2.length, 2);
++      // snapshot1 is frozen in time
++      assert.equal(snapshot1.length, 1);
++    });
++  });
++});
+diff --git a/packages/plugins/reckoner/src/registry.ts b/packages/plugins/reckoner/src/registry.ts
+new file mode 100644
+index 0000000..eca4d10
+--- /dev/null
++++ b/packages/plugins/reckoner/src/registry.ts
+@@ -0,0 +1,150 @@
++/**
++ * Kit-static petitioner registry.
++ *
++ * Consumed by the Reckoner apparatus at boot — `createReckoner()` calls
++ * `ctx.kits('petitioners')`, registers each declared source, then seals the
++ * registry at `phase:started`. Post-seal registration attempts are a hard
++ * error.
++ *
++ * See: docs/architecture/petitioner-registration.md §5
++ */
++
++import type { PetitionerDescriptor } from './types.ts';
++
++// ── Source-id grammar ─────────────────────────────────────────────────
++
++/**
++ * Regex for the source-id grammar: `{pluginId}.{kebab-suffix}`.
++ *
++ * Both segments are kebab-case identifiers:
++ *   - Start with a lowercase letter.
++ *   - Followed by zero or more lowercase letters, digits, or single hyphens.
++ *   - No leading or trailing hyphens; no consecutive hyphens.
++ *
++ * Examples that match: `vision-keeper.snapshot`, `patron-bridge.commission`,
++ *   `tech-debt.detected`, `my-plugin.my-event-type`.
++ * Examples that don't: `no-dot`, `.prefix-missing`, `suffix.`, `UPPER.case`,
++ *   `bad!.chars`, `double..dot`, `-leading.hyphen`, `trailing-.hyphen`.
++ */
++const SOURCE_ID_REGEX =
++  /^[a-z][a-z0-9]*(-[a-z0-9]+)*\.[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
++
++/**
++ * Return `true` when `source` satisfies the `{pluginId}.{kebab-suffix}`
++ * grammar, `false` otherwise.
++ */
++export function validateSourceId(source: string): boolean {
++  return SOURCE_ID_REGEX.test(source);
++}
++
++/**
++ * Extract the pluginId prefix from a source id (the part before the first
++ * `.`). Returns the empty string for ids that contain no `.`.
++ */
++function pluginIdPrefix(source: string): string {
++  const dot = source.indexOf('.');
++  return dot === -1 ? '' : source.slice(0, dot);
++}
++
++// ── PetitionerRegistry ────────────────────────────────────────────────
++
++/**
++ * Maintains the kit-static map of registered petitioner sources.
++ *
++ * The registry is built during apparatus startup via `register()` calls, one
++ * per kit entry, then sealed via `seal()` before the apparatus signals
++ * ready. After sealing, any `register()` call throws immediately.
++ *
++ * Duplicate-source collision policy: two entries with the same `source` id
++ * — regardless of which plugin contributed them — throw a hard error naming
++ * both contributing plugin ids. The winner is never resolved by load order.
++ * This mirrors the framework-wide collision rule for writ-types,
++ * rig-template-mappings, and engine designs.
++ */
++export class PetitionerRegistry {
++  private readonly _entries = new Map<
++    string,
++    { readonly pluginId: string; readonly descriptor: PetitionerDescriptor }
++  >();
++  private _sealed = false;
++
++  /** Whether `seal()` has been called. Post-seal registration throws. */
++  get isSealed(): boolean {
++    return this._sealed;
++  }
++
++  /**
++   * Register a petitioner source declared by `pluginId`.
++   *
++   * Validates:
++   * 1. Registry is not yet sealed.
++   * 2. `descriptor.source` matches the source-id grammar.
++   * 3. `descriptor.source` is prefixed with `pluginId.`.
++   * 4. No other kit has already registered the same `descriptor.source`.
++   *
++   * Throws on any violation — all validation failures are startup errors.
++   */
++  register(pluginId: string, descriptor: PetitionerDescriptor): void {
++    if (this._sealed) {
++      throw new Error(
++        `[reckoner] Registry is sealed; cannot register petitioner source ` +
++          `'${descriptor.source}' from plugin '${pluginId}' after startup.`,
++      );
++    }
++
++    if (!validateSourceId(descriptor.source)) {
++      throw new Error(
++        `[reckoner] Malformed source id '${descriptor.source}' from plugin '${pluginId}': ` +
++          `source ids must match the pattern '{pluginId}.{kebab-suffix}' ` +
++          `(e.g. 'vision-keeper.snapshot').`,
++      );
++    }
++
++    const prefix = pluginIdPrefix(descriptor.source);
++    if (prefix !== pluginId) {
++      throw new Error(
++        `[reckoner] Source id '${descriptor.source}' from plugin '${pluginId}' ` +
++          `must be prefixed with the contributing plugin id followed by '.': ` +
++          `expected prefix '${pluginId}.' but got '${prefix}.'.`,
++      );
++    }
++
++    const existing = this._entries.get(descriptor.source);
++    if (existing !== undefined) {
++      throw new Error(
++        `[reckoner] Duplicate petitioner source '${descriptor.source}': ` +
++          `contributed by both '${existing.pluginId}' and '${pluginId}'. ` +
++          `Each source id must be unique across all plugins.`,
++      );
++    }
++
++    this._entries.set(descriptor.source, { pluginId, descriptor });
++  }
++
++  /**
++   * Seal the registry, preventing any further `register()` calls.
++   *
++   * Called by the Reckoner apparatus immediately after consuming all
++   * kit `petitioners` contributions, before the apparatus signals ready.
++   * Idempotent — calling `seal()` on an already-sealed registry is a no-op.
++   */
++  seal(): void {
++    this._sealed = true;
++  }
++
++  /**
++   * Return `true` when `source` has been registered, `false` otherwise.
++   */
++  isRegistered(source: string): boolean {
++    return this._entries.has(source);
++  }
++
++  /**
++   * Return all registered petitioner descriptors in registration order.
++   * The returned array is a snapshot — mutations to the registry after this
++   * call are not reflected in the returned value.
++   */
++  getAll(): ReadonlyArray<PetitionerDescriptor> {
++    return Array.from(this._entries.values()).map((e) => e.descriptor);
++  }
++}
+diff --git a/packages/plugins/reckoner/src/types.ts b/packages/plugins/reckoner/src/types.ts
+new file mode 100644
+index 0000000..ba9fa5e
+--- /dev/null
++++ b/packages/plugins/reckoner/src/types.ts
+@@ -0,0 +1,322 @@
++/**
++ * Reckoner public types.
++ *
++ * Covers the petition data shape (priority dimensions, complexity, payload,
++ * labels), the petitioner registry descriptor, the configuration schema, and
++ * the ReckonerApi interface.
++ *
++ * See: docs/architecture/petitioner-registration.md
++ */
++
++import type { WritDoc } from '@shardworks/clerk-apparatus';
++
++// ── Priority dimensions (§3) ──────────────────────────────────────────
++
++/**
++ * Domain tags — multi-valued classification axis on a petition's priority.
++ *
++ * Not a priority axis itself; describes what *kind* of work the petition is.
++ * Used by the Reckoner for filtering, patron-tunable weighting, and reporting.
++ */
++export type DomainTag =
++  | 'security'
++  | 'compliance'
++  | 'cost'
++  | 'feature'
++  | 'quality'
++  | 'infrastructure'
++  | 'documentation'
++  | 'research'
++  | 'ergonomics';
++
++/**
++ * Five-axis priority schema for a petition.
++ *
++ * Designed to be inspectable and defensible rather than mechanically
++ * objective — petitioners declare honest inputs; the Reckoner does
++ * judgment-laden contextual collapse. The shared vocabulary makes
++ * disagreements visible and resolvable in review.
++ *
++ * Use `defaultPriority()` to obtain an instance with defaults applied for
++ * any omitted dimensions.
++ */
++export type Priority = {
++  /**
++   * How this petition relates to the product vision.
++   *
++   * - `vision-blocker`  — the vision is unreachable without this.
++   * - `vision-violator` — the current state actively diverges from the vision.
++   * - `vision-advancer` — pushes toward an aspirational, not-yet-realised aspect.
++   * - `vision-neutral`  — operational, hygiene, internal tooling, research.
++   */
++  visionRelation:
++    | 'vision-blocker'
++    | 'vision-violator'
++    | 'vision-advancer'
++    | 'vision-neutral';
++
++  /**
++   * How bad is the situation if this petition is not acted on?
++   *
++   * - `critical`  — production breakage, irreversible damage, agents blocked.
++   * - `serious`   — significant ongoing degradation; daily workarounds.
++   * - `moderate`  — noticeable but tolerable.
++   * - `minor`     — easy to live with; cosmetic, convenience, polish.
++   */
++  severity: 'critical' | 'serious' | 'moderate' | 'minor';
++
++  /**
++   * What fraction of the system is affected?
++   *
++   * - `whole-product` — every user / every commission / every guild.
++   * - `major-area`    — a major feature or subsystem.
++   * - `minor-area`    — a small slice, one workflow, one command.
++   */
++  scope: 'whole-product' | 'major-area' | 'minor-area';
++
++  /**
++   * Time-pressure dimensions — two genuinely independent axes.
++   *
++   * - `decay: true`          — urgency grows over time (drift, accruing debt).
++   * - `deadline: <iso-date>` — pledged external commitment.
++   * Neither — defer-friendly work.
++   */
++  time: {
++    decay: boolean;
++    /** ISO date string (e.g. "2025-06-01") or null when no hard deadline. */
++    deadline: string | null;
++  };
++
++  /**
++   * Multi-valued domain classification. An empty array is valid and common.
++   * See `DomainTag` for valid values.
++   */
++  domain: Array<DomainTag>;
++};
++
++// ── Complexity (§4) ───────────────────────────────────────────────────
++
++/**
++ * Petitioner-side coarse cost estimate.
++ *
++ * Refined by the Astrolabe at plan time; present at petition time only for
++ * early-stage trade-offs before plans exist.
++ *
++ * - `mechanical`  — clear path, minimal exploration. ~50K–200K tokens.
++ * - `bounded`     — clear scope, some exploration. ~200K–1M tokens.
++ * - `exploratory` — design judgment required; multiple viable paths. ~1M–5M.
++ * - `open-ended`  — research/prototyping; scope likely to grow. 5M+ tokens.
++ *
++ * Petitioners are encouraged to omit rather than guess — omission is honest.
++ */
++export type ComplexityTier =
++  | 'mechanical'
++  | 'bounded'
++  | 'exploratory'
++  | 'open-ended';
++
++// ── Petition shape (§2) ───────────────────────────────────────────────
++
++/**
++ * Full `writ.ext['reckoner']` shape.
++ *
++ * Set by the Reckoner apparatus on every held writ, either via
++ * `reckoner.petition()` (Workflow 2) or manually via `clerk.post()` +
++ * `clerk.setWritExt()` (Workflow 1).
++ */
++export interface ReckonerExt {
++  /**
++   * Required. Identifies the petitioner. Must match a registered petitioner
++   * descriptor (§5) when `enforceRegistration` is true.
++   */
++  source: string;
++
++  /** Required. Multi-dimensional priority; see §3. */
++  priority: Priority;
++
++  /**
++   * Optional petitioner-side coarse cost estimate. Refined by the Astrolabe
++   * at plan time. See §4.
++   */
++  complexity?: ComplexityTier;
++
++  /**
++   * Opaque petitioner-defined structured data. The Reckoner stores it but
++   * does not introspect; the rig's implementation engine reads it if needed.
++   */
++  payload?: unknown;
++
++  /**
++   * Additive non-priority metadata. Multi-instance discrimination,
++   * observability hints, diagnostic tags.
++   *
++   * @example { 'vision-keeper.io/vision-id': 'nexus' }
++   */
++  labels?: Record<string, string>;
++}
++
++// ── PetitionRequest (§1 Workflow 2) ──────────────────────────────────
++
++/**
++ * Input to `reckoner.petition()`.
++ *
++ * Combines writ fields (passed through to `clerk.post()`) with the
++ * `ext.reckoner` fields (source, priority, complexity, payload, labels).
++ * The `priority` is accepted as `Partial<Priority>`; `reckoner.petition()`
++ * applies defaults for any omitted dimensions before posting.
++ */
++export interface PetitionRequest {
++  // ── Writ fields ────────────────────────────────────────────────
++  /** Writ type — must be registered with the Clerk. */
++  type: string;
++  /** Short human-readable title describing the work. */
++  title: string;
++  /** Detail text. */
++  body: string;
++  /** Target codex name. */
++  codex: string;
++  /** Create as a child of this parent writ. */
++  parentId?: string;
++
++  // ── ext.reckoner fields ────────────────────────────────────────
++  /** Required. Identifies the petitioner source. Format: `{pluginId}.{kebab-suffix}`. */
++  source: string;
++  /**
++   * Priority dimensions. Any omitted dimension receives its default:
++   * `vision-neutral / minor / minor-area / {decay: false, deadline: null} / []`.
++   */
++  priority: Partial<Priority>;
++  /** Optional petitioner-side coarse cost estimate. */
++  complexity?: ComplexityTier;
++  /** Opaque petitioner-defined structured data. */
++  payload?: unknown;
++  /** Additive non-priority metadata. */
++  labels?: Record<string, string>;
++}
++
++// ── Petitioner registry (§5) ──────────────────────────────────────────
++
++/**
++ * A petitioner source declaration — contributed via the `petitioners` kit
++ * contribution type.
++ *
++ * Kit declaration example:
++ * ```typescript
++ * export default {
++ *   kit: {
++ *     requires: ['reckoner'],
++ *     petitioners: [{
++ *       source: 'vision-keeper.snapshot',
++ *       description: 'Vision-vs-reality snapshots emitted on drift.',
++ *     }],
++ *   },
++ * };
++ * ```
++ */
++export interface PetitionerDescriptor {
++  /**
++   * Unique source id. Format: `{pluginId}.{kebab-suffix}`.
++   * Validated against the contributing plugin's id at registry build time.
++   */
++  source: string;
++  /** Human-readable one-liner describing this source for operators. */
++  description: string;
++}
++
++// ── Configuration (§6) ───────────────────────────────────────────────
++
++/**
++ * Reckoner configuration — read from `guild.json` under the `reckoner` key.
++ *
++ * ```json
++ * {
++ *   "reckoner": {
++ *     "enforceRegistration": false,
++ *     "disabledSources": []
++ *   }
++ * }
++ * ```
++ */
++export interface ReckonerConfig {
++  /**
++   * Controls how the Reckoner handles petitions from unregistered sources.
++   *
++   * - `false` (default) — log a warning and proceed with normal consideration.
++   * - `true` — decline the petition (transition `new` → `cancelled`) with a
++   *   reason naming the unknown source.
++   */
++  enforceRegistration?: boolean;
++
++  /**
++   * Per-source disable list. Petitions from any source in this array are
++   * skipped by the Reckoner — left in `new` phase with no reckoning entry.
++   * Removing a source from this list resumes normal consideration of any
++   * pending writs from that source.
++   *
++   * Default: `[]`.
++   */
++  disabledSources?: string[];
++}
++
++// Augment GuildConfig so `guild().guildConfig().reckoner` is typed without
++// requiring a manual type parameter at the call site.
++declare module '@shardworks/nexus-core' {
++  interface GuildConfig {
++    reckoner?: ReckonerConfig;
++  }
++}
++
++// ── Resolved config (internal) ────────────────────────────────────────
++
++/**
++ * Reckoner config with all defaults applied. Used internally by the apparatus.
++ */
++export interface ResolvedReckonerConfig {
++  readonly enforceRegistration: boolean;
++  readonly disabledSources: readonly string[];
++}
++
++// ── ReckonerApi (§1 Workflow 2) ───────────────────────────────────────
++
++/**
++ * The Reckoner's runtime API — retrieved via `guild().apparatus<ReckonerApi>('reckoner')`.
++ *
++ * Petitioners typically interact only with `petition()` and `withdraw()`.
++ * `getRegisteredSources()` is for operator/observability tooling.
++ */
++export interface ReckonerApi {
++  /**
++   * Post a writ in `new` phase with Reckoner ext set correctly.
++   *
++   * Validates dimension values against the schema, applies defaults for
++   * omitted dimensions, validates source against the registry (subject to
++   * `enforceRegistration` config), calls `clerk.post()`, and then writes
++   * the ext fields under `writ.ext.reckoner` via `setWritExt`.
++   *
++   * Returns the persisted `WritDoc` with `phase: 'new'` and
++   * `ext.reckoner` populated.
++   *
++   * Equivalent in effect to calling `clerk.post()` with manual ext
++   * construction (Workflow 1); this helper exists for type checking,
++   * default handling, and discoverability.
++   */
++  petition(request: PetitionRequest): Promise<WritDoc>;
++
++  /**
++   * Withdraw a held writ by transitioning it to `cancelled`.
++   *
++   * Convenience wrapper around `clerk.transition(writId, 'cancelled', ...)`.
++   * The `reason`, when provided, is recorded in the writ's `resolution` field.
++   * No source-check is performed — any caller may withdraw any writ.
++   */
++  withdraw(writId: string, reason?: string): Promise<WritDoc>;
++
++  /**
++   * Return all registered petitioner sources.
++   *
++   * Useful for operator / observability tooling that wants to enumerate known
++   * sources without aggregating from observed petition history.
++   * Reflects the registry state at the time of the call — sealed after startup.
++   */
++  getRegisteredSources(): ReadonlyArray<PetitionerDescriptor>;
++}
+diff --git a/packages/plugins/reckoner/src/validation.ts b/packages/plugins/reckoner/src/validation.ts
+new file mode 100644
+index 0000000..272d0d2
+--- /dev/null
++++ b/packages/plugins/reckoner/src/validation.ts
+@@ -0,0 +1,109 @@
++/**
++ * Priority dimension validation.
++ *
++ * Validates that all fields on a fully-resolved `Priority` object are
++ * members of their respective enum sets. Called by `executePetition()` after
++ * defaults have been applied.
++ *
++ * See: docs/architecture/petitioner-registration.md §3
++ */
++
++import type { DomainTag, Priority } from './types.ts';
++
++// ── Valid value sets (as frozen Sets for O(1) membership checks) ──────
++
++export const VALID_VISION_RELATIONS: ReadonlySet<Priority['visionRelation']> =
++  new Set([
++    'vision-blocker',
++    'vision-violator',
++    'vision-advancer',
++    'vision-neutral',
++  ]);
++
++export const VALID_SEVERITIES: ReadonlySet<Priority['severity']> = new Set([
++  'critical',
++  'serious',
++  'moderate',
++  'minor',
++]);
++
++export const VALID_SCOPES: ReadonlySet<Priority['scope']> = new Set([
++  'whole-product',
++  'major-area',
++  'minor-area',
++]);
++
++export const VALID_DOMAIN_TAGS: ReadonlySet<DomainTag> = new Set([
++  'security',
++  'compliance',
++  'cost',
++  'feature',
++  'quality',
++  'infrastructure',
++  'documentation',
++  'research',
++  'ergonomics',
++]);
++
++// ── Validator ─────────────────────────────────────────────────────────
++
++/**
++ * Validate that all five dimensions of `priority` are well-formed.
++ *
++ * Throws a descriptive error on the first invalid field found. This is
++ * intentionally fail-loud at petition-emit time so mis-configured sources
++ * are caught immediately rather than silently accepted and misfiled.
++ *
++ * After `defaultPriority()` has been applied all fields will be present;
++ * this function validates their *values*, not their presence.
++ */
++export function validatePriority(priority: Priority): void {
++  if (
++    !VALID_VISION_RELATIONS.has(priority.visionRelation)
++  ) {
++    throw new Error(
++      `[reckoner] Invalid priority.visionRelation: '${priority.visionRelation}'. ` +
++        `Valid values: ${[...VALID_VISION_RELATIONS].map((v) => `'${v}'`).join(', ')}.`,
++    );
++  }
++
++  if (!VALID_SEVERITIES.has(priority.severity)) {
++    throw new Error(
++      `[reckoner] Invalid priority.severity: '${priority.severity}'. ` +
++        `Valid values: ${[...VALID_SEVERITIES].map((v) => `'${v}'`).join(', ')}.`,
++    );
++  }
++
++  if (!VALID_SCOPES.has(priority.scope)) {
++    throw new Error(
++      `[reckoner] Invalid priority.scope: '${priority.scope}'. ` +
++        `Valid values: ${[...VALID_SCOPES].map((v) => `'${v}'`).join(', ')}.`,
++    );
++  }
++
++  if (typeof priority.time.decay !== 'boolean') {
++    throw new Error(
++      `[reckoner] Invalid priority.time.decay: expected boolean, ` +
++        `got ${typeof priority.time.decay}.`,
++    );
++  }
++
++  if (
++    priority.time.deadline !== null &&
++    typeof priority.time.deadline !== 'string'
++  ) {
++    throw new Error(
++      `[reckoner] Invalid priority.time.deadline: expected ISO date string or null, ` +
++        `got ${typeof priority.time.deadline}.`,
++    );
++  }
++
++  for (const tag of priority.domain) {
++    if (!VALID_DOMAIN_TAGS.has(tag as DomainTag)) {
++      throw new Error(
++        `[reckoner] Invalid priority.domain tag: '${tag}'. ` +
++          `Valid values: ${[...VALID_DOMAIN_TAGS].map((v) => `'${v}'`).join(', ')}.`,
++      );
++    }
++  }
++}
+diff --git a/packages/plugins/reckoner/tsconfig.json b/packages/plugins/reckoner/tsconfig.json
+new file mode 100644
+index 0000000..4229950
+--- /dev/null
++++ b/packages/plugins/reckoner/tsconfig.json
+@@ -0,0 +1,13 @@
++{
++  "extends": "../../../tsconfig.json",
++  "compilerOptions": {
++    "outDir": "dist",
++    "rootDir": "src"
++  },
++  "include": [
++    "src"
++  ],
++  "exclude": [
++    "src/**/*.test.ts"
++  ]
++}
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 453f547..e2411f9 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -385,6 +385,19 @@ importers:
+         specifier: 25.5.0
+         version: 25.5.0
+ 
++  packages/plugins/reckoner:
++    dependencies:
++      '@shardworks/clerk-apparatus':
++        specifier: workspace:*
++        version: link:../clerk
++    devDependencies:
++      '@shardworks/nexus-core':
++        specifier: workspace:*
++        version: link:../../framework/core
++      '@types/node':
++        specifier: 25.5.0
++        version: 25.5.0
++
+   packages/plugins/sentinel:
+     dependencies:
+       '@shardworks/clerk-apparatus':

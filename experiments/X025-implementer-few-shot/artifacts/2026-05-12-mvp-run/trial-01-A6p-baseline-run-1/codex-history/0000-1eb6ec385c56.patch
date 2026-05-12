@@ -1,0 +1,1627 @@
+
+
+diff --git a/packages/plugins/ratchet/README.md b/packages/plugins/ratchet/README.md
+index bb85c5a..dc9fe6a 100644
+--- a/packages/plugins/ratchet/README.md
++++ b/packages/plugins/ratchet/README.md
+@@ -215,10 +215,28 @@ Terminal statuses (`concluded`, `dropped`) allow no further transitions.
+ | `click-link` | write | Create a typed link |
+ | `click-unlink` | write | Remove a link |
+ | `click-extract` | read | Extract a click tree (goals only by default; `--full` includes conclusions) |
+-| `click-tree` | read | Display click hierarchy as a visual tree with short IDs and status indicators |
++| `click-tree` | read | Display click hierarchy as a visual tree with short IDs and status indicators; pass `--format json` to receive structured `ClickTree[]` data instead of the ASCII render |
+ 
+ All tools that accept an `id` parameter resolve short ID prefixes automatically via `resolveId()`. Tools with a single required ID parameter also accept the ID as a positional argument (e.g., `nsg click show <id>`).
+ 
++### Pages
++
++| Page ID | Title | Directory |
++|---------|-------|-----------|
++| `clicks` | Clicks | `pages/clicks` |
++
++The **Clicks** page (`/pages/clicks/`) renders the click forest as an interactive tree view. Features:
++- Persistent right-hand detail pane showing the selected click's fields, children, links, and lifecycle actions
++- Status-filter buttons prune non-matching nodes and their subtrees (All / live / parked / concluded / dropped)
++- All nodes expanded by default; collapse/expand individual subtrees
++- CSS badge status indicators matching the shared Oculus badge vocabulary
++- Focus button on each node scopes the tree to that subtree (`?root=<id>`); breadcrumb navigation with "Show all"
++- Toggleable inline create-click form at the top of the tree
++- Deep-link support: `?click=<id>` auto-opens that click's detail pane; `?root=<id>` scopes the tree
++- Link navigation dispatches by ID prefix: `c-…` opens the click detail in-page; `w-…` navigates to the Writs page
++- Link target metadata lazily fetched and displayed alongside each link ID
++- Park / Resume / Conclude / Drop lifecycle actions in the detail pane (conclude/drop require a non-empty conclusion)
++
+ ---
+ 
+ ## Types
+diff --git a/packages/plugins/ratchet/package.json b/packages/plugins/ratchet/package.json
+index cb89041..b844800 100644
+--- a/packages/plugins/ratchet/package.json
++++ b/packages/plugins/ratchet/package.json
+@@ -14,7 +14,7 @@
+   },
+   "scripts": {
+     "build": "tsc",
+-    "test": "node --disable-warning=ExperimentalWarning --experimental-transform-types --test 'src/**/*.test.ts'",
++    "test": "node --disable-warning=ExperimentalWarning --experimental-transform-types --test 'src/**/*.test.ts' 'pages/**/*.test.js'",
+     "typecheck": "tsc --noEmit"
+   },
+   "peerDependencies": {
+@@ -29,7 +29,10 @@
+     "@shardworks/nexus-core": "workspace:*",
+     "@types/node": "25.5.0"
+   },
+-  "files": ["dist"],
++  "files": [
++    "dist",
++    "pages"
++  ],
+   "publishConfig": {
+     "exports": {
+       ".": {
+diff --git a/packages/plugins/ratchet/pages/clicks/clicks-tree.test.js b/packages/plugins/ratchet/pages/clicks/clicks-tree.test.js
+new file mode 100644
+index 0000000..7db6880
+--- /dev/null
++++ b/packages/plugins/ratchet/pages/clicks/clicks-tree.test.js
+@@ -0,0 +1,437 @@
++/**
++ * Unit tests for the pure tree logic in pages/clicks/index.html.
++ *
++ * Re-declares the functions under test since they are IIFE-scoped in the page.
++ * Uses node:test + assert/strict + a minimal FakeElement DOM shim, following
++ * the clerk pages/writs/writs-hierarchy.test.js pattern.
++ *
++ * Covers (per D21):
++ *   - tree-build from a ClickTree[] forest
++ *   - prune-by-status with subtree-hiding semantics (D6)
++ *   - subtree scoping and breadcrumb derivation (D23)
++ */
++
++import { describe, it } from 'node:test';
++import assert from 'node:assert/strict';
++
++// ── Minimal DOM shim ────────────────────────────────────────────────
++
++class FakeElement {
++  constructor(tag) {
++    this.tagName = tag.toUpperCase();
++    this.className = '';
++    this.textContent = '';
++    this.title = '';
++    this.innerHTML = '';
++    this.dataset = {};
++    this.children = [];
++    this.style = {};
++    this._listeners = {};
++  }
++  appendChild(child) { this.children.push(child); return child; }
++  querySelectorAll(selector) {
++    if (selector.startsWith('.')) {
++      const cls = selector.slice(1);
++      return this.children.filter(c => (c.className ?? '').includes(cls));
++    }
++    return [];
++  }
++  addEventListener(event, fn) {
++    if (!this._listeners[event]) this._listeners[event] = [];
++    this._listeners[event].push(fn);
++  }
++  get classList() {
++    const self = this;
++    return {
++      toggle(cls, force) {
++        const parts = self.className.split(/\s+/).filter(Boolean);
++        const idx = parts.indexOf(cls);
++        if (force === true  && idx === -1) parts.push(cls);
++        if (force === false && idx !== -1) parts.splice(idx, 1);
++        if (force === undefined) {
++          if (idx === -1) parts.push(cls); else parts.splice(idx, 1);
++        }
++        self.className = parts.join(' ');
++      },
++      add(cls)    { if (!self.className.split(/\s+/).includes(cls)) self.className = (self.className + ' ' + cls).trim(); },
++      remove(cls) { self.className = self.className.split(/\s+/).filter(c => c !== cls).join(' '); },
++      contains(cls) { return self.className.split(/\s+/).includes(cls); },
++    };
++  }
++}
++
++// ── Re-declared pure functions (mirrors pages/clicks/index.html) ────
++
++function statusBadge(status) {
++  const map = {
++    live:      'badge badge--active',
++    parked:    'badge badge--warning',
++    concluded: 'badge badge--success',
++    dropped:   'badge badge--error',
++  };
++  return `<span class="${map[status] ?? 'badge'}">${escHtml(status)}</span>`;
++}
++
++function escHtml(s) {
++  return String(s ?? '')
++    .replace(/&/g, '&amp;')
++    .replace(/</g, '&lt;')
++    .replace(/>/g, '&gt;')
++    .replace(/"/g, '&quot;');
++}
++
++function shortId(id) {
++  const parts = id.split('-');
++  return parts.length >= 2 ? parts.slice(0, 2).join('-') : id;
++}
++
++/** Prune a ClickTree by a Set<string> of allowed statuses. */
++function pruneByStatus(tree, activeStatuses) {
++  if (!activeStatuses.has(tree.click.status)) return null;
++  const children = tree.children.map(c => pruneByStatus(c, activeStatuses)).filter(c => c !== null);
++  return { click: tree.click, children };
++}
++
++/** Apply scoping and status pruning to a forest. */
++function getVisibleForest(forest, scopedRootId, activeStatuses) {
++  let roots;
++  if (scopedRootId) {
++    const sub = findTree(forest, scopedRootId);
++    roots = sub ? [sub] : [];
++  } else {
++    roots = forest;
++  }
++  return roots.map(t => pruneByStatus(t, activeStatuses)).filter(t => t !== null);
++}
++
++function findTree(trees, id) {
++  for (const t of trees) {
++    if (t.click.id === id) return t;
++    const found = findTree(t.children, id);
++    if (found) return found;
++  }
++  return null;
++}
++
++/** Return the ancestor path of ClickDocs from forest root to the target ID. */
++function ancestorPath(forest, id) {
++  function walk(trees, target, acc) {
++    for (const t of trees) {
++      const path = [...acc, t.click];
++      if (t.click.id === target) return path;
++      const found = walk(t.children, target, path);
++      if (found) return found;
++    }
++    return null;
++  }
++  return walk(forest, id, []) ?? [];
++}
++
++/**
++ * Dispatch link target display by ID prefix (D15):
++ * c-… → in-page click anchor
++ * w-… → writs-page anchor
++ * other → plain text
++ */
++function linkTargetHtml(targetId) {
++  if (targetId.startsWith('c-')) {
++    return `<a class="link-target" data-click-id="${escHtml(targetId)}">${escHtml(targetId)}</a>`;
++  }
++  if (targetId.startsWith('w-')) {
++    return `<a class="link-target" href="/pages/writs/?writ=${encodeURIComponent(targetId)}">${escHtml(targetId)}</a>`;
++  }
++  return `<span>${escHtml(targetId)}</span>`;
++}
++
++// ── Test helpers ────────────────────────────────────────────────────
++
++function makeClick(id, status = 'live', opts = {}) {
++  return {
++    id,
++    goal:      opts.goal      ?? `Goal of ${id}`,
++    status,
++    createdAt: opts.createdAt ?? '2024-01-01T00:00:00.000Z',
++    conclusion: opts.conclusion,
++    parentId:   opts.parentId,
++  };
++}
++
++function makeTree(click, children = []) {
++  return { click, children };
++}
++
++// ── Tests: tree-build ───────────────────────────────────────────────
++
++describe('tree-build (pruneByStatus + getVisibleForest)', () => {
++  const ALL = new Set(['live', 'parked', 'concluded', 'dropped']);
++
++  it('returns forest unchanged when all statuses active', () => {
++    const root = makeTree(makeClick('c-1', 'live'), [
++      makeTree(makeClick('c-2', 'parked')),
++      makeTree(makeClick('c-3', 'concluded')),
++    ]);
++    const result = getVisibleForest([root], null, ALL);
++    assert.strictEqual(result.length, 1);
++    assert.strictEqual(result[0].children.length, 2);
++  });
++
++  it('returns an empty array for an empty forest', () => {
++    const result = getVisibleForest([], null, ALL);
++    assert.strictEqual(result.length, 0);
++  });
++
++  it('preserves tree structure when nothing is pruned', () => {
++    const grandchild = makeTree(makeClick('c-3', 'live'));
++    const child = makeTree(makeClick('c-2', 'live'), [grandchild]);
++    const root  = makeTree(makeClick('c-1', 'live'), [child]);
++    const result = getVisibleForest([root], null, ALL);
++    assert.strictEqual(result[0].children[0].children[0].click.id, 'c-3');
++  });
++});
++
++// ── Tests: prune-by-status ──────────────────────────────────────────
++
++describe('prune-by-status (D6)', () => {
++  it('prunes a root node whose status is not in the active set', () => {
++    const root = makeTree(makeClick('c-1', 'parked'));
++    const result = pruneByStatus(root, new Set(['live']));
++    assert.strictEqual(result, null);
++  });
++
++  it('prunes a root and its entire subtree when root status is filtered', () => {
++    const child = makeTree(makeClick('c-2', 'live'));
++    const root  = makeTree(makeClick('c-1', 'parked'), [child]);
++    const result = pruneByStatus(root, new Set(['live']));
++    // Root is parked → pruned, even though child is live
++    assert.strictEqual(result, null);
++  });
++
++  it('prunes non-matching children but keeps matching root', () => {
++    const liveChild   = makeTree(makeClick('c-2', 'live'));
++    const parkedChild = makeTree(makeClick('c-3', 'parked'));
++    const root        = makeTree(makeClick('c-1', 'live'), [liveChild, parkedChild]);
++    const result = pruneByStatus(root, new Set(['live']));
++    assert.ok(result, 'root should survive');
++    assert.strictEqual(result.children.length, 1);
++    assert.strictEqual(result.children[0].click.id, 'c-2');
++  });
++
++  it('preserves a grandchild when all ancestors match', () => {
++    const grandchild = makeTree(makeClick('c-3', 'live'));
++    const child = makeTree(makeClick('c-2', 'live'), [grandchild]);
++    const root  = makeTree(makeClick('c-1', 'live'), [child]);
++    const result = pruneByStatus(root, new Set(['live']));
++    assert.strictEqual(result.children[0].children[0].click.id, 'c-3');
++  });
++
++  it('prunes grandchild when parent does not match', () => {
++    const grandchild = makeTree(makeClick('c-3', 'live'));
++    const child      = makeTree(makeClick('c-2', 'parked'), [grandchild]);
++    const root       = makeTree(makeClick('c-1', 'live'), [child]);
++    const result = pruneByStatus(root, new Set(['live']));
++    assert.strictEqual(result.children.length, 0, 'parked child (with live grandchild) must be removed');
++  });
++
++  it('getVisibleForest prunes root-level nodes', () => {
++    const forest = [
++      makeTree(makeClick('c-1', 'live')),
++      makeTree(makeClick('c-2', 'dropped')),
++    ];
++    const result = getVisibleForest(forest, null, new Set(['live']));
++    assert.strictEqual(result.length, 1);
++    assert.strictEqual(result[0].click.id, 'c-1');
++  });
++
++  it('returns empty array when no nodes match filters', () => {
++    const forest = [makeTree(makeClick('c-1', 'live'))];
++    const result = getVisibleForest(forest, null, new Set(['parked']));
++    assert.strictEqual(result.length, 0);
++  });
++
++  it('filters by multiple statuses', () => {
++    const forest = [
++      makeTree(makeClick('c-1', 'live')),
++      makeTree(makeClick('c-2', 'parked')),
++      makeTree(makeClick('c-3', 'dropped')),
++    ];
++    const result = getVisibleForest(forest, null, new Set(['live', 'parked']));
++    assert.strictEqual(result.length, 2);
++    const ids = result.map(t => t.click.id);
++    assert.ok(ids.includes('c-1'));
++    assert.ok(ids.includes('c-2'));
++  });
++});
++
++// ── Tests: subtree scoping ──────────────────────────────────────────
++
++describe('subtree scoping (D23)', () => {
++  const ALL = new Set(['live', 'parked', 'concluded', 'dropped']);
++
++  it('returns full forest when scopedRootId is null', () => {
++    const forest = [
++      makeTree(makeClick('c-1', 'live')),
++      makeTree(makeClick('c-2', 'live')),
++    ];
++    const result = getVisibleForest(forest, null, ALL);
++    assert.strictEqual(result.length, 2);
++  });
++
++  it('returns only the scoped subtree when rootId is set', () => {
++    const child = makeTree(makeClick('c-2', 'live'));
++    const forest = [
++      makeTree(makeClick('c-1', 'live'), [child]),
++      makeTree(makeClick('c-3', 'live')),
++    ];
++    const result = getVisibleForest(forest, 'c-1', ALL);
++    assert.strictEqual(result.length, 1);
++    assert.strictEqual(result[0].click.id, 'c-1');
++    assert.strictEqual(result[0].children.length, 1);
++    assert.strictEqual(result[0].children[0].click.id, 'c-2');
++  });
++
++  it('returns empty when scopedRootId does not exist in forest', () => {
++    const forest = [makeTree(makeClick('c-1', 'live'))];
++    const result = getVisibleForest(forest, 'c-ghost', ALL);
++    assert.strictEqual(result.length, 0);
++  });
++
++  it('scoping to a deep node returns that node as root', () => {
++    const deep = makeTree(makeClick('c-3', 'live'));
++    const mid  = makeTree(makeClick('c-2', 'live'), [deep]);
++    const root = makeTree(makeClick('c-1', 'live'), [mid]);
++    const result = getVisibleForest([root], 'c-3', ALL);
++    assert.strictEqual(result.length, 1);
++    assert.strictEqual(result[0].click.id, 'c-3');
++    assert.strictEqual(result[0].children.length, 0);
++  });
++
++  // Breadcrumb derivation
++  it('ancestorPath returns empty array for unknown id', () => {
++    const forest = [makeTree(makeClick('c-1', 'live'))];
++    assert.deepStrictEqual(ancestorPath(forest, 'c-ghost'), []);
++  });
++
++  it('ancestorPath returns single-element array for a root node', () => {
++    const click = makeClick('c-1', 'live');
++    const forest = [makeTree(click)];
++    const path = ancestorPath(forest, 'c-1');
++    assert.strictEqual(path.length, 1);
++    assert.strictEqual(path[0].id, 'c-1');
++  });
++
++  it('ancestorPath returns full chain for a nested node', () => {
++    const gc   = makeClick('c-3', 'live');
++    const mid  = makeClick('c-2', 'live');
++    const root = makeClick('c-1', 'live');
++    const forest = [makeTree(root, [makeTree(mid, [makeTree(gc)])])];
++    const path = ancestorPath(forest, 'c-3');
++    assert.strictEqual(path.length, 3);
++    assert.strictEqual(path[0].id, 'c-1');
++    assert.strictEqual(path[1].id, 'c-2');
++    assert.strictEqual(path[2].id, 'c-3');
++  });
++
++  it('ancestorPath works across multiple forest roots', () => {
++    const target = makeClick('c-5', 'live');
++    const forest = [
++      makeTree(makeClick('c-1', 'live')),
++      makeTree(makeClick('c-2', 'live'), [makeTree(target)]),
++    ];
++    const path = ancestorPath(forest, 'c-5');
++    assert.strictEqual(path.length, 2);
++    assert.strictEqual(path[0].id, 'c-2');
++    assert.strictEqual(path[1].id, 'c-5');
++  });
++});
++
++// ── Tests: detail-pane rendering ────────────────────────────────────
++
++describe('detail-pane rendering', () => {
++  it('statusBadge maps live to badge--active', () => {
++    const html = statusBadge('live');
++    assert.ok(html.includes('badge--active'));
++    assert.ok(html.includes('live'));
++  });
++
++  it('statusBadge maps parked to badge--warning', () => {
++    const html = statusBadge('parked');
++    assert.ok(html.includes('badge--warning'));
++  });
++
++  it('statusBadge maps concluded to badge--success', () => {
++    const html = statusBadge('concluded');
++    assert.ok(html.includes('badge--success'));
++  });
++
++  it('statusBadge maps dropped to badge--error', () => {
++    const html = statusBadge('dropped');
++    assert.ok(html.includes('badge--error'));
++  });
++
++  it('shortId returns c-<base36ts> prefix', () => {
++    const full  = 'c-mo1mq8ry-abc123';
++    const short = shortId(full);
++    assert.strictEqual(short, 'c-mo1mq8ry');
++  });
++
++  it('shortId returns the ID unchanged when it has fewer than 2 parts', () => {
++    assert.strictEqual(shortId('single'), 'single');
++  });
++
++  it('escHtml encodes HTML special characters', () => {
++    assert.strictEqual(escHtml('<script>'), '&lt;script&gt;');
++    assert.strictEqual(escHtml('"quoted"'), '&quot;quoted&quot;');
++    assert.strictEqual(escHtml('a & b'), 'a &amp; b');
++  });
++
++  it('escHtml handles null/undefined safely', () => {
++    assert.strictEqual(escHtml(null),      '');
++    assert.strictEqual(escHtml(undefined), '');
++  });
++});
++
++// ── Tests: link dispatch (D15) ──────────────────────────────────────
++
++describe('link prefix dispatch (D15)', () => {
++  it('c-… prefix renders an in-page anchor with data-click-id', () => {
++    const html = linkTargetHtml('c-abc123');
++    assert.ok(html.includes('data-click-id="c-abc123"'));
++    assert.ok(html.includes('<a '));
++    assert.ok(!html.includes('/pages/writs/'));
++  });
++
++  it('w-… prefix renders a link to the writs page', () => {
++    const html = linkTargetHtml('w-xyz789');
++    assert.ok(html.includes('/pages/writs/'));
++    assert.ok(html.includes('w-xyz789'));
++    assert.ok(html.includes('<a '));
++  });
++
++  it('w-… prefix encodes the ID in the href', () => {
++    const html = linkTargetHtml('w-abc/def');
++    assert.ok(html.includes(encodeURIComponent('w-abc/def')));
++  });
++
++  it('unknown prefix renders as plain text without a link', () => {
++    const html = linkTargetHtml('github:org/repo');
++    assert.ok(html.includes('<span>'));
++    assert.ok(!html.includes('<a '));
++    assert.ok(html.includes('github:org/repo'));
++  });
++
++  it('c-… prefix does not link to writs page', () => {
++    const html = linkTargetHtml('c-mo1mq8ry');
++    assert.ok(!html.includes('/pages/writs/'));
++  });
++
++  it('w-… prefix does not carry data-click-id', () => {
++    const html = linkTargetHtml('w-mo1mq8ry');
++    assert.ok(!html.includes('data-click-id'));
++  });
++
++  it('escapes HTML in target IDs', () => {
++    const html = linkTargetHtml('c-<evil>');
++    assert.ok(!html.includes('<evil>'));
++    assert.ok(html.includes('&lt;evil&gt;'));
++  });
++});
+diff --git a/packages/plugins/ratchet/pages/clicks/index.html b/packages/plugins/ratchet/pages/clicks/index.html
+new file mode 100644
+index 0000000..e1cd395
+--- /dev/null
++++ b/packages/plugins/ratchet/pages/clicks/index.html
+@@ -0,0 +1,995 @@
++<!DOCTYPE html>
++<html lang="en">
++<head>
++  <meta charset="UTF-8">
++  <meta name="viewport" content="width=device-width, initial-scale=1.0">
++  <title>Clicks</title>
++  <style>
++    /* ── Page-specific styles ───────────────────────────────────── */
++    .error-msg { color: var(--red, #f7768e); font-size: 0.875rem; margin-top: 0.25rem; }
++    .split-layout { display: flex; gap: 1rem; align-items: flex-start; }
++    .tree-area { flex: 0 0 55%; min-width: 0; }
++    .detail-area { flex: 1; min-width: 0; }
++    .tree-node-row {
++      display: flex; align-items: center; gap: 0.4rem;
++      padding: 0.2rem 0.35rem; cursor: pointer; border-radius: 4px;
++      border-left: 2px solid transparent;
++    }
++    .tree-node-row:hover { background: var(--bg3, #24283b); }
++    .tree-node-row.selected {
++      background: var(--bg3, #24283b);
++      border-left-color: var(--blue, #7aa2f7);
++    }
++    .tree-children {
++      padding-left: 1.25rem;
++      border-left: 1px solid var(--border, #414868);
++      margin-left: 0.6rem;
++    }
++    .expand-btn {
++      background: none; border: none; color: inherit; cursor: pointer;
++      width: 1rem; min-width: 1rem; text-align: center;
++      font-size: 0.75rem; padding: 0; opacity: 0.6;
++    }
++    .node-goal { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
++    .node-id-code { font-size: 0.72rem; opacity: 0.55; white-space: nowrap; }
++    .node-actions { display: flex; gap: 0.25rem; opacity: 0; transition: opacity 0.1s; flex-shrink: 0; }
++    .tree-node-row:hover .node-actions { opacity: 1; }
++    .conclusion-disclosure { padding-left: 1.6rem; }
++    .conclusion-text {
++      font-size: 0.8rem; opacity: 0.8;
++      padding: 0.25rem 0.5rem; background: var(--bg3, #24283b);
++      border-radius: 4px; margin-top: 0.15rem;
++      white-space: pre-wrap; word-break: break-word;
++    }
++    .breadcrumb { font-size: 0.875rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem; }
++    .breadcrumb-sep { opacity: 0.4; }
++    .breadcrumb-link { cursor: pointer; color: var(--blue, #7aa2f7); text-decoration: underline; background: none; border: none; font: inherit; padding: 0; }
++    .breadcrumb-link:hover { opacity: 0.8; }
++    #create-section { margin-bottom: 16px; display: none; }
++    #create-section.open { display: block; }
++    #create-section h3 { margin: 0 0 0.75rem; }
++    .form-row { margin-bottom: 0.75rem; display: flex; flex-direction: column; gap: 0.3rem; }
++    .form-row label { font-size: 0.875rem; opacity: 0.7; }
++    .form-row input, .form-row textarea, .form-row select {
++      padding: 0.4rem 0.6rem; background: var(--bg3, #24283b);
++      border: 1px solid var(--border, #414868); border-radius: 4px;
++      color: inherit; font-size: 0.9rem;
++    }
++    .detail-grid { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; font-size: 0.875rem; }
++    .detail-grid dt { opacity: 0.6; white-space: nowrap; }
++    .detail-section { margin-bottom: 1rem; }
++    .detail-section h4 { margin: 0 0 0.4rem; font-size: 0.875rem; text-transform: uppercase; opacity: 0.6; }
++    .link-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.875rem; margin-bottom: 0.25rem; flex-wrap: wrap; }
++    .link-dir { font-weight: bold; opacity: 0.45; width: 1rem; text-align: center; }
++    .link-target { cursor: pointer; text-decoration: underline; color: var(--blue, #7aa2f7); }
++    .link-target:hover { opacity: 0.8; }
++    .link-meta { font-size: 0.78rem; opacity: 0.55; font-style: italic; }
++    .add-link-form { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: flex-end; margin-top: 0.5rem; }
++    .add-link-form input, .add-link-form select {
++      padding: 0.3rem 0.5rem; background: var(--bg3, #24283b);
++      border: 1px solid var(--border, #414868); border-radius: 4px;
++      color: inherit; font-size: 0.875rem;
++    }
++    .confirm-section {
++      display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: flex-end;
++      margin-top: 0.5rem; padding: 0.75rem; background: var(--bg3, #24283b); border-radius: 6px;
++    }
++    .confirm-section label { font-size: 0.875rem; opacity: 0.8; }
++    .confirm-section input {
++      padding: 0.3rem 0.5rem; background: var(--bg, #1a1b26);
++      border: 1px solid var(--border, #414868); border-radius: 4px;
++      color: inherit; min-width: 200px;
++    }
++    .action-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
++    .children-table { width: 100%; }
++    .children-table tbody tr { cursor: pointer; }
++    .children-table tbody tr:hover { opacity: 0.85; }
++    .detail-placeholder-text { font-size: 0.875rem; opacity: 0.5; text-align: center; padding: 2rem 1rem; }
++    #breadcrumb-bar { margin-bottom: 8px; }
++  </style>
++</head>
++<body>
++<main style="padding: 24px;">
++  <h1>Clicks</h1>
++
++  <!-- Toolbar -->
++  <div class="card" style="margin-bottom: 16px;">
++    <div class="toolbar" id="toolbar">
++      <button class="btn btn--primary" id="btn-new-click">New Click</button>
++      <button class="btn" id="btn-refresh">Refresh</button>
++      <span style="display:inline-flex;gap:0.4rem;flex-wrap:wrap;align-items:center">
++        <span style="font-size:0.875rem;opacity:0.6">Status:</span>
++        <button class="btn filter-btn active-filter" data-status="">All</button>
++        <button class="btn filter-btn active-filter" data-status="live">live</button>
++        <button class="btn filter-btn active-filter" data-status="parked">parked</button>
++        <button class="btn filter-btn active-filter" data-status="concluded">concluded</button>
++        <button class="btn filter-btn active-filter" data-status="dropped">dropped</button>
++      </span>
++    </div>
++  </div>
++
++  <!-- Create-click card (toggleable, per D13) -->
++  <div id="create-section" class="card">
++    <h3 id="create-form-title">New Click</h3>
++    <div class="form-row">
++      <label for="create-goal-input">Goal</label>
++      <input type="text" id="create-goal-input" placeholder="Click goal" required>
++    </div>
++    <div class="form-row">
++      <label for="create-parent-input">Parent ID (optional)</label>
++      <input type="text" id="create-parent-input" placeholder="Parent click ID or short prefix">
++    </div>
++    <button class="btn btn--primary" id="create-submit-btn">Create Click</button>
++    <div id="create-error" class="error-msg" style="display:none"></div>
++  </div>
++
++  <!-- Breadcrumb (shown when scoped, per D23) -->
++  <div id="breadcrumb-bar" class="card" style="display:none">
++    <div id="breadcrumb-content" class="breadcrumb"></div>
++  </div>
++
++  <!-- Split layout: tree area (left) + detail pane (right), per D4 -->
++  <div class="split-layout">
++    <div class="tree-area">
++      <div class="card" id="tree-card">
++        <div id="tree-container">
++          <div class="empty-state">Loading…</div>
++        </div>
++      </div>
++    </div>
++    <div class="detail-area">
++      <div id="detail-card" class="card" style="display:none">
++        <div id="detail-content"></div>
++      </div>
++      <div id="detail-placeholder" class="card">
++        <p class="detail-placeholder-text">Select a click to view its details.</p>
++      </div>
++    </div>
++  </div>
++
++</main>
++
++  <script>
++  (() => {
++    // ── State ────────────────────────────────────────────────────────
++    let forest = [];            // Full ClickTree[] from server
++    let selectedClickId = null; // Currently shown in detail pane
++    let scopedRootId = null;    // ?root= URL param
++    let collapsedNodes = new Set(); // node IDs the user has collapsed
++
++    // All four statuses active by default (D7)
++    let activeStatuses = new Set(['live', 'parked', 'concluded', 'dropped']);
++
++    // Parse URL params on load (D19, D23)
++    const _urlParams = new URLSearchParams(window.location.search);
++    selectedClickId = _urlParams.get('click');
++    scopedRootId    = _urlParams.get('root');
++
++    // ── Helpers ──────────────────────────────────────────────────────
++
++    async function api(method, path, body) {
++      const opts = { method, headers: { 'Content-Type': 'application/json' } };
++      if (body !== undefined) opts.body = JSON.stringify(body);
++      const res = await fetch(path, opts);
++      const json = await res.json();
++      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
++      return json;
++    }
++
++    /** Map click status to shared Oculus badge class (D9/D20). */
++    function statusBadge(status) {
++      const map = {
++        live:      'badge badge--active',
++        parked:    'badge badge--warning',
++        concluded: 'badge badge--success',
++        dropped:   'badge badge--error',
++      };
++      return `<span class="${map[status] ?? 'badge'}">${escHtml(status)}</span>`;
++    }
++
++    function fmtDate(iso) {
++      if (!iso) return '';
++      return new Date(iso).toLocaleString();
++    }
++
++    function escHtml(s) {
++      return String(s ?? '')
++        .replace(/&/g, '&amp;')
++        .replace(/</g, '&lt;')
++        .replace(/>/g, '&gt;')
++        .replace(/"/g, '&quot;');
++    }
++
++    function showError(el, msg) { el.textContent = msg; el.style.display = 'block'; }
++    function clearError(el) { el.textContent = ''; el.style.display = 'none'; }
++
++    async function copyToClipboard(text, btn) {
++      try {
++        await navigator.clipboard.writeText(text);
++        const orig = btn.textContent;
++        btn.textContent = '✓';
++        setTimeout(() => { btn.textContent = orig; }, 1500);
++      } catch (e) { console.error('Copy failed', e); }
++    }
++
++    /** Shorten `c-<base36ts>-<hex>` to `c-<base36ts>` (the resolvable prefix form). */
++    function shortId(id) {
++      const parts = id.split('-');
++      return parts.length >= 2 ? parts.slice(0, 2).join('-') : id;
++    }
++
++    // ── Prune helpers (D6) ───────────────────────────────────────────
++
++    /**
++     * Prune a ClickTree by the active status set.
++     * Returns null when the node itself is filtered out.
++     */
++    function pruneByStatus(tree) {
++      if (!activeStatuses.has(tree.click.status)) return null;
++      const children = tree.children.map(pruneByStatus).filter(c => c !== null);
++      return { click: tree.click, children };
++    }
++
++    /** Return the pruned, scoped forest for rendering. */
++    function getVisibleForest() {
++      let roots;
++      if (scopedRootId) {
++        const sub = findTree(forest, scopedRootId);
++        roots = sub ? [sub] : [];
++      } else {
++        roots = forest;
++      }
++      return roots.map(pruneByStatus).filter(t => t !== null);
++    }
++
++    /** Find a ClickTree node anywhere in the forest by ID. */
++    function findTree(trees, id) {
++      for (const t of trees) {
++        if (t.click.id === id) return t;
++        const found = findTree(t.children, id);
++        if (found) return found;
++      }
++      return null;
++    }
++
++    /** Find the ClickDoc for a given ID anywhere in the forest. */
++    function findClick(id) {
++      const t = findTree(forest, id);
++      return t ? t.click : null;
++    }
++
++    // ── Breadcrumb (D23) ─────────────────────────────────────────────
++
++    /** Return the path of ClickDocs from the forest root to `id`. */
++    function ancestorPath(id) {
++      function walk(trees, target, acc) {
++        for (const t of trees) {
++          const path = [...acc, t.click];
++          if (t.click.id === target) return path;
++          const found = walk(t.children, target, path);
++          if (found) return found;
++        }
++        return null;
++      }
++      return walk(forest, id, []) ?? [];
++    }
++
++    function renderBreadcrumb() {
++      const bar = document.getElementById('breadcrumb-bar');
++      const content = document.getElementById('breadcrumb-content');
++
++      if (!scopedRootId) { bar.style.display = 'none'; return; }
++
++      bar.style.display = '';
++      const path = ancestorPath(scopedRootId);
++
++      let html = '<button class="breadcrumb-link" id="bc-show-all">Show all</button>';
++      for (const click of path) {
++        const label = click.goal.length > 40 ? click.goal.substring(0, 39) + '…' : click.goal;
++        html += `<span class="breadcrumb-sep">›</span>`;
++        html += `<button class="breadcrumb-link" data-bc-id="${click.id}">${escHtml(label)}</button>`;
++      }
++      content.innerHTML = html;
++
++      document.getElementById('bc-show-all').addEventListener('click', () => setScopedRoot(null));
++      content.querySelectorAll('[data-bc-id]').forEach(btn => {
++        btn.addEventListener('click', () => setScopedRoot(btn.dataset.bcId));
++      });
++    }
++
++    function setScopedRoot(id) {
++      scopedRootId = id;
++      const p = new URLSearchParams(window.location.search);
++      if (id) { p.set('root', id); } else { p.delete('root'); }
++      if (selectedClickId) { p.set('click', selectedClickId); } else { p.delete('click'); }
++      const qs = p.toString();
++      history.pushState({}, '', qs ? '?' + qs : location.pathname);
++      renderAll();
++    }
++
++    // ── Tree rendering ────────────────────────────────────────────────
++
++    function renderTree() {
++      const container = document.getElementById('tree-container');
++      const visible = getVisibleForest();
++
++      if (visible.length === 0) {
++        if (forest.length === 0) {
++          container.innerHTML = '<div class="empty-state">No clicks found. Create one with "New Click".</div>';
++        } else {
++          container.innerHTML = '<div class="empty-state">No clicks match the current filters.</div>';
++        }
++        return;
++      }
++
++      container.innerHTML = '';
++      for (const tree of visible) {
++        container.appendChild(buildNodeEl(tree));
++      }
++    }
++
++    function buildNodeEl(tree) {
++      const click  = tree.click;
++      const isSelected  = click.id === selectedClickId;
++      const isCollapsed = collapsedNodes.has(click.id);
++      const hasChildren = tree.children.length > 0;
++      const isTerminal  = click.status === 'concluded' || click.status === 'dropped';
++      const hasConclusion = isTerminal && click.conclusion;
++
++      const wrapper = document.createElement('div');
++      wrapper.dataset.nodeId = click.id;
++
++      // ── Row ──────────────────────────────────────────────────────
++      const row = document.createElement('div');
++      row.className = 'tree-node-row' + (isSelected ? ' selected' : '');
++      row.dataset.id = click.id;
++
++      // Expand/collapse button (for children) or conclusion toggle (for terminal leaf)
++      const expandBtn = document.createElement('button');
++      expandBtn.className = 'expand-btn';
++      if (hasChildren) {
++        expandBtn.textContent = isCollapsed ? '▸' : '▾';
++        expandBtn.title = isCollapsed ? 'Expand' : 'Collapse';
++        expandBtn.addEventListener('click', e => { e.stopPropagation(); toggleExpand(click.id); });
++      } else if (hasConclusion) {
++        // D10: disclosure triangle for terminal-node conclusion
++        expandBtn.textContent = '▸';
++        expandBtn.title = 'Show conclusion';
++        expandBtn.dataset.conclusionFor = click.id;
++        expandBtn.addEventListener('click', e => { e.stopPropagation(); toggleConclusion(click.id, expandBtn); });
++      }
++      row.appendChild(expandBtn);
++
++      // Status badge (D9)
++      const badgeWrapper = document.createElement('span');
++      badgeWrapper.innerHTML = statusBadge(click.status);
++      row.appendChild(badgeWrapper);
++
++      // Short ID
++      const idCode = document.createElement('code');
++      idCode.className = 'node-id-code';
++      idCode.textContent = shortId(click.id);
++      row.appendChild(idCode);
++
++      // Goal text
++      const goalSpan = document.createElement('span');
++      goalSpan.className = 'node-goal';
++      goalSpan.textContent = click.goal;
++      goalSpan.title = click.goal;
++      row.appendChild(goalSpan);
++
++      // Action buttons (visible on hover)
++      const actions = document.createElement('span');
++      actions.className = 'node-actions';
++
++      const copyBtn = document.createElement('button');
++      copyBtn.className = 'btn';
++      copyBtn.textContent = 'ID';
++      copyBtn.title = 'Copy full ID to clipboard';
++      copyBtn.style.cssText = 'padding:0.1rem 0.3rem;font-size:0.7rem';
++      copyBtn.addEventListener('click', e => { e.stopPropagation(); copyToClipboard(click.id, copyBtn); });
++      actions.appendChild(copyBtn);
++
++      const focusBtn = document.createElement('button');
++      focusBtn.className = 'btn';
++      focusBtn.textContent = 'Focus';
++      focusBtn.title = 'Scope tree to this subtree';
++      focusBtn.style.cssText = 'padding:0.1rem 0.3rem;font-size:0.7rem';
++      focusBtn.addEventListener('click', e => { e.stopPropagation(); setScopedRoot(click.id); });
++      actions.appendChild(focusBtn);
++
++      row.appendChild(actions);
++
++      // Select the click and show detail when the row label is clicked (D5)
++      row.addEventListener('click', () => selectClick(click.id));
++
++      wrapper.appendChild(row);
++
++      // ── Conclusion disclosure (D10) ──────────────────────────────
++      if (hasConclusion) {
++        const discDiv = document.createElement('div');
++        discDiv.className = 'conclusion-disclosure';
++        discDiv.id = 'node-conclusion-' + click.id;
++        discDiv.style.display = 'none';
++        const discText = document.createElement('div');
++        discText.className = 'conclusion-text';
++        discText.textContent = click.conclusion;
++        discDiv.appendChild(discText);
++        wrapper.appendChild(discDiv);
++      }
++
++      // ── Children (D8: all expanded by default) ───────────────────
++      if (hasChildren) {
++        const childrenDiv = document.createElement('div');
++        childrenDiv.className = 'tree-children';
++        childrenDiv.id = 'children-' + click.id;
++        if (isCollapsed) childrenDiv.style.display = 'none';
++        for (const child of tree.children) {
++          childrenDiv.appendChild(buildNodeEl(child));
++        }
++        wrapper.appendChild(childrenDiv);
++      }
++
++      return wrapper;
++    }
++
++    function toggleExpand(id) {
++      if (collapsedNodes.has(id)) {
++        collapsedNodes.delete(id);
++      } else {
++        collapsedNodes.add(id);
++      }
++      renderAll();
++    }
++
++    function toggleConclusion(id, btn) {
++      const discDiv = document.getElementById('node-conclusion-' + id);
++      if (!discDiv) return;
++      const show = discDiv.style.display === 'none';
++      discDiv.style.display = show ? '' : 'none';
++      btn.textContent = show ? '▾' : '▸';
++    }
++
++    // ── Data loading ─────────────────────────────────────────────────
++
++    async function loadForest() {
++      try {
++        const data = await api('GET', '/api/click/tree?format=json');
++        forest = Array.isArray(data) ? data : [];
++      } catch (e) {
++        console.error('Failed to load click tree:', e);
++        forest = [];
++      }
++    }
++
++    // ── Render all ───────────────────────────────────────────────────
++
++    function renderAll() {
++      renderBreadcrumb();
++      renderTree();
++    }
++
++    // ── Status filter (D6/D7) ────────────────────────────────────────
++
++    function setStatusFilter(status) {
++      const allStatuses = ['live', 'parked', 'concluded', 'dropped'];
++      if (status === '') {
++        // "All" button: activate all
++        activeStatuses = new Set(allStatuses);
++      } else {
++        const allActive = allStatuses.every(s => activeStatuses.has(s));
++        if (allActive) {
++          // Collapse to just the clicked status
++          activeStatuses = new Set([status]);
++        } else if (activeStatuses.has(status)) {
++          activeStatuses.delete(status);
++        } else {
++          activeStatuses.add(status);
++        }
++      }
++      // Re-sync button visual state
++      const nowAll = allStatuses.every(s => activeStatuses.has(s));
++      document.querySelectorAll('.filter-btn').forEach(btn => {
++        const s = btn.dataset.status;
++        btn.classList.toggle('active-filter', s === '' ? nowAll : activeStatuses.has(s));
++      });
++      renderAll();
++    }
++
++    // ── Select click → detail pane ────────────────────────────────────
++
++    async function selectClick(id) {
++      selectedClickId = id;
++
++      // Update URL ?click= param (D19)
++      const p = new URLSearchParams(window.location.search);
++      p.set('click', id);
++      if (scopedRootId) { p.set('root', scopedRootId); }
++      history.pushState({}, '', '?' + p.toString());
++
++      // Highlight selected row
++      document.querySelectorAll('.tree-node-row').forEach(row => {
++        row.classList.toggle('selected', row.dataset.id === id);
++      });
++
++      await showDetailPane(id);
++    }
++
++    async function showDetailPane(id) {
++      let clickData;
++      try {
++        clickData = await api('GET', '/api/click/show?id=' + encodeURIComponent(id));
++      } catch (e) {
++        console.error('Failed to load click detail:', e);
++        return;
++      }
++
++      document.getElementById('detail-placeholder').style.display = 'none';
++      document.getElementById('detail-card').style.display = '';
++
++      const content = document.getElementById('detail-content');
++      content.innerHTML = renderDetail(clickData);
++      wireDetailEvents(content, clickData);
++      fetchLinkMetadata(clickData);
++    }
++
++    function hideDetailPane() {
++      document.getElementById('detail-card').style.display = 'none';
++      document.getElementById('detail-placeholder').style.display = '';
++      selectedClickId = null;
++    }
++
++    // ── Detail pane rendering (D24) ──────────────────────────────────
++
++    function renderDetail(clickData) {
++      // click-show returns the ClickDoc fields spread + links + parent + children
++      const click    = clickData;
++      const links    = clickData.links    ?? { outbound: [], inbound: [] };
++      const children = clickData.children ?? { summary: {}, items: [] };
++      const parent   = clickData.parent;
++
++      const isTerminal = click.status === 'concluded' || click.status === 'dropped';
++      let html = '';
++
++      // ── ID header with copy affordance ──────────────────────────
++      html += `<div class="detail-section" style="margin-bottom:0.5rem">`;
++      html += `<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">`;
++      html += `<code id="detail-id-${click.id}">${escHtml(click.id)}</code>`;
++      html += `<button class="btn copy-id-btn" data-copy="${escHtml(click.id)}" `;
++      html += `style="padding:0.1rem 0.3rem;font-size:0.7rem;cursor:pointer">📋</button>`;
++      html += `</div></div>`;
++
++      // ── Fields (D24) ─────────────────────────────────────────────
++      html += `<div class="detail-section"><dl class="detail-grid">`;
++      html += `<dt>Goal</dt><dd>${escHtml(click.goal)}</dd>`;
++      html += `<dt>Status</dt><dd>${statusBadge(click.status)}</dd>`;
++      if (parent) {
++        html += `<dt>Parent</dt><dd>`;
++        html += `<a class="link-target" data-click-id="${parent.id}">${escHtml(parent.goal ?? parent.id)}</a>`;
++        html += ` ${statusBadge(parent.status)}`;
++        html += `</dd>`;
++      }
++      html += `<dt>Created</dt><dd>${escHtml(fmtDate(click.createdAt))}</dd>`;
++      if (click.createdSessionId) {
++        html += `<dt>Created by</dt><dd><code>${escHtml(click.createdSessionId)}</code></dd>`;
++      }
++      if (click.resolvedAt) {
++        html += `<dt>Resolved</dt><dd>${escHtml(fmtDate(click.resolvedAt))}</dd>`;
++      }
++      if (click.resolvedSessionId) {
++        html += `<dt>Resolved by</dt><dd><code>${escHtml(click.resolvedSessionId)}</code></dd>`;
++      }
++      html += `</dl></div>`;
++
++      // ── Conclusion (terminal only, expandable per D10) ────────────
++      if (isTerminal && click.conclusion) {
++        html += `<div class="detail-section">`;
++        html += `<h4>Conclusion `;
++        html += `<button class="btn" id="concl-toggle-${click.id}" `;
++        html += `style="padding:0.1rem 0.3rem;font-size:0.7rem" title="Toggle conclusion">▸</button>`;
++        html += `</h4>`;
++        html += `<div id="concl-text-${click.id}" style="display:none;padding:0.5rem;`;
++        html += `background:var(--bg3,#24283b);border-radius:4px;font-size:0.875rem;`;
++        html += `white-space:pre-wrap;word-break:break-word">${escHtml(click.conclusion)}</div>`;
++        html += `</div>`;
++      }
++
++      // ── Children (D22) ────────────────────────────────────────────
++      const childItems = children.items ?? [];
++      if (childItems.length > 0 || Object.keys(children.summary ?? {}).length > 0) {
++        html += `<div class="detail-section"><h4>Children</h4>`;
++
++        // Status-count badge strip
++        if (children.summary && Object.keys(children.summary).length > 0) {
++          html += `<div style="margin-bottom:0.5rem">`;
++          for (const [st, cnt] of Object.entries(children.summary)) {
++            html += statusBadge(st) + ` <span style="margin-right:0.6rem">${cnt}</span>`;
++          }
++          html += `</div>`;
++        }
++
++        // Table of first-generation children with clickable rows
++        if (childItems.length > 0) {
++          html += `<table class="data-table children-table"><thead><tr>`;
++          html += `<th>Status</th><th>Goal</th><th>ID</th>`;
++          html += `</tr></thead><tbody>`;
++          for (const child of childItems) {
++            html += `<tr class="child-row" data-child-id="${escHtml(child.id)}">`;
++            html += `<td>${statusBadge(child.status)}</td>`;
++            html += `<td>${escHtml(child.goal ?? '')}</td>`;
++            html += `<td><code>${escHtml(child.id)}</code></td>`;
++            html += `</tr>`;
++          }
++          html += `</tbody></table>`;
++        }
++        html += `</div>`;
++      }
++
++      // ── Links (D15/D16) ───────────────────────────────────────────
++      html += `<div class="detail-section" id="links-section-${click.id}">`;
++      html += renderLinksSection(click, links);
++      html += `</div>`;
++
++      // ── Lifecycle actions (D11) ───────────────────────────────────
++      if (!isTerminal) {
++        html += `<div class="detail-section"><h4>Actions</h4>`;
++        html += `<div class="action-buttons" id="actions-${click.id}">`;
++        if (click.status === 'live') {
++          html += `<button class="btn" data-action="park" data-id="${click.id}">Park</button>`;
++          html += `<button class="btn btn--success" data-action="conclude" data-id="${click.id}">Conclude</button>`;
++          html += `<button class="btn btn--danger"  data-action="drop"     data-id="${click.id}">Drop</button>`;
++        } else if (click.status === 'parked') {
++          html += `<button class="btn btn--primary" data-action="resume"   data-id="${click.id}">Resume</button>`;
++          html += `<button class="btn btn--success" data-action="conclude" data-id="${click.id}">Conclude</button>`;
++          html += `<button class="btn btn--danger"  data-action="drop"     data-id="${click.id}">Drop</button>`;
++        }
++        html += `<div class="error-msg" id="action-error-${click.id}" style="display:none"></div>`;
++        html += `<div id="confirm-area-${click.id}"></div>`;
++        html += `</div></div>`;
++      }
++
++      return html;
++    }
++
++    /** Render the links section HTML for a click. */
++    function renderLinksSection(click, links) {
++      const outbound = links.outbound ?? [];
++      const inbound  = links.inbound  ?? [];
++      let html = '<h4>Links</h4>';
++
++      if (outbound.length === 0 && inbound.length === 0) {
++        html += '<p style="font-size:0.875rem;opacity:0.5">No links.</p>';
++      }
++
++      for (const l of outbound) {
++        html += `<div class="link-row">`;
++        html += `<span class="link-dir">→</span>`;
++        html += linkTargetHtml(l.targetId);
++        html += `<span class="badge" style="font-size:0.7rem;padding:0.1rem 0.35rem">${escHtml(l.linkType)}</span>`;
++        html += `<button class="btn btn--danger" style="padding:0.1rem 0.4rem;font-size:0.75rem"`;
++        html += ` data-action="unlink" data-source="${l.sourceId}" data-target="${l.targetId}" data-link-type="${l.linkType}">×</button>`;
++        html += `<span class="link-meta" id="link-meta-${l.targetId}"></span>`;
++        html += `</div>`;
++      }
++      for (const l of inbound) {
++        html += `<div class="link-row">`;
++        html += `<span class="link-dir">←</span>`;
++        html += linkTargetHtml(l.sourceId);
++        html += `<span class="badge" style="font-size:0.7rem;padding:0.1rem 0.35rem">${escHtml(l.linkType)}</span>`;
++        html += `<button class="btn btn--danger" style="padding:0.1rem 0.4rem;font-size:0.75rem"`;
++        html += ` data-action="unlink" data-source="${l.sourceId}" data-target="${l.targetId}" data-link-type="${l.linkType}">×</button>`;
++        html += `<span class="link-meta" id="link-meta-${l.sourceId}"></span>`;
++        html += `</div>`;
++      }
++
++      // Add-link form with enum dropdown (D14)
++      html += `<div class="add-link-form">`;
++      html += `<input type="text" id="link-target-${click.id}" placeholder="Target ID" style="width:160px">`;
++      html += `<select id="link-type-${click.id}">`;
++      html += `<option value="related">related</option>`;
++      html += `<option value="commissioned">commissioned</option>`;
++      html += `<option value="supersedes">supersedes</option>`;
++      html += `<option value="depends-on">depends-on</option>`;
++      html += `</select>`;
++      html += `<button class="btn" data-action="addlink" data-id="${click.id}">Link</button>`;
++      html += `<div class="error-msg" id="link-error-${click.id}" style="display:none"></div>`;
++      html += `</div>`;
++
++      return html;
++    }
++
++    /**
++     * Dispatch link target display by ID prefix (D15):
++     * c-… → anchor that opens click detail in-page
++     * w-… → anchor that navigates to the writs page
++     * other → plain text
++     */
++    function linkTargetHtml(targetId) {
++      if (targetId.startsWith('c-')) {
++        return `<a class="link-target" data-click-id="${escHtml(targetId)}">${escHtml(targetId)}</a>`;
++      }
++      if (targetId.startsWith('w-')) {
++        return `<a class="link-target" href="/pages/writs/?writ=${encodeURIComponent(targetId)}">${escHtml(targetId)}</a>`;
++      }
++      return `<span>${escHtml(targetId)}</span>`;
++    }
++
++    /**
++     * Lazily fetch metadata for each link target and populate the
++     * `.link-meta` spans in the detail pane (D16).
++     */
++    async function fetchLinkMetadata(clickData) {
++      const links   = clickData.links ?? { outbound: [], inbound: [] };
++      const targets = [
++        ...links.outbound.map(l => l.targetId),
++        ...links.inbound .map(l => l.sourceId),
++      ];
++
++      for (const id of targets) {
++        const metaEl = document.getElementById('link-meta-' + id);
++        if (!metaEl) continue;
++        try {
++          if (id.startsWith('c-')) {
++            const data = await api('GET', '/api/click/show?id=' + encodeURIComponent(id));
++            const goal = data.goal ?? '';
++            metaEl.textContent = goal ? '— ' + goal.substring(0, 50) : '';
++          } else if (id.startsWith('w-')) {
++            const data = await api('GET', '/api/writ/show?id=' + encodeURIComponent(id));
++            const title = data.title ?? '';
++            metaEl.textContent = title ? '— ' + title.substring(0, 50) : '';
++          }
++        } catch (_) { /* silently ignore — metadata is best-effort */ }
++      }
++    }
++
++    // ── Detail event wiring ──────────────────────────────────────────
++
++    function wireDetailEvents(container, clickData) {
++      const click = clickData;
++
++      // Copy-ID button
++      container.querySelectorAll('.copy-id-btn').forEach(btn => {
++        btn.addEventListener('click', () => copyToClipboard(btn.dataset.copy, btn));
++      });
++
++      // Conclusion toggle (D10)
++      const conclToggle = document.getElementById('concl-toggle-' + click.id);
++      if (conclToggle) {
++        conclToggle.addEventListener('click', () => {
++          const conclText = document.getElementById('concl-text-' + click.id);
++          if (!conclText) return;
++          const show = conclText.style.display === 'none';
++          conclText.style.display = show ? '' : 'none';
++          conclToggle.textContent = show ? '▾' : '▸';
++        });
++      }
++
++      // Child-row clicks → navigate to child detail (D22)
++      container.querySelectorAll('.child-row').forEach(row => {
++        row.addEventListener('click', () => selectClick(row.dataset.childId));
++      });
++
++      // Parent link click (c-… prefix)
++      container.querySelectorAll('.link-target[data-click-id]').forEach(a => {
++        a.addEventListener('click', e => {
++          e.preventDefault();
++          selectClick(a.dataset.clickId);
++        });
++      });
++
++      // Generic data-action buttons
++      container.querySelectorAll('[data-action]').forEach(btn => {
++        btn.addEventListener('click', e => {
++          e.stopPropagation();
++          handleDetailAction(btn.dataset.action, btn.dataset.id ?? click.id, btn, container, click);
++        });
++      });
++    }
++
++    function handleDetailAction(action, id, btn, container, click) {
++      if      (action === 'park')    doSimpleTransition(id, 'park',    btn);
++      else if (action === 'resume')  doSimpleTransition(id, 'resume',  btn);
++      else if (action === 'conclude') showConfirm(id, 'conclude', btn, container);
++      else if (action === 'drop')     showConfirm(id, 'drop',     btn, container);
++      else if (action === 'unlink') {
++        doUnlink(btn.dataset.source, btn.dataset.target, btn.dataset.linkType, btn, id);
++      }
++      else if (action === 'addlink') {
++        const targetInput = document.getElementById('link-target-' + id);
++        const typeSelect  = document.getElementById('link-type-'   + id);
++        const errEl       = document.getElementById('link-error-'  + id);
++        doAddLink(id, targetInput.value.trim(), typeSelect.value, btn, errEl, targetInput);
++      }
++    }
++
++    async function doSimpleTransition(id, action, btn) {
++      const orig = btn.textContent;
++      btn.disabled = true; btn.textContent = '…';
++      try {
++        await api('POST', '/api/click/' + action, { id });
++        await refreshAfterMutation(id);
++      } catch (e) {
++        alert(`Failed to ${action}: ${e.message}`);
++      } finally {
++        btn.disabled = false; btn.textContent = orig;
++      }
++    }
++
++    /** Show the conclude/drop confirm section with a required conclusion input. */
++    function showConfirm(id, action, btn, container) {
++      const area   = document.getElementById('confirm-area-' + id);
++      const errEl  = container.querySelector('#action-error-' + id);
++      if (errEl) clearError(errEl);
++      if (!area) return;
++
++      const confirmLabel = action === 'conclude' ? 'Confirm Conclude' : 'Confirm Drop';
++      const btnClass     = action === 'conclude' ? 'btn--success' : 'btn--danger';
++
++      area.innerHTML = `
++        <div class="confirm-section">
++          <label>Conclusion (required)</label>
++          <input type="text" id="confirm-concl-${id}" placeholder="Conclusion text">
++          <button class="btn ${btnClass}" id="confirm-btn-${id}" disabled>${escHtml(confirmLabel)}</button>
++          <div class="error-msg" id="confirm-error-${id}" style="display:none"></div>
++        </div>`;
++
++      const input      = document.getElementById('confirm-concl-'  + id);
++      const confirmBtn = document.getElementById('confirm-btn-'    + id);
++      const confirmErr = document.getElementById('confirm-error-'  + id);
++
++      input.addEventListener('input', () => {
++        confirmBtn.disabled = !input.value.trim();
++        clearError(confirmErr);
++      });
++
++      confirmBtn.addEventListener('click', async () => {
++        const conclusion = input.value.trim();
++        clearError(confirmErr);
++        confirmBtn.disabled = true; confirmBtn.textContent = '…';
++        try {
++          await api('POST', '/api/click/' + action, { id, conclusion });
++          await refreshAfterMutation(id);
++          area.innerHTML = '';
++        } catch (e) {
++          showError(confirmErr, e.message);
++          confirmBtn.disabled = false; confirmBtn.textContent = confirmLabel;
++        }
++      });
++    }
++
++    async function doUnlink(sourceId, targetId, linkType, btn, clickId) {
++      const orig = btn.textContent;
++      btn.disabled = true;
++      try {
++        await api('POST', '/api/click/unlink', { sourceId, targetId, linkType });
++        await refreshAfterMutation(clickId);
++      } catch (e) {
++        alert('Unlink failed: ' + e.message);
++      } finally {
++        btn.disabled = false; btn.textContent = orig;
++      }
++    }
++
++    async function doAddLink(clickId, targetId, linkType, btn, errEl, targetInput) {
++      clearError(errEl);
++      if (!targetId) { showError(errEl, 'Target ID is required.'); return; }
++      const orig = btn.textContent;
++      btn.disabled = true; btn.textContent = '…';
++      try {
++        await api('POST', '/api/click/link', { sourceId: clickId, targetId, linkType });
++        targetInput.value = '';
++        await refreshAfterMutation(clickId);
++      } catch (e) {
++        showError(errEl, e.message);
++      } finally {
++        btn.disabled = false; btn.textContent = orig;
++      }
++    }
++
++    // ── Post-mutation refresh (D17) ──────────────────────────────────
++
++    async function refreshAfterMutation(keepSelectedId) {
++      await loadForest();
++      renderAll();
++      // Re-select the same click so the detail pane stays coherent
++      if (keepSelectedId) {
++        // Re-highlight selected row
++        document.querySelectorAll('.tree-node-row').forEach(row => {
++          row.classList.toggle('selected', row.dataset.id === keepSelectedId);
++        });
++        await showDetailPane(keepSelectedId);
++      }
++    }
++
++    // ── Create-click form ────────────────────────────────────────────
++
++    function openCreateForm(prefillParentId) {
++      const section = document.getElementById('create-section');
++      section.classList.add('open');
++      if (prefillParentId) {
++        document.getElementById('create-parent-input').value = prefillParentId;
++      }
++      document.getElementById('create-goal-input').focus();
++    }
++
++    function closeCreateForm() {
++      document.getElementById('create-section').classList.remove('open');
++      document.getElementById('create-goal-input').value = '';
++      document.getElementById('create-parent-input').value = '';
++      clearError(document.getElementById('create-error'));
++    }
++
++    async function submitCreateForm() {
++      const goalInput   = document.getElementById('create-goal-input');
++      const parentInput = document.getElementById('create-parent-input');
++      const submitBtn   = document.getElementById('create-submit-btn');
++      const errEl       = document.getElementById('create-error');
++
++      clearError(errEl);
++      const goal     = goalInput.value.trim();
++      const parentId = parentInput.value.trim() || undefined;
++
++      if (!goal) { showError(errEl, 'Goal is required.'); return; }
++
++      submitBtn.disabled = true; submitBtn.textContent = 'Creating…';
++      try {
++        const newClick = await api('POST', '/api/click/create', { goal, ...(parentId ? { parentId } : {}) });
++        closeCreateForm();
++        await loadForest();
++        renderAll();
++        // Auto-select the new click
++        await selectClick(newClick.id);
++      } catch (e) {
++        showError(errEl, e.message);
++      } finally {
++        submitBtn.disabled = false; submitBtn.textContent = 'Create Click';
++      }
++    }
++
++    // ── Event wiring ─────────────────────────────────────────────────
++
++    document.getElementById('btn-new-click').addEventListener('click', () => {
++      const section = document.getElementById('create-section');
++      if (section.classList.contains('open')) {
++        closeCreateForm();
++      } else {
++        // Pre-fill parent with currently selected click, if any (D12)
++        openCreateForm(selectedClickId || '');
++      }
++    });
++
++    document.getElementById('btn-refresh').addEventListener('click', async () => {
++      await loadForest();
++      renderAll();
++      if (selectedClickId) await showDetailPane(selectedClickId);
++    });
++
++    document.getElementById('create-submit-btn').addEventListener('click', submitCreateForm);
++
++    document.getElementById('create-goal-input').addEventListener('keydown', e => {
++      if (e.key === 'Enter') submitCreateForm();
++    });
++
++    document.querySelectorAll('.filter-btn').forEach(btn => {
++      btn.addEventListener('click', () => setStatusFilter(btn.dataset.status));
++    });
++
++    // ── Init ─────────────────────────────────────────────────────────
++    (async () => {
++      await loadForest();
++      renderAll();
++
++      // Deep-link: ?click=<id> auto-opens detail pane (D19)
++      if (selectedClickId) {
++        await showDetailPane(selectedClickId);
++        // Highlight in tree
++        document.querySelectorAll('.tree-node-row').forEach(row => {
++          row.classList.toggle('selected', row.dataset.id === selectedClickId);
++        });
++      }
++    })();
++
++  })();
++  </script>
++</body>
++</html>
+diff --git a/packages/plugins/ratchet/src/ratchet.test.ts b/packages/plugins/ratchet/src/ratchet.test.ts
+index 8e876a1..e7b5754 100644
+--- a/packages/plugins/ratchet/src/ratchet.test.ts
++++ b/packages/plugins/ratchet/src/ratchet.test.ts
+@@ -115,10 +115,15 @@ describe('Ratchet', () => {
+       ]);
+     });
+ 
+-    it('has no pages in supportKit', () => {
++    it('supportKit includes pages contribution for clicks', () => {
+       const plugin = createRatchet();
+-      const app = (plugin as { apparatus: { supportKit: Record<string, unknown> } }).apparatus;
+-      assert.strictEqual(app.supportKit.pages, undefined);
++      const p = plugin as { apparatus: { supportKit: { pages?: Array<{ id: string; title: string; dir: string }> } } };
++      const pages = p.apparatus.supportKit.pages;
++      assert.ok(Array.isArray(pages), 'pages should be an array');
++      const clicksPage = pages!.find(pg => pg.id === 'clicks');
++      assert.ok(clicksPage, 'pages should include a clicks entry');
++      assert.equal(clicksPage.title, 'Clicks');
++      assert.equal(clicksPage.dir, 'pages/clicks');
+     });
+   });
+ 
+@@ -1046,6 +1051,47 @@ describe('Ratchet', () => {
+         'sibling goals should align in the same column',
+       );
+     });
++
++    it('returns ClickTree[] when format=json', async () => {
++      const root = await ratchet.create({ goal: 'Root' });
++      const child = await ratchet.create({ goal: 'Child', parentId: root.id });
++
++      const result = await clickTree.handler({ format: 'json' }) as ClickTree[];
++      assert.ok(Array.isArray(result), 'json format should return an array');
++      assert.strictEqual(result.length, 1);
++      assert.strictEqual(result[0].click.id, root.id);
++      assert.strictEqual(result[0].click.goal, 'Root');
++      assert.strictEqual(result[0].children.length, 1);
++      assert.strictEqual(result[0].children[0].click.id, child.id);
++    });
++
++    it('returns empty array for json format when no clicks exist', async () => {
++      const result = await clickTree.handler({ format: 'json' }) as ClickTree[];
++      assert.ok(Array.isArray(result));
++      assert.strictEqual(result.length, 0);
++    });
++
++    it('json format returns text message for default format when empty', async () => {
++      const output = await clickTree.handler({}) as string;
++      assert.strictEqual(typeof output, 'string');
++      assert.strictEqual(output, 'No clicks found.');
++    });
++
++    it('json format respects rootId and status filters', async () => {
++      const a = await ratchet.create({ goal: 'Root A' });
++      await ratchet.create({ goal: 'Root B' });
++      await ratchet.create({ goal: 'Child of A', parentId: a.id });
++      const parked = await ratchet.create({ goal: 'Parked child', parentId: a.id });
++      await ratchet.park(parked.id);
++
++      const result = await clickTree.handler({ rootId: a.id, status: 'live', format: 'json' }) as ClickTree[];
++      assert.ok(Array.isArray(result));
++      assert.strictEqual(result.length, 1);
++      assert.strictEqual(result[0].click.id, a.id);
++      // Only 'Child of A' (live) should be in children — parked one pruned
++      assert.strictEqual(result[0].children.length, 1);
++      assert.strictEqual(result[0].children[0].click.goal, 'Child of A');
++    });
+   });
+ 
+   // ── click-extract tool with full flag ─────────────────────────
+diff --git a/packages/plugins/ratchet/src/ratchet.ts b/packages/plugins/ratchet/src/ratchet.ts
+index 5ac33ed..42ffc85 100644
+--- a/packages/plugins/ratchet/src/ratchet.ts
++++ b/packages/plugins/ratchet/src/ratchet.ts
+@@ -495,6 +495,9 @@ export function createRatchet(): Plugin {
+           clickExtract,
+           clickTree,
+         ],
++        pages: [
++          { id: 'clicks', title: 'Clicks', dir: 'pages/clicks' },
++        ],
+       },
+ 
+       provides: api,
+diff --git a/packages/plugins/ratchet/src/tools/click-tree.ts b/packages/plugins/ratchet/src/tools/click-tree.ts
+index a2b49eb..6921e49 100644
+--- a/packages/plugins/ratchet/src/tools/click-tree.ts
++++ b/packages/plugins/ratchet/src/tools/click-tree.ts
+@@ -106,7 +106,8 @@ export default tool({
+     'column before the goal, so the ID can be fed directly to click-show / click-extract / --root-id. ' +
+     'Shows all root clicks and their descendants by default. ' +
+     'Use --root-id to show a specific subtree, --status to filter by status (prune semantics), ' +
+-    'and --depth to limit tree depth.',
++    'and --depth to limit tree depth. ' +
++    'Pass --format json to receive structured ClickTree[] data instead of the rendered ASCII tree.',
+   params: {
+     rootId: z.string().optional().describe('Show subtree rooted at this click ID or prefix'),
+     status: z
+@@ -117,6 +118,10 @@ export default tool({
+       .optional()
+       .describe('Filter by click status (repeatable — pass multiple to match any). Non-matching nodes and their subtrees are pruned.'),
+     depth: z.number().optional().describe('Maximum tree depth to display (0 = roots only)'),
++    format: z
++      .enum(['text', 'json'])
++      .optional()
++      .describe('Output format: "text" (default) renders the ASCII tree; "json" returns structured ClickTree[]'),
+   },
+   permission: 'read',
+   handler: async (params) => {
+@@ -132,6 +137,11 @@ export default tool({
+       depth: params.depth,
+     });
+ 
++    if (params.format === 'json') {
++      // Always return the array for structured callers (empty array when nothing matches)
++      return forest;
++    }
++
+     if (forest.length === 0) {
+       if (params.rootId || params.status || params.depth !== undefined) {
+         return 'No clicks match the given filters.';
