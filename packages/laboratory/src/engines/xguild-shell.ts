@@ -34,6 +34,48 @@ export async function exec(
 }
 
 /**
+ * Tolerant JSON parser for cross-guild shellout output. A well-behaved
+ * `nsg <subcommand> --format json` invocation emits exactly one JSON
+ * document on stdout, but real-world stdout can be polluted by trailing
+ * content from a follow-on emitter (e.g. a plugin's shutdown log, or a
+ * future telemetry hook). When the standard `JSON.parse` rejects with
+ * the V8-flavoured "Unexpected non-whitespace character after JSON at
+ * position N" error, slice the stdout to the failure position and retry
+ * — the prefix is, by definition, a complete and valid JSON document.
+ *
+ * Emits a stderr warning on the recovery path so the underlying
+ * pollution stays diagnosable. Throws the original error (wrapped with
+ * caller context) only when no prefix-recovery path is available.
+ */
+function parseJsonTolerant(stdout: string, caller: string, target: string): unknown {
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    const message = (err as Error).message;
+    const match = /at position (\d+)/.exec(message);
+    if (match) {
+      const pos = Number(match[1]);
+      if (Number.isFinite(pos) && pos > 0 && pos <= stdout.length) {
+        try {
+          const parsed = JSON.parse(stdout.slice(0, pos));
+          console.warn(
+            `[${caller}] tolerated trailing content after JSON for ${target}: ` +
+              `${stdout.length - pos} bytes of garbage after a valid ${pos}-byte JSON prefix.`,
+          );
+          return parsed;
+        } catch {
+          // Prefix isn't valid either — fall through to the original throw.
+        }
+      }
+    }
+    throw new Error(
+      `[${caller}] JSON parse failed for ${target}: ${message}; ` +
+        `stdout=${stdout.slice(0, 200)}`,
+    );
+  }
+}
+
+/**
  * Resolve the test guild's locally-installed `nsg` binstub.
  *
  * The cross-guild shellouts always run against the test guild's own
@@ -88,15 +130,7 @@ export async function fetchWritState(opts: {
     'json',
   ]);
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch (err) {
-    throw new Error(
-      `[${opts.caller}] writ-show JSON parse failed for writ ${opts.writId}: ` +
-        `${(err as Error).message}; stdout=${stdout.slice(0, 200)}`,
-    );
-  }
+  const parsed = parseJsonTolerant(stdout, opts.caller, `writ ${opts.writId}`);
   if (typeof parsed !== 'object' || parsed === null) {
     throw new Error(
       `[${opts.caller}] writ-show response was not an object for writ ${opts.writId}.`,
@@ -127,15 +161,7 @@ export async function fetchRigForWrit(opts: {
   const trimmed = stdout.trim();
   if (!trimmed || trimmed === 'null') return null;
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch (err) {
-    throw new Error(
-      `[${opts.caller}] rig for-writ JSON parse failed for writ ${opts.writId}: ` +
-        `${(err as Error).message}; stdout=${trimmed.slice(0, 200)}`,
-    );
-  }
+  const parsed = parseJsonTolerant(trimmed, opts.caller, `rig for-writ ${opts.writId}`);
   if (typeof parsed === 'object' && parsed !== null) {
     const obj = parsed as Record<string, unknown>;
     if (typeof obj.id === 'string' && obj.id.length > 0) {
@@ -171,15 +197,7 @@ export async function fetchRigState(opts: {
     'json',
   ]);
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch (err) {
-    throw new Error(
-      `[${opts.caller}] rig show JSON parse failed for rig ${opts.rigId}: ` +
-        `${(err as Error).message}; stdout=${stdout.slice(0, 200)}`,
-    );
-  }
+  const parsed = parseJsonTolerant(stdout, opts.caller, `rig ${opts.rigId}`);
   if (typeof parsed !== 'object' || parsed === null) {
     throw new Error(
       `[${opts.caller}] rig show response was not an object for rig ${opts.rigId}.`,
