@@ -1,0 +1,110 @@
+slug: x026-a10-baseline
+title: X026 — A10 Reckoner parseChildFailures fix baseline (stock Sonnet-era artificer.md)
+codex: nexus
+
+description: |
+  X026 baseline trial on workload A10 (rig-moeiitmi, Reckoner
+  parseChildFailures fix). Ships a verbatim Sonnet-era snapshot of
+  `artificer.md` as the implementer's role file. Brief is the
+  astrolabe-generated prompt body extracted from the production
+  implement session (ses-moej0ku7).
+
+  Workload switched from A2 → A10 after the first A2 baseline trial
+  (and the parallel X025 A2 baseline) both hit a
+  "claims-complete-but-no-commit" failure mode at ~17-min session
+  length. Filed as click c-mp2q270l. A10 is the smallest workload in
+  the portfolio: $12.23 Opus baseline, ~15min historical duration,
+  500-insertion discrimination floor. Expected to stay under the
+  threshold where the auto-compaction-strips-commit pattern bites.
+
+  Codex pinned to 50b258507091f6a472c5f100bf6c496c7d8c9635 — the
+  implementer-eye-view at the start of the original rig.
+
+  Per X026 spec, MVP runs n=3 of baseline + n=3 of combined per
+  workload. Per-trial cost expectation: $2-3 Sonnet.
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: 50b258507091f6a472c5f100bf6c496c7d8c9635
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: 50b258507091f6a472c5f100bf6c496c7d8c9635
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X026-implementer-xml-role-ordering/fixtures/roles/artificer-baseline.md
+      briefPath: /workspace/nexus-mk2/experiments/X026-implementer-xml-role-ordering/briefs/A10-reckoner-parsechildfailures-fix.md
+      model: sonnet
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set +e
+        pnpm -w typecheck > /tmp/x026-tc.log 2>&1
+        pnpm -w build > /tmp/x026-build.log 2>&1
+        pnpm -w test > /tmp/x026-test.log 2>&1
+        set -e
+
+        # Typecheck baseline: A10 inherits one clockworks writ-lifecycle-observer error.
+        UNEXPECTED_TC=$(grep -E "error TS[0-9]+" /tmp/x026-tc.log /tmp/x026-build.log \
+          | grep -v "writ-lifecycle-observer.ts(161,34)")
+        if [ -n "$UNEXPECTED_TC" ]; then
+          echo "Variant introduced typecheck/build errors beyond baseline:"
+          echo "$UNEXPECTED_TC"
+          exit 1
+        fi
+
+        # Test baseline: A10 inherits 10 clockworks failures.
+        UNEXPECTED=$(grep -E "test: ✖ " /tmp/x026-test.log \
+          | grep -v "failing tests:" \
+          | grep -v "a child non-mandate writ fires {type}.ready but NOT commission" \
+          | grep -v "Clockworks — end-to-end framework event emission" \
+          | grep -v "Clockworks — processEvents integration" \
+          | grep -v "drives a root mandate through stuck → open → completed" \
+          | grep -v "end-to-end SOF emit + loop-guard cycle through the apparatus surface" \
+          | grep -v "failure path: a throwing relay records an error row" \
+          | grep -v "happy path: emit, processEvents, dispatch row" \
+          | grep -v "posting a root mandate fires mandate.ready, commission.posted" \
+          | grep -v "returns zero counts on an empty queue" \
+          | grep -v "throws aggregated when any standing order in guild.json is malformed")
+        if [ -n "$UNEXPECTED" ]; then
+          echo "Variant introduced new test failures beyond baseline:"
+          echo "$UNEXPECTED"
+          exit 1
+        fi
+
+        # Discrimination: confirm meaningful work in expected packages
+        INSERTIONS=$(git diff --shortstat 50b258507091f6a472c5f100bf6c496c7d8c9635..HEAD -- packages/plugins/reckoner packages/plugins/clerk packages/framework/cli | grep -oP '\d+(?= insertion)' || echo 0)
+        FILES=$(git diff --name-only 50b258507091f6a472c5f100bf6c496c7d8c9635..HEAD -- packages/plugins/reckoner packages/plugins/clerk packages/framework/cli | wc -l)
+        test "$INSERTIONS" -ge 500 || { echo "Discrimination FAIL: $INSERTIONS insertions (need ≥500)"; exit 1; }
+        test "$FILES" -ge 10 || { echo "Discrimination FAIL: $FILES files (need ≥10)"; exit 1; }
+
+        git push origin HEAD:main
+      verifyTimeoutMs: 900000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

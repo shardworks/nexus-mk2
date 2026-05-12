@@ -74,25 +74,27 @@ The ~50 tokens of added content (the new `<task>` block) is the only content del
 
 ## Workload portfolio
 
-MVP picks one workload from `docs/lab-operations/trial-workload-portfolio.md` — A2 — chosen for greenfield design freedom (highest sensitivity to role-file influence) and prior X025 calibration (same brief, same fixtures, same verify command).
+MVP picks one workload from `docs/lab-operations/trial-workload-portfolio.md`:
 
 | # | Workload | Shape | Why chosen |
 |---|---|---|---|
-| A2 | rig-mohvspfy Reckoner skeleton | greenfield apparatus | Highest design freedom — blank-page work, no patterns to copy. Strongest test of role-file structural influence. Reused from X025 (same brief). |
+| A10 | rig-moeiitmi Reckoner parseChildFailures fix | diagnostic bugfix | Smallest workload in the portfolio ($12.23 Opus baseline, ~15min historical duration, 500-insertion discrimination floor). Chosen after the original A2 selection hit a "claims-complete-but-no-commit" failure mode at ~17-min session length (see workload-switch note below). |
+
+**Workload switch (2026-05-12):** Original MVP plan used A2 (Reckoner skeleton, greenfield). The first A2 baseline trial (`w-mp2ocw5y`) failed verify with 0 commits despite passing typecheck/build/test — the implementer wrote all files in the working tree but never executed a commit tool call before the session ended. Parallel X025 A2 baseline (`w-mp2o068y`) hit identical failure. Pattern is "auto-compaction strips commit-discipline directive on long sessions"; filed as `c-mp2q270l`. Switching to A10 (smaller workload, shorter expected session) to stay below the threshold where the pattern bites.
 
 **Optional expansion (post-MVP, if H1 sustains):**
-- A6' (Oculus click tree view) — frontend feature, thin spec. Different stack from greenfield apparatus.
-- A5 (Cartograph migration) — well-specified substantive work; tests whether the effect is shape-specific.
+- A3 (Arbor apparatus.stop) — narrow bugfix, comparable shape, ~19min historical. Different package surface from A10.
+- A6' (Oculus click tree view) — frontend feature, thin spec. Different stack.
 
 ## Trial plan
 
 **MVP** (recommended starting point):
-- 1 workload × 2 variants × n=3 = **6 trials**
-- Estimated cost: **$18-24 Sonnet**
+- 1 workload (A10) × 2 variants × n=3 = **6 trials**
+- Estimated cost: **$12-18 Sonnet** (per-trial expectation $2-3)
 
-**Mid** (adds A6'):
+**Mid** (adds A3 narrow bugfix):
 - 2 workloads × 2 variants × n=3 = **12 trials**
-- Estimated cost: **$36-48 Sonnet**
+- Estimated cost: **$28-40 Sonnet**
 
 Run sequence:
 1. Phase 0 — Snapshot Sonnet-era artificer.md baseline (frozen at experiment start; verbatim copy at `fixtures/roles/artificer-baseline.md`).

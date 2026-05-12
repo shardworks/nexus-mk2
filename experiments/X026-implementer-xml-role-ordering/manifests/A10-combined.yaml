@@ -1,0 +1,102 @@
+slug: x026-a10-combined
+title: X026 — A10 Reckoner parseChildFailures fix — combined XML-tagged + goal-first variant
+codex: nexus
+
+description: |
+  X026 combined variant trial on workload A10. Variant role file:
+  fixtures/roles/artificer-combined.md.
+
+  Two coupled changes vs baseline:
+  1. XML structural tags (B3): each section wrapped in <task>,
+     <testing>, <documentation>, <persona>, <finishing> tags. Doc-drift
+     subsection nests as <adjacent-doc-drift-cleanup>.
+  2. Goal-first reordering (B4): new <task> block at top with
+     goal-stated framing. Persona moves to <persona> block near the
+     end; <finishing> stays last for recency.
+
+  Section content otherwise verbatim from baseline. Only deliberate
+  delta is structure + ordering. Same codex pin, same brief, same
+  framework version as the baseline manifest.
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: 50b258507091f6a472c5f100bf6c496c7d8c9635
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: 50b258507091f6a472c5f100bf6c496c7d8c9635
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X026-implementer-xml-role-ordering/fixtures/roles/artificer-combined.md
+      briefPath: /workspace/nexus-mk2/experiments/X026-implementer-xml-role-ordering/briefs/A10-reckoner-parsechildfailures-fix.md
+      model: sonnet
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set +e
+        pnpm -w typecheck > /tmp/x026-tc.log 2>&1
+        pnpm -w build > /tmp/x026-build.log 2>&1
+        pnpm -w test > /tmp/x026-test.log 2>&1
+        set -e
+
+        UNEXPECTED_TC=$(grep -E "error TS[0-9]+" /tmp/x026-tc.log /tmp/x026-build.log \
+          | grep -v "writ-lifecycle-observer.ts(161,34)")
+        if [ -n "$UNEXPECTED_TC" ]; then
+          echo "Variant introduced typecheck/build errors beyond baseline:"
+          echo "$UNEXPECTED_TC"
+          exit 1
+        fi
+
+        UNEXPECTED=$(grep -E "test: ✖ " /tmp/x026-test.log \
+          | grep -v "failing tests:" \
+          | grep -v "a child non-mandate writ fires {type}.ready but NOT commission" \
+          | grep -v "Clockworks — end-to-end framework event emission" \
+          | grep -v "Clockworks — processEvents integration" \
+          | grep -v "drives a root mandate through stuck → open → completed" \
+          | grep -v "end-to-end SOF emit + loop-guard cycle through the apparatus surface" \
+          | grep -v "failure path: a throwing relay records an error row" \
+          | grep -v "happy path: emit, processEvents, dispatch row" \
+          | grep -v "posting a root mandate fires mandate.ready, commission.posted" \
+          | grep -v "returns zero counts on an empty queue" \
+          | grep -v "throws aggregated when any standing order in guild.json is malformed")
+        if [ -n "$UNEXPECTED" ]; then
+          echo "Variant introduced new test failures beyond baseline:"
+          echo "$UNEXPECTED"
+          exit 1
+        fi
+
+        INSERTIONS=$(git diff --shortstat 50b258507091f6a472c5f100bf6c496c7d8c9635..HEAD -- packages/plugins/reckoner packages/plugins/clerk packages/framework/cli | grep -oP '\d+(?= insertion)' || echo 0)
+        FILES=$(git diff --name-only 50b258507091f6a472c5f100bf6c496c7d8c9635..HEAD -- packages/plugins/reckoner packages/plugins/clerk packages/framework/cli | wc -l)
+        test "$INSERTIONS" -ge 500 || { echo "Discrimination FAIL: $INSERTIONS insertions (need ≥500)"; exit 1; }
+        test "$FILES" -ge 10 || { echo "Discrimination FAIL: $FILES files (need ≥10)"; exit 1; }
+
+        git push origin HEAD:main
+      verifyTimeoutMs: 900000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
