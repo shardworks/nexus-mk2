@@ -57,9 +57,13 @@ scenario:
         pnpm -w test > /tmp/x026-test.log 2>&1
         set -e
 
+        # `|| true` on every grep pipe to prevent set -e from silently
+        # exiting the script when the inner grep -v finds nothing to
+        # invert (see click c-mp2viid4).
+
         # Typecheck baseline: A10 inherits one clockworks writ-lifecycle-observer error.
         UNEXPECTED_TC=$(grep -E "error TS[0-9]+" /tmp/x026-tc.log /tmp/x026-build.log \
-          | grep -v "writ-lifecycle-observer.ts(161,34)")
+          | grep -v "writ-lifecycle-observer.ts(161,34)" || true)
         if [ -n "$UNEXPECTED_TC" ]; then
           echo "Variant introduced typecheck/build errors beyond baseline:"
           echo "$UNEXPECTED_TC"
@@ -78,7 +82,8 @@ scenario:
           | grep -v "happy path: emit, processEvents, dispatch row" \
           | grep -v "posting a root mandate fires mandate.ready, commission.posted" \
           | grep -v "returns zero counts on an empty queue" \
-          | grep -v "throws aggregated when any standing order in guild.json is malformed")
+          | grep -v "throws aggregated when any standing order in guild.json is malformed" \
+          || true)
         if [ -n "$UNEXPECTED" ]; then
           echo "Variant introduced new test failures beyond baseline:"
           echo "$UNEXPECTED"
