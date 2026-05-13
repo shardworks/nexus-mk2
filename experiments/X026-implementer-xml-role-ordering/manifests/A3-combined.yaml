@@ -1,0 +1,91 @@
+slug: x026-a3-combined
+title: X026 — A3 Arbor lifecycle — combined XML-tagged + goal-first variant
+codex: nexus
+
+description: |
+  X026 combined variant trial on workload A3. Variant role file:
+  fixtures/roles/artificer-combined.md. XML structural tags + goal-first
+  reordering bundled — identical to the A10 combined variant.
+
+  Same codex pin, same brief, same framework version as the A3 baseline
+  manifest. Only the role file differs.
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: 912ef1797af253a535f415b3b39b61f5305e7d3f
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: 912ef1797af253a535f415b3b39b61f5305e7d3f
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X026-implementer-xml-role-ordering/fixtures/roles/artificer-combined.md
+      briefPath: /workspace/nexus-mk2/experiments/X026-implementer-xml-role-ordering/briefs/A3-arbor-lifecycle.md
+      model: sonnet
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set +e
+        pnpm -w typecheck > /tmp/x026-tc.log 2>&1
+        pnpm -w build > /tmp/x026-build.log 2>&1
+        pnpm -w test > /tmp/x026-test.log 2>&1
+        set -e
+
+        UNEXPECTED_TC=$(grep -E "error TS[0-9]+" /tmp/x026-tc.log /tmp/x026-build.log \
+          | grep -v "writ-lifecycle-observer.ts(161,34)" || true)
+        if [ -n "$UNEXPECTED_TC" ]; then
+          echo "Variant introduced typecheck/build errors beyond baseline:"
+          echo "$UNEXPECTED_TC"
+          exit 1
+        fi
+
+        UNEXPECTED=$(grep -E "test: ✖ " /tmp/x026-test.log \
+          | grep -v "failing tests:" \
+          | grep -v "a child non-mandate writ fires {type}.ready but NOT commission" \
+          | grep -v "Clockworks — end-to-end framework event emission" \
+          | grep -v "Clockworks — processEvents integration" \
+          | grep -v "drives a root mandate through stuck → open → completed" \
+          | grep -v "end-to-end SOF emit + loop-guard cycle through the apparatus surface" \
+          || true)
+        if [ -n "$UNEXPECTED" ]; then
+          echo "Variant introduced new test failures beyond baseline:"
+          echo "$UNEXPECTED"
+          exit 1
+        fi
+
+        INSERTIONS=$(git diff --shortstat 912ef1797af253a535f415b3b39b61f5305e7d3f..HEAD -- packages/framework/arbor packages/framework/core | grep -oP '\d+(?= insertion)' || echo 0)
+        FILES=$(git diff --name-only 912ef1797af253a535f415b3b39b61f5305e7d3f..HEAD -- packages/framework/arbor packages/framework/core | wc -l)
+        COMMITS=$(git rev-list 912ef1797af253a535f415b3b39b61f5305e7d3f..HEAD --count)
+        echo "Discrimination telemetry: $COMMITS commit(s), $FILES files changed, $INSERTIONS insertions in filter"
+        test "$COMMITS" -ge 1 || { echo "Discrimination FAIL: $COMMITS commits (need ≥1 — no work landed)"; exit 1; }
+
+        git push origin HEAD:main
+      verifyTimeoutMs: 900000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

@@ -1,0 +1,105 @@
+slug: x026-a3-baseline
+title: X026 — A3 Arbor lifecycle baseline (stock Sonnet-era artificer.md)
+codex: nexus
+
+description: |
+  X026 baseline trial on workload A3 (rig-moehp3a4, Arbor apparatus.stop
+  lifecycle). Validation pass for the X026 hypothesis on a second workload
+  after A10 produced a -21% point estimate at n=3 (mean $4.18 combined vs
+  $5.29 baseline). A3 is narrow-bugfix shape vs A10's diagnostic-bugfix
+  — different design surface, same intervention.
+
+  Codex pinned to 912ef1797af253a535f415b3b39b61f5305e7d3f. Discrimination
+  uses the same loosened gate as A10 (commit-presence only; the typecheck
+  and test gates filter broken variants).
+
+  Per X026 spec, expanded run: n=5 baseline + n=5 combined per workload.
+  Per-trial cost expectation: $3-4 Sonnet.
+
+frameworkVersion: '0.1.304'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/nexus
+      baseSha: 912ef1797af253a535f415b3b39b61f5305e7d3f
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: 912ef1797af253a535f415b3b39b61f5305e7d3f
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-monolithic
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X026-implementer-xml-role-ordering/fixtures/roles/artificer-baseline.md
+      briefPath: /workspace/nexus-mk2/experiments/X026-implementer-xml-role-ordering/briefs/A3-arbor-lifecycle.md
+      model: sonnet
+      executionWrap: production
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set +e
+        pnpm -w typecheck > /tmp/x026-tc.log 2>&1
+        pnpm -w build > /tmp/x026-build.log 2>&1
+        pnpm -w test > /tmp/x026-test.log 2>&1
+        set -e
+
+        # `|| true` on every grep pipe to prevent set -e from silently
+        # exiting the script (see click c-mp2viid4).
+
+        # Typecheck baseline: A3 inherits one clockworks writ-lifecycle-observer error.
+        UNEXPECTED_TC=$(grep -E "error TS[0-9]+" /tmp/x026-tc.log /tmp/x026-build.log \
+          | grep -v "writ-lifecycle-observer.ts(161,34)" || true)
+        if [ -n "$UNEXPECTED_TC" ]; then
+          echo "Variant introduced typecheck/build errors beyond baseline:"
+          echo "$UNEXPECTED_TC"
+          exit 1
+        fi
+
+        # Test baseline: A3 inherits 5 clockworks failures (subset of A10's 10).
+        UNEXPECTED=$(grep -E "test: ✖ " /tmp/x026-test.log \
+          | grep -v "failing tests:" \
+          | grep -v "a child non-mandate writ fires {type}.ready but NOT commission" \
+          | grep -v "Clockworks — end-to-end framework event emission" \
+          | grep -v "Clockworks — processEvents integration" \
+          | grep -v "drives a root mandate through stuck → open → completed" \
+          | grep -v "end-to-end SOF emit + loop-guard cycle through the apparatus surface" \
+          || true)
+        if [ -n "$UNEXPECTED" ]; then
+          echo "Variant introduced new test failures beyond baseline:"
+          echo "$UNEXPECTED"
+          exit 1
+        fi
+
+        # Discrimination: at least one commit past baseSha. Loosened from
+        # files/insertions thresholds because Sonnet's compact-fix style
+        # routinely falls under Opus-calibrated portfolio floors.
+        INSERTIONS=$(git diff --shortstat 912ef1797af253a535f415b3b39b61f5305e7d3f..HEAD -- packages/framework/arbor packages/framework/core | grep -oP '\d+(?= insertion)' || echo 0)
+        FILES=$(git diff --name-only 912ef1797af253a535f415b3b39b61f5305e7d3f..HEAD -- packages/framework/arbor packages/framework/core | wc -l)
+        COMMITS=$(git rev-list 912ef1797af253a535f415b3b39b61f5305e7d3f..HEAD --count)
+        echo "Discrimination telemetry: $COMMITS commit(s), $FILES files changed, $INSERTIONS insertions in filter"
+        test "$COMMITS" -ge 1 || { echo "Discrimination FAIL: $COMMITS commits (need ≥1 — no work landed)"; exit 1; }
+
+        git push origin HEAD:main
+      verifyTimeoutMs: 900000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}

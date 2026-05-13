@@ -88,13 +88,13 @@ MVP picks one workload from `docs/lab-operations/trial-workload-portfolio.md`:
 
 ## Trial plan
 
-**MVP** (recommended starting point):
-- 1 workload (A10) × 2 variants × n=3 = **6 trials**
-- Estimated cost: **$12-18 Sonnet** (per-trial expectation $2-3)
+**MVP** (executed 2026-05-12): 1 workload (A10) × 2 variants × n=3 = 6 trials, ~$30 valid spend. Point estimate −21% combined vs baseline (mean $4.18 vs $5.29). Variance compression: baseline CV 22% → combined CV 4.3%. Statistical floor weak at n=3; result is fragile to baseline outlier removal.
 
-**Mid** (adds A3 narrow bugfix):
-- 2 workloads × 2 variants × n=3 = **12 trials**
-- Estimated cost: **$28-40 Sonnet**
+**Expansion** (executing): add A3 narrow-bugfix workload at n=5 each cell to test whether the A10 effect transports.
+- A3 baseline: n=5
+- A3 combined: n=5
+- Total trials this expansion: **10**
+- Estimated cost: **$30-45 Sonnet** (per-trial expectation $3-4)
 
 Run sequence:
 1. Phase 0 — Snapshot Sonnet-era artificer.md baseline (frozen at experiment start; verbatim copy at `fixtures/roles/artificer-baseline.md`).
