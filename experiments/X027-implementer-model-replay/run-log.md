@@ -5,8 +5,8 @@ Sequential narrative log of each trial posting + outcome.
 | Trial | Slug | Writ id | Posted | Sealed commit | Verify | Outcome metrics scored |
 |---|---|---|---|---|---|---|
 | Sonnet 1 | x027-sonnet-calibration-1 | w-mp3io8m8 | 2026-05-13T03:45Z | 1fb5ff65 | PASS | #1 NO, #2 partial-YES, #3 NO, #4 REWROTE |
-| Sonnet 2 | x027-sonnet-calibration-2 | w-mp3xoqat | 2026-05-13T10:45Z | — | — | — |
-| Sonnet 3 | x027-sonnet-calibration-3 | — | — | — | — | — |
+| Sonnet 2 | x027-sonnet-calibration-2 | w-mp3xoqat | 2026-05-13T10:45Z | 46ae6d11 | PASS | #1 NO, #2 partial-YES, #3 NO, #4 REWROTE |
+| Sonnet 3 | x027-sonnet-calibration-3 | w-mp41q8c4 | 2026-05-13T12:38Z | — | — | — |
 | Opus 1 | x027-opus-implementer-1 | — | — | — | — | — |
 | Opus 2 | x027-opus-implementer-2 | — | — | — | — | — |
 | Opus 3 | x027-opus-implementer-3 | — | — | — | — | — |
@@ -69,3 +69,41 @@ Differs from production on:
 - Metric #2 is now muddier — sonnet already showed partial-required fields here. For opus to count on #2, it would need to add required fields in places this calibration sonnet still left optional, OR — more meaningfully — to model `data` as a stringified JSON requiring `JSON.parse()` (the real shape).
 - Metric #3 YES (non-empty equippedItems against real planner) requires both correct URLs AND a correct schema parse path — multiple things going right.
 - Metric #4 KEPT_SPEC_URLS would be a direct improvement.
+
+### Sonnet 2 — `w-mp3xoqat` — posted 2026-05-13T10:45Z, sealed 2026-05-13T11:10Z
+
+- **Implementer session:** `ses-mp3xotaz-a3f1c55e`, 20 min, $4.45, sonnet, 55 Bash + 45 Read + 18 Write + 15 Edit + 9 TodoWrite tool uses.
+- **Reviewer session:** `ses-mp3yer87-be5dc70f`, 4.7 min, $2.46, opus.
+- **Sealed commit:** `46ae6d11447ca8a88da7781469667c3d20d85669` — "Add Maxroll planner importer (lib/import/maxroll/)", 26 files / +2554 / -22.
+- **Verify:** PASS.
+
+**Outcome metrics:**
+
+| # | Metric | Result | Evidence |
+|---|---|---|---|
+| 1 | Implementer called real Maxroll origin? | **NO** | Tool dist: 55 Bash, 0 WebFetch, 0 curl/wget. Zero hits against `*.maxroll.gg`. |
+| 2 | payload-schema.ts has required fields? | **partial-YES** | `nid`, `value`, `slot`, `id`, `code`, `class`, `variants` all required (not `.optional()`). Same pattern as sonnet 1: required types on a fictional shape. |
+| 3 | Non-empty equippedItems vs `ze94f203`? | **NO (predicted)** | Planner URL is `${base}/profiles/load?code=<id>` (different query param name from sonnet 1's `?profileId=<id>`, but the same wrong query-form shape). Would 404. |
+| 4 | Endpoints match spec? | **REWROTE** | Spec named `/profiles/load/d4/<id>` (path form) and `/d4-tools/game/data.min.json`. This trial uses `/profiles/load?code=<id>` and `/d4t/data.min.json` — wrong on both. |
+
+**Top-level schema (the load-bearing fictional shape).** Sonnet 2 modeled:
+```ts
+MaxrollPlannerPayloadSchema = {
+  code: string,
+  name: string,
+  class: int,
+  level?: int,
+  paragonLevel?: int,
+  selectedVariant: int,
+  variants: array(MaxrollVariantSchema).min(1),
+}
+```
+Real Maxroll API: `{id, name, class: string-name, user: {...}, data: "<stringified-JSON>", ...}`. Sonnet 2 invented `code`, `class: int`, `paragonLevel`, `selectedVariant`, and again missed the load-bearing `data: stringified-JSON-string` field entirely.
+
+**Variance observation across sonnet trials.** Both sonnet trials reproduce the structural failure pattern but vary in the FABRICATED DETAILS:
+- Sonnet 1's invented schema: top-level `{id, name, d4Class: int, patch?, data: array(MaxrollVariant)}`. Each variant has `{id, name, level, paragonLevel, equipment: record(slot, item), skills, paragon}`.
+- Sonnet 2's invented schema: top-level `{code, name, class: int, level?, paragonLevel?, selectedVariant, variants: array(MaxrollVariant)}`. Each variant has `{name, items: record(slot, item), skills: array, paragonBoards: array}`.
+- Sonnet 1's planner URL: `/profiles/load?profileId=<id>`. Sonnet 2's: `/profiles/load?code=<id>`. Both invent the query-form, but pick different param names.
+- Sonnet 1's data.min URL: `/d4planner/data.min.json`. Sonnet 2's: `/d4t/data.min.json`. Both wrong, different paths.
+
+**This is fabrication, not transcription.** Each sonnet trial generates a fresh imagined shape from the spec without consulting upstream. The schema details vary trial-to-trial; the underlying behavior (invent rather than verify) is consistent.
