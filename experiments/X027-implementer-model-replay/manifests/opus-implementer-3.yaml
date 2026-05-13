@@ -1,0 +1,86 @@
+slug: x027-opus-implementer-3
+title: X027 — Opus implementer trial 3 (Maxroll importer replay, opus implementer + opus reviewer)
+codex: d4-tools
+
+description: |
+  X027 Opus implementer intervention, trial 3 of 3. Replays the Maxroll planner
+  importer commission (writ w-mp35iw3r, sealed 72460b7d on 2026-05-12)
+  by feeding the production-authored spec verbatim to an Opus
+  implementer under claude-direct-with-review. Tests whether a higher-
+  capability implementer, given the same spec that authorized D25
+  (hermetic test) and D28 (loose-passthrough schema), engages real
+  upstream data instead of authoring against a fictional shape.
+
+  Pass condition (descriptive, not a verify gate): a "model-driven
+  improvement" on any of the four tier-1 outcome metrics — see
+  experiments/X027-implementer-model-replay/spec.md. Verify only
+  checks that a commit landed and `pnpm build` passes; metric scoring
+  is post-hoc by Coco against the sealed commit.
+
+  Codex pinned to 69f6a26f8a5499117ddc2478168383055409c851 — the
+  parent of the production seal 72460b7d (post-rebase state the
+  production implementer's commit was applied on top of). At this
+  SHA the hazardous test:acceptance / test:e2e suites are absent
+  per the d4-tools safety landmark 7a1c998.
+
+  Implementer: opus (intervention — production was sonnet).
+  Reviewer: opus (matches production settings.model fallback).
+
+frameworkVersion: '0.1.309'
+
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/d4-tools
+      baseSha: 69f6a26f8a5499117ddc2478168383055409c851
+
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    dependsOn: [codex]
+    givens:
+      bareLocalPath: '${yields.fixture-codex-setup.bareLocalPath}'
+      baseSha: 69f6a26f8a5499117ddc2478168383055409c851
+      codexName: '${yields.fixture-codex-setup.codexName}'
+
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-with-review
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X027-implementer-model-replay/fixtures/roles/artificer.md
+      briefPath: /workspace/nexus-mk2/experiments/X027-implementer-model-replay/briefs/maxroll-importer-spec.md
+      model: opus
+      executionWrap: production
+      reviewerRolePath: /workspace/nexus-mk2/experiments/X027-implementer-model-replay/fixtures/roles/reviewer.md
+      reviewerModel: opus
+      cwd: '${yields.fixture-codex-checkout-setup.workdir}'
+      verifyCommand: |
+        set -e
+        # Confirm a commit landed (implementer produced output).
+        git log -1 --pretty=%s | grep -qE '.+'
+        # Confirm the lib/import/maxroll/ subsystem was created at minimum.
+        # This is a weak smoke check — does NOT validate correctness, which
+        # is scored post-hoc. The production seal also satisfied this check.
+        test -d lib/import/maxroll || { echo "VERIFY FAIL: lib/import/maxroll/ not created"; exit 1; }
+        # Next build (includes typecheck via tsc --noEmit). Production
+        # sealed commit passed this; calibration trial must too.
+        pnpm build
+        # Push HEAD back to the codex bare so lab.probe-git-range captures it.
+        git push origin HEAD:main
+      verifyTimeoutMs: 300000
+
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+
+archive:
+  engineId: lab.archive
+  givens: {}
