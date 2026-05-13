@@ -6,8 +6,8 @@ Sequential narrative log of each trial posting + outcome.
 |---|---|---|---|---|---|---|
 | Sonnet 1 | x027-sonnet-calibration-1 | w-mp3io8m8 | 2026-05-13T03:45Z | 1fb5ff65 | PASS | #1 NO, #2 partial-YES, #3 NO, #4 REWROTE |
 | Sonnet 2 | x027-sonnet-calibration-2 | w-mp3xoqat | 2026-05-13T10:45Z | 46ae6d11 | PASS | #1 NO, #2 partial-YES, #3 NO, #4 REWROTE |
-| Sonnet 3 | x027-sonnet-calibration-3 | w-mp41q8c4 | 2026-05-13T12:38Z | — | — | — |
-| Opus 1 | x027-opus-implementer-1 | — | — | — | — | — |
+| Sonnet 3 | x027-sonnet-calibration-3 | w-mp41q8c4 | 2026-05-13T12:38Z | 3ccb62cb | PASS | #1 NO, #2 partial-YES, #3 NO, #4 REWROTE (path form, missing `/d4/`) |
+| Opus 1 | x027-opus-implementer-1 | w-mp4jqzfw | 2026-05-13T21:03Z | — | — | — |
 | Opus 2 | x027-opus-implementer-2 | — | — | — | — | — |
 | Opus 3 | x027-opus-implementer-3 | — | — | — | — | — |
 
@@ -107,3 +107,66 @@ Real Maxroll API: `{id, name, class: string-name, user: {...}, data: "<stringifi
 - Sonnet 1's data.min URL: `/d4planner/data.min.json`. Sonnet 2's: `/d4t/data.min.json`. Both wrong, different paths.
 
 **This is fabrication, not transcription.** Each sonnet trial generates a fresh imagined shape from the spec without consulting upstream. The schema details vary trial-to-trial; the underlying behavior (invent rather than verify) is consistent.
+
+### Sonnet 3 — `w-mp41q8c4` — posted 2026-05-13T12:38Z, sealed 2026-05-13T13:04Z
+
+- **Implementer session:** `ses-mp41qec8-958cf522`, 20 min, $5.03, sonnet, 55 Bash + 54 Read + 18 Write + 15 Edit tool uses.
+- **Reviewer session:** `ses-mp42g8dr-e5782d06`, 5.3 min, $2.87, opus.
+- **Sealed commit:** `3ccb62cb2bc4c2b40e83a5f90864a7f9a28cf425` — "feat(import): Maxroll planner importer — library, API route, UI, and entry points", 26 files / +2338 / -23.
+- **Verify:** PASS.
+
+**Outcome metrics:**
+
+| # | Metric | Result | Evidence |
+|---|---|---|---|
+| 1 | Implementer called real Maxroll origin? | **NO** | 0 curl/wget/WebFetch tool uses against any `*.maxroll.gg` URL. |
+| 2 | payload-schema.ts has required fields? | **partial-YES** | `MaxrollPlannerDataSchema.id` and `.heroes`, `MaxrollHeroSchema.d4class`, and `DataMinSchema.version` are required (not `.optional()`). Most other fields are `.optional()` — closer to production's fully-permissive pattern than sonnet 1/2. |
+| 3 | Non-empty equippedItems vs `ze94f203`? | **NO (predicted)** | URL path is `${base}/profiles/load/<plannerID>` — closer to the working form than sonnet 1/2, but missing the `/d4/` segment that the real API requires. Would 404. |
+| 4 | Endpoints match spec? | **REWROTE** | Sonnet 3 used path form `/profiles/load/<id>` (correct shape; closer to spec than sonnet 1/2's query forms) but dropped the `/d4/` segment. data.min URL is `/d4/data.min.json` (wrong; real is `/d4-tools/game/data.min.json`). |
+
+**Top-level schema (the load-bearing fictional shape).** Sonnet 3 modeled:
+```ts
+MaxrollApiResponseSchema = {
+  code?: number,             // imagined "HTTP-like status"
+  data?: MaxrollPlannerDataSchema  // NESTED OBJECT, not string
+}
+MaxrollPlannerDataSchema = {
+  id: string,
+  name?: string,
+  lastUpdate?: number,
+  version?: string,
+  heroes: array(MaxrollHeroSchema)   // imagined; real is `profiles`
+}
+```
+Real Maxroll API: top-level has `data: "<stringified-JSON>"` (a STRING that requires `JSON.parse()` to access the build). Sonnet 3 treated `data` as a nested object — same load-bearing structural error as production and sonnets 1/2, but with different fabricated field names (`heroes` instead of `profiles`/`variants`).
+
+**Variance observation completed (3/3 sonnet trials).** All three sonnet trials:
+- Did not call the real Maxroll API (0/3 fetches)
+- Invented a payload schema that does NOT model `data` as a stringified-JSON string (3/3 wrong)
+- Wrote wrong upstream URLs (3/3 — different specific mistakes, all 404 in practice)
+- Ship a passing test against a synthetic fixture conforming to their invented schema (3/3)
+
+Fabrication details vary widely:
+| Aspect | Sonnet 1 | Sonnet 2 | Sonnet 3 |
+|---|---|---|---|
+| Top-level "build container" field | `data: array(Variant)` | `variants: array(Variant)` | `data.heroes: array(Hero)` |
+| `data` modeled as | array | (not present at top) | nested object |
+| Planner-load URL | `?profileId=<id>` | `?code=<id>` | `/<id>` (path, no `/d4/`) |
+| data.min path | `/d4planner/data.min.json` | `/d4t/data.min.json` | `/d4/data.min.json` |
+| Class id field | `d4Class: int` | `class: int` | `d4class: number` |
+| Affix nid type | `number` | `number` | `string` |
+
+**Calibration conclusion.** The apparatus reproduces the production failure mode at 3/3. The specific failure-mode signature is "implementer reads the spec, invents a schema, writes hermetic tests against the invention, ships." Every sonnet trial does this. No sonnet trial verified the upstream API shape, even though tools (Bash with curl, WebFetch) were available.
+
+Opus arm now expected to test: does a higher-capability implementer engage real upstream data given the same spec?
+
+## Sonnet calibration summary (closed)
+
+| Trial | Sealed | Impl $ | Impl time | Fetch real upstream? | Schema models `data: string`? | Ships fictional schema? |
+|---|---|---|---|---|---|---|
+| Sonnet 1 | 1fb5ff65 | $5.60 | 27 min | NO | NO | YES |
+| Sonnet 2 | 46ae6d11 | $4.45 | 20 min | NO | NO | YES |
+| Sonnet 3 | 3ccb62cb | $5.03 | 20 min | NO | NO | YES |
+| **Mean** | — | **$5.03** | **22 min** | **0/3** | **0/3** | **3/3** |
+
+Total sonnet calibration spend (impl + reviewer): ~$23.30 across 3 trials. Reviewer ($2.5-2.9 each) consistently fast (~5 min) and never flagged the fictional schema. Lab reviewer is structurally lax compared to production review engine — but production review also approved the fictional schema, so this divergence is not load-bearing for the experiment.
