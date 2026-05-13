@@ -229,25 +229,22 @@ The literature's 20-80% depth zone:
 |---:|---|---|---|
 | B1 | **Position-audit the artificer role file** | Done (this section). Role directives sit at positions 0.7-1.4K of the assembled context — strongest primacy zone. The "20-80% depth" concern maps to Claude Code overhead + our brief content (mix varies by commission size). | **measured** |
 | B2 | **Repeat critical directives at the end** | Not done. Each engine's systemPrompt ends with a "Finishing Your Work" section containing *new* operational rules, not repetition of earlier directives. Literature claim is ~5-10% on adherence, but our X022/X024 behavioral-nudge experiments came in at -3.5% to -13% (wrong direction). | **untested, with priors against** |
-| B3 | **XML-tag section delimiters** | Not in use. All engines rely on Markdown headers. spec-writer uses `<task-manifest>` / `<task>` but only as output template, not as structural prompt delimiters. Genuine untested lever. | **untested** |
-| B4 | **Front-load with goal, not background** | Violated by all four engines: tool descriptions occupy 22-49% of the systemPrompt before role/goal. Concrete framework lever available: flip `loom.ts:360-378` assembly order from `charter → tools → role` to `charter → role → tools`. One-line code change, reversible. | **untested — concrete lever available** |
+| B3 | **XML-tag section delimiters** | **Tested by X026** (May 12-13 2026). Combined with B4 in one variant (XML tags wrapping `<task>`/`<testing>`/`<documentation>`/`<persona>`/`<finishing>` sections). Cross-workload result (A10 n=3 + A3 n=5): refuted. A10 showed apparent −21% effect (driven by one baseline outlier); A3 showed +2.3% (essentially null). Variance-compression hypothesis suggested by A10 (combined CV 4.3% vs baseline 22%) also did not transport to A3 (combined CV 7.1% > baseline 5.7%). | **tested-refuted (X026)** |
+| B4 | **Front-load with goal, not background** | **Tested by X026** alongside B3 in the combined variant. Same cross-workload refutation as B3. The variant placed a `<task>` block at the top of the role file's content (and the framework-level `loom.ts` reorder lever `c-mp28jkau` remains untested). | **tested-refuted (X026)** |
 | B5 | **Length-budget the role file** (~4K-token soft ceiling) | Partially relevant. Implement systemPrompt is ~1.4K tokens (under). Other three engines exceed 4K. But the 4K threshold concerns total assembled context, not role file alone; our context is 25K-100K+ regardless of role-file size. | **misframed in current setup** |
 
-### What the data points to
+### What the data points to (post-X026)
 
-The single concrete, available lever is **B4 (loom.ts assembly order)**.
-Three caveats temper expectations:
+**X026 closes the action surface in Section B at the cost-effect level.** Pattern across four experiments testing prompt-modification levers on Sonnet implementer:
 
-1. The systemPrompt is *itself* in the primacy zone of the assembled
-   context. Moving role to the front of the systemPrompt rearranges within
-   the strong-primacy zone — not pulling content out of a weak zone.
-2. Recency effect competes: current ordering puts role at the back of the
-   systemPrompt, giving it recency relative to subsequent tool docs.
-3. Our prompt-structure experiments (X022, X024) underperformed literature
-   claims by a wide margin. Behavior-side priors are not encouraging.
+- X022 (imperative tool-use nudges): −13% n=3, marginal
+- X024 (goal-stated reframe of X022): −3.5% n=3, refuted
+- X025 (few-shot demonstrations): central estimate +2% to −9% across cells, refuted at detection-threshold but deployed at deployment-threshold
+- X026 (XML structural tags + goal-first ordering): refuted across workloads (A10 −21% driven by outlier, A3 +2.3%)
 
-A conservative trial: flip the assembly order for the implement engine only,
-run a lab trial against the X021/X023 workload. Cheap to set up and revert.
+Aggregate signal: structural and behavioral prompt-modification on the role file produces marginal-to-null cost effects. The B4 framework-level lever (`loom.ts:360-378` reorder, click `c-mp28jkau`) is technically still untested but the priors against now run X022/X024/X025/X026 — running it has low expected value.
+
+The `--allowedTools` / `--disallowedTools` lever (`c-mp28jnjk`, side discovery from Section B measurement) remains the more promising structural intervention in this neighborhood: it caps at ~12K tokens of Claude-Code-baseline-tool overhead. Cost-side lever, not behavior-side.
 
 ### Side discovery — Claude Code's built-in tool burden (corrected)
 
@@ -271,9 +268,15 @@ than initially pitched.
   the user prompt at positions ~1.4K-15K of the assembled context — also in
   the strong primacy zone.
 - B2 and B4 are the behavioral-nudge slice of this section. Section I
-  experiments (X022, X024) tested similar levers and found marginal-to-
-  negative effects. The framework-level lever in B4 is the cheapest way to
-  re-test that family without rewriting role-file content.
+  experiments (X022, X024) tested similar levers; X026 closed B3+B4 with the
+  same refuted verdict. The framework-level `loom.ts:360-378` lever
+  (`c-mp28jkau`) is technically still untested but priors are now strongly
+  against it producing meaningful cost movement.
+- **Variance compression as its own claim** is an open question surfaced by
+  X025 and X026 A10. Both observed combined cells with substantially lower
+  CV than baseline (X026 A10: 22% → 4.3%). X026 A3 did not replicate. Could
+  be a small-sample artifact or a real cost-stability effect; would need a
+  focused trial holding workload fixed and varying n to distinguish.
 
 ---
 
@@ -693,8 +696,10 @@ The bigger question, addressed in the next section: are these the right
 These came up while drafting the catalog. Worth thinking through before
 committing to which bundles to actually run.
 
-1. **Why did our behavioral nudges (X022, X024) underperform literature
-   claims?** Several hypotheses:
+1. **Why do prompt-modification levers consistently underperform literature
+   claims on Sonnet implementer cost?** Pattern is now wider: X022 marginal,
+   X024 refuted, X025 marginal at detection-threshold (deployed at deployment-
+   threshold), X026 refuted across two workloads. Several hypotheses:
    - Claude is too well-aligned to respond to coercive framing.
    - Our role files are already long enough that incremental nudges get
      lost in the middle (B1-B5 above).
@@ -703,9 +708,15 @@ committing to which bundles to actually run.
      surface than expected.
    - The mechanism stories were always weak — adherence-without-effect is
      possible if the nudged behavior isn't actually the cost driver.
+   - Sonnet's behavioral variance is high enough that detectable effects
+     at n=3-5 require ≥20% effect sizes, and prompt-modification just
+     doesn't produce effects that large.
 
-   Resolving this would help calibrate effort on future behavioral work.
-   Family I in the catalog is the natural follow-up surface.
+   The aggregate pattern argues against continued investment in this
+   intervention surface for cost reduction. The variance compression
+   anomaly observed in X025 v3 and X026 A10 (but not X026 A3) remains an
+   open question worth a focused trial if cost-stability matters
+   independent of mean cost.
 
 2. ~~**Are we already implicitly doing the structural techniques?**~~
    **Resolved (May 12 2026).** Direct measurement on $2.6K of session
@@ -758,8 +769,13 @@ Internal:
 - X021 results (spec/inventory content) — `experiments/X021-inventory-format/artifacts/results.md`
 - X022 results (tool-use nudges) — `experiments/X022-implementer-behavior-nudges/artifacts/runlog.md`
 - X024 results (turn discipline) — `experiments/X024-implementer-turn-discipline/artifacts/results.md`
+- X025 results (few-shot demonstrations) — `experiments/X025-implementer-few-shot/spec.md`
+- X026 results (XML structural tags + goal-first) — `experiments/X026-implementer-xml-role-ordering/spec.md`
 - Click `c-mok4nke6` — Apr 29 cost-optimization landscape
 - Click `c-mokdz3sr` — Sonnet swap (Priority 0, recently pulled)
+- Click `c-mp2o2m5h` (concluded) — X026 experiment click
+- Click `c-mp2viid4` — lab verify silent-exit bug (X026 side discovery)
+- Click `c-mp28jnjk` — `--allowedTools` Claude Code built-in filtering (Section B side discovery)
 
 ---
 

@@ -1,5 +1,6 @@
 ---
-status: draft
+status: complete
+outcome: H1 NOT sustained across workloads. A10 showed an apparent -21% effect at n=3 driven by a baseline outlier; A3 at n=5 showed +2.3% (essentially null). Combined-variant variance-compression observed in A10 did not transport to A3 (A3 combined CV 7.1% vs baseline 5.7%). Consistent with X022/X024 priors that structural and behavioral prompt-modification levers produce marginal-to-null effects on Sonnet implementer cost.
 ---
 
 # X026 — Implementer XML-Tagged Role-First systemPrompt
@@ -113,16 +114,60 @@ Run sequence:
 - **Pass**: combined-variant verify-pass rate ≥ baseline verify-pass rate. No new failure modes surfaced in the variant transcripts (read post-hoc).
 - **Fail**: variant introduces regressions not present in baseline. If H1 also fails, the combined variant is unsafe to ship. If H1 sustains, halt and inspect transcripts.
 
-## What this experiment closes
+## Results (2026-05-13)
 
-- **B3** (XML structural tags) and **B4** (goal-first ordering) from the prompt-engineering landscape.
-- If refuted, the broader B-family (behavioral nudges via prompt structure) gains another data point pointing toward "marginal at best" — consistent with X022/X024 priors.
-- If sustained, opens the question of whether the framework-level `loom.ts` reorder lever (`c-mp28jkau`) would compound the effect by putting role content in even stronger primacy.
+### A10 — Reckoner parseChildFailures fix (n=3 each cell)
 
-## Open questions
+| Cell | Trials ($) | Mean | StdDev | CV |
+|---|---|---:|---:|---:|
+| Baseline | $6.64, $4.69, $4.53 | $5.29 | $1.18 | 22% |
+| Combined | $4.21, $4.34, $3.98 | $4.18 | $0.18 | 4.3% |
 
-1. **Confound from added content.** The new `<task>` block adds ~50 tokens. If H1 sustains, attribution between "the XML tags" / "the reorder" / "the goal-stated task summary" is muddy. A follow-up could decompose with v1 (XML-only, no reorder) and v2 (reorder-only, no XML).
-2. **Cache impact.** The new role file content invalidates the cache once at first deployment. Steady-state cache utilization will return to baseline within a few sessions per Section A's cross-session-reuse data. Not a concern for the trial.
+Effect: **−21%**, Welch's t ≈ 1.6, df ≈ 2, p > 0.1. Statistical floor weak.
+
+### A3 — Arbor lifecycle apparatus.stop (n=5 each cell)
+
+| Cell | Trials ($) | Mean | StdDev | CV |
+|---|---|---:|---:|---:|
+| Baseline | $5.56, $5.53, $5.27, $4.85, $5.08 | $5.26 | $0.30 | 5.7% |
+| Combined | $5.69, $4.73, $5.63, $5.47, $5.37 | $5.38 | $0.38 | 7.1% |
+
+Effect: **+2.3%** (combined trivially higher). Welch's t ≈ 0.55, p ≈ 0.6.
+
+### Verdict — H1 refuted across workloads
+
+The A10 apparent −21% effect did not transport to A3. The most parsimonious read of the cross-workload data: A10's effect was driven by a single high-cost baseline outlier ($6.64 vs sibling pair $4.69, $4.53); with that outlier removed A10 effect drops to −9.3% on n=2 — well within the noise floor measured elsewhere. A3's tighter baseline (CV 5.7%) reveals no real effect from the XML+goal-first treatment.
+
+The **variance-compression hypothesis** (A10 baseline CV 22% → combined CV 4.3%) also did not transport. A3 combined CV (7.1%) is *higher* than baseline (5.7%). The A10 CV pattern was very likely small-sample artifact.
+
+**H2 (quality) verdict: pass.** No verify-gate regressions on the combined cell across either workload (after discarding flaky infra failures). The variant didn't make things worse.
+
+### Spend
+
+| Category | Spend |
+|---|---:|
+| Infra burns (verify-bash-bug, pnpm flake, API overload, files-gate calibration, allowlist fix, regression discards) | ~$41 |
+| Valid A10 data | $28.39 |
+| Valid A3 data | $53.18 |
+| **Total** | **~$122** |
+
+### What X026 closes
+
+- **B3 (XML structural tags) and B4 (goal-first ordering) from the prompt-engineering landscape:** refuted at the cost-effect level on Sonnet implementer.
+- **Pattern check:** four experiments now (X022 marginal, X024 refuted, X025 marginal at detection-threshold, X026 refuted) on structural/behavioral prompt-modification levers. Each individually had a colorable theoretical mechanism; aggregate signal is that this family of intervention produces marginal-to-null effects on Sonnet cost. Section I of the landscape is also consistent (priors against behavioral nudges).
+- **Open: variance compression as its own claim.** Both X025 and X026 (on A10) observed combined-variant CV substantially lower than baseline CV. X026 A3 did not replicate this. Worth a focused follow-up if cost-stability matters independent of mean cost.
+
+### Side discoveries documented (filed clicks)
+
+- **`c-mp2viid4`** — lab verify command silently exits under `set -e` when error-filter `grep -v` eliminates all matches. Three observed silent failures across X025/X026 baselines before diagnosis. Filed under lab-trial-issues parent.
+- **`c-mp2q270l`** (concluded) — false-positive click filed during initial debugging; concluded with corrected diagnosis pointing to `c-mp2viid4`.
+- **Workload portfolio doc inconsistency** — A3 entry's `sealedBaseline.testFailures` listed only 5 of the actual 10 clockworks failures present at the A3 baseSha. Patched in X026 manifests; portfolio doc should be updated.
+- **Sonnet baseline regression rate observation** — at least one baseline trial on each workload (A10 oculus socket flake, A3 cross-package test breakage) exhibited verify-gate failures that weren't related to the experimental variable. Real-world Sonnet failure rate on baseline role-file work is non-trivial.
+
+## Open questions (post-result)
+
+1. **Variance compression: real phenomenon or artifact?** X025 noted CV halved on v3 cells; X026 A10 saw CV drop 22% → 4.3%; X026 A3 saw no compression. Worth a focused trial that holds workload fixed and varies sample size to distinguish small-sample artifact from real behavioral effect.
+2. **The A10 baseline $6.64 outlier.** Was it auto-compaction territory, a sub-agent thrash, an extended-thinking event? Worth a transcript-level look post-hoc; could illuminate when Sonnet baselines have wide variance.
 
 ## References
 
