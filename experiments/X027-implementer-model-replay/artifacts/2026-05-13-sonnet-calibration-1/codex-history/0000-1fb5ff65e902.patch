@@ -1,0 +1,2803 @@
+
+
+diff --git a/__tests__/fixtures/maxroll-data-min-subset.json b/__tests__/fixtures/maxroll-data-min-subset.json
+new file mode 100644
+index 0000000..f1543c3
+--- /dev/null
++++ b/__tests__/fixtures/maxroll-data-min-subset.json
+@@ -0,0 +1,28 @@
++{
++  "version": "3.0.1.71747",
++  "affixes": {
++    "1001": { "bnetFileName": "AttackSpeed", "name": "Attack Speed" },
++    "1002": { "bnetFileName": "Life", "name": "Maximum Life" },
++    "1003": { "bnetFileName": "Barrier_Strength_Percent", "name": "Barrier Generation" },
++    "1004": { "bnetFileName": "DamageReduction", "name": "Damage Reduction" },
++    "1005": { "bnetFileName": "CritChance_Physical_Elite", "name": "Critical Strike Chance" },
++    "1006": { "bnetFileName": "CritChance_Physical_Elite", "name": "Critical Strike Chance" },
++    "1007": { "bnetFileName": "CoreStat_Intelligence_Weapon", "name": "Intelligence" }
++  },
++  "aspects": {
++    "2001": { "bnetFileName": "legendary_sorc_035", "name": "Aspect of Frozen Orbit" }
++  },
++  "skills": {
++    "3001": { "bnetFileName": "Sorcerer_Blizzard", "name": "Blizzard" },
++    "3002": { "bnetFileName": "Sorcerer_FrostBolt", "name": "Frost Bolt" },
++    "3003": { "bnetFileName": "Sorcerer_IceShards", "name": "Ice Shards" },
++    "3004": { "bnetFileName": "Sorcerer_IceShards", "name": "Ice Shards" }
++  },
++  "paragonBoards": {
++    "4001": { "bnetFileName": "Paragon_Sorc_00", "name": "Starter Board" }
++  },
++  "paragonGlyphs": {
++    "5001": { "bnetFileName": "Rare_009_Willpower_Side", "name": "Cryopathy" }
++  },
++  "items": {}
++}
+diff --git a/__tests__/fixtures/maxroll-planner-fixture.json b/__tests__/fixtures/maxroll-planner-fixture.json
+new file mode 100644
+index 0000000..f65c180
+--- /dev/null
++++ b/__tests__/fixtures/maxroll-planner-fixture.json
+@@ -0,0 +1,92 @@
++{
++  "id": "sorc-blizzard-fixture",
++  "name": "Blizzard Sorcerer",
++  "d4Class": 1,
++  "patch": "3.0.1.71747",
++  "data": [
++    {
++      "id": 0,
++      "name": "Blizzard Shatter",
++      "level": 100,
++      "paragonLevel": 200,
++      "equipment": {
++        "helm": {
++          "power": 900,
++          "ancestral": false,
++          "quality": 4,
++          "affixes": [
++            { "nid": 1001, "value": 0.05 },
++            { "nid": 1002, "value": 850 },
++            { "nid": 1003, "value": 0.12 }
++          ],
++          "aspect": { "nid": 2001, "value": 60.0 }
++        },
++        "chest": {
++          "power": 875,
++          "ancestral": false,
++          "quality": 3,
++          "affixes": [
++            { "nid": 1004, "value": 0.12 },
++            { "nid": 1002, "value": 700 },
++            { "nid": 1005, "value": 0.08 }
++          ]
++        },
++        "gloves": {
++          "power": 910,
++          "ancestral": false,
++          "quality": 4,
++          "affixes": [
++            { "nid": 1006, "value": 0.065 },
++            { "nid": 1007, "value": 0.05 },
++            { "nid": 1002, "value": 500 },
++            { "nid": 9999, "value": 1.5, "tempered": true }
++          ]
++        }
++      },
++      "skills": {
++        "active": [
++          { "nid": 3001, "rank": 5, "slot": 0 },
++          { "nid": 3002, "rank": 1, "slot": 1 }
++        ],
++        "passive": [
++          { "nid": 3003, "rank": 3 }
++        ]
++      },
++      "paragon": {
++        "boards": [
++          {
++            "nid": 4001,
++            "nodes": [10001, 10002, 10003, 10004],
++            "glyph": { "nid": 5001, "level": 21 }
++          }
++        ]
++      }
++    },
++    {
++      "id": 1,
++      "name": "Ice Shards Alt",
++      "level": 100,
++      "paragonLevel": 200,
++      "equipment": {
++        "helm": {
++          "power": 900,
++          "ancestral": false,
++          "quality": 4,
++          "affixes": [
++            { "nid": 1001, "value": 0.05 },
++            { "nid": 1002, "value": 850 }
++          ]
++        }
++      },
++      "skills": {
++        "active": [
++          { "nid": 3004, "rank": 5, "slot": 0 }
++        ],
++        "passive": []
++      },
++      "paragon": {
++        "boards": []
++      }
++    }
++  ]
++}
+diff --git a/__tests__/maxroll-import.test.ts b/__tests__/maxroll-import.test.ts
+new file mode 100644
+index 0000000..c9f09ca
+--- /dev/null
++++ b/__tests__/maxroll-import.test.ts
+@@ -0,0 +1,323 @@
++/**
++ * Acceptance tests for the Maxroll planner importer (D25).
++ *
++ * Hermetic fixture-based tests — no live network calls.
++ * ctx.fetch is overridden to serve checked-in fixture data.
++ *
++ * Three test cases:
++ *   1. ok:true result for a realistic planner fixture (AS1)
++ *   2. ok:false / patch-mismatch when patch differs AND explicit rate < 50% (AS4)
++ *   3. ok:true with versionMismatch warning when patch differs but rate >= 50% (AS4)
++ */
++
++import { describe, it, expect, beforeEach, afterEach } from "vitest";
++import * as path from "path";
++import * as fs from "fs";
++import * as os from "os";
++import { importMaxrollPlanner } from "../lib/import/maxroll";
++import { clearMemoryCache } from "../lib/import/maxroll/data-min-cache";
++
++/** Unique temp dir for disk-cache isolation — created fresh before each test. */
++let testCacheDir: string;
++
++// ─── Fixture loading ──────────────────────────────────────────────────────
++
++const FIXTURE_DIR = path.join(__dirname, "fixtures");
++
++function loadFixture(filename: string): unknown {
++  const raw = fs.readFileSync(path.join(FIXTURE_DIR, filename), "utf-8");
++  return JSON.parse(raw);
++}
++
++const plannerFixture = loadFixture("maxroll-planner-fixture.json");
++const dataMinSubset = loadFixture("maxroll-data-min-subset.json");
++
++/** A data.min subset with a different patch version but the same good coverage. */
++const dataMinDriftAboveThreshold = {
++  ...(dataMinSubset as Record<string, unknown>),
++  version: "99.0.0", // differs from catalog patch AND fixture patch
++};
++
++/**
++ * A data.min subset with a different patch version and NO valid bnetFileNames
++ * (all affixes map to unknown entries → 0% explicit mapping rate).
++ */
++const dataMinDriftBelowThreshold = {
++  version: "99.0.0",
++  affixes: {
++    "1001": { bnetFileName: "Unknown_Affix_A" },
++    "1002": { bnetFileName: "Unknown_Affix_B" },
++    "1003": { bnetFileName: "Unknown_Affix_C" },
++    "1004": { bnetFileName: "Unknown_Affix_D" },
++    "1005": { bnetFileName: "Unknown_Affix_E" },
++    "1006": { bnetFileName: "Unknown_Affix_F" },
++    "1007": { bnetFileName: "Unknown_Affix_G" },
++  },
++  aspects: {},
++  skills: {},
++  paragonBoards: {},
++  paragonGlyphs: {},
++  items: {},
++};
++
++// ─── Fixture fetch helper ──────────────────────────────────────────────────
++
++/**
++ * Create a mock fetch function that serves fixture data.
++ *
++ * - planners.maxroll.gg/profiles/load → planner fixture
++ * - assets-ng.maxroll.gg/d4planner/data.min.json → data.min fixture
++ * - anything else → 404
++ */
++function makeMockFetch(
++  plannerData: unknown,
++  dataMinData: unknown
++): typeof globalThis.fetch {
++  return async (input: RequestInfo | URL): Promise<Response> => {
++    const url = typeof input === "string" ? input : input.toString();
++    if (url.includes("/profiles/load")) {
++      return new Response(JSON.stringify(plannerData), {
++        status: 200,
++        headers: { "Content-Type": "application/json" },
++      });
++    }
++    if (url.includes("data.min.json")) {
++      return new Response(JSON.stringify(dataMinData), {
++        status: 200,
++        headers: { "Content-Type": "application/json" },
++      });
++    }
++    // build-guide redirect fallback
++    if (url.includes("maxroll.gg")) {
++      return new Response(
++        `<html><a href="/d4/planner/sorc-blizzard-fixture">view planner</a></html>`,
++        { status: 200 }
++      );
++    }
++    return new Response("Not Found", { status: 404 });
++  };
++}
++
++// ─── Setup / Teardown ─────────────────────────────────────────────────────
++
++beforeEach(() => {
++  // Fresh isolated temp dir per test — prevents disk-cache cross-contamination
++  testCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "maxroll-test-"));
++});
++
++afterEach(() => {
++  // Clear in-memory cache so each test starts with a clean slate
++  clearMemoryCache();
++  // Clean up temp dir
++  try {
++    fs.rmSync(testCacheDir, { recursive: true, force: true });
++  } catch {
++    // Ignore cleanup errors
++  }
++});
++
++// ─── Test 1: happy path ───────────────────────────────────────────────────
++
++describe("importMaxrollPlanner — happy path (AS1)", () => {
++  it("returns ok:true with non-empty equippedItems, class, paragonAllocation, mapped aspect, and mapped glyph", async () => {
++    const result = await importMaxrollPlanner("sorc-blizzard-fixture", {
++      fetch: makeMockFetch(plannerFixture, dataMinSubset),
++      cacheDir: testCacheDir,
++    });
++
++    expect(result.ok).toBe(true);
++    if (!result.ok) return; // narrow type
++
++    // Has variants
++    expect(result.variants.length).toBeGreaterThanOrEqual(1);
++
++    const v = result.variants[0];
++
++    // Class is set
++    expect(v.character.class).toBe("Sorcerer");
++
++    // Level is set (should be 100 from fixture)
++    expect(v.character.level).toBe(100);
++
++    // Non-empty equippedItems
++    expect(Object.keys(v.items).length).toBeGreaterThan(0);
++    expect(v.items).toHaveProperty("helm");
++
++    // ParagonAllocation populated
++    expect(v.character.paragonAllocation.paragonLevel).toBeGreaterThan(0);
++    expect(v.character.paragonAllocation.boards.length).toBeGreaterThan(0);
++
++    // At least one mapped aspect
++    const helmItem = v.items["helm"];
++    expect(helmItem).toBeDefined();
++    expect(helmItem.aspect).toBeDefined();
++    expect(helmItem.aspect?.aspectId).toBe("aspect_of_frozen_orbit");
++
++    // At least one mapped paragon glyph
++    const board = v.character.paragonAllocation.boards[0];
++    expect(board.glyph).toBeDefined();
++    expect(board.glyph?.glyphId).toBe("glyph_cold_calc");
++    expect(board.glyph?.level).toBe(21);
++
++    // Paragon nodes stored with mr: prefix (D17)
++    expect(board.nodes[0]).toMatch(/^mr:\d+$/);
++
++    // spentPoints = nodes.length (D17)
++    expect(board.spentPoints).toBe(board.nodes.length);
++  });
++
++  it("resolves all four input shapes", async () => {
++    const mockFetch = makeMockFetch(plannerFixture, dataMinSubset);
++    const ctx = { fetch: mockFetch, cacheDir: testCacheDir };
++
++    const bareId = await importMaxrollPlanner("sorc-blizzard-fixture", ctx);
++    expect(bareId.ok).toBe(true);
++
++    const plannerUrl = await importMaxrollPlanner(
++      "https://maxroll.gg/d4/planner/sorc-blizzard-fixture",
++      ctx
++    );
++    expect(plannerUrl.ok).toBe(true);
++
++    const plannerUrlWithHash = await importMaxrollPlanner(
++      "https://maxroll.gg/d4/planner/sorc-blizzard-fixture#1&equipment",
++      ctx
++    );
++    expect(plannerUrlWithHash.ok).toBe(true);
++
++    const buildGuideUrl = await importMaxrollPlanner(
++      "https://maxroll.gg/d4/build-guides/my-cool-sorcerer-guide",
++      ctx
++    );
++    expect(buildGuideUrl.ok).toBe(true);
++  });
++
++  it("routes implicit affixes into implicits[], tempered-unmapped into unmapped report", async () => {
++    const result = await importMaxrollPlanner("sorc-blizzard-fixture", {
++      fetch: makeMockFetch(plannerFixture, dataMinSubset),
++      cacheDir: testCacheDir,
++    });
++    if (!result.ok) throw new Error("Expected ok:true");
++
++    const v = result.variants[0];
++
++    // helm has Barrier_Strength_Percent (isImplicit:true) → should land in implicits
++    const helm = v.items["helm"];
++    expect(helm).toBeDefined();
++    const hasImplicit = helm.implicits.some((a) => a.affixId === "affix_implicit_barrier_offhand");
++    expect(hasImplicit).toBe(true);
++
++    // gloves has nid 9999 (no data.min entry) with tempered:true → unmapped
++    const report = v.report;
++    const unmappedTempered = report.unmappedAffixes.find(
++      (a) => a.category === "affix" && a.nid === 9999
++    );
++    expect(unmappedTempered).toBeDefined();
++  });
++
++  it("reports are never empty for known unmapped references", async () => {
++    const result = await importMaxrollPlanner("sorc-blizzard-fixture", {
++      fetch: makeMockFetch(plannerFixture, dataMinSubset),
++      cacheDir: testCacheDir,
++    });
++    if (!result.ok) throw new Error("Expected ok:true");
++
++    const v = result.variants[0];
++    const report = v.report;
++
++    // nid 9999 has no data.min entry → should appear in unmappedAffixes
++    expect(report.unmappedAffixes.some((a) => a.nid === 9999)).toBe(true);
++
++    // No version mismatch in this case (patches match)
++    expect(report.versionMismatch).toBeUndefined();
++  });
++
++  it("maps skills into skillSelections", async () => {
++    const result = await importMaxrollPlanner("sorc-blizzard-fixture", {
++      fetch: makeMockFetch(plannerFixture, dataMinSubset),
++      cacheDir: testCacheDir,
++    });
++    if (!result.ok) throw new Error("Expected ok:true");
++
++    const v = result.variants[0];
++    const skills = v.character.skillSelections;
++    expect(skills.length).toBeGreaterThan(0);
++    const blizzard = skills.find((s) => s.skillId === "sorc_blizzard");
++    expect(blizzard).toBeDefined();
++    expect(blizzard?.rank).toBe(5);
++  });
++
++  it("sets buildProvenance correctly", async () => {
++    const fixedDate = new Date("2026-05-13T00:00:00.000Z");
++    const result = await importMaxrollPlanner("sorc-blizzard-fixture", {
++      fetch: makeMockFetch(plannerFixture, dataMinSubset),
++      cacheDir: testCacheDir,
++      now: () => fixedDate,
++    });
++    if (!result.ok) throw new Error("Expected ok:true");
++
++    const provenance = result.variants[0].buildProvenance;
++    expect(provenance.source).toBe("maxroll");
++    expect(provenance.plannerId).toBe("sorc-blizzard-fixture");
++    expect(provenance.variantIndex).toBe(0);
++    expect(provenance.importedAt).toBe("2026-05-13T00:00:00.000Z");
++    expect(provenance.plannerVersion).toBe("3.0.1.71747");
++  });
++});
++
++// ─── Test 2: patch-mismatch fail (AS4) ───────────────────────────────────
++
++describe("importMaxrollPlanner — patch-mismatch fail (AS4)", () => {
++  it("returns ok:false with reason patch-mismatch when patch differs AND explicit rate < 50%", async () => {
++    const result = await importMaxrollPlanner("sorc-blizzard-fixture", {
++      fetch: makeMockFetch(plannerFixture, dataMinDriftBelowThreshold),
++      cacheDir: testCacheDir,
++    });
++
++    expect(result.ok).toBe(false);
++    if (result.ok) return;
++    expect(result.reason).toBe("patch-mismatch");
++    expect(result.message).toMatch(/patch|version.*differs|differs.*version/i);
++  });
++});
++
++// ─── Test 3: patch drift but above threshold (AS4) ───────────────────────
++
++describe("importMaxrollPlanner — patch drift above threshold (AS4)", () => {
++  it("returns ok:true with versionMismatch warning when patch differs but mapping rate >= 50%", async () => {
++    const result = await importMaxrollPlanner("sorc-blizzard-fixture", {
++      fetch: makeMockFetch(plannerFixture, dataMinDriftAboveThreshold),
++      cacheDir: testCacheDir,
++    });
++
++    expect(result.ok).toBe(true);
++    if (!result.ok) return;
++
++    // At least one variant should have a versionMismatch warning
++    const hasWarning = result.variants.some((v) => v.report.versionMismatch !== undefined);
++    expect(hasWarning).toBe(true);
++
++    const withWarning = result.variants.find((v) => v.report.versionMismatch !== undefined);
++    expect(withWarning?.report.versionMismatch?.catalogPatch).toBeTruthy();
++    expect(withWarning?.report.versionMismatch?.maxrollPatch).toBe("99.0.0");
++    expect(withWarning?.report.versionMismatch?.explicitMappingRate).toBeGreaterThanOrEqual(0.5);
++  });
++});
++
++// ─── Test 4: not-found handling ───────────────────────────────────────────
++
++describe("importMaxrollPlanner — error handling", () => {
++  it("returns ok:false with reason not-found for 404 response", async () => {
++    const fetch404: typeof globalThis.fetch = async () =>
++      new Response("Not Found", { status: 404 });
++
++    const result = await importMaxrollPlanner("nonexistent-planner", {
++      fetch: fetch404,
++      cacheDir: testCacheDir,
++    });
++
++    expect(result.ok).toBe(false);
++    if (result.ok) return;
++    expect(result.reason).toBe("not-found");
++  });
++});
+diff --git a/app/api/builds/[id]/route.ts b/app/api/builds/[id]/route.ts
+index 800662a..a63b4ae 100644
+--- a/app/api/builds/[id]/route.ts
++++ b/app/api/builds/[id]/route.ts
+@@ -1,7 +1,8 @@
+ import { NextResponse } from "next/server";
+ import { loadBuild, saveBuild, deleteBuild } from "@/lib/persistence";
+-import { BuildSchema } from "@/lib/schema";
++import { BuildSchema, BuildImportedFromSchema } from "@/lib/schema";
+ import { isSafeId } from "@/lib/persistence/paths";
++import { z } from "zod";
+ 
+ type Params = { params: Promise<{ id: string }> };
+ 
+@@ -43,6 +44,35 @@ export async function PUT(request: Request, { params }: Params) {
+   }
+ }
+ 
++/**
++ * PATCH /api/builds/[id] — partial update for structured fields.
++ *
++ * Currently supports: { importedFrom } (D19 provenance).
++ * Merges the patch into the existing build and saves.
++ */
++export async function PATCH(request: Request, { params }: Params) {
++  const { id } = await params;
++  if (!isSafeId(id)) return badId();
++
++  const PatchBodySchema = z.object({
++    importedFrom: BuildImportedFromSchema.optional(),
++  });
++
++  try {
++    const existing = await loadBuild(id);
++    if (!existing) return NextResponse.json({ error: "Build not found" }, { status: 404 });
++
++    const body = await request.json();
++    const patch = PatchBodySchema.parse(body);
++
++    const updated = await saveBuild({ ...existing, ...patch });
++    return NextResponse.json(updated);
++  } catch (err) {
++    const message = err instanceof Error ? err.message : "Failed to patch build";
++    return NextResponse.json({ error: message }, { status: 400 });
++  }
++}
++
+ /** DELETE /api/builds/[id] */
+ export async function DELETE(_req: Request, { params }: Params) {
+   const { id } = await params;
+diff --git a/app/api/import/maxroll/preview/route.ts b/app/api/import/maxroll/preview/route.ts
+new file mode 100644
+index 0000000..3c2827a
+--- /dev/null
++++ b/app/api/import/maxroll/preview/route.ts
+@@ -0,0 +1,98 @@
++/**
++ * POST /api/import/maxroll/preview — stateless Maxroll planner preview (D23).
++ *
++ * Accepts a planner reference (bare id, planner URL, or build-guide URL),
++ * invokes the library, and returns ALL variants' mapped data in one response.
++ * No server-side preview state is maintained.
++ *
++ * The UI picks one variant and commits it directly via the existing
++ * POST /api/characters?withDefaultBuild=true endpoint.
++ *
++ * HTTP error mapping:
++ *   400  parse-error
++ *   404  not-found | private
++ *   409  patch-mismatch
++ *   422  zero-mapped
++ *   502  network
++ *   500  unexpected errors
++ */
++
++import { NextResponse } from "next/server";
++import { importMaxrollPlanner } from "@/lib/import/maxroll";
++import { z } from "zod";
++
++const RequestBodySchema = z.object({
++  /** Planner reference: bare id, planner URL, planner URL with hash, or build-guide URL */
++  input: z.string().min(1, "input is required"),
++});
++
++export async function POST(request: Request) {
++  // Parse request body
++  let body: unknown;
++  try {
++    body = await request.json();
++  } catch {
++    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
++  }
++
++  const parsed = RequestBodySchema.safeParse(body);
++  if (!parsed.success) {
++    return NextResponse.json(
++      { error: parsed.error.message },
++      { status: 400 }
++    );
++  }
++
++  const { input } = parsed.data;
++
++  // Invoke the importer library
++  const result = await importMaxrollPlanner(input);
++
++  if (!result.ok) {
++    // Map failure reasons to appropriate HTTP status codes
++    const statusMap: Record<string, number> = {
++      "parse-error": 400,
++      "not-found": 404,
++      private: 404,
++      "patch-mismatch": 409,
++      "zero-mapped": 422,
++      network: 502,
++    };
++
++    const status = statusMap[result.reason] ?? 500;
++    return NextResponse.json(
++      { error: result.message, reason: result.reason, details: result.details },
++      { status }
++    );
++  }
++
++  // Success — return all variants so the UI can display a picker
++  return NextResponse.json({
++    plannerId: result.plannerId,
++    plannerName: result.plannerName,
++    variants: result.variants.map((v) => ({
++      variantIndex: v.variantIndex,
++      variantName: v.variantName,
++      character: v.character,
++      buildProvenance: v.buildProvenance,
++      items: v.items,
++      report: {
++        unmappedAffixes: v.report.unmappedAffixes,
++        unmappedAspects: v.report.unmappedAspects,
++        unmappedUniques: v.report.unmappedUniques,
++        unmappedParagonNodes: v.report.unmappedParagonNodes,
++        unmappedGlyphs: v.report.unmappedGlyphs,
++        unmappedSkills: v.report.unmappedSkills,
++        versionMismatch: v.report.versionMismatch,
++        // Summary counts for UI display
++        unmappedCount:
++          v.report.unmappedAffixes.length +
++          v.report.unmappedAspects.length +
++          v.report.unmappedUniques.length +
++          v.report.unmappedParagonNodes.length +
++          v.report.unmappedGlyphs.length +
++          v.report.unmappedSkills.length,
++      },
++    })),
++  });
++}
+diff --git a/app/builds/page.tsx b/app/builds/page.tsx
+index 2bed35b..abc170a 100644
+--- a/app/builds/page.tsx
++++ b/app/builds/page.tsx
+@@ -3,7 +3,7 @@ import { listBuilds } from "@/lib/persistence/builds";
+ import { listCharacters } from "@/lib/persistence/characters";
+ import type { Build, Character } from "@/lib/schema";
+ import { Button } from "@/components/ui/button";
+-import { Plus, PenSquare } from "lucide-react";
++import { Plus, PenSquare, Upload } from "lucide-react";
+ 
+ export const metadata = { title: "Builds — D4 Tools" };
+ 
+@@ -28,6 +28,12 @@ export default async function BuildsListPage() {
+       <div className="flex items-center justify-between mb-5">
+         <h1 className="text-[20px] font-bold text-stone-100 m-0">Builds</h1>
+         <div className="flex gap-2">
++          <Link href="/import/maxroll">
++            <Button variant="outline" className="gap-[6px]">
++              <Upload size={14} />
++              Import from Maxroll
++            </Button>
++          </Link>
+           <Link href="/characters/new">
+             <Button className="gap-[6px]">
+               <Plus size={14} />
+@@ -48,12 +54,20 @@ export default async function BuildsListPage() {
+       {!error && builds.length === 0 && (
+         <div className="text-center py-12 px-6 text-stone-500 text-base">
+           <p>No builds yet.</p>
+-          <Link href="/characters/new">
+-            <Button variant="outline" className="mt-3 gap-[6px]">
+-              <Plus size={14} />
+-              Create your first character
+-            </Button>
+-          </Link>
++          <div className="flex justify-center gap-2 mt-3">
++            <Link href="/characters/new">
++              <Button variant="outline" className="gap-[6px]">
++                <Plus size={14} />
++                Create your first character
++              </Button>
++            </Link>
++            <Link href="/import/maxroll">
++              <Button variant="outline" className="gap-[6px]">
++                <Upload size={14} />
++                Import from Maxroll
++              </Button>
++            </Link>
++          </div>
+         </div>
+       )}
+ 
+diff --git a/app/characters/new/page.tsx b/app/characters/new/page.tsx
+index 7924d4d..c67c0ee 100644
+--- a/app/characters/new/page.tsx
++++ b/app/characters/new/page.tsx
+@@ -1,3 +1,4 @@
++import Link from "next/link";
+ import { CharacterEditor } from "@/components/d4/CharacterEditor";
+ 
+ export const metadata = { title: "New Character — D4 Tools" };
+@@ -5,6 +6,16 @@ export const metadata = { title: "New Character — D4 Tools" };
+ export default function NewCharacterPage() {
+   return (
+     <div className="max-w-[720px] p-6">
++      <div className="flex items-center justify-between mb-5">
++        <h1 className="text-[18px] font-bold text-stone-100">New Character</h1>
++        <Link
++          href="/import/maxroll"
++          className="text-xs text-stone-500 hover:text-accent transition-colors no-underline"
++          title="Import a build from a shared Maxroll planner"
++        >
++          Import from Maxroll ↗
++        </Link>
++      </div>
+       <CharacterEditor isNew />
+     </div>
+   );
+diff --git a/app/import/maxroll/MaxrollImportClient.tsx b/app/import/maxroll/MaxrollImportClient.tsx
+new file mode 100644
+index 0000000..595c335
+--- /dev/null
++++ b/app/import/maxroll/MaxrollImportClient.tsx
+@@ -0,0 +1,406 @@
++"use client";
++
++/**
++ * Maxroll planner importer — four-state client flow (D20/D23).
++ *
++ * States:
++ *   paste   — input a planner reference (id or URL)
++ *   preview — multi-variant picker + gear summary + unmapped-ref counts
++ *   confirm — single commit action
++ *   (redirect on success)
++ *
++ * Commit path: POST chosen variant's character to /api/characters?withDefaultBuild=true
++ * (existing atomic endpoint per D23), then PATCH the created build with importedFrom
++ * provenance (D19).
++ */
++
++import { useState, useCallback } from "react";
++import { useRouter } from "next/navigation";
++import { Button } from "@/components/ui/button";
++import { AlertCircle, ArrowLeft, CheckCircle, Loader2, Upload } from "lucide-react";
++
++// ─── Types mirrored from API response ─────────────────────────────────────
++
++interface VersionMismatch {
++  catalogPatch: string;
++  maxrollPatch: string;
++  explicitMappingRate: number;
++}
++
++interface VariantReport {
++  unmappedCount: number;
++  versionMismatch?: VersionMismatch;
++}
++
++interface VariantPreview {
++  variantIndex: number;
++  variantName: string;
++  character: {
++    name: string;
++    class: string;
++    level: number;
++    paragonAllocation: { paragonLevel: number; boards: unknown[] };
++    equippedItems: Record<string, unknown>;
++    skillSelections: unknown[];
++  };
++  buildProvenance: {
++    source: string;
++    plannerId: string;
++    variantIndex: number;
++    importedAt: string;
++    plannerVersion: string;
++  };
++  items: Record<string, unknown>;
++  report: VariantReport;
++}
++
++interface PreviewPayload {
++  plannerId: string;
++  plannerName: string;
++  variants: VariantPreview[];
++}
++
++// ─── Component ─────────────────────────────────────────────────────────────
++
++type FlowState = "paste" | "preview" | "confirm" | "committing";
++
++export function MaxrollImportClient() {
++  const router = useRouter();
++
++  const [state, setState] = useState<FlowState>("paste");
++  const [inputValue, setInputValue] = useState("");
++  const [isLoading, setIsLoading] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++
++  const [preview, setPreview] = useState<PreviewPayload | null>(null);
++  const [selectedVariantIndex, setSelectedVariantIndex] = useState(0);
++
++  // ── Paste state: submit ──────────────────────────────────────────────────
++
++  const handlePreview = useCallback(async () => {
++    const trimmed = inputValue.trim();
++    if (!trimmed) {
++      setError("Please enter a Maxroll planner URL or id.");
++      return;
++    }
++
++    setError(null);
++    setIsLoading(true);
++
++    try {
++      const res = await fetch("/api/import/maxroll/preview", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ input: trimmed }),
++      });
++
++      const data = await res.json();
++
++      if (!res.ok) {
++        setError(data.error ?? `Import failed (${res.status})`);
++        setIsLoading(false);
++        return;
++      }
++
++      setPreview(data as PreviewPayload);
++      setSelectedVariantIndex(0);
++      setState("preview");
++    } catch (err) {
++      setError(err instanceof Error ? err.message : "Network error");
++    } finally {
++      setIsLoading(false);
++    }
++  }, [inputValue]);
++
++  // ── Preview state: select variant, confirm ───────────────────────────────
++
++  const handleConfirm = useCallback(() => {
++    setState("confirm");
++  }, []);
++
++  // ── Confirm state: commit ────────────────────────────────────────────────
++
++  const handleCommit = useCallback(async () => {
++    if (!preview) return;
++
++    const variant = preview.variants[selectedVariantIndex];
++    if (!variant) return;
++
++    setState("committing");
++    setError(null);
++
++    try {
++      // Step 1: Create character + default build atomically
++      const createRes = await fetch("/api/characters?withDefaultBuild=true", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify(variant.character),
++      });
++
++      if (!createRes.ok) {
++        const err = await createRes.json().catch(() => ({}));
++        throw new Error(err.error ?? `Failed to create character (${createRes.status})`);
++      }
++
++      const { build } = await createRes.json();
++
++      // Step 2: PATCH the build with importedFrom provenance (D19)
++      try {
++        await fetch(`/api/builds/${build.id}`, {
++          method: "PATCH",
++          headers: { "Content-Type": "application/json" },
++          body: JSON.stringify({ importedFrom: variant.buildProvenance }),
++        });
++      } catch {
++        // Provenance write is best-effort — do not abort on failure
++        console.warn("[MaxrollImport] Failed to write importedFrom provenance to build", build.id);
++      }
++
++      // Step 3: Navigate to the new build (setActiveBuildId happens server-side on visit)
++      router.push(`/builds/${build.id}`);
++    } catch (err) {
++      setError(err instanceof Error ? err.message : "Commit failed");
++      setState("confirm");
++    }
++  }, [preview, selectedVariantIndex, router]);
++
++  // ── Selected variant ─────────────────────────────────────────────────────
++
++  const selectedVariant = preview?.variants[selectedVariantIndex];
++
++  // ─── Render ─────────────────────────────────────────────────────────────
++
++  return (
++    <div className="max-w-[640px] p-6">
++      <h1 className="text-[20px] font-bold text-stone-100 mb-6">
++        Import from Maxroll Planner
++      </h1>
++
++      {/* ── Paste state ── */}
++      {state === "paste" && (
++        <div className="flex flex-col gap-4">
++          <p className="text-sm text-stone-400">
++            Paste a Maxroll planner URL or planner id. The planner must be publicly shared.
++          </p>
++
++          <div className="flex flex-col gap-1">
++            <label className="text-xs text-stone-500 uppercase tracking-wider" htmlFor="planner-input">
++              Planner URL or ID
++            </label>
++            <input
++              id="planner-input"
++              type="text"
++              className="w-full rounded-md border border-stone-700 bg-surface-2 px-3 py-2 text-sm text-stone-100 placeholder-stone-600 focus:border-stone-500 focus:outline-none"
++              placeholder="https://maxroll.gg/d4/planner/abc123 or abc123"
++              value={inputValue}
++              onChange={(e) => setInputValue(e.target.value)}
++              onKeyDown={(e) => e.key === "Enter" && handlePreview()}
++              autoFocus
++            />
++          </div>
++
++          {error && (
++            <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
++              <AlertCircle size={15} className="mt-0.5 shrink-0" />
++              <span>{error}</span>
++            </div>
++          )}
++
++          <div className="flex gap-2">
++            <Button onClick={handlePreview} disabled={isLoading} className="gap-2">
++              {isLoading ? (
++                <Loader2 size={14} className="animate-spin" />
++              ) : (
++                <Upload size={14} />
++              )}
++              {isLoading ? "Loading…" : "Preview"}
++            </Button>
++          </div>
++
++          <p className="text-xs text-stone-600">
++            Accepted formats: bare planner id, maxroll.gg/d4/planner/&lt;id&gt; URL,
++            maxroll.gg/d4/build-guides/&lt;slug&gt; URL
++          </p>
++        </div>
++      )}
++
++      {/* ── Preview state ── */}
++      {state === "preview" && preview && selectedVariant && (
++        <div className="flex flex-col gap-5">
++          <div className="flex items-center gap-3">
++            <button
++              onClick={() => setState("paste")}
++              className="flex items-center gap-1 text-xs text-stone-500 hover:text-stone-300 transition-colors"
++            >
++              <ArrowLeft size={13} />
++              Back
++            </button>
++            <span className="text-stone-600">·</span>
++            <span className="text-sm text-stone-300">{preview.plannerName}</span>
++          </div>
++
++          {/* Variant picker */}
++          {preview.variants.length > 1 && (
++            <div className="flex flex-col gap-2">
++              <span className="text-xs text-stone-500 uppercase tracking-wider">
++                Variant / Tab
++              </span>
++              <div className="flex flex-wrap gap-2">
++                {preview.variants.map((v) => (
++                  <button
++                    key={v.variantIndex}
++                    onClick={() => setSelectedVariantIndex(v.variantIndex)}
++                    className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
++                      v.variantIndex === selectedVariantIndex
++                        ? "border-accent bg-accent/10 text-accent"
++                        : "border-stone-700 text-stone-400 hover:border-stone-500"
++                    }`}
++                  >
++                    {v.variantName}
++                  </button>
++                ))}
++              </div>
++            </div>
++          )}
++
++          {/* Build summary */}
++          <div className="rounded-md border border-stone-800 bg-surface-2 p-4 flex flex-col gap-3">
++            <div className="grid grid-cols-3 gap-3 text-sm">
++              <div>
++                <div className="text-xs text-stone-500 mb-1">Class</div>
++                <div className="text-stone-100">{selectedVariant.character.class}</div>
++              </div>
++              <div>
++                <div className="text-xs text-stone-500 mb-1">Level</div>
++                <div className="text-stone-100">{selectedVariant.character.level}</div>
++              </div>
++              <div>
++                <div className="text-xs text-stone-500 mb-1">Paragon</div>
++                <div className="text-stone-100">
++                  {selectedVariant.character.paragonAllocation.paragonLevel}
++                </div>
++              </div>
++            </div>
++
++            <div className="grid grid-cols-3 gap-3 text-sm">
++              <div>
++                <div className="text-xs text-stone-500 mb-1">Items</div>
++                <div className="text-stone-100">
++                  {Object.keys(selectedVariant.items).length} slots
++                </div>
++              </div>
++              <div>
++                <div className="text-xs text-stone-500 mb-1">Skills</div>
++                <div className="text-stone-100">
++                  {selectedVariant.character.skillSelections.length}
++                </div>
++              </div>
++              <div>
++                <div className="text-xs text-stone-500 mb-1">Paragon boards</div>
++                <div className="text-stone-100">
++                  {selectedVariant.character.paragonAllocation.boards.length}
++                </div>
++              </div>
++            </div>
++          </div>
++
++          {/* Unmapped references summary */}
++          {selectedVariant.report.unmappedCount > 0 && (
++            <div className="rounded-md border border-amber-900/50 bg-amber-900/10 px-4 py-3">
++              <div className="text-xs font-semibold text-amber-400 mb-1">
++                {selectedVariant.report.unmappedCount} unmapped reference
++                {selectedVariant.report.unmappedCount !== 1 ? "s" : ""}
++              </div>
++              <div className="text-xs text-amber-600">
++                Some affixes, skills, or paragon nodes from this planner could not be matched
++                to the current catalog. They will be omitted from the import.
++              </div>
++            </div>
++          )}
++
++          {/* Version mismatch warning */}
++          {selectedVariant.report.versionMismatch && (
++            <div className="rounded-md border border-amber-900/50 bg-amber-900/10 px-4 py-3">
++              <div className="text-xs font-semibold text-amber-400 mb-1">
++                Patch version mismatch
++              </div>
++              <div className="text-xs text-amber-600">
++                Maxroll data is from patch {selectedVariant.report.versionMismatch.maxrollPatch};
++                catalog is {selectedVariant.report.versionMismatch.catalogPatch}.
++                Mapping rate:{" "}
++                {(selectedVariant.report.versionMismatch.explicitMappingRate * 100).toFixed(0)}%.
++              </div>
++            </div>
++          )}
++
++          {error && (
++            <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
++              <AlertCircle size={15} className="mt-0.5 shrink-0" />
++              <span>{error}</span>
++            </div>
++          )}
++
++          <div className="flex gap-2">
++            <Button onClick={handleConfirm}>
++              Import This Build
++            </Button>
++            <Button variant="outline" onClick={() => setState("paste")}>
++              Start Over
++            </Button>
++          </div>
++        </div>
++      )}
++
++      {/* ── Confirm state ── */}
++      {state === "confirm" && selectedVariant && (
++        <div className="flex flex-col gap-5">
++          <div className="flex items-center gap-3">
++            <button
++              onClick={() => setState("preview")}
++              className="flex items-center gap-1 text-xs text-stone-500 hover:text-stone-300 transition-colors"
++            >
++              <ArrowLeft size={13} />
++              Back to preview
++            </button>
++          </div>
++
++          <div className="rounded-md border border-stone-800 bg-surface-2 p-4 flex flex-col gap-2">
++            <div className="flex items-center gap-2 text-sm text-stone-300">
++              <CheckCircle size={15} className="text-green-500 shrink-0" />
++              Ready to import
++            </div>
++            <div className="text-xs text-stone-500">
++              Creating character <strong className="text-stone-300">{selectedVariant.character.name}</strong>
++              {" "}({selectedVariant.character.class}, Lvl {selectedVariant.character.level}) with{" "}
++              {Object.keys(selectedVariant.items).length} equipped items.
++            </div>
++          </div>
++
++          {error && (
++            <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
++              <AlertCircle size={15} className="mt-0.5 shrink-0" />
++              <span>{error}</span>
++            </div>
++          )}
++
++          <div className="flex gap-2">
++            <Button onClick={handleCommit} className="gap-2">
++              Confirm Import
++            </Button>
++            <Button variant="outline" onClick={() => setState("preview")}>
++              Cancel
++            </Button>
++          </div>
++        </div>
++      )}
++
++      {/* ── Committing state ── */}
++      {state === "committing" && (
++        <div className="flex items-center gap-3 text-sm text-stone-400">
++          <Loader2 size={16} className="animate-spin shrink-0" />
++          Saving character and build…
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/app/import/maxroll/page.tsx b/app/import/maxroll/page.tsx
+new file mode 100644
+index 0000000..ed83bc8
+--- /dev/null
++++ b/app/import/maxroll/page.tsx
+@@ -0,0 +1,7 @@
++import { MaxrollImportClient } from "./MaxrollImportClient";
++
++export const metadata = { title: "Import from Maxroll — D4 Tools" };
++
++export default function MaxrollImportPage() {
++  return <MaxrollImportClient />;
++}
+diff --git a/components/layout/CommandPalette.tsx b/components/layout/CommandPalette.tsx
+index 4e99b64..86c5479 100644
+--- a/components/layout/CommandPalette.tsx
++++ b/components/layout/CommandPalette.tsx
+@@ -232,12 +232,23 @@ export function CommandPalette() {
+     },
+     {
+       id: "import-build",
+-      label: "Import Build…",
++      label: "Import Build from JSON file…",
+       description: "Load a build from a JSON file",
+       icon: Upload,
+       group: "File",
+       run: () => triggerFileInput(importBuildFromFile),
+     },
++    {
++      id: "import-build-maxroll",
++      label: "Import Build from Maxroll planner…",
++      description: "Import a shared Maxroll build planner by URL or id",
++      icon: Upload,
++      group: "File",
++      run: () => {
++        handleOpenChange(false);
++        router.push("/import/maxroll");
++      },
++    },
+     {
+       id: "export-build",
+       label: "Export Build…",
+diff --git a/docs/data-sources/01-armory.md b/docs/data-sources/01-armory.md
+index 396f452..11940be 100644
+--- a/docs/data-sources/01-armory.md
++++ b/docs/data-sources/01-armory.md
+@@ -247,6 +247,8 @@ approach for character data access.
+ ### 2.2 Maxroll.gg D4 Planner
+ 
+ Maxroll's D4 planner at `https://maxroll.gg/d4/planner/` provides build sharing and planning.
++d4-tools ships a Maxroll planner importer (`lib/import/maxroll/`) that fetches and maps shared
++planner builds into the canonical Character + Build schema.
+ 
+ - URL: `https://maxroll.gg/d4/planner/`
+ - Accessed: 2026-05-07
+@@ -254,15 +256,36 @@ Maxroll's D4 planner at `https://maxroll.gg/d4/planner/` provides build sharing
+ - provenance: `planner`
+ - verification: `verified working` (HTTP 200 confirmed at access date)
+ 
+-**Battle.net import:** Not confirmed in research. Maxroll's planner is primarily a manual
+-build-entry tool for sharing builds; direct character import is not a known feature.
++**Import surface:** User-shared builds — i.e., a manually-authored or community-shared build
++configuration. This is **not** a "my actual character" import path; builds are imported from
++shared planner URLs that the user pastes into the tool. The import produces a Character with
++equipped items, skills, and paragon allocation matching the Maxroll planner, along with a
++structured report of any references that could not be mapped to the current catalog.
+ 
+-**API:** No public API. Internal API endpoints are observable via browser devtools but use of
+-those undocumented endpoints violates Maxroll's ToS.
++**Data sources used by the importer:**
+ 
+-**ToS:** Maxroll's Terms of Service explicitly prohibit scraping. For a personal build tool
+-analyzing your own character, the sanctioned path would be Blizzard's Game Data API (§1.2) — but
+-as noted, those endpoints do not currently exist.
++- `GET https://planners.maxroll.gg/profiles/load?profileId=<id>` — returns the full planner
++  payload (all variants / tabs) as JSON.
++- `GET https://assets-ng.maxroll.gg/d4planner/data.min.json` — game-data mapping file that
++  translates Maxroll's internal numeric nids to datamine `bnetFileName` values, which are the
++  join key against our catalog.
++
++Both endpoints are observable via browser devtools and are used by the importer. Endpoint bases
++can be overridden via `MAXROLL_PLANNER_API_BASE` and `MAXROLL_DATA_BASE` environment variables
++for testing.
++
++**Join key:** `bnetFileName` — a datamine-derived file identifier present on every affix, aspect,
++unique, skill, paragon board, and paragon glyph entry in our catalog. The importer performs
++exact-match lookups only; no label-match or tag-based fallbacks.
++
++**Cache:** `data.min.json` is cached to `DATA_DIR/maxroll-cache/data.min.<patch>.json` keyed by
++patch version. No TTL beyond patch-version invalidation.
++
++**ToS posture:** Maxroll's Terms of Service prohibit automated scraping. Fetching a single
++user-pasted planner URL for personal build analysis is the community-accepted "gray area" pattern
++(see `docs/future-import-paths.md` Path A). The importer never issues bulk or automated requests.
++Consistent with the posture documented in Path A and shared by tools like Diablo4Companion
++(289 stars, same API).
+ 
+ ---
+ 
+diff --git a/docs/future-import-paths.md b/docs/future-import-paths.md
+index 351c69b..926490c 100644
+--- a/docs/future-import-paths.md
++++ b/docs/future-import-paths.md
+@@ -63,9 +63,21 @@ user-pasted URL parsed for personal use is a much grayer area than bulk
+ scraping. Community tools have operated in this gray area without
+ incident, but it is not unambiguously sanctioned.
+ 
+-**Implementation cost:** Modest. One HTML fetch + a parser per source
+-site, plus mapping to the canonical schema. Per-site parsers must be
+-maintained as the source HTML evolves.
++**Implementation cost:** Modest. One API fetch + a mapper per source
++site, plus mapping to the canonical schema. Per-site mappers must be
++maintained as the source API evolves.
++
++**Per-planner status:**
++
++- **Maxroll.gg** ✅ Shipped — `lib/import/maxroll/` implements the full importer using
++  `planners.maxroll.gg/profiles/load` (planner profile API) +
++  `assets-ng.maxroll.gg/d4planner/data.min.json` (nid→bnetFileName mapping). Accessible from
++  cmd-K ("Import Build from Maxroll planner…"), the Builds page, and the New Character page.
++  See `docs/data-sources/01-armory.md §2.2` for API details.
++
++- **D4Builds.gg** — Not yet shipped. Remains an open commission idea.
++
++- **Mobalytics.gg** — Not yet shipped. Remains an open commission idea.
+ 
+ ### Path B — Screenshot OCR  ✅ Shipped (v11 + v12)
+ 
+@@ -211,9 +223,10 @@ backlog:
+   `POST /api/triage/upload` receives, saves, and parses synchronously via
+   the Anthropic Vision API; `/triage` gallery displays results. The
+   dedicated-OCR variant was superseded by the vision-LLM approach.
+-- **`vN: Build-URL parser`** — paste a D4Builds.gg / Maxroll / Mobalytics
+-  URL, fetch and parse to v2 schema. Per-source parsers; ToS gray-area
+-  acknowledged.
++- ~~**`vN: Build-URL parser (Maxroll)`**~~ **✅ Shipped.** `lib/import/maxroll/` — paste a
++  Maxroll planner URL or id, maps to v2 schema via bnetFileName join key.
++- **`vN: Build-URL parser (D4Builds.gg / Mobalytics)`** — extend the import namespace with
++  per-source importers for the remaining planners. ToS gray-area acknowledged.
+ - **`vN: TTS-accessibility companion`** — Windows DLL intercepts D4's TTS
+   stream, exposes a local socket, web app subscribes for real-time item
+   events. Supports real-time loot triage. Substantial multi-component
+diff --git a/lib/import/index.ts b/lib/import/index.ts
+new file mode 100644
+index 0000000..5b461e9
+--- /dev/null
++++ b/lib/import/index.ts
+@@ -0,0 +1,15 @@
++/**
++ * lib/import — top-level re-export for all planner importers (D1).
++ *
++ * Currently ships only the Maxroll importer. D4Builds and Mobalytics importers
++ * are open commission ideas tracked in docs/future-import-paths.md Path A.
++ */
++
++export { importMaxrollPlanner } from "./maxroll";
++export type {
++  ImportContext,
++  ImportResult,
++  MappedVariant,
++  ImportReport,
++  UnmappedRef,
++} from "./maxroll";
+diff --git a/lib/import/maxroll/catalog-index.ts b/lib/import/maxroll/catalog-index.ts
+new file mode 100644
+index 0000000..c3934b1
+--- /dev/null
++++ b/lib/import/maxroll/catalog-index.ts
+@@ -0,0 +1,118 @@
++/**
++ * Catalog join indices for the Maxroll importer (T3 — catalog index builders).
++ *
++ * Built once at module load time. All indices are keyed by bnetFileName —
++ * the only join key used by the importer (D3 patron decision: no label-match,
++ * no attribute-id, no tag-heuristic fallbacks).
++ *
++ * Per-class indices are built lazily on first request to avoid loading all
++ * class catalogs when only one class is being imported.
++ */
++
++import {
++  affixes,
++  aspects,
++  uniques,
++  getSkillsForClass,
++  getParagonCatalogForClass,
++  type AffixEntry,
++  type AspectEntry,
++  type UniqueEntry,
++  type SkillEntry,
++  type ParagonBoardEntry,
++  type ParagonGlyphEntry,
++} from "@/lib/catalog";
++
++// ─── Global indices (class-agnostic) ──────────────────────────────────────
++
++/**
++ * Map from bnetFileName → AffixEntry.
++ * Excludes deprecated affixes.
++ * Built once at module load.
++ */
++export const affixIndexByBnetFileName: Map<string, AffixEntry> = (() => {
++  const m = new Map<string, AffixEntry>();
++  for (const entry of affixes) {
++    if (!entry.deprecated && entry.bnetFileName) {
++      m.set(entry.bnetFileName, entry);
++    }
++  }
++  return m;
++})();
++
++/**
++ * Map from bnetFileName → AspectEntry.
++ * Excludes deprecated aspects.
++ * Built once at module load.
++ */
++export const aspectIndexByBnetFileName: Map<string, AspectEntry> = (() => {
++  const m = new Map<string, AspectEntry>();
++  for (const entry of aspects) {
++    if (!entry.deprecated && entry.bnetFileName) {
++      m.set(entry.bnetFileName, entry);
++    }
++  }
++  return m;
++})();
++
++/**
++ * Map from bnetFileName → UniqueEntry.
++ * Excludes deprecated uniques.
++ * Built once at module load.
++ */
++export const uniqueIndexByBnetFileName: Map<string, UniqueEntry> = (() => {
++  const m = new Map<string, UniqueEntry>();
++  for (const entry of uniques) {
++    if (!entry.deprecated && entry.bnetFileName) {
++      m.set(entry.bnetFileName, entry);
++    }
++  }
++  return m;
++})();
++
++// ─── Per-class lazy indices ────────────────────────────────────────────────
++
++const skillIndexByClass = new Map<string, Map<string, SkillEntry>>();
++const boardIndexByClass = new Map<string, Map<string, ParagonBoardEntry>>();
++const glyphIndexByClass = new Map<string, Map<string, ParagonGlyphEntry>>();
++
++export function getSkillIndex(className: string): Map<string, SkillEntry> {
++  let idx = skillIndexByClass.get(className);
++  if (idx) return idx;
++  idx = new Map<string, SkillEntry>();
++  for (const entry of getSkillsForClass(className)) {
++    if (entry.bnetFileName) {
++      idx.set(entry.bnetFileName, entry);
++    }
++  }
++  skillIndexByClass.set(className, idx);
++  return idx;
++}
++
++export function getBoardIndex(className: string): Map<string, ParagonBoardEntry> {
++  let idx = boardIndexByClass.get(className);
++  if (idx) return idx;
++  idx = new Map<string, ParagonBoardEntry>();
++  const { boards } = getParagonCatalogForClass(className);
++  for (const entry of boards) {
++    if (entry.bnetFileName) {
++      idx.set(entry.bnetFileName, entry);
++    }
++  }
++  boardIndexByClass.set(className, idx);
++  return idx;
++}
++
++export function getGlyphIndex(className: string): Map<string, ParagonGlyphEntry> {
++  let idx = glyphIndexByClass.get(className);
++  if (idx) return idx;
++  idx = new Map<string, ParagonGlyphEntry>();
++  const { glyphs } = getParagonCatalogForClass(className);
++  for (const entry of glyphs) {
++    if (entry.bnetFileName) {
++      idx.set(entry.bnetFileName, entry);
++    }
++  }
++  glyphIndexByClass.set(className, idx);
++  return idx;
++}
+diff --git a/lib/import/maxroll/data-min-cache.ts b/lib/import/maxroll/data-min-cache.ts
+new file mode 100644
+index 0000000..925b6a4
+--- /dev/null
++++ b/lib/import/maxroll/data-min-cache.ts
+@@ -0,0 +1,98 @@
++/**
++ * Disk + in-memory cache for Maxroll's data.min.json (D4, D5).
++ *
++ * Cache key: patch version string extracted from the Maxroll profile response.
++ * Disk path: DATA_DIR/maxroll-cache/data.min.<patch>.json
++ * No sliding TTL — patch-only invalidation (D5).
++ *
++ * In-process in-memory layer prevents re-reading from disk on repeated imports
++ * within the same Node process.
++ */
++
++import * as fs from "fs/promises";
++import * as path from "path";
++import { getDataDir } from "@/lib/persistence/paths";
++import { MaxrollDataMinSchema, type MaxrollDataMin } from "./payload-schema";
++import { fetchDataMin } from "./fetcher";
++
++/** In-memory cache: patch string → parsed DataMin object */
++const memoryCache = new Map<string, MaxrollDataMin>();
++
++/**
++ * Returns the disk cache directory for data.min.json files.
++ * Respects the cacheDir override from ImportContext (used in tests).
++ */
++function getCacheDir(override?: string): string {
++  return override ?? path.join(getDataDir(), "maxroll-cache");
++}
++
++function cachePath(cacheDir: string, patch: string): string {
++  // Sanitize patch string for use in a filename (replace path separators and dots aren't an issue)
++  const safePatch = patch.replace(/[^a-zA-Z0-9._-]/g, "-");
++  return path.join(cacheDir, `data.min.${safePatch}.json`);
++}
++
++/**
++ * Load data.min.json for the given patch version.
++ *
++ * Resolution order:
++ *   1. In-memory cache (fastest, zero I/O)
++ *   2. Disk cache at DATA_DIR/maxroll-cache/data.min.<patch>.json
++ *   3. Network fetch from assets-ng.maxroll.gg (writes to disk + memory)
++ *
++ * @param patch    Patch string from the Maxroll profile response (used as cache key)
++ * @param cacheDir Optional override (from ImportContext.cacheDir; used in tests)
++ * @param fetchFn  Optional fetch override (from ImportContext.fetch; used in tests)
++ */
++export async function loadDataMin(
++  patch: string,
++  cacheDir?: string,
++  fetchFn: typeof globalThis.fetch = globalThis.fetch
++): Promise<MaxrollDataMin> {
++  // 1. In-memory
++  const cached = memoryCache.get(patch);
++  if (cached) return cached;
++
++  const dir = getCacheDir(cacheDir);
++  const filePath = cachePath(dir, patch);
++
++  // 2. Disk cache
++  try {
++    const raw = await fs.readFile(filePath, "utf-8");
++    const parsed = MaxrollDataMinSchema.parse(JSON.parse(raw));
++    memoryCache.set(patch, parsed);
++    return parsed;
++  } catch (err) {
++    // ENOENT → cache miss, continue to fetch; anything else is re-thrown
++    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
++      // Corrupt cache file — log and re-fetch
++      console.warn(`[maxroll-cache] Failed to read disk cache ${filePath}: ${err}. Re-fetching.`);
++    }
++  }
++
++  // 3. Network fetch
++  const raw = await fetchDataMin(fetchFn);
++
++  let parsed: MaxrollDataMin;
++  try {
++    parsed = MaxrollDataMinSchema.parse(raw);
++  } catch (err) {
++    throw new Error(`Maxroll data.min.json did not match expected schema: ${err}`);
++  }
++
++  // Write to disk (best-effort — failure should not abort the import)
++  try {
++    await fs.mkdir(dir, { recursive: true });
++    await fs.writeFile(filePath, JSON.stringify(parsed), "utf-8");
++  } catch (writeErr) {
++    console.warn(`[maxroll-cache] Failed to write disk cache ${filePath}: ${writeErr}`);
++  }
++
++  memoryCache.set(patch, parsed);
++  return parsed;
++}
++
++/** Clear the in-memory cache (exposed for test teardown). */
++export function clearMemoryCache(): void {
++  memoryCache.clear();
++}
+diff --git a/lib/import/maxroll/fetcher.ts b/lib/import/maxroll/fetcher.ts
+new file mode 100644
+index 0000000..b489be2
+--- /dev/null
++++ b/lib/import/maxroll/fetcher.ts
+@@ -0,0 +1,108 @@
++/**
++ * HTTP client for Maxroll planner API and data assets (D6).
++ *
++ * Two env-var overrides following lib/triage/anthropic.ts pattern:
++ *   MAXROLL_PLANNER_API_BASE  — default https://planners.maxroll.gg
++ *   MAXROLL_DATA_BASE         — default https://assets-ng.maxroll.gg
++ *
++ * Native fetch only, no SDK dependency. Fails loud on non-2xx responses.
++ */
++
++/**
++ * Returns the base URL for the Maxroll planner API.
++ * Override via MAXROLL_PLANNER_API_BASE for testing.
++ */
++export function getMaxrollPlannerApiBase(): string {
++  const override = process.env.MAXROLL_PLANNER_API_BASE;
++  if (override && override.length > 0) return override.replace(/\/$/, "");
++  return "https://planners.maxroll.gg";
++}
++
++/**
++ * Returns the base URL for Maxroll data assets (data.min.json).
++ * Override via MAXROLL_DATA_BASE for testing.
++ */
++export function getMaxrollDataBase(): string {
++  const override = process.env.MAXROLL_DATA_BASE;
++  if (override && override.length > 0) return override.replace(/\/$/, "");
++  return "https://assets-ng.maxroll.gg";
++}
++
++/**
++ * Fetch the Maxroll planner profile for a given planner id.
++ * Returns the raw JSON body (unparsed — validation happens in payload-schema.ts).
++ */
++export async function fetchPlannerProfile(
++  plannerId: string,
++  fetchFn: typeof globalThis.fetch = globalThis.fetch
++): Promise<unknown> {
++  const base = getMaxrollPlannerApiBase();
++  const url = `${base}/profiles/load?profileId=${encodeURIComponent(plannerId)}`;
++
++  let res: Response;
++  try {
++    res = await fetchFn(url, {
++      headers: { Accept: "application/json" },
++    });
++  } catch (err) {
++    throw new Error(
++      `Network error fetching Maxroll profile ${plannerId}: ${err instanceof Error ? err.message : String(err)}`
++    );
++  }
++
++  if (res.status === 404) {
++    const err = new Error(`Maxroll planner not found: ${plannerId}`);
++    (err as Error & { code: string }).code = "not-found";
++    throw err;
++  }
++
++  if (res.status === 403 || res.status === 401) {
++    const err = new Error(`Maxroll planner is private: ${plannerId}`);
++    (err as Error & { code: string }).code = "private";
++    throw err;
++  }
++
++  if (!res.ok) {
++    throw new Error(
++      `Maxroll profile fetch failed with HTTP ${res.status} for planner: ${plannerId}`
++    );
++  }
++
++  try {
++    return await res.json();
++  } catch {
++    throw new Error(`Maxroll profile response was not valid JSON for planner: ${plannerId}`);
++  }
++}
++
++/**
++ * Fetch the Maxroll data.min.json game-data file.
++ * This is a large file (~11MB) — callers should cache aggressively.
++ */
++export async function fetchDataMin(
++  fetchFn: typeof globalThis.fetch = globalThis.fetch
++): Promise<unknown> {
++  const base = getMaxrollDataBase();
++  const url = `${base}/d4planner/data.min.json`;
++
++  let res: Response;
++  try {
++    res = await fetchFn(url, {
++      headers: { Accept: "application/json" },
++    });
++  } catch (err) {
++    throw new Error(
++      `Network error fetching Maxroll data.min.json: ${err instanceof Error ? err.message : String(err)}`
++    );
++  }
++
++  if (!res.ok) {
++    throw new Error(`Maxroll data.min.json fetch failed with HTTP ${res.status}`);
++  }
++
++  try {
++    return await res.json();
++  } catch {
++    throw new Error("Maxroll data.min.json response was not valid JSON");
++  }
++}
+diff --git a/lib/import/maxroll/index.ts b/lib/import/maxroll/index.ts
+new file mode 100644
+index 0000000..f428dea
+--- /dev/null
++++ b/lib/import/maxroll/index.ts
+@@ -0,0 +1,116 @@
++/**
++ * Maxroll planner importer — public entry point.
++ *
++ * Exports only importMaxrollPlanner (D3 patron override: no public helpers).
++ * All parser/fetcher/mapper modules remain private to this package.
++ *
++ * Usage:
++ *   import { importMaxrollPlanner } from "@/lib/import/maxroll";
++ *   const result = await importMaxrollPlanner("abc123", { fetch: customFetch });
++ */
++
++import { parseMaxrollInput } from "./parser";
++import { fetchPlannerProfile } from "./fetcher";
++import { loadDataMin } from "./data-min-cache";
++import { MaxrollProfileSchema } from "./payload-schema";
++import { mapProfile } from "./mapper";
++import type { ImportContext, ImportResult } from "./types";
++
++export type { ImportContext, ImportResult, MappedVariant, ImportReport, UnmappedRef } from "./types";
++
++/**
++ * Import a Maxroll planner by id, URL, or build-guide URL.
++ *
++ * Input shapes accepted:
++ *   - Bare planner id: "abc123def"
++ *   - Planner URL: "https://maxroll.gg/d4/planner/abc123def"
++ *   - Planner URL with variant hash: "https://maxroll.gg/d4/planner/abc123def#2&equipment"
++ *   - Build-guide URL: "https://maxroll.gg/d4/build-guides/my-build-guide"
++ *
++ * Returns an ImportResult discriminated union:
++ *   ok: true  — { plannerId, plannerName, variants: MappedVariant[] }
++ *   ok: false — { reason, message, details? }
++ *
++ * The result carries ALL variants from the planner. The server route
++ * (POST /api/import/maxroll/preview) returns all of them to the UI
++ * which lets the user pick one to commit.
++ */
++export async function importMaxrollPlanner(
++  input: string,
++  ctx: ImportContext = {}
++): Promise<ImportResult> {
++  const fetchFn = ctx.fetch ?? globalThis.fetch;
++  const now = ctx.now ?? (() => new Date());
++
++  // 1. Parse input → planner id
++  let parsedInput: Awaited<ReturnType<typeof parseMaxrollInput>>;
++  try {
++    parsedInput = await parseMaxrollInput(input, fetchFn);
++  } catch (err) {
++    return {
++      ok: false,
++      reason: "parse-error",
++      message: err instanceof Error ? err.message : String(err),
++    };
++  }
++
++  const { plannerId } = parsedInput;
++
++  // 2. Fetch planner profile
++  let rawProfile: unknown;
++  try {
++    rawProfile = await fetchPlannerProfile(plannerId, fetchFn);
++  } catch (err) {
++    const code = (err as { code?: string }).code;
++    if (code === "not-found") {
++      return {
++        ok: false,
++        reason: "not-found",
++        message: `Maxroll planner not found: ${plannerId}`,
++      };
++    }
++    if (code === "private") {
++      return {
++        ok: false,
++        reason: "private",
++        message: `Maxroll planner is private: ${plannerId}`,
++      };
++    }
++    const isNetwork =
++      err instanceof Error &&
++      (err.message.includes("Network error") || err.message.includes("fetch"));
++    return {
++      ok: false,
++      reason: isNetwork ? "network" : "parse-error",
++      message: err instanceof Error ? err.message : String(err),
++    };
++  }
++
++  // 3. Validate profile schema
++  const profileResult = MaxrollProfileSchema.safeParse(rawProfile);
++  if (!profileResult.success) {
++    return {
++      ok: false,
++      reason: "parse-error",
++      message: `Maxroll profile did not match expected schema: ${profileResult.error.message}`,
++      details: profileResult.error.issues,
++    };
++  }
++  const profile = profileResult.data;
++
++  // 4. Load data.min.json (disk cache → network)
++  const patch = profile.patch ?? "unknown";
++  let datMin: Awaited<ReturnType<typeof loadDataMin>>;
++  try {
++    datMin = await loadDataMin(patch, ctx.cacheDir, fetchFn);
++  } catch (err) {
++    return {
++      ok: false,
++      reason: "network",
++      message: `Failed to load Maxroll data.min.json: ${err instanceof Error ? err.message : String(err)}`,
++    };
++  }
++
++  // 5. Map to canonical schemas
++  return mapProfile(profile, datMin, now());
++}
+diff --git a/lib/import/maxroll/mapper.ts b/lib/import/maxroll/mapper.ts
+new file mode 100644
+index 0000000..28fe3b0
+--- /dev/null
++++ b/lib/import/maxroll/mapper.ts
+@@ -0,0 +1,528 @@
++/**
++ * Schema-mapping pipeline for the Maxroll planner importer (T3).
++ *
++ * Maps a parsed Maxroll profile + data.min.json into canonical d4-tools
++ * Character / Item / Build shapes using bnetFileName as the exclusive join key.
++ *
++ * Key decisions implemented here:
++ *   D9  — patch-mismatch fail threshold (50% explicit mapping rate)
++ *   D11 — aspect.source defaults to 'legendary'
++ *   D12 — Character.level defaults to 100
++ *   D13 — Item.itemPower left undefined when absent
++ *   D14 — Item.rarity: unique > legendary (if aspect) > rare
++ *   D15 — Item.isAncestral defaults to false
++ *   D16 — Affix routing: catalog isImplicit → implicits; Maxroll tempered → tempered; else → explicits
++ *   D17 — Paragon nodes stored verbatim as mr:<nid> strings; spentPoints = nodes.length
++ *   D18 — Glyph level defaults to 21
++ */
++
++import { classes, verifiedAgainst } from "@/lib/catalog";
++import type { Character } from "@/lib/schema/character";
++import type { Item, ItemRarity } from "@/lib/schema/item";
++import type { AffixInstance } from "@/lib/schema/affix";
++import type { AspectInstance } from "@/lib/schema/aspect";
++import type { SkillSelection } from "@/lib/schema/skill";
++import type { ParagonBoardAllocation, ParagonAllocation } from "@/lib/schema/paragon";
++import type { BuildImportedFrom } from "@/lib/schema/build";
++import type { MaxrollProfile, MaxrollVariant, MaxrollItem, MaxrollDataMin } from "./payload-schema";
++import type { UnmappedRef, ImportReport, MappedVariant, ImportResult } from "./types";
++import { resolveSlot } from "./slot-map";
++import {
++  affixIndexByBnetFileName,
++  aspectIndexByBnetFileName,
++  uniqueIndexByBnetFileName,
++  getSkillIndex,
++  getBoardIndex,
++  getGlyphIndex,
++} from "./catalog-index";
++
++// ─── Class ID mapping ──────────────────────────────────────────────────────
++
++/** Map from Maxroll d4Class numeric id → our class name string. */
++const classIdToName: Map<number, string> = (() => {
++  const m = new Map<number, string>();
++  for (const entry of classes) {
++    if (entry.bnetClassId !== undefined) {
++      m.set(entry.bnetClassId, entry.id);
++    }
++  }
++  return m;
++})();
++
++// ─── Item mapper ───────────────────────────────────────────────────────────
++
++interface MappedItemResult {
++  item: Item;
++  unmappedAffixes: UnmappedRef[];
++  unmappedAspects: UnmappedRef[];
++  unmappedUniques: UnmappedRef[];
++  explicitCount: number;
++  explicitMappedCount: number;
++}
++
++function mapItem(
++  slotKey: string,
++  mrItem: MaxrollItem,
++  datMin: MaxrollDataMin
++): MappedItemResult | null {
++  const ourSlot = resolveSlot(slotKey);
++  if (!ourSlot) return null; // unknown slot — caller logs a warning
++
++  const unmappedAffixes: UnmappedRef[] = [];
++  const unmappedAspects: UnmappedRef[] = [];
++  const unmappedUniques: UnmappedRef[] = [];
++
++  let explicitCount = 0;
++  let explicitMappedCount = 0;
++
++  // Resolve unique item type via item nid → data.min items → bnetFileName → catalog
++  let isUniqueMapped = false;
++  let uniqueId: string | undefined;
++
++  if (mrItem.nid !== undefined) {
++    const nidStr = String(mrItem.nid);
++    const dmEntry = datMin.items[nidStr];
++    if (dmEntry?.bnetFileName) {
++      const catalogUnique = uniqueIndexByBnetFileName.get(dmEntry.bnetFileName);
++      if (catalogUnique) {
++        isUniqueMapped = true;
++        uniqueId = catalogUnique.id;
++      }
++    }
++    if (!isUniqueMapped) {
++      unmappedUniques.push({ category: "unique", nid: mrItem.nid, slot: ourSlot });
++    }
++  }
++
++  // Map affixes
++  const implicits: AffixInstance[] = [];
++  const explicits: AffixInstance[] = [];
++  const tempered: AffixInstance[] = [];
++
++  for (const mrAffix of mrItem.affixes) {
++    const nidStr = String(mrAffix.nid);
++    const dmEntry = datMin.affixes[nidStr];
++    const bnetFileName = dmEntry?.bnetFileName;
++
++    if (!bnetFileName) {
++      // No data.min entry for this nid — unmapped
++      const isTempered = mrAffix.tempered === true;
++      if (!isTempered) {
++        explicitCount++;
++      }
++      unmappedAffixes.push({
++        category: "affix",
++        nid: mrAffix.nid,
++        value: mrAffix.value,
++        slot: ourSlot,
++        tempered: isTempered,
++      });
++      continue;
++    }
++
++    const catalogAffix = affixIndexByBnetFileName.get(bnetFileName);
++    if (!catalogAffix) {
++      const isTempered = mrAffix.tempered === true;
++      if (!isTempered) {
++        explicitCount++;
++      }
++      unmappedAffixes.push({
++        category: "affix",
++        nid: mrAffix.nid,
++        value: mrAffix.value,
++        slot: ourSlot,
++        tempered: isTempered,
++      });
++      continue;
++    }
++
++    const affixInstance: AffixInstance = {
++      affixId: catalogAffix.id,
++      rolledValue: mrAffix.value,
++    };
++
++    // D16: route by catalog isImplicit, then Maxroll tempered flag, else explicit
++    if (catalogAffix.isImplicit) {
++      implicits.push(affixInstance);
++    } else if (mrAffix.tempered === true) {
++      tempered.push(affixInstance);
++    } else {
++      explicits.push(affixInstance);
++      explicitCount++;
++      explicitMappedCount++;
++    }
++  }
++
++  // Map aspect
++  let aspect: AspectInstance | undefined;
++  if (mrItem.aspect !== undefined) {
++    const nidStr = String(mrItem.aspect.nid);
++    const dmEntry = datMin.aspects[nidStr];
++    const bnetFileName = dmEntry?.bnetFileName;
++
++    if (bnetFileName) {
++      const catalogAspect = aspectIndexByBnetFileName.get(bnetFileName);
++      if (catalogAspect) {
++        aspect = {
++          aspectId: catalogAspect.id,
++          rolledValue: mrItem.aspect.value,
++          source: "legendary" as const, // D11
++        };
++      } else {
++        unmappedAspects.push({
++          category: "aspect",
++          nid: mrItem.aspect.nid,
++          value: mrItem.aspect.value,
++          slot: ourSlot,
++        });
++      }
++    } else {
++      unmappedAspects.push({
++        category: "aspect",
++        nid: mrItem.aspect.nid,
++        value: mrItem.aspect.value,
++        slot: ourSlot,
++      });
++    }
++  }
++
++  // D14: rarity inference
++  let rarity: ItemRarity;
++  if (uniqueId) {
++    rarity = "unique";
++  } else if (aspect !== undefined) {
++    rarity = "legendary";
++  } else {
++    // If quality is present, use it as a hint; else default to rare
++    const q = mrItem.quality;
++    if (q === 5) rarity = "unique";
++    else if (q === 4) rarity = "legendary";
++    else if (q === 2) rarity = "magic";
++    else if (q === 1) rarity = "common";
++    else rarity = "rare";
++  }
++
++  const item: Item = {
++    slot: ourSlot,
++    name: uniqueId ? (uniqueIndexByBnetFileName.get(
++      datMin.items[String(mrItem.nid)]?.bnetFileName ?? ""
++    )?.label ?? "") : "",
++    rarity,
++    itemPower: mrItem.power !== undefined ? Math.round(mrItem.power) : undefined, // D13
++    isAncestral: mrItem.ancestral === true, // D15
++    implicits,
++    explicits,
++    tempered,
++    aspect,
++    masterworkRank: 0,
++    runes: [],
++    sockets: [],
++  };
++
++  return {
++    item,
++    unmappedAffixes,
++    unmappedAspects,
++    unmappedUniques,
++    explicitCount,
++    explicitMappedCount,
++  };
++}
++
++// ─── Skill mapper ──────────────────────────────────────────────────────────
++
++function mapSkills(
++  variant: MaxrollVariant,
++  className: string,
++  datMin: MaxrollDataMin
++): { skillSelections: SkillSelection[]; unmappedSkills: UnmappedRef[] } {
++  const skillIndex = getSkillIndex(className);
++  const skillSelections: SkillSelection[] = [];
++  const unmappedSkills: UnmappedRef[] = [];
++
++  const processSkill = (nid: number, rank: number, slot: number | undefined, isActive: boolean) => {
++    const nidStr = String(nid);
++    const dmEntry = datMin.skills[nidStr];
++    const bnetFileName = dmEntry?.bnetFileName;
++    if (!bnetFileName) {
++      unmappedSkills.push({ category: "skill", nid, isActive });
++      return;
++    }
++    const catalogSkill = skillIndex.get(bnetFileName);
++    if (!catalogSkill) {
++      unmappedSkills.push({ category: "skill", nid, isActive });
++      return;
++    }
++    const sel: SkillSelection = {
++      skillId: catalogSkill.id,
++      rank: Math.min(Math.max(rank, 0), 15),
++      slot: slot !== undefined ? String(slot) : undefined,
++    };
++    skillSelections.push(sel);
++  };
++
++  for (const s of variant.skills?.active ?? []) {
++    processSkill(s.nid, s.rank, s.slot, true);
++  }
++  for (const s of variant.skills?.passive ?? []) {
++    processSkill(s.nid, s.rank, undefined, false);
++  }
++
++  return { skillSelections, unmappedSkills };
++}
++
++// ─── Paragon mapper ────────────────────────────────────────────────────────
++
++function mapParagon(
++  variant: MaxrollVariant,
++  className: string,
++  datMin: MaxrollDataMin
++): {
++  paragonAllocation: ParagonAllocation;
++  unmappedParagonNodes: UnmappedRef[];
++  unmappedGlyphs: UnmappedRef[];
++} {
++  const boardIndex = getBoardIndex(className);
++  const glyphIndex = getGlyphIndex(className);
++
++  const boards: ParagonBoardAllocation[] = [];
++  const unmappedParagonNodes: UnmappedRef[] = [];
++  const unmappedGlyphs: UnmappedRef[] = [];
++
++  for (const mrBoard of variant.paragon?.boards ?? []) {
++    const nidStr = String(mrBoard.nid);
++    const dmEntry = datMin.paragonBoards[nidStr];
++    const bnetFileName = dmEntry?.bnetFileName;
++
++    if (!bnetFileName) {
++      // Board itself unmapped — still emit node unmapped refs
++      for (const nodeNid of mrBoard.nodes) {
++        unmappedParagonNodes.push({ category: "paragon-node", nid: nodeNid, boardNid: mrBoard.nid });
++      }
++      if (mrBoard.glyph) {
++        unmappedGlyphs.push({ category: "glyph", nid: mrBoard.glyph.nid, boardNid: mrBoard.nid });
++      }
++      continue;
++    }
++
++    const catalogBoard = boardIndex.get(bnetFileName);
++    if (!catalogBoard) {
++      for (const nodeNid of mrBoard.nodes) {
++        unmappedParagonNodes.push({ category: "paragon-node", nid: nodeNid, boardNid: mrBoard.nid });
++      }
++      if (mrBoard.glyph) {
++        unmappedGlyphs.push({ category: "glyph", nid: mrBoard.glyph.nid, boardNid: mrBoard.nid });
++      }
++      continue;
++    }
++
++    // D17: store node ids verbatim as "mr:<nid>" strings; spentPoints = nodes.length
++    const nodeStrings = mrBoard.nodes.map((n) => `mr:${n}`);
++
++    // Map glyph
++    let mappedGlyph: ParagonBoardAllocation["glyph"] | undefined;
++    if (mrBoard.glyph) {
++      const glyphNidStr = String(mrBoard.glyph.nid);
++      const glyphDmEntry = datMin.paragonGlyphs[glyphNidStr];
++      const glyphBnetFileName = glyphDmEntry?.bnetFileName;
++      if (glyphBnetFileName) {
++        const catalogGlyph = glyphIndex.get(glyphBnetFileName);
++        if (catalogGlyph) {
++          mappedGlyph = {
++            glyphId: catalogGlyph.id,
++            level: mrBoard.glyph.level ?? 21, // D18: default to 21
++          };
++        } else {
++          unmappedGlyphs.push({ category: "glyph", nid: mrBoard.glyph.nid, boardNid: mrBoard.nid });
++        }
++      } else {
++        unmappedGlyphs.push({ category: "glyph", nid: mrBoard.glyph.nid, boardNid: mrBoard.nid });
++      }
++    }
++
++    boards.push({
++      boardId: catalogBoard.id,
++      boardName: catalogBoard.label,
++      spentPoints: nodeStrings.length, // D17: derived from nodes.length
++      glyph: mappedGlyph,
++      nodes: nodeStrings,
++    });
++  }
++
++  const paragonAllocation: ParagonAllocation = {
++    paragonLevel: Math.min(Math.max(variant.paragonLevel ?? 0, 0), 300),
++    boards,
++  };
++
++  return { paragonAllocation, unmappedParagonNodes, unmappedGlyphs };
++}
++
++// ─── Variant mapper ────────────────────────────────────────────────────────
++
++function mapVariant(
++  profile: MaxrollProfile,
++  variant: MaxrollVariant,
++  variantIndex: number,
++  className: string,
++  datMin: MaxrollDataMin,
++  importedAt: string,
++  catalogPatch: string
++): MappedVariant {
++  // Map equipment
++  const equippedItems: Record<string, Item> = {};
++  const allUnmappedAffixes: UnmappedRef[] = [];
++  const allUnmappedAspects: UnmappedRef[] = [];
++  const allUnmappedUniques: UnmappedRef[] = [];
++
++  let totalExplicitCount = 0;
++  let totalExplicitMappedCount = 0;
++
++  for (const [slotKey, mrItem] of Object.entries(variant.equipment)) {
++    const result = mapItem(slotKey, mrItem, datMin);
++    if (!result) {
++      // Unknown slot key — skip
++      continue;
++    }
++    equippedItems[result.item.slot] = result.item;
++    allUnmappedAffixes.push(...result.unmappedAffixes);
++    allUnmappedAspects.push(...result.unmappedAspects);
++    allUnmappedUniques.push(...result.unmappedUniques);
++    totalExplicitCount += result.explicitCount;
++    totalExplicitMappedCount += result.explicitMappedCount;
++  }
++
++  // Map skills
++  const { skillSelections, unmappedSkills } = mapSkills(variant, className, datMin);
++
++  // Map paragon
++  const { paragonAllocation, unmappedParagonNodes, unmappedGlyphs } = mapParagon(
++    variant,
++    className,
++    datMin
++  );
++
++  // Compute version mismatch info (D9/D25: compare datMin.version vs catalog patch)
++  const datMinVersion = datMin.version;
++  const patchesDiffer = catalogPatch !== datMinVersion;
++  const explicitMappingRate =
++    totalExplicitCount > 0 ? totalExplicitMappedCount / totalExplicitCount : 1;
++
++  const report: ImportReport = {
++    unmappedAffixes: allUnmappedAffixes,
++    unmappedAspects: allUnmappedAspects,
++    unmappedUniques: allUnmappedUniques,
++    unmappedParagonNodes,
++    unmappedGlyphs,
++    unmappedSkills,
++    versionMismatch: patchesDiffer
++      ? { catalogPatch, maxrollPatch: datMinVersion, explicitMappingRate }
++      : undefined,
++  };
++
++  const character: Omit<Character, "id"> = {
++    name: `${profile.name || className} (Maxroll Import)`,
++    class: className as Character["class"],
++    level: Math.min(Math.max(variant.level ?? 100, 1), 100), // D12: default 100
++    paragonAllocation,
++    skillSelections,
++    equippedItems,
++    playstyleConstraints: [],
++  };
++
++  const buildProvenance: BuildImportedFrom = {
++    source: "maxroll",
++    plannerId: profile.id,
++    variantIndex,
++    importedAt,
++    plannerVersion: profile.patch ?? datMinVersion,
++  };
++
++  return {
++    variantIndex,
++    variantName: variant.name || `Variant ${variantIndex + 1}`,
++    character,
++    buildProvenance,
++    items: equippedItems,
++    report,
++  };
++}
++
++// ─── Top-level mapper ──────────────────────────────────────────────────────
++
++/**
++ * Map a fully parsed MaxrollProfile + data.min into an ImportResult.
++ *
++ * Applies patch-mismatch fail rule (D9):
++ *   If patches differ AND any variant has explicit mapping rate < 50% → ok: false
++ */
++export function mapProfile(
++  profile: MaxrollProfile,
++  datMin: MaxrollDataMin,
++  now: Date
++): ImportResult {
++  const className = classIdToName.get(profile.d4Class);
++  if (!className) {
++    return {
++      ok: false,
++      reason: "parse-error",
++      message: `Unknown Maxroll d4Class value: ${profile.d4Class}`,
++    };
++  }
++
++  const catalogPatch = verifiedAgainst.patch;
++  const importedAt = now.toISOString();
++
++  const mappedVariants: MappedVariant[] = [];
++
++  for (let i = 0; i < profile.data.length; i++) {
++    const variant = profile.data[i];
++    const mapped = mapVariant(profile, variant, i, className, datMin, importedAt, catalogPatch);
++    mappedVariants.push(mapped);
++  }
++
++  if (mappedVariants.length === 0) {
++    return {
++      ok: false,
++      reason: "parse-error",
++      message: "Maxroll planner has no variants",
++    };
++  }
++
++  // D9: patch-mismatch fail threshold (compare datMin.version vs catalog patch)
++  const datMinVersion = datMin.version;
++  if (catalogPatch !== datMinVersion) {
++    for (const v of mappedVariants) {
++      const vm = v.report.versionMismatch;
++      if (vm && vm.explicitMappingRate < 0.5) {
++        return {
++          ok: false,
++          reason: "patch-mismatch",
++          message:
++            `data.min.json version (${datMinVersion}) differs from catalog patch (${catalogPatch}) ` +
++            `and explicit mapping rate for variant "${v.variantName}" is ${(vm.explicitMappingRate * 100).toFixed(0)}% ` +
++            `(below 50% threshold). Delete the data.min cache and retry after a catalog update.`,
++          details: { catalogPatch, maxrollPatch: datMinVersion, explicitMappingRate: vm.explicitMappingRate },
++        };
++      }
++    }
++  }
++
++  // D20 zero-mapped check (no equipped items across all variants)
++  const hasAnyItems = mappedVariants.some((v) => Object.keys(v.items).length > 0);
++  if (!hasAnyItems && profile.data.some((d) => Object.keys(d.equipment ?? {}).length > 0)) {
++    return {
++      ok: false,
++      reason: "zero-mapped",
++      message:
++        "No items could be mapped from the Maxroll planner. " +
++        "This planner may use a catalog that is incompatible with the current patch.",
++    };
++  }
++
++  return {
++    ok: true,
++    plannerId: profile.id,
++    plannerName: profile.name || className,
++    variants: mappedVariants,
++  };
++}
+diff --git a/lib/import/maxroll/parser.ts b/lib/import/maxroll/parser.ts
+new file mode 100644
+index 0000000..6941cf1
+--- /dev/null
++++ b/lib/import/maxroll/parser.ts
+@@ -0,0 +1,96 @@
++/**
++ * Source-reference parser for Maxroll planner inputs (D2/D24).
++ *
++ * Resolves four input shapes into a canonical planner id:
++ *   1. Bare planner id: /^[a-zA-Z0-9]+$/
++ *   2. Planner URL: https://maxroll.gg/d4/planner/<id>
++ *   3. Planner URL with hash: https://maxroll.gg/d4/planner/<id>#<n>&equipment
++ *   4. Build-guide URL: https://maxroll.gg/d4/build-guides/<slug>
++ *      — requires fetching the page HTML and regex-matching /d4/planner/([a-zA-Z0-9]+)
++ *
++ * Returns { plannerId, variantIndex } where variantIndex defaults to 0 (D10)
++ * unless extracted from the URL hash.
++ */
++
++const PLANNER_ID_RE = /^[a-zA-Z0-9-]+$/;
++const PLANNER_URL_RE = /maxroll\.gg\/d4\/planner\/([a-zA-Z0-9]+)/;
++const BUILD_GUIDE_URL_RE = /maxroll\.gg\/d4\/build-guides\//;
++const GUIDE_EMBEDDED_PLANNER_RE = /\/d4\/planner\/([a-zA-Z0-9]+)/;
++
++export interface ParsedInput {
++  plannerId: string;
++  variantIndex: number;
++}
++
++function extractVariantFromHash(hash: string): number {
++  // Hash format: #<n>&equipment or #<n> — the leading # is stripped by URL parsing
++  const match = hash.match(/^(\d+)/);
++  if (match) return parseInt(match[1], 10);
++  return 0;
++}
++
++/**
++ * Parse a Maxroll planner input into a canonical plannerId + variantIndex.
++ * Throws for inputs that don't match any known pattern.
++ * Build-guide URLs require a fetch (ctx.fetch must be provided or global fetch used).
++ */
++export async function parseMaxrollInput(
++  input: string,
++  fetchFn: typeof globalThis.fetch = globalThis.fetch
++): Promise<ParsedInput> {
++  const trimmed = input.trim();
++
++  // Shape 1: bare id
++  if (PLANNER_ID_RE.test(trimmed)) {
++    return { plannerId: trimmed, variantIndex: 0 };
++  }
++
++  // Shape 2 + 3: planner URL (with or without hash)
++  if (PLANNER_URL_RE.test(trimmed)) {
++    let url: URL;
++    try {
++      url = new URL(trimmed);
++    } catch {
++      // If URL() fails, try raw regex
++      const m = PLANNER_URL_RE.exec(trimmed);
++      if (!m) throw new Error(`Could not extract planner id from URL: ${trimmed}`);
++      return { plannerId: m[1], variantIndex: 0 };
++    }
++
++    const m = PLANNER_URL_RE.exec(trimmed);
++    if (!m) throw new Error(`Could not extract planner id from URL: ${trimmed}`);
++    const plannerId = m[1];
++    const variantIndex = url.hash ? extractVariantFromHash(url.hash.replace(/^#/, "")) : 0;
++    return { plannerId, variantIndex };
++  }
++
++  // Shape 4: build-guide URL — fetch HTML and regex-match
++  if (BUILD_GUIDE_URL_RE.test(trimmed)) {
++    let html: string;
++    try {
++      const res = await fetchFn(trimmed);
++      if (!res.ok) {
++        throw new Error(`Build-guide fetch failed: HTTP ${res.status}`);
++      }
++      html = await res.text();
++    } catch (err) {
++      throw new Error(
++        `Failed to fetch build-guide page at ${trimmed}: ${err instanceof Error ? err.message : String(err)}`
++      );
++    }
++
++    // D24: regex-match /d4/planner/([a-zA-Z0-9]+), take the first match
++    const match = GUIDE_EMBEDDED_PLANNER_RE.exec(html);
++    if (!match) {
++      throw new Error(
++        `No Maxroll planner link found in build-guide page: ${trimmed}`
++      );
++    }
++    return { plannerId: match[1], variantIndex: 0 };
++  }
++
++  throw new Error(
++    `Unrecognized Maxroll planner input: "${trimmed}". ` +
++      `Expected a bare planner id, a maxroll.gg/d4/planner/<id> URL, or a maxroll.gg/d4/build-guides/<slug> URL.`
++  );
++}
+diff --git a/lib/import/maxroll/payload-schema.ts b/lib/import/maxroll/payload-schema.ts
+new file mode 100644
+index 0000000..100ac75
+--- /dev/null
++++ b/lib/import/maxroll/payload-schema.ts
+@@ -0,0 +1,178 @@
++/**
++ * Zod validation schemas for the Maxroll planner API payload (D28).
++ *
++ * Every object uses .passthrough() so that unknown extra fields from Maxroll
++ * are tolerated without throwing. Required fields still throw on absence.
++ *
++ * Two top-level schemas:
++ *   MaxrollProfileSchema   — the planners.maxroll.gg/profiles/load response
++ *   MaxrollDataMinSchema   — the assets-ng.maxroll.gg/d4planner/data.min.json file
++ */
++
++import { z } from "zod";
++
++// ─── Profile API payload ────────────────────────────────────────────────────
++
++const MaxrollAffixSchema = z
++  .object({
++    /** Maxroll internal numeric id for the affix entry */
++    nid: z.number(),
++    /** Rolled numeric value */
++    value: z.number(),
++    /** Present and true when this is a tempered affix (D16) */
++    tempered: z.boolean().optional(),
++  })
++  .passthrough();
++
++export type MaxrollAffix = z.infer<typeof MaxrollAffixSchema>;
++
++const MaxrollAspectSchema = z
++  .object({
++    nid: z.number(),
++    value: z.number(),
++  })
++  .passthrough();
++
++export type MaxrollAspect = z.infer<typeof MaxrollAspectSchema>;
++
++const MaxrollItemSchema = z
++  .object({
++    /** Item type nid (used for unique lookup via data.min items catalog) */
++    nid: z.number().optional(),
++    /** Item power */
++    power: z.number().optional(),
++    /** True if this is an ancestral item */
++    ancestral: z.boolean().optional(),
++    /**
++     * Maxroll quality value:
++     *   1 = Normal/Common, 2 = Magic, 3 = Rare, 4 = Legendary, 5 = Unique/Mythic
++     */
++    quality: z.number().optional(),
++    /** All affixes (implicits, explicits, tempered) in a flat array. */
++    affixes: z.array(MaxrollAffixSchema).default([]),
++    /** The single legendary/codex aspect on this item. */
++    aspect: MaxrollAspectSchema.optional(),
++  })
++  .passthrough();
++
++export type MaxrollItem = z.infer<typeof MaxrollItemSchema>;
++
++const MaxrollActiveSkillSchema = z
++  .object({
++    nid: z.number(),
++    rank: z.number().int().min(0),
++    /** Bar slot index (0-5) */
++    slot: z.number().int().optional(),
++  })
++  .passthrough();
++
++export type MaxrollActiveSkill = z.infer<typeof MaxrollActiveSkillSchema>;
++
++const MaxrollPassiveSkillSchema = z
++  .object({
++    nid: z.number(),
++    rank: z.number().int().min(0),
++  })
++  .passthrough();
++
++export type MaxrollPassiveSkill = z.infer<typeof MaxrollPassiveSkillSchema>;
++
++const MaxrollSkillsSchema = z
++  .object({
++    active: z.array(MaxrollActiveSkillSchema).default([]),
++    passive: z.array(MaxrollPassiveSkillSchema).default([]),
++  })
++  .passthrough();
++
++const MaxrollGlyphSchema = z
++  .object({
++    nid: z.number(),
++    /** Glyph level (1-21). Absent → default to 21 per D18. */
++    level: z.number().int().optional(),
++  })
++  .passthrough();
++
++export type MaxrollGlyph = z.infer<typeof MaxrollGlyphSchema>;
++
++const MaxrollBoardSchema = z
++  .object({
++    /** Maxroll board nid */
++    nid: z.number(),
++    /** Raw paragon node ids — stored verbatim as mr:<nid> strings per D17. */
++    nodes: z.array(z.number()).default([]),
++    glyph: MaxrollGlyphSchema.optional(),
++  })
++  .passthrough();
++
++export type MaxrollBoard = z.infer<typeof MaxrollBoardSchema>;
++
++const MaxrollParagonSchema = z
++  .object({
++    boards: z.array(MaxrollBoardSchema).default([]),
++  })
++  .passthrough();
++
++const MaxrollVariantSchema = z
++  .object({
++    id: z.number().int().optional(),
++    name: z.string().default(""),
++    level: z.number().int().optional(),
++    paragonLevel: z.number().int().optional(),
++    /** Equipment items keyed by Maxroll slot name (resolved via slot-map.ts). */
++    equipment: z.record(z.string(), MaxrollItemSchema).default({}),
++    skills: MaxrollSkillsSchema.optional(),
++    paragon: MaxrollParagonSchema.optional(),
++  })
++  .passthrough();
++
++export type MaxrollVariant = z.infer<typeof MaxrollVariantSchema>;
++
++export const MaxrollProfileSchema = z
++  .object({
++    id: z.string(),
++    name: z.string().default(""),
++    /** Numeric class id matching bnetClassId in lib/catalog/classes.json */
++    d4Class: z.number().int(),
++    /** Maxroll's reported patch version string */
++    patch: z.string().optional(),
++    /** Array of build variants/tabs */
++    data: z.array(MaxrollVariantSchema),
++  })
++  .passthrough();
++
++export type MaxrollProfile = z.infer<typeof MaxrollProfileSchema>;
++
++// ─── data.min.json ──────────────────────────────────────────────────────────
++
++/**
++ * A single entry in data.min.json category maps.
++ * The bnetFileName field is the join key to our catalog.
++ */
++const DataMinEntrySchema = z
++  .object({
++    bnetFileName: z.string().optional(),
++    name: z.string().optional(),
++  })
++  .passthrough();
++
++export type DataMinEntry = z.infer<typeof DataMinEntrySchema>;
++
++/**
++ * The complete data.min.json shape.
++ * Nid keys are stored as string representations of integers.
++ */
++export const MaxrollDataMinSchema = z
++  .object({
++    /** Patch version string — used to key the disk cache (D4). */
++    version: z.string(),
++    affixes: z.record(z.string(), DataMinEntrySchema).default({}),
++    aspects: z.record(z.string(), DataMinEntrySchema).default({}),
++    skills: z.record(z.string(), DataMinEntrySchema).default({}),
++    paragonBoards: z.record(z.string(), DataMinEntrySchema).default({}),
++    paragonGlyphs: z.record(z.string(), DataMinEntrySchema).default({}),
++    /** Unique item type entries (nid → entry with bnetFileName). */
++    items: z.record(z.string(), DataMinEntrySchema).default({}),
++  })
++  .passthrough();
++
++export type MaxrollDataMin = z.infer<typeof MaxrollDataMinSchema>;
+diff --git a/lib/import/maxroll/slot-map.ts b/lib/import/maxroll/slot-map.ts
+new file mode 100644
+index 0000000..295a66e
+--- /dev/null
++++ b/lib/import/maxroll/slot-map.ts
+@@ -0,0 +1,47 @@
++/**
++ * Maxroll planner slot-key → d4-tools canonical slot-id translation table (D27).
++ *
++ * Maxroll's equipment object uses string keys that differ from our catalog slot ids
++ * in several places (case conventions, Barbarian-specific names). This map is the
++ * single authoritative translation; it lives here rather than in lib/catalog/ because
++ * it is importer-private Maxroll vocabulary.
++ *
++ * Our slot ids come from lib/catalog/slots.json.
++ */
++export const MAXROLL_SLOT_MAP: Record<string, string> = {
++  // Standard slots — most match our catalog ids exactly
++  helm: "helm",
++  chest: "chest",
++  gloves: "gloves",
++  pants: "pants",
++  boots: "boots",
++  amulet: "amulet",
++  ring1: "ring1",
++  ring2: "ring2",
++
++  // Weapons — generic classes (non-Barbarian)
++  weapon: "weapon",
++  offhand: "offHand",
++  offHand: "offHand",
++
++  // Barbarian dual-wield + 2H slots
++  "1h-main": "barb_1h_main",
++  "1h-off": "barb_1h_off",
++  "2h-bludgeoning": "barb_2h_bludgeoning",
++  "2h-slashing": "barb_2h_slashing",
++  // Alternative naming conventions seen in Maxroll exports
++  weapon1: "barb_1h_main",
++  weapon2: "barb_1h_off",
++  weapon3: "barb_2h_bludgeoning",
++  weapon4: "barb_2h_slashing",
++  bludgeoning: "barb_2h_bludgeoning",
++  slashing: "barb_2h_slashing",
++};
++
++/**
++ * Resolve a Maxroll slot key to our canonical slot id.
++ * Returns undefined when the key is unknown (caller should emit a warning).
++ */
++export function resolveSlot(maxrollSlotKey: string): string | undefined {
++  return MAXROLL_SLOT_MAP[maxrollSlotKey];
++}
+diff --git a/lib/import/maxroll/types.ts b/lib/import/maxroll/types.ts
+new file mode 100644
+index 0000000..c1734c7
+--- /dev/null
++++ b/lib/import/maxroll/types.ts
+@@ -0,0 +1,132 @@
++/**
++ * Public types for the Maxroll planner importer (lib/import/maxroll/).
++ *
++ * ImportResult is a discriminated union — ok:true carries the full mapped
++ * payload for ALL variants of the planner; ok:false carries a structured
++ * failure reason so callers can batch-collect failures without try/catch.
++ *
++ * UnmappedRef is a per-category discriminated union capturing every reference
++ * that could not be resolved via bnetFileName join. Every unmapped reference
++ * is surfaced here — none are silently dropped (D8).
++ */
++
++import type { Character } from "@/lib/schema/character";
++import type { Item } from "@/lib/schema/item";
++import type { BuildImportedFrom } from "@/lib/schema/build";
++
++// ─── ImportContext ─────────────────────────────────────────────────────────
++
++/**
++ * Optional context for importMaxrollPlanner.
++ * All slots have sensible server-side defaults; tests override via ctx.fetch.
++ */
++export interface ImportContext {
++  /** Override the global fetch (used in tests to serve fixture data). */
++  fetch?: typeof globalThis.fetch;
++  /** Directory for the data.min.json disk cache. Defaults to DATA_DIR/maxroll-cache. */
++  cacheDir?: string;
++  /** Returns the current Date (used in tests to pin importedAt timestamps). */
++  now?: () => Date;
++}
++
++// ─── UnmappedRef (D8) ─────────────────────────────────────────────────────
++
++export type UnmappedRef =
++  | {
++      category: "affix";
++      /** Maxroll nid for the affix */
++      nid: number;
++      /** Rolled value from the Maxroll payload */
++      value: number;
++      /** Our slot id where this affix appeared */
++      slot: string;
++      /** Whether Maxroll marked this as tempered */
++      tempered: boolean;
++    }
++  | {
++      category: "aspect";
++      nid: number;
++      value: number;
++      slot: string;
++    }
++  | {
++      category: "unique";
++      /** Maxroll item type nid */
++      nid: number;
++      slot: string;
++    }
++  | {
++      category: "paragon-node";
++      /** Maxroll node id (stored as mr:<nid>) */
++      nid: number;
++      boardNid: number;
++    }
++  | {
++      category: "glyph";
++      nid: number;
++      boardNid: number;
++    }
++  | {
++      category: "skill";
++      nid: number;
++      isActive: boolean;
++    };
++
++// ─── ImportReport ──────────────────────────────────────────────────────────
++
++export interface ImportReport {
++  unmappedAffixes: UnmappedRef[];
++  unmappedAspects: UnmappedRef[];
++  unmappedUniques: UnmappedRef[];
++  unmappedParagonNodes: UnmappedRef[];
++  unmappedGlyphs: UnmappedRef[];
++  unmappedSkills: UnmappedRef[];
++  /**
++   * Present when the Maxroll planner's patch string differs from the catalog's
++   * verifiedAgainst.patch but the explicit mapping rate is still above the
++   * fail threshold. Absent when patches match or when ok:false is returned.
++   */
++  versionMismatch?: {
++    catalogPatch: string;
++    maxrollPatch: string;
++    /** Ratio of successfully-mapped explicit affixes across all items in this variant. */
++    explicitMappingRate: number;
++  };
++}
++
++// ─── Mapped variant ────────────────────────────────────────────────────────
++
++export interface MappedVariant {
++  variantIndex: number;
++  variantName: string;
++  /** Character shape ready to POST to /api/characters (id omitted; server generates). */
++  character: Omit<Character, "id">;
++  /** Build provenance for /api/characters?withDefaultBuild=true to attach. */
++  buildProvenance: BuildImportedFrom;
++  /** equippedItems record keyed by our slot id. */
++  items: Record<string, Item>;
++  report: ImportReport;
++}
++
++// ─── ImportResult (D7) ────────────────────────────────────────────────────
++
++export type ImportResult =
++  | {
++      ok: true;
++      plannerId: string;
++      plannerName: string;
++      /** All variants mapped — at least one entry, preserving Maxroll tab order. */
++      variants: MappedVariant[];
++    }
++  | {
++      ok: false;
++      reason:
++        | "not-found"
++        | "private"
++        | "patch-mismatch"
++        | "zero-mapped"
++        | "network"
++        | "parse-error";
++      message: string;
++      details?: unknown;
++    };
+diff --git a/lib/schema/build.ts b/lib/schema/build.ts
+index 116a2ac..9c83149 100644
+--- a/lib/schema/build.ts
++++ b/lib/schema/build.ts
+@@ -1,6 +1,21 @@
+ import { z } from "zod";
+ import { ItemSchema } from "./item";
+ 
++/**
++ * Structured provenance record for builds created via a planner importer (D19).
++ * Written once at import time; never mutated by the editor.
++ * Consumers that do not perform imports can safely ignore this field.
++ */
++export const BuildImportedFromSchema = z.object({
++  source: z.literal("maxroll"),
++  plannerId: z.string(),
++  variantIndex: z.number().int().min(0),
++  importedAt: z.string().datetime(),
++  plannerVersion: z.string(),
++});
++
++export type BuildImportedFrom = z.infer<typeof BuildImportedFromSchema>;
++
+ /**
+  * Canonical Build entity (v2+).
+  *
+@@ -9,6 +24,10 @@ import { ItemSchema } from "./item";
+  * In v2, UI only surfaces current character items; target slots are reserved
+  * for the comparison surface in a future commission.
+  * No schemaVersion field (D4 patron override).
++ *
++ * importedFrom: optional provenance field populated when the build originates
++ * from a planner importer (currently Maxroll only). Absent for manually-authored
++ * builds. Every existing consumer continues to work when this field is absent.
+  */
+ export const BuildSchema = z.object({
+   id: z.string().regex(/^[a-z0-9-]+$/, "ID must be lowercase alphanumeric with hyphens"),
+@@ -16,6 +35,7 @@ export const BuildSchema = z.object({
+   name: z.string().min(1, "Build name is required"),
+   notes: z.string().default(""),
+   targetItems: z.record(z.string(), ItemSchema).default({}),
++  importedFrom: BuildImportedFromSchema.optional(),
+   createdAt: z.string().datetime().optional(),
+   updatedAt: z.string().datetime().optional(),
+ });
+diff --git a/lib/schema/index.ts b/lib/schema/index.ts
+index 5333be0..65bb8ae 100644
+--- a/lib/schema/index.ts
++++ b/lib/schema/index.ts
+@@ -42,5 +42,5 @@ export {
+ } from "./character";
+ export type { Character, CharacterFormInput, CharacterFormOutput, D4Class } from "./character";
+ 
+-export { BuildSchema } from "./build";
+-export type { Build } from "./build";
++export { BuildSchema, BuildImportedFromSchema } from "./build";
++export type { Build, BuildImportedFrom } from "./build";

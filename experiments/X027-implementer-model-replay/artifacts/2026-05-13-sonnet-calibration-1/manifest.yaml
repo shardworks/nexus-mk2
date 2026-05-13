@@ -1,0 +1,68 @@
+slug: x027-sonnet-calibration-1
+frameworkVersion: 0.1.309
+fixtures:
+  - id: codex
+    engineId: lab.codex-setup
+    givens:
+      upstreamRepo: /workspace/d4-tools
+      baseSha: 69f6a26f8a5499117ddc2478168383055409c851
+  - id: codex-checkout
+    engineId: lab.codex-checkout
+    givens:
+      bareLocalPath: ${yields.fixture-codex-setup.bareLocalPath}
+      baseSha: 69f6a26f8a5499117ddc2478168383055409c851
+      codexName: ${yields.fixture-codex-setup.codexName}
+    dependsOn:
+      - codex
+scenario:
+  engineId: spider.graft-rig-template
+  givens:
+    template: laboratory.claude-direct-with-review
+    givens:
+      rolePath: /workspace/nexus-mk2/experiments/X027-implementer-model-replay/fixtures/roles/artificer.md
+      briefPath: /workspace/nexus-mk2/experiments/X027-implementer-model-replay/briefs/maxroll-importer-spec.md
+      model: sonnet
+      executionWrap: production
+      reviewerRolePath: /workspace/nexus-mk2/experiments/X027-implementer-model-replay/fixtures/roles/reviewer.md
+      reviewerModel: opus
+      cwd: ${yields.fixture-codex-checkout-setup.workdir}
+      verifyCommand: >
+        set -e
+
+        # Confirm a commit landed (implementer produced output).
+
+        git log -1 --pretty=%s | grep -qE '.+'
+
+        # Confirm the lib/import/maxroll/ subsystem was created at minimum.
+
+        # This is a weak smoke check — does NOT validate correctness, which
+
+        # is scored post-hoc. The production seal also satisfied this check.
+
+        test -d lib/import/maxroll || { echo "VERIFY FAIL: lib/import/maxroll/
+        not created"; exit 1; }
+
+        # Next build (includes typecheck via tsc --noEmit). Production
+
+        # sealed commit passed this; calibration trial must too.
+
+        pnpm build
+
+        # Push HEAD back to the codex bare so lab.probe-git-range captures it.
+
+        git push origin HEAD:main
+      verifyTimeoutMs: 300000
+probes:
+  - id: context
+    engineId: lab.probe-trial-context
+    givens: {}
+  - id: commits
+    engineId: lab.probe-git-range
+    givens: {}
+  - id: sessions
+    engineId: lab.probe-trial-sessions
+    givens: {}
+archive:
+  engineId: lab.archive
+  givens: {}
+manifestPath: /workspace/nexus-mk2/experiments/X027-implementer-model-replay/manifests/sonnet-calibration-1.yaml
